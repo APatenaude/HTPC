@@ -25,7 +25,12 @@ const ICONS = {
   app: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   music: 'M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0zM20 16a3 3 0 1 1-6 0a3 3 0 1 1 6 0z',
   sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
-  timer: 'M12 8a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM12 12v3.5l2.5 1.5M10 3h4M12 3v5'
+  timer: 'M12 8a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM12 12v3.5l2.5 1.5M10 3h4M12 3v5',
+  wifi: 'M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h0',
+  bluetooth: 'M7 7l10 10-5 4V3l5 4L7 17',
+  phone: 'M7 2h10v20H7zM11 18.5h2',
+  chevleft: 'M15 5l-7 7 7 7',
+  chevright: 'M9 5l7 7-7 7'
 };
 
 function icon(name, size, weight) {

@@ -4,27 +4,58 @@ using Windows.Media.Control;
 
 namespace Htpc.Launcher;
 
-/// <summary>Launcher settings kept in C:\ProgramData\HTPC\launcher\settings.json.</summary>
+/// <summary>Launcher settings (Settings on the TV), kept in %LOCALAPPDATA%\HTPC\settings.json.</summary>
 sealed class LauncherSettings
 {
     /// <summary>Standby after this long without input and without playback; 0 = never.</summary>
     public int IdleMinutes { get; set; } = 30;
 
-    /// <summary>Real (S3) sleep after this long in standby; 0 = never. The controller cannot wake it from there.</summary>
+    /// <summary>Deep sleep after this long in standby; 0 = never (the default: the controller cannot wake it from there).</summary>
     public int DeepSleepHours { get; set; }
 
+    /// <summary>Deep sleep hibernates instead of S3 sleep.</summary>
+    public bool DeepSleepHibernate { get; set; }
+
+    /// <summary>No idle standby while something plays, even with the controller untouched.</summary>
+    public bool StayAwakeWhilePlaying { get; set; } = true;
+
+    static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "launcher", "settings.json");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
 
     public static LauncherSettings Load()
     {
         try
         {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(FilePath), new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? new();
+            if (File.Exists(FilePath)) return JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(FilePath), Json) ?? new();
         }
         catch (Exception e) { Log.Warn($"Settings unreadable, using defaults: {e.Message}"); }
         return new();
+    }
+
+    public void Save()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+        }
+        catch (Exception e) { Log.Error("Saving settings", e); }
+    }
+
+    /// <summary>Applies one value sent by the Settings screen; false for an unknown key.</summary>
+    public bool Set(string key, JsonElement value)
+    {
+        switch (key)
+        {
+            case "idleMinutes": IdleMinutes = value.GetInt32(); break;
+            case "deepSleepHours": DeepSleepHours = value.GetInt32(); break;
+            case "deepSleepHibernate": DeepSleepHibernate = value.GetBoolean(); break;
+            case "stayAwakeWhilePlaying": StayAwakeWhilePlaying = value.GetBoolean(); break;
+            default: return false;
+        }
+        Save();
+        return true;
     }
 }
 
@@ -142,8 +173,8 @@ sealed class Standby
             else if (LastInputTick() != inputAtStandby) Wake("keyboard or mouse");
             else if (settings.DeepSleepHours > 0 && DateTime.Now - since >= TimeSpan.FromHours(settings.DeepSleepHours))
             {
-                Log.Info("Deep sleep after standby");
-                Application.SetSuspendState(PowerState.Suspend, false, false);
+                DeepSleep($"after {settings.DeepSleepHours} h in standby");
+                since = DateTime.Now; // back from deep sleep still in standby: count again
             }
             return;
         }
@@ -152,8 +183,15 @@ sealed class Standby
         var controllerIdle = DateTime.Now - controller.LastActivity;
         if (controllerIdle < idle) idle = controllerIdle;
         if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
-        if (SomethingNeedsDisplay() || await IsPlaying()) return;
+        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await IsPlaying())) return;
         Enter($"idle {settings.IdleMinutes} min");
+    }
+
+    /// <summary>Real sleep (S3) or hibernate. Only the phone (Wake-on-LAN), keyboard or power button wake it.</summary>
+    public void DeepSleep(string reason)
+    {
+        Log.Info($"Deep sleep ({reason}, {(settings.DeepSleepHibernate ? "hibernate" : "S3")})");
+        Application.SetSuspendState(settings.DeepSleepHibernate ? PowerState.Hibernate : PowerState.Suspend, false, false);
     }
 
     static uint LastInputTick()

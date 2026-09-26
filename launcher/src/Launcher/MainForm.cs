@@ -118,7 +118,10 @@ sealed class MainForm : Form
         {
             case "ready":
                 uiReady = true;
-                Post(new { type = "init", tiles = TileList(), settings = StateObject() });
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings });
+                break;
+            case "setting":
+                if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
                 break;
             case "launch": Open(Str("id")!); break;
             case "switchTo": case "resume": SwitchTo(Str("id")!); break;
@@ -292,6 +295,10 @@ sealed class MainForm : Form
             case "sleep":
                 // Stay-awake standby; the launcher wakes on the home screen.
                 standby.Enter("Power menu");
+                break;
+            case "deepsleep":
+                Post(new { type = "show", view = "home" });
+                standby.DeepSleep("Settings");
                 break;
             case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
             case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;

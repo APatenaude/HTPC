@@ -144,6 +144,40 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .opt.focused { background: var(--tile-focus); }
 #timer-status.on { color: var(--accent); }
 
+/* Settings: section list on the left, the section on the right */
+#settings { background: var(--bg); }
+.snav { width: 560px; flex-shrink: 0; box-sizing: border-box; padding: 64px 40px; background: #121317; display: flex; flex-direction: column; gap: 6px; }
+.snav-title { display: flex; align-items: center; gap: 14px; margin: 0 0 28px 20px; }
+.snav-title span { font-family: var(--display); font-weight: 600; font-size: 48px; letter-spacing: -0.02em; }
+.sitem { display: flex; align-items: center; gap: 20px; height: 76px; padding: 0 24px; border-radius: 20px; font-size: 28px; color: var(--text-2); }
+.sitem .icon { color: var(--muted); }
+.sitem.on { background: #22252B; color: #FFFFFF; font-weight: 700; }
+.sitem.on .icon { color: var(--accent); }
+.sitem.focused { background: var(--tile-focus); color: #FFFFFF; }
+.spane { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
+.spane main { flex-grow: 1; padding: 72px 96px 0 80px; display: flex; flex-direction: column; gap: 14px; }
+.spane header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+.spane h1 { font-size: 48px; }
+.spane header p { margin: 0; font-size: 26px; color: var(--text-2); }
+.spane .hints { padding: 0 80px; }
+.srow { display: flex; align-items: center; gap: 32px; min-height: 104px; padding: 18px 32px; box-sizing: border-box; border-radius: 22px; background: #16181C; }
+.srow.focused { background: var(--tile-focus); }
+.srow .text { flex-grow: 1; display: flex; flex-direction: column; gap: 6px; }
+.srow .label { font-size: 30px; }
+.srow .caption { font-size: 23px; color: var(--muted); }
+.srow .value { display: flex; align-items: center; gap: 14px; font-size: 28px; font-weight: 700; white-space: nowrap; }
+.srow .value.link { color: var(--accent); }
+.seg { display: flex; gap: 6px; padding: 6px; border-radius: 18px; background: var(--bg); }
+.seg span { padding: 10px 24px; border-radius: 14px; color: var(--text-2); font-size: 24px; }
+.seg span.on { background: var(--accent); color: var(--bg); font-weight: 700; }
+.toggle { display: flex; align-items: center; width: 88px; height: 48px; padding: 6px; box-sizing: border-box; border-radius: 24px; background: var(--track); }
+.toggle span { width: 36px; height: 36px; border-radius: 18px; background: var(--muted); }
+.toggle.on { background: var(--accent); }
+.toggle.on span { margin-left: auto; background: var(--bg); }
+.sbuttons { display: flex; gap: 16px; margin-top: 18px; }
+.sbutton { display: flex; align-items: center; height: 72px; padding: 0 32px; border-radius: 20px; background: #22252B; font-size: 26px; }
+.sbutton.focused { background: var(--tile-focus); }
+
 /* Hidden launcher (an app is in front, or standby): nothing to draw */
 #stage.blank { visibility: hidden; }
 

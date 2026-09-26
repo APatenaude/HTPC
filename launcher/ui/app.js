@@ -19,7 +19,9 @@ const state = {
   alert: null,             // { text, glyph }
   memory: {},              // last focused item per view
   stack: [],               // views to go back to
-  backdrop: null
+  backdrop: null,
+  section: 'sleep',        // Settings section shown
+  prefs: { idleMinutes: 30, deepSleepHours: 0, deepSleepHibernate: false, stayAwakeWhilePlaying: true }
 };
 
 const $ = (id) => document.getElementById(id);
@@ -143,6 +145,78 @@ function renderTimer() {
   $('timer-hints').innerHTML = hints([['A', 'Set'], ['B', 'Back']]);
 }
 
+const SECTIONS = [
+  ['sleep', 'moon', 'Sleep & power'], ['tv', 'tv', 'TV'], ['controller', 'controller', 'Controller'],
+  ['phone', 'phone', 'Phone remote'], ['wifi', 'wifi', 'Wi-Fi'], ['bluetooth', 'bluetooth', 'Bluetooth'],
+  ['display', 'desktop', 'Display'], ['sound', 'speaker', 'Sound'], ['updates', 'download', 'Updates'],
+  ['about', 'info', 'About & Desktop mode']
+];
+
+// Values a setting row steps through with left/right (A steps forward).
+const CHOICES = {
+  idleMinutes: [[15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [0, 'Never']],
+  deepSleepHours: [[0, 'Never'], [1, 'After 1 hour'], [3, 'After 3 hours'], [6, 'After 6 hours'], [12, 'After 12 hours']],
+  deepSleepHibernate: [[false, 'Sleep'], [true, 'Hibernate']],
+  stayAwakeWhilePlaying: [[false, 'Off'], [true, 'On']]
+};
+
+function choiceLabel(key) {
+  const c = CHOICES[key].find(([v]) => v === state.prefs[key]);
+  return c ? c[1] : String(state.prefs[key]);
+}
+
+function settingRow(key, label, caption, control) {
+  return `<div class="srow" data-nav data-id="set-${key}" data-setting="${key}">` +
+    `<div class="text"><span class="label">${esc(label)}</span><span class="caption">${esc(caption)}</span></div>${control}</div>`;
+}
+
+function stepper(key) {
+  return `<div class="value">${icon('chevleft', 28, 2)}${esc(choiceLabel(key))}${icon('chevright', 28, 2)}</div>`;
+}
+
+function renderSleepSection() {
+  const p = state.prefs;
+  const deep = p.deepSleepHours > 0;
+  return '<header><h1>Sleep &amp; power</h1>' +
+      '<p>Sleep turns the screen and TV off; the box stays ready and wakes with Home on the controller.</p></header>' +
+    settingRow('idleMinutes', 'Sleep after', 'When nothing plays and nobody touches the controller', stepper('idleMinutes')) +
+    `<div class="srow" data-nav data-id="set-timer" data-act="view" data-arg="timer">` +
+      '<div class="text"><span class="label">Sleep timer</span><span class="caption">A countdown you set. Also in the Home menu.</span></div>' +
+      `<div class="value link">${esc(state.timer ? timerText() : 'Off')}${icon('chevright', 28, 2)}</div></div>` +
+    settingRow('deepSleepHours', 'Deep sleep',
+      'After sleeping this long the box sleeps fully (about 1 W instead of a few). Home on the controller cannot wake it then: use the phone, the keyboard or the power button.',
+      stepper('deepSleepHours')) +
+    (deep ? settingRow('deepSleepHibernate', 'Deep sleep type', 'Hibernate if the box wakes up by itself or comes back to a black screen',
+      '<div class="seg">' + CHOICES.deepSleepHibernate.map(([v, l]) => `<span${v === p.deepSleepHibernate ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>') : '') +
+    settingRow('stayAwakeWhilePlaying', 'Stay awake while video plays', 'Even if you don’t touch the controller for hours',
+      `<div class="toggle${p.stayAwakeWhilePlaying ? ' on' : ''}"><span></span></div>`) +
+    '<div class="sbuttons">' +
+      '<div class="sbutton" data-nav data-id="set-sleepnow" data-act="power-action" data-arg="sleep">Sleep now</div>' +
+      '<div class="sbutton" data-nav data-id="set-deepnow" data-act="power-action" data-arg="deepsleep">Deep sleep now</div>' +
+    '</div>';
+}
+
+function renderSettings() {
+  const nav = `<nav class="snav"><div class="snav-title">${icon('chevleft', 36, 2)}<span>Settings</span></div>` +
+    SECTIONS.map(([id, glyph, label]) =>
+      `<div class="sitem${id === state.section ? ' on' : ''}" data-nav data-id="s-${id}" data-section="${id}">${icon(glyph, 32)}${esc(label)}</div>`).join('') +
+    '</nav>';
+  const title = SECTIONS.find(([id]) => id === state.section)[2];
+  const body = state.section === 'sleep' ? renderSleepSection()
+    : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
+  $('settings').innerHTML = nav + `<div class="spane"><main>${body}</main>` +
+    `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['B', 'Back']])}</footer></div>`;
+}
+
+function changeSetting(key, step) {
+  const list = CHOICES[key];
+  const i = list.findIndex(([v]) => v === state.prefs[key]);
+  const next = list[(Math.max(i, 0) + step + list.length) % list.length][0];
+  state.prefs[key] = next;
+  send({ type: 'setting', key, value: next });
+  render();
+}
+
 function renderConfirm() {
   const c = state.confirm;
   $('confirm-box').innerHTML =
@@ -164,7 +238,8 @@ function render() {
   if (state.view === 'power') renderPower();
   if (state.view === 'timer') renderTimer();
   if (state.view === 'confirm') renderConfirm();
-  for (const v of ['home', 'menu', 'power', 'timer', 'confirm']) $(v).classList.toggle('on', v === state.view || v === under);
+  if (state.view === 'settings') renderSettings();
+  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings']) $(v).classList.toggle('on', v === state.view || v === under);
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
@@ -186,6 +261,11 @@ function setFocus(el, chosen = true) {
   if (!el) return;
   el.classList.add('focused');
   if (chosen) state.memory[state.view] = el.dataset.id;
+  // Settings: moving through the section list shows each section right away.
+  if (el.dataset.section && el.dataset.section !== state.section) {
+    state.section = el.dataset.section;
+    render();
+  }
 }
 
 function restoreFocus(id) {
@@ -193,6 +273,7 @@ function restoreFocus(id) {
   const kept = list.find((e) => e.dataset.id === id) || list.find((e) => e.dataset.id === state.memory[state.view]);
   if (kept) { setFocus(kept); return; }
   setFocus((state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
+    (state.view === 'settings' ? list.find((e) => e.classList.contains('srow')) : null) ||
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
@@ -262,7 +343,7 @@ function activate(el) {
     }
     case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
     case 'cancel': back(); break;
-    case 'settings': toast('Settings come in a later update'); break;
+    case 'settings': go('settings'); break;
     case 'soon': toast(`${arg} come in a later update`); break;
   }
 }
@@ -290,9 +371,13 @@ function press(button) {
   switch (button) {
     case 'up': case 'down': move(button); break;
     case 'left': case 'right':
-      if (el && el.dataset.slider) adjust(el, button === 'right' ? 5 : -5); else move(button);
+      if (el && el.dataset.slider) adjust(el, button === 'right' ? 5 : -5);
+      else if (el && el.dataset.setting) changeSetting(el.dataset.setting, button === 'right' ? 1 : -1);
+      else move(button);
       break;
-    case 'a': activate(el); break;
+    case 'a':
+      if (el && el.dataset.setting) changeSetting(el.dataset.setting, 1); else activate(el);
+      break;
     case 'b': back(); break;
     case 'x': {
       // On an app row: that app. Anywhere else in the menu: the app it was opened over.
@@ -326,6 +411,7 @@ function onHost(msg) {
     case 'init':
       state.tiles = msg.tiles;
       Object.assign(state, msg.settings || {});
+      if (msg.prefs) Object.assign(state.prefs, msg.prefs);
       render();
       break;
     case 'blank': $('stage').classList.add('blank'); break;
@@ -383,6 +469,8 @@ if (host) {
 
 fit();
 render();
+// Demo only: index.html#settings (or #menu, #power...) opens that view, for screenshots.
+if (!host && location.hash) go(location.hash.slice(1));
 // Redraw when the minute (or the timer countdown) changes; render() keeps the focus.
 let shown = '';
 setInterval(() => {
