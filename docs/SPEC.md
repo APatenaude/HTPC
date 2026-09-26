@@ -1,6 +1,6 @@
 # TV box: needs, wants and plan
 
-Draft 3 · 26 September 2026 (after review 2) · Design canvas: https://claude.ai/artifact/6kXG7DKA3nVAxW5LGhv1ph
+Draft 4 · 26 September 2026 (after review 3) · Design canvas: https://claude.ai/artifact/6kXG7DKA3nVAxW5LGhv1ph
 
 One person, one TV, one controller. A launcher of our own replaces the Windows
 desktop, opens six apps full screen, and turns the iPhone into a remote and a
@@ -12,26 +12,28 @@ desktop, opens six apps full screen, and turns the iPhone into a remote and a
 |---|---|
 | Box | Intel N97 mini PC, 16 GB |
 | System | Windows 11 IoT Enterprise LTSC 2024 (user supplies ISO and license) |
-| TV | Roku TV, SDR (no HDR needed), sound through the TV speakers |
+| TV | Roku TV today (SDR, TV speakers); any TV later via per-TV profiles |
 | Controller | 8BitDo Ultimate 2C on its 2.4 GHz dongle (XInput) |
-| Phone | iPhone |
+| Phones | iPhone and Android |
 | Media | Jellyfin server on the network · Stremio with Real-Debrid |
 | Users | One |
 
 ## Needs (day one)
 
 - **N1 Boots straight into the launcher.** No Windows desktop, taskbar, Start menu or popups.
-- **N2 Big app tiles.** Uniform dark tiles, fully controller-driven.
+- **N2 Big app tiles.** Dark tiles with each app's icon in its own color; fully controller-driven.
 - **N3 Apps picked in first-run setup.** The six come pre-ticked: YouTube (VacuumTube), Twitch (twitch.tv in its own Edge app window with extensions), Stremio, Jellyfin Desktop, Moonlight, Edge. Everything else lives in the library.
 - **N4 Home button over any app.** Overlay slides in, apps keep running, X closes one.
 - **N5 Hardware video decoding everywhere**, with a check runnable from Settings.
 - **N6 Sleep and wake.** From the menu and after a configurable idle time (15 min, 30 min, 1 h, 2 h, never; default 30 min); wake with the controller; one switch to Hibernate.
-- **N7 The TV follows the box** via Roku ECP (HTTP, port 8060): TV on + input switch whenever the box boots or wakes, off at sleep; box sleeps when the TV is turned off with its own remote (poll `query/device-info` power mode, same approach as the user's existing sound-switch script).
-- **N8 iPhone remote web app.** Touchpad and arrows, keyboard, now playing and volume, open apps, paste a link, sleep/restart.
-- **N9 Casting from the iPhone.** YouTube cast button (VacuumTube), Jellyfin "Play on", "Send to TV" Shortcut in the Share sheet.
+- **N7 The TV follows the box, whichever TV it is.** Each TV is a profile recognised by its HDMI identity (EDID): control method (Roku ECP, LG webOS, Samsung Tizen, Sony / Google TV / Android TV, HDMI-CEC adapter, or none), input, display settings. Found on the network by name (SSDP/mDNS), not IP, so moving it is fine. TV on + input at box boot/wake, off at sleep; box sleeps when the TV is turned off (polling the TV's power state, same approach as the user's sound-switch script).
+- **N8 Phone remote web app (iPhone and Android), a small companion.** Three tabs: Remote (touchpad/arrows, back, home, options, volume, brightness, sleep button), Type (live typing + paste a link to play), Playing (media controls, volume, sleep timer). No management screens on the phone.
+- **N9 Casting from the phone.** YouTube cast button (VacuumTube), Jellyfin "Play on", Share › TV: iPhone via a Shortcut, Android via the installed web app (Web Share Target; needs HTTPS, so the box's own certificate is installed on the phone once).
 - **N10 Scripted install.** Clean Windows in, finished box out. Nothing updates unless asked.
 - **N11 On-screen keyboard in any app** (browser logins, searches). Pops up automatically when a text/password field gets focus (UI Automation), and a configurable button opens it anytime (default: right-stick press, R3). Numbers row, @, .com, shift, symbols, show password; types through Windows input (SendInput). Auto-popup off in apps with their own keyboard (VacuumTube, Jellyfin, Moonlight); R3 not intercepted in Moonlight.
 - **N12 Global brightness.** One slider dims the whole screen in every app (software dimming layer), reachable from the Home menu, the iPhone remote and Settings › Display.
+- **N13 Buttons per app.** Presets: Controller (pass-through), Mouse, Keyboard. Any button can be remapped per app on the TV to a key, key combination, mouse action, media key or launcher action. Mouse default: A click, B back, X Enter, Y Space, D-pad arrows, LT right-click, RT hold precise pointer, LB/RB tabs, Select Esc, Start F11, R3 keyboard. Website tiles are separate windows, so each has its own map.
+- **N14 Sleep timer.** Countdown set from the Home menu, Power menu, Settings or the phone: 15/30/45 min, 1 h, 1 h 30, 2 h, when the current video ends, off. Shown in the status bar; warning 1 minute before with +15 min.
 
 ## Wants
 
@@ -43,7 +45,7 @@ desktop, opens six apps full screen, and turns the iPhone into a remote and a
 
 ## Not now
 
-Content rows ("Live now", "Continue watching") · HDR · surround passthrough · AirPlay mirroring · CEC adapter · profiles · Steam/games · Firefox (Edge only by choice) · servers, games and utilities in the library.
+Content rows ("Live now", "Continue watching") · HDR · surround passthrough · AirPlay mirroring · CEC adapter · profiles · Steam/games · Firefox (Edge only by choice) · servers, games and utilities in the library · managing the box from the phone.
 
 ## Decisions from the requirements dialog
 
@@ -71,30 +73,39 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Library scope | Media apps + streaming-site tiles (client only) |
 | Brightness | Global software dimming only |
 | On-screen keyboard | Auto on text fields + configurable button, default R3 |
+| TV brands | Roku, LG webOS, Samsung Tizen, Sony / Google TV / Android TV, CEC adapter fallback |
+| Android Share | One-time certificate install from a QR code |
+| Browser-like apps | X Enter, Y Space, D-pad arrows (Mouse preset) |
+| Button map editing | On the TV only |
+| Phone app scope | Companion only: Remote, Type, Playing |
+| Icons | Colored per app on dark tiles |
+| Sleep timer | Countdown you set, with warning |
 
-## Controller map (proposal)
+## Controller map
 
-| Context | Button | Action |
-|---|---|---|
-| Everywhere | Home (tap) | Home menu over the app |
-| Everywhere | Home (hold 1 s) | Power menu |
-| Moonlight | Home | Tap goes to the game PC, hold 2 s opens the menu |
-| Everywhere except Moonlight | R3 (configurable) | On-screen keyboard |
-| Launcher & menus | D-pad / L stick | Move |
-| | A / B | Select / back |
-| | X | Close app (Home menu) · delete (keyboard) |
-| | Y | Space (keyboard) |
-| | Start | Tile options · done (keyboard) |
-| | LB / RB | Switch tabs |
-| Controller apps (YouTube, Jellyfin, Moonlight) | all | Passed through untouched; only Home is caught |
-| Mouse mode (Edge, Twitch, Stremio, website tiles) | L stick | Pointer (hold RT for precise) |
-| | R stick | Scroll |
-| | A / Y | Click / right-click |
-| | B | Back |
-| | X | Unused |
-| | LB / RB | Previous / next tab (Edge) |
-| | D-pad | Arrow keys |
-| | Select / Start | Esc / full screen (F11) |
+Always (launcher): Home tap = Home menu · Home hold 1 s = Power · in Moonlight tap goes to the game PC, hold 2 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
+
+Launcher & menus: D-pad/L stick move · A select · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
+
+| Button | Controller preset | Mouse preset (Edge, Twitch, Stremio, websites) | Keyboard preset |
+|---|---|---|---|
+| L stick | app | pointer | arrow keys |
+| R stick | app | scroll | pointer |
+| A | app | click | Enter |
+| B | app | back | Esc |
+| X | app | Enter | Space |
+| Y | app | Space | Tab |
+| D-pad | app | arrow keys | arrow keys |
+| LB / RB | app | previous / next tab | Page Up / Page Down |
+| LT | app | right-click | Home |
+| RT | app | hold: precise pointer | End |
+| Select | app | Esc | Backspace |
+| Start | app | F11 | Menu key |
+| L3 | app | nothing | click |
+| R3 | keyboard | keyboard | keyboard |
+| Home | launcher | launcher | launcher |
+
+Defaults: YouTube, Jellyfin, Moonlight = Controller; Edge, Twitch, Stremio, website tiles = Mouse. Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
 
 ## Risks and pushback
 
@@ -110,6 +121,9 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Can't run Windows from the build environment | Test list per phase; launcher writes logs |
 | LTSC has no Store/winget; Edge 4K web video needs HEVC codec | Setup script installs winget and the codec |
 | Launcher crash leaves a blank screen | Watchdog restart; Ctrl+Alt+Del still works |
+| Each TV brand is its own integration; Samsung power-on over network is unreliable | Roku first, other brands when needed, CEC adapter as catch-all |
+| Android installs web apps / Share targets only over HTTPS | Box's own certificate installed once via QR; remote works in the browser without it |
+| Button maps per app, but website tiles all run in Edge | Each website tile is its own app window with its own map |
 | Auto keyboard pops up when a site focuses a search box on load | B dismisses; off in apps with their own keyboard; can be disabled |
 | Brightness is digital: can only go darker than the TV setting | Set the TV's own brightness once to the brightest comfortable level |
 
@@ -117,9 +131,9 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 
 - **Install:** `autounattend.xml` on the USB stick (no questions, local account, autologin) + `setup.ps1` (winget, apps, policies, power, codecs).
 - **Launcher:** C# host with a WebView2 web UI; registered as the shell for the TV account. Watchdog restarts it.
-- **Controller service:** in the launcher; reads XInput directly (incl. Guide), per-app mode: pass-through or mouse mode (SendInput).
-- **TV control:** HTTP to Roku ECP on port 8060: `keypress/PowerOn`, `keypress/PowerOff`, `keypress/InputHDMIn`, `query/device-info` (power mode) polling.
-- **Phone:** launcher serves the remote web app on the LAN at `tv.local`; "Send to TV" iOS Shortcut posts links to it; optional 4-digit code for new phones.
+- **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button maps (preset + overrides) applied to the foreground window, emitted via SendInput.
+- **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket + Wake-on-LAN), Samsung Tizen (websocket + WoL), Sony / Google / Android TV (Android TV Remote protocol or Bravia API), HDMI-CEC (libCEC). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
+- **Phone:** launcher serves the remote web app at `tv.local` over HTTPS with the box's own CA (installed once on phones that need it); iOS Shortcut or Android Web Share Target posts links; optional 4-digit code for new phones.
 - **Link player:** mpv + yt-dlp with hardware decoding (d3d11va).
 - **App catalog:** one list (winget IDs + website tiles) drives the setup picks and the library.
 - **Keyboard and brightness:** launcher overlay layers above every app.
@@ -128,19 +142,18 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 ## Build order
 
 1. **Base install:** USB install, setup script with the app catalog, apps with hardware decoding, decoding check.
-2. **Launcher core:** tiles, Home menu, power menu, controller service, keyboard, brightness, sleep, TV control.
-3. **iPhone:** remote web app, Send to TV Shortcut, link player.
-4. **Polish:** settings screens, app library, tile editing, alerts, first-run setup.
+2. **Launcher core:** tiles, Home menu, power menu + sleep timer, controller service with presets, keyboard, brightness, sleep, Roku control.
+3. **Phone:** remote web app for iPhone and Android, Send to TV on both, link player.
+4. **Polish:** settings screens, button map editor, TV profiles + other brands, app library, tile editing, alerts, first-run setup.
 
 ## Screens (on the design canvas)
 
-- **TV:** Home · Tile options · App library · Installing from the library · Add tile (on this box) · Add tile (website + on-screen keyboard) · Keyboard over a website · Opening an app · Inside an app (mouse-mode hint) · Home menu over an app (volume + brightness) · Power · Link player · Alerts · First-run setup (incl. pick your apps)
-- **Settings:** Sleep & power · TV · Controller · iPhone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
-- **iPhone:** Remote (touchpad) · Remote (arrows) · Type · Now playing · Apps, link & power · Send to TV
+- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Inside an app (button hint) · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Link player · Alerts · First-run setup (incl. pick your apps)
+- **Settings:** Sleep & power · TV (profiles) · How the box controls a TV · Controller · Button maps · Button map editor · Phone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
+- **Phone:** Remote (touchpad) · Remote (arrows) · Type (+ paste link) · Playing (+ sleep timer) · Send to TV
 
 ## Open questions
 
-1. Mouse-mode button layout: anything to move?
-2. Look: blue focus glow, 4 tiles per row, 24-hour clock.
-3. Can VacuumTube be handed a YouTube link to open? (Verify before build; fallback is the link player.)
-4. Library list: anything to add or drop?
+1. Look: colored icons, blue focus glow, 4 tiles per row, 24-hour clock.
+2. Can VacuumTube be handed a YouTube link to open? (Verify before build; fallback is the link player.)
+3. Library list: anything to add or drop?
