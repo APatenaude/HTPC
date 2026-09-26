@@ -80,6 +80,8 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Phone app scope | Companion only: Remote, Type, Playing |
 | Icons | Colored per app on dark tiles |
 | Sleep timer | Countdown you set, with warning |
+| Ad blocking | uBlock Origin Lite in Edge (force-installed by policy); full uBlock Origin not used since Edge ends MV2 support by ~April 2027 |
+| Edge search engine | Google, set by policy; the box is marked as MDM-enrolled (fake MDM enrollment keys) so Edge honours DefaultSearchProvider* on a non-domain PC |
 
 ## Controller map
 
@@ -120,6 +122,8 @@ Defaults: YouTube, Jellyfin, Moonlight = Controller; Edge, Twitch, Stremio, webs
 | Roku ECP needs "Control by mobile apps" and "Fast TV start"; PowerOn not in official docs | Setup checks both and tests on/off |
 | Can't run Windows from the build environment | Test list per phase; launcher writes logs |
 | LTSC has no Store/winget; Edge 4K web video needs HEVC codec | Setup script installs winget and the codec |
+| Edge ignores search-engine policies on non-managed PCs | Fake MDM enrollment registry keys; side effect: Defender Tamper Protection shows as managed |
+| uBlock Origin Lite is weaker than full uBO, especially on Twitch | Accepted; revisit (e.g. a second browser for Twitch) if ads get through |
 | Launcher crash leaves a blank screen | Watchdog restart; Ctrl+Alt+Del still works |
 | Each TV brand is its own integration; Samsung power-on over network is unreliable | Roku first, other brands when needed, CEC adapter as catch-all |
 | Android installs web apps / Share targets only over HTTPS | Box's own certificate installed once via QR; remote works in the browser without it |
