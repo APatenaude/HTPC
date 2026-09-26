@@ -23,6 +23,9 @@ sealed class MainForm : Form
     readonly Dimmer dimmer = new();
     readonly System.Windows.Forms.Timer clock = new() { Interval = 1000 };
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
+    readonly LauncherSettings settings = LauncherSettings.Load();
+    Standby standby = null!;   // needs the window handle: created in OnLoad
+    int ticks;
 
     bool uiReady;
     int brightness = 100;
@@ -43,8 +46,17 @@ sealed class MainForm : Form
         apps = new AppManager(options.CatalogPath);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
         controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
-        controller.StatusChanged += (_, _) => BeginInvoke(PushState);
-        clock.Tick += (_, _) => CheckSleepTimer();
+        controller.StatusChanged += (connected, _) => BeginInvoke(() =>
+        {
+            // A sleeping 8BitDo controller reconnects on the first press: that press wakes the box.
+            if (connected && standby.Active) standby.Wake("controller reconnected");
+            PushState();
+        });
+        clock.Tick += async (_, _) =>
+        {
+            CheckSleepTimer();
+            if (++ticks % 5 == 0) await standby.Tick();
+        };
         Directory.CreateDirectory(captureDir);
     }
 
@@ -53,6 +65,9 @@ sealed class MainForm : Form
         base.OnLoad(e);
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+        standby = new Standby(Handle, controller, settings);
+        standby.Changed += active => Log.Info(active ? "In standby" : "Awake");
+        Log.Info($"Standby after {settings.IdleMinutes} min idle; deep sleep after {settings.DeepSleepHours} h (0 = never)");
         controller.Start();
         clock.Start();
         try { await InitWebView(); }
@@ -140,6 +155,8 @@ sealed class MainForm : Form
 
     void OnPad(Pad pad, bool repeat)
     {
+        // In standby any button only wakes the box.
+        if (standby.Active) { standby.Wake($"controller {pad}"); return; }
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
         // Inside Moonlight a tap on Home belongs to the game PC; a 2 s hold opens our menu.
@@ -252,8 +269,9 @@ sealed class MainForm : Form
         switch (action)
         {
             case "sleep":
+                // Stay-awake standby; the launcher wakes on the home screen.
                 Post(new { type = "show", view = "home" });
-                Application.SetSuspendState(PowerState.Suspend, false, false);
+                standby.Enter("Power menu");
                 break;
             case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
             case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
@@ -295,7 +313,7 @@ sealed class MainForm : Form
             sleepAt = null;
             sleepLabel = null;
             PushState();
-            Power("sleep");
+            standby.Enter("sleep timer");
         }
     }
 

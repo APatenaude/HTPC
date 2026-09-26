@@ -10,7 +10,7 @@
       Apps          the apps picked in catalog.json (or -Apps)
       Codecs        HEVC Video Extensions (for Edge)
       Edge          Google search, uBlock Origin Lite, no first-run or promotions
-      Power         S3 sleep after 30 min, hibernate available, no self-wake, wake sources
+      Power         never sleeps on its own (the launcher's standby), TV standby plan, wake sources
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
@@ -33,20 +33,17 @@
     Catalog ids to install instead of the default picks.
 .PARAMETER Unattended
     First sign-in after a USB install: no prompts, window closes by itself.
-.PARAMETER DevKeepAwake
-    While we develop on the box: the Power step keeps never-sleep.
 .PARAMETER NoPause
     Close the window at the end without waiting for Enter.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -DevKeepAwake
+    powershell -ExecutionPolicy Bypass -File setup\setup.ps1
 #>
 param(
     [string[]]$Only,
     [string[]]$Skip,
     [string[]]$Apps,
     [switch]$Unattended,
-    [switch]$DevKeepAwake,
     [switch]$NoPause
 )
 
@@ -66,7 +63,7 @@ $Steps = [ordered]@{
     Apps         = { & "$lib\Install-Apps.ps1" -Ids $Apps }
     Codecs       = { & "$lib\Install-Codecs.ps1" }
     Edge         = { & "$lib\Set-EdgePolicy.ps1" }
-    Power        = { & "$lib\Set-Power.ps1" -DevKeepAwake:$DevKeepAwake }
+    Power        = { & "$lib\Set-Power.ps1" }
     Updates      = { & "$lib\Set-UpdatePolicy.ps1" }
     System       = { & "$lib\Set-SystemPolicy.ps1" }
     AutoLogon    = { & "$lib\Set-AutoLogon.ps1" }

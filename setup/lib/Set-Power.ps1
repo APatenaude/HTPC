@@ -1,52 +1,81 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Power plan for the box: S3 sleep, hibernate available, no self-wake, chosen wake sources.
+    Power plans: Balanced for use, "TV standby" for the launcher's standby; wake sources.
 
 .DESCRIPTION
-    This N97 box has classic S3 sleep (docs/MACHINE.md).
-      - Sleep after 30 min idle (SPEC N6 default). Interim: in Phase 2 the launcher owns idle
-        sleep, because controller input does not reset Windows' idle timer.
-      - The screen never blanks on its own; the TV goes off when the box sleeps.
-      - Hibernate available (for the launcher's "Hibernate instead" switch), never automatic.
-      - Fast Startup off (a real shutdown resets drivers; it also avoids stale USB state).
-      - No wake timers and no maintenance wake, so the box does not wake itself.
-      - Power button = sleep. USB selective suspend off (controller dongle latency and wake).
-      - Wake: keyboard and controller dongle yes, mouse no (a bump would wake the box),
-        Ethernet only on a Wake-on-LAN magic packet.
+    Stay-awake standby (SPEC decision, 26 Sept 2026): this box has S3 only (docs/MACHINE.md)
+    and the 8BitDo dongle cannot wake it from S3. So Windows never sleeps on its own; the
+    launcher's Sleep pauses playback, turns the screen off and switches to "TV standby", and
+    any controller button brings it all back.
 
-.PARAMETER DevKeepAwake
-    While we develop on the box: keep never-sleep (setup\dev\Enable-DevSession.ps1).
+    Both plans (Balanced is the base and the one in use):
+      - never sleep, blank the screen or hibernate on their own: the launcher decides
+      - no wake timers and no maintenance wake: the box never wakes itself
+      - power button = real sleep (S3); no sign-in on wake (the box is open)
+      - USB selective suspend off: the controller dongle stays awake and quick
+    "TV standby" also: CPU capped at 30% without boost, PCIe link power saving, disk off after
+    5 min, Wi-Fi at maximum power saving. Ethernet stays up (phone remote, TV control, WoL).
+
+    Also: hibernate available (full hiberfile) for the optional deep sleep, Fast Startup off,
+    wake from the keyboard and an Ethernet magic packet, not from the mouse (a bump would
+    wake the box). The dongle has no USB remote wakeup (deepest wake state S0): it wakes
+    Modern Standby laptops, not this box.
 #>
-param(
-    [switch]$DevKeepAwake,
-    [int]$SleepMinutes = 30
-)
+param()
 
 . "$PSScriptRoot\Common.ps1"
 Assert-Admin
 
-function Set-PowerValue([string]$Label, [string]$Group, [string]$Setting, [int]$Value) {
-    powercfg /setacvalueindex SCHEME_CURRENT $Group $Setting $Value
-    powercfg /setdcvalueindex SCHEME_CURRENT $Group $Setting $Value
-    if ($LASTEXITCODE -ne 0) { throw "powercfg failed for $Label" }
+$Balanced = '381b4222-f694-41f0-9685-ff5bb260df2e'
+$StandbyPlan = '8d3c4f6a-2b71-4e59-a0c3-6f1e9b27d5c4'   # fixed: the launcher switches to it by this id
+
+$Sleep = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; $Video = '7516b95f-f776-4464-8c53-06167f40cc99'
+$Buttons = '4f971e89-eebd-4455-a8de-9e59040e7347'; $Usb = '2a737441-1930-4402-8d77-b2bebba308a3'
+$Processor = '54533251-82be-4824-96c1-47b60b740d00'; $Pcie = '501a4d13-42af-4429-9fd1-a8218c268e20'
+$Disk = '0012ee47-9041-4b5d-9b77-535fba8b1442'; $Wireless = '19cbb8fa-5279-450e-9fac-8a3d5fedd0c1'
+$NoGroup = 'fea3413e-7e05-4911-9a71-700331f1c294'
+
+function Set-PowerValue([string]$Plan, [string]$Label, [string]$Group, [string]$Setting, [int]$Value, [switch]$Optional) {
+    powercfg /setacvalueindex $Plan $Group $Setting $Value
+    $ac = $LASTEXITCODE
+    powercfg /setdcvalueindex $Plan $Group $Setting $Value
+    if ($ac -ne 0 -or $LASTEXITCODE -ne 0) {
+        if ($Optional) { Write-Attention "$Label not available on this PC"; return }
+        throw "powercfg failed for $Label"
+    }
     Write-Change "$Label = $Value"
 }
 
-$sub = @{ Sleep = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; Video = '7516b95f-f776-4464-8c53-06167f40cc99'
-          Buttons = '4f971e89-eebd-4455-a8de-9e59040e7347'; Usb = '2a737441-1930-4402-8d77-b2bebba308a3' }
+if (-not ((powercfg /list) -match $StandbyPlan)) {
+    powercfg /duplicatescheme $Balanced $StandbyPlan | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create the TV standby power plan' }
+    Write-Change 'power plan "TV standby" created'
+}
+powercfg /changename $StandbyPlan 'TV standby' 'Used by the launcher while the screen and TV are off; the controller wakes the box.'
 
-$sleepSeconds = if ($DevKeepAwake) { 0 } else { $SleepMinutes * 60 }
-if ($DevKeepAwake) { Write-Attention 'Dev session: sleep stays off. Run without -DevKeepAwake to finish the box.' }
-Set-PowerValue 'Sleep after (s)' $sub.Sleep '29f6c1db-86da-48c5-9fdb-f2b67b1f44da' $sleepSeconds
-Set-PowerValue 'Turn off display after (s)' $sub.Video '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e' 0
-Set-PowerValue 'Hibernate after (s)' $sub.Sleep '9d7815a6-7ee4-497e-8888-515a05f02364' 0
-Set-PowerValue 'Allow wake timers' $sub.Sleep 'bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d' 0
-Set-PowerValue 'Power button action (1 = sleep)' $sub.Buttons '7648efa3-dd9c-4e3e-b566-50f929386280' 1
-Set-PowerValue 'USB selective suspend' $sub.Usb '48e6b7a6-50f5-4782-a5d4-53bb8f07e226' 0
-# The box is open (no Windows password, SPEC N1): no sign-in screen after sleep either.
-Set-PowerValue 'Require sign-in on wake' 'fea3413e-7e05-4911-9a71-700331f1c294' '0e796bdb-100d-47d6-a2d5-f7d2daa51f51' 0
-powercfg /setactive SCHEME_CURRENT
+foreach ($plan in $Balanced, $StandbyPlan) {
+    $name = if ($plan -eq $Balanced) { 'Balanced' } else { 'TV standby' }
+    Write-Host "  Plan: $name"
+    Set-PowerValue $plan 'Sleep after (s)' $Sleep '29f6c1db-86da-48c5-9fdb-f2b67b1f44da' 0
+    Set-PowerValue $plan 'Hibernate after (s)' $Sleep '9d7815a6-7ee4-497e-8888-515a05f02364' 0
+    Set-PowerValue $plan 'Allow wake timers' $Sleep 'bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d' 0
+    Set-PowerValue $plan 'Turn off display after (s)' $Video '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e' 0
+    Set-PowerValue $plan 'Power button action (1 = sleep)' $Buttons '7648efa3-dd9c-4e3e-b566-50f929386280' 1
+    Set-PowerValue $plan 'USB selective suspend' $Usb '48e6b7a6-50f5-4782-a5d4-53bb8f07e226' 0
+    Set-PowerValue $plan 'Require sign-in on wake' $NoGroup '0e796bdb-100d-47d6-a2d5-f7d2daa51f51' 0
+}
+
+Write-Host '  Plan: TV standby, power savings'
+Set-PowerValue $StandbyPlan 'Maximum processor state (%)' $Processor 'bc5038f7-23e0-4960-96da-33abaf5935ec' 30
+Set-PowerValue $StandbyPlan 'Minimum processor state (%)' $Processor '893dee8e-2bef-41e0-89c6-b55d0929964c' 5
+Set-PowerValue $StandbyPlan 'Processor boost (0 = off)' $Processor 'be337238-0d82-4146-a960-4f3749d470c7' 0 -Optional
+Set-PowerValue $StandbyPlan 'PCIe link state power (2 = maximum savings)' $Pcie 'ee12f906-d277-404b-b6da-e5fa1a576df5' 2 -Optional
+Set-PowerValue $StandbyPlan 'Turn off disk after (s)' $Disk '6738e2c4-e8a5-4a42-b16a-e040e769756e' 300
+Set-PowerValue $StandbyPlan 'Wi-Fi power saving (3 = maximum)' $Wireless '12bbebe6-58d6-4636-95bb-3217ef867c1a' 3 -Optional
+
+powercfg /setactive $Balanced
+Write-Change 'Balanced is the active plan'
 
 powercfg /hibernate on
 powercfg /hibernate /type full
@@ -61,15 +90,6 @@ foreach ($device in $armed | Where-Object { $_ -match 'mouse' }) {
     powercfg /devicedisablewake $device
     Write-Change "wake off: $device"
 }
-$pads = @(powercfg /devicequery wake_programmable | Where-Object { $_ -match 'XINPUT|Xbox|8BitDo|Gamepad|Game controller' })
-if ($pads) {
-    foreach ($device in $pads) { powercfg /deviceenablewake $device; Write-Change "wake on: $device" }
-} else {
-    # The 8BitDo 2.4 GHz dongle has no USB remote wakeup (deepest wake state S0), so it can wake
-    # Modern Standby laptops but not this S3 box. Keyboard, power button and Wake-on-LAN can.
-    Write-Attention 'No controller receiver here can wake the box from sleep'
-}
-
 foreach ($nic in Get-NetAdapter -Physical | Where-Object { $_.MediaType -eq '802.3' }) {
     Set-NetAdapterPowerManagement -Name $nic.Name -WakeOnMagicPacket Enabled -WakeOnPattern Disabled -ErrorAction SilentlyContinue
     Write-Change "$($nic.Name): wake on magic packet only"

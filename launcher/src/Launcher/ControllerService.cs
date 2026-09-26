@@ -37,6 +37,9 @@ sealed class ControllerService : IDisposable
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
 
+    /// <summary>Poll every 80 ms instead of 8 ms (standby: fewer CPU wake-ups, wake still instant).</summary>
+    public bool Slow { get; set; }
+
     public bool Connected { get; private set; }
     public string? BatteryLevel { get; private set; }
     public DateTime LastActivity { get; private set; } = DateTime.Now;
@@ -126,7 +129,7 @@ sealed class ControllerService : IDisposable
             }
 
             previous = buttons;
-            Thread.Sleep(8);
+            Thread.Sleep(Slow ? 80 : 8);
         }
     }
 

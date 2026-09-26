@@ -21,7 +21,7 @@ param([switch]$Dev, [switch]$Windowed, [switch]$NoBuild)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'src\Launcher\Launcher.csproj'
-$exe = Join-Path $root 'src\Launcher\bin\Debug\net10.0-windows\HtpcLauncher.exe'
+$exe = Join-Path $root 'src\Launcher\bin\Debug\net10.0-windows10.0.19041.0\HtpcLauncher.exe'
 $task = 'HTPC launcher (dev)'
 
 Get-Process HtpcLauncher -ErrorAction SilentlyContinue | Stop-Process -Force

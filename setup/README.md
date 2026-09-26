@@ -5,8 +5,7 @@ Scripts that turn a clean Windows 11 IoT Enterprise LTSC 2024 install into the f
 
 ## setup.ps1
 
-    powershell -ExecutionPolicy Bypass -File setup\setup.ps1              # the finished box
-    powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -DevKeepAwake # while developing
+    powershell -ExecutionPolicy Bypass -File setup\setup.ps1
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Only Edge,Power
 
 It elevates itself (UAC), is safe to re-run, keeps going when one step fails, and logs to
@@ -20,7 +19,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc` |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
-| Power | `lib/Set-Power.ps1` | S3 sleep after 30 min, hibernate available, no self-wake, keyboard/controller wake, not mouse |
+| Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); "TV standby" low-power plan; no self-wake; keyboard and WoL wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | automatic sign-in, password kept as an LSA secret (from the answer file, or typed) |
@@ -59,11 +58,10 @@ Hyper-V test VM. See `autounattend/README.md`.
 | 2026-09-26 | Hyper-V enabled, user in Hyper-V Administrators | `dev/Enable-HyperV.ps1` |
 | 2026-09-26 | ffmpeg 9.0.2 and mpv 0.41.0 for the current user | `dev/Install-MediaTools.ps1` |
 | 2026-09-26 | .NET SDK 10.0.401 | `dev/Install-BuildTools.ps1` |
-| 2026-09-26 | setup.ps1 -DevKeepAwake: all steps; the Microsoft Store was added (`wsreset -i`) during a first HEVC attempt and left in place | `setup.ps1` |
+| 2026-09-26 | setup.ps1: all steps; the Microsoft Store was added (`wsreset -i`) during a first HEVC attempt and left in place | `setup.ps1` |
 | 2026-09-26 | HEVC Video Extensions 2.4.109.0, for this user and provisioned for new ones | `setup.ps1 -Only Codecs` |
 
-To undo before calling the box finished: run setup.ps1 without `-DevKeepAwake` (restores
-sleep) and remove PortableGit, ffmpeg and mpv.
+To undo before calling the box finished: remove PortableGit, ffmpeg, mpv and the .NET SDK.
 
 ## Running scripts from the Claude desktop app
 

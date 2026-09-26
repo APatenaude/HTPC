@@ -83,6 +83,18 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Ad blocking | uBlock Origin Lite in Edge (force-installed by policy); full uBlock Origin not used since Edge ends MV2 support by ~April 2027 |
 | Edge search engine | Google, set by policy; the box is marked as MDM-enrolled (fake MDM enrollment keys) so Edge honours DefaultSearchProvider* on a non-domain PC |
 
+Decisions of 26 September 2026 (building on the box):
+
+| Topic | Decision |
+|---|---|
+| Sleep | Stay-awake standby: Sleep (menu, timer, idle) turns the TV and screen off and pauses playback while the box stays on, so Home on the controller wakes everything. The box has S3 only and the 8BitDo dongle cannot wake from S3. Optional real sleep after some hours; wake from it with the phone (Wake-on-LAN), keyboard or power button |
+| Windows sign-in | None: no password, automatic sign-in, nothing locks; a PIN in the launcher if ever wanted |
+| Install | One "TV Box Setup" exe from GitHub releases: the launcher's UI in setup mode (pick apps, find the TV, controller check, options), running the setup steps with one admin prompt; it is also the first-run setup. The USB answer file stays for full wipe-and-install |
+| Updates | Windows manual; Edge and WebView2 automatic; other apps on demand (winget); launcher from GitHub releases |
+| Language and time | English (en-US); automatic time zone |
+| Stremio | Stremio 5 (beta) |
+| Test loop | Build on the real box first; a Hyper-V VM checks the clean install |
+
 ## Controller map
 
 Always (launcher): Home tap = Home menu · Home hold 1 s = Power · in Moonlight tap goes to the game PC, hold 2 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
@@ -113,8 +125,8 @@ Defaults: YouTube, Jellyfin, Moonlight = Controller; Edge, Twitch, Stremio, webs
 
 | Risk | Plan |
 |---|---|
-| N97 boxes only get Modern Standby; can self-wake or resume black | Test day one; Hibernate one setting away |
-| Waking from the 8BitDo dongle is unknown | Test day one; fallback power button or keyboard |
+| N97 boxes only get Modern Standby; can self-wake or resume black | Tested: this box has S3 and no Modern Standby; S3 sleep and wake work |
+| Waking from the 8BitDo dongle is unknown | Tested: it cannot wake from S3 (no USB remote wakeup), keyboard can. Answer: stay-awake standby |
 | Twitch ad blocking is weaker in Edge | Try a week; moving only the Twitch tile to Firefox is small |
 | Mouse mode has a ceiling (Edge, Twitch, Stremio) | Precise pointer on RT; phone touchpad and keyboard |
 | Some apps expect Explorer | Fallback: Explorer running but hidden behind the launcher |
@@ -133,7 +145,7 @@ Defaults: YouTube, Jellyfin, Moonlight = Controller; Edge, Twitch, Stremio, webs
 
 ## Architecture
 
-- **Install:** `autounattend.xml` on the USB stick (no questions, local account, autologin) + `setup.ps1` (winget, apps, policies, power, codecs).
+- **Install:** "TV Box Setup" exe (the launcher in setup mode) running the setup steps (winget, apps, policies, power, codecs); optional `autounattend.xml` USB stick for a full wipe-and-install that ends in the same setup.
 - **Launcher:** C# host with a WebView2 web UI; registered as the shell for the TV account. Watchdog restarts it.
 - **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button maps (preset + overrides) applied to the foreground window, emitted via SendInput.
 - **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket + Wake-on-LAN), Samsung Tizen (websocket + WoL), Sony / Google / Android TV (Android TV Remote protocol or Bravia API), HDMI-CEC (libCEC). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
