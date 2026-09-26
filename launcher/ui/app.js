@@ -22,7 +22,8 @@ const state = {
   backdrop: null,
   section: 'sleep',        // Settings section shown
   prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true },
-  power: { sleep: true, hibernate: true }   // sleep states this PC has (from the host)
+  power: { sleep: true, hibernate: true },  // sleep states this PC has (from the host)
+  tv: { screen: null, profile: null, found: [] }   // the screen's TV, its profile, TVs on the network
 };
 
 const $ = (id) => document.getElementById(id);
@@ -219,6 +220,45 @@ function renderSleepSection() {
     '</div>';
 }
 
+// TV toggles live in the TV's profile, not in prefs.
+const TV_TOGGLES = ['offWithBox', 'onWithBox', 'sleepWithTv'];
+
+function toggle(on) { return `<div class="toggle${on ? ' on' : ''}"><span></span></div>`; }
+
+function renderTvSection() {
+  const t = state.tv;
+  const p = t.profile;
+  const current = p && t.found.find((x) => x.id === p.deviceId);
+  let body = '<header><h1>TV</h1><p>The box turns the TV it is plugged into on and off and picks its input. ' +
+    'Each TV gets its own settings.</p></header>';
+  if (!t.found.length) {
+    body += '<div class="srow"><div class="text"><span class="label">No TV found</span>' +
+      '<span class="caption">None on the network that the box can control (Roku TVs for now). Other brands come later.</span></div></div>';
+  } else {
+    const label = current ? current.name : 'Pick your TV';
+    const caption = current
+      ? `${current.model}${p.input ? ' · HDMI ' + p.input : ''}${t.screen ? ' · this screen: ' + t.screen : ''}`
+      : `Which TV is this box plugged into?${t.screen ? ' This screen reports itself as ' + t.screen + '.' : ''}`;
+    body += `<div class="srow" data-nav data-id="tv-device" data-setting="tvDevice">` +
+      `<div class="text"><span class="label">${esc(label)}</span><span class="caption">${esc(caption)}</span></div>` +
+      (t.found.length > 1 || !current ? `<div class="value">${icon('chevleft', 28, 2)}Change${icon('chevright', 28, 2)}</div>` : '') + '</div>';
+    if (current && current.locked) {
+      body += '<div class="srow"><div class="text"><span class="label" style="color:var(--warn)">This TV blocks control</span>' +
+        '<span class="caption">On the TV: Settings › System › Advanced system settings › Control by mobile apps, set Network access to Enabled. ' +
+        'Also Settings › System › Power › Fast TV start: On.</span></div></div>';
+    }
+    if (p) {
+      body += settingRow('tv.offWithBox', 'Turn off when the box sleeps', 'The TV goes to standby with the box', toggle(p.offWithBox)) +
+        settingRow('tv.onWithBox', 'Turn on when the box wakes', 'And switch to the box’s input', toggle(p.onWithBox)) +
+        settingRow('tv.sleepWithTv', 'Follow the TV’s remote', 'Turning the TV off puts the box to sleep; turning it back on wakes the box', toggle(p.sleepWithTv));
+    }
+  }
+  body += '<div class="sbuttons">' +
+    (current && !current.locked ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: off and back on</div>' : '') +
+    '<div class="sbutton" data-nav data-id="tv-refresh" data-act="tv-refresh">Search again</div></div>';
+  return body;
+}
+
 function renderSettings() {
   const nav = `<nav class="snav"><div class="snav-title">${icon('chevleft', 36, 2)}<span>Settings</span></div>` +
     SECTIONS.map(([id, glyph, label]) =>
@@ -226,12 +266,29 @@ function renderSettings() {
     '</nav>';
   const title = SECTIONS.find(([id]) => id === state.section)[2];
   const body = state.section === 'sleep' ? renderSleepSection()
+    : state.section === 'tv' ? renderTvSection()
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
   $('settings').innerHTML = nav + `<div class="spane"><main>${body}</main>` +
     `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['B', 'Back']])}</footer></div>`;
 }
 
 function changeSetting(key, step) {
+  if (key === 'tvDevice') {
+    // Step through the TVs found on the network.
+    const ids = state.tv.found.map((x) => x.id);
+    if (!ids.length) return;
+    const cur = state.tv.profile ? ids.indexOf(state.tv.profile.deviceId) : -1;
+    send({ type: 'tvChoose', id: ids[(cur + step + ids.length) % ids.length] });
+    return;
+  }
+  if (key.startsWith('tv.')) {
+    const name = key.slice(3);
+    if (!state.tv.profile) return;
+    state.tv.profile[name] = !state.tv.profile[name];
+    send({ type: 'tvSetting', key: name, value: state.tv.profile[name] });
+    render();
+    return;
+  }
   const list = key === 'sleepMode' ? availableModes() : CHOICES[key];
   const i = list.findIndex(([v]) => v === state.prefs[key]);
   const next = list[(Math.max(i, 0) + step + list.length) % list.length][0];
@@ -366,6 +423,8 @@ function activate(el) {
       break;
     }
     case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
+    case 'tv-test': toast('Turning the TV off and back on…'); send({ type: 'tvTest' }); break;
+    case 'tv-refresh': toast('Searching for TVs…'); send({ type: 'tvRefresh' }); break;
     case 'cancel': back(); break;
     case 'settings': go('settings'); break;
     case 'soon': toast(`${arg} come in a later update`); break;
@@ -442,9 +501,11 @@ function onHost(msg) {
       Object.assign(state, msg.settings || {});
       if (msg.prefs) Object.assign(state.prefs, msg.prefs);
       if (msg.power) state.power = msg.power;
+      if (msg.tv) state.tv = msg.tv;
       render();
       break;
     case 'blank': $('stage').classList.add('blank'); break;
+    case 'tv': state.tv = msg.tv; if (state.view === 'settings') render(); break;
     case 'opened':
       hideOpening();
       if (!msg.ok) toast(msg.text, 'warn');

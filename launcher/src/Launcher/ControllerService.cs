@@ -39,7 +39,10 @@ sealed class ControllerService : IDisposable
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
 
-    /// <summary>Poll every 80 ms instead of 8 ms (standby: fewer CPU wake-ups, wake still instant).</summary>
+    /// <summary>
+    /// Poll every 25 ms instead of 8 ms (standby: fewer CPU wake-ups). Not slower: at 80 ms a
+    /// quick tap on Home fell between two polls and did not wake the box.
+    /// </summary>
     public bool Slow { get; set; }
 
     public bool Connected { get; private set; }
@@ -156,7 +159,7 @@ sealed class ControllerService : IDisposable
             }
 
             previous = buttons;
-            Thread.Sleep(Slow ? 80 : 8);
+            Thread.Sleep(Slow ? 25 : 8);
         }
     }
 

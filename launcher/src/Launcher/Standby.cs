@@ -23,6 +23,9 @@ sealed class LauncherSettings
     /// <summary>No idle sleep while something plays, even with the controller untouched.</summary>
     public bool StayAwakeWhilePlaying { get; set; } = true;
 
+    /// <summary>TV profiles by HDMI identity (EDID key): each TV the box meets gets its own.</summary>
+    public Dictionary<string, TvProfile> Tvs { get; set; } = new();
+
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");

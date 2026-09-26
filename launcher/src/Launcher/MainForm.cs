@@ -24,6 +24,8 @@ sealed class MainForm : Form
     readonly System.Windows.Forms.Timer clock = new() { Interval = 1000 };
     readonly System.Windows.Forms.Timer mouseWatch = new() { Interval = 200 };
     readonly CursorHider cursor = new();
+    readonly TvService tv;
+    bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
@@ -54,11 +56,21 @@ sealed class MainForm : Form
             if (connected && standby.Active) standby.Wake("controller reconnected");
             PushState();
         });
+        tv = new TvService(settings);
+        tv.Changed += () => BeginInvoke(() => Post(new { type = "tv", tv = tv.Describe() }));
+        tv.TvStateChanged += (on, showingBox) => BeginInvoke(() => OnTvState(on, showingBox));
         clock.Tick += async (_, _) =>
         {
             CheckSleepTimer();
-            // Every second in standby (wake on keyboard or mouse), every 5 s otherwise (idle check).
-            if (standby.Active || ++ticks % 5 == 0) await standby.Tick();
+            // Every 5 s: the idle check, and the TV's power state (its own remote).
+            if (++ticks % 5 != 0) return;
+            await standby.Tick();
+            await tv.Poll();
+        };
+        // Back from a real sleep or hibernate: the TV comes on with the box.
+        Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
+        {
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
         };
         mouseWatch.Tick += (_, _) => cursor.Check();
         Directory.CreateDirectory(captureDir);
@@ -71,7 +83,13 @@ sealed class MainForm : Form
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         standby = new Standby(Handle, controller, settings);
         standby.Changed += OnStandbyChanged;
-        standby.GoingDown += () => Post(new { type = "show", view = "home" });
+        standby.GoingDown += () =>
+        {
+            Post(new { type = "show", view = "home" });
+            // Before Windows sleeps, or the key never goes out. On the thread pool: waiting on the
+            // UI thread would deadlock the awaits inside.
+            Task.Run(() => tv.TurnOff()).Wait(3000);
+        };
         var (hasS3, hasS4) = Standby.Capabilities();
         Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
         controller.Start();
@@ -79,6 +97,25 @@ sealed class MainForm : Form
         mouseWatch.Start();
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
+        // SPEC N7: the TV turns on (and to the box's input) when the box starts.
+        await tv.Discover();
+        await tv.TurnOn();
+    }
+
+    // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
+    // box: the box wakes. (Switched to something else: the box stays asleep.)
+    void OnTvState(bool on, bool showingBox)
+    {
+        if (!on && !standby.Active)
+        {
+            tvChangedItself = true;
+            standby.Enter("TV turned off");
+        }
+        else if (on && showingBox && standby.Active)
+        {
+            tvChangedItself = true;
+            standby.Wake("TV turned on");
+        }
     }
 
     // As the shell it starts in front; in dev it also pushes past the windows already open.
@@ -125,9 +162,32 @@ sealed class MainForm : Form
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
-                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 } });
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
                 break;
             case "wake": standby.Wake("keyboard"); break;
+            case "tvChoose": tv.Choose(Str("id")!); break;
+            case "tvRefresh": _ = tv.Discover(); break;
+            case "tvTest":
+                _ = Task.Run(async () =>
+                {
+                    var ok = await tv.Test();
+                    BeginInvoke(() => Post(new { type = "toast", text = ok ? "The TV went off and came back" : "The TV did not respond", kind = ok ? "info" : "warn" }));
+                });
+                break;
+            case "tvSetting":
+                if (tv.Profile is { } profile)
+                {
+                    var on = m.GetProperty("value").GetBoolean();
+                    switch (Str("key"))
+                    {
+                        case "offWithBox": profile.OffWithBox = on; break;
+                        case "onWithBox": profile.OnWithBox = on; break;
+                        case "sleepWithTv": profile.SleepWithTv = on; break;
+                    }
+                    settings.Save();
+                    Post(new { type = "tv", tv = tv.Describe() });
+                }
+                break;
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
                 break;
@@ -167,11 +227,11 @@ sealed class MainForm : Form
 
     void OnPad(Pad pad, bool repeat)
     {
-        cursor.Hide(); // the controller is in use: no mouse pointer on the TV
-        // In standby any button only wakes the box.
         // In standby only a tap on Home wakes the box; everything else is swallowed. Holding Home
-        // (3 s switches the 8BitDo off) raises HomeHold instead, so it does not wake it.
+        // (3 s switches the 8BitDo off) raises HomeHold instead, so it does not wake it. Nothing
+        // here may move the pointer: Windows counts that as input and turns the display back on.
         if (standby.Active) { if (pad == Pad.Home) standby.Wake("controller Home"); return; }
+        cursor.Hide(); // the controller is in use: no mouse pointer on the TV
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
         // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
@@ -322,6 +382,9 @@ sealed class MainForm : Form
     void OnStandbyChanged(bool active)
     {
         Log.Info(active ? "In standby" : "Awake");
+        // The TV follows the box, unless the TV's own remote started this.
+        if (!tvChangedItself) _ = active ? tv.TurnOff() : tv.TurnOn();
+        tvChangedItself = false;
         if (active)
         {
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
