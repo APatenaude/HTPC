@@ -8,15 +8,15 @@
       "finish setting up" screens; no lock screen; no toast notifications; no error-report
       dialogs; no Sticky/Filter/Toggle Keys prompts; no Game DVR.
     - Connected networks set to Private (the phone remote and TV discovery need the LAN).
-    - Time zone Eastern; computer name TV (phones reach it as tv.local).
+    - Automatic time zone (Windows location services; the Wi-Fi adapter locates the box
+      from nearby networks even while it uses Ethernet); computer name TV (tv.local).
     User-level settings apply to the account running setup (the box has one user).
 
 .PARAMETER ComputerName
     Renaming needs a restart; setup.ps1 reports it.
 #>
 param(
-    [string]$ComputerName = 'TV',
-    [string]$TimeZone = 'Eastern Standard Time'
+    [string]$ComputerName = 'TV'
 )
 
 . "$PSScriptRoot\Common.ps1"
@@ -54,12 +54,11 @@ foreach ($net in Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -e
     Set-NetConnectionProfile -InterfaceIndex $net.InterfaceIndex -NetworkCategory Private
     Write-Change "$($net.InterfaceAlias) network set to Private"
 }
-if ((Get-TimeZone).Id -ne $TimeZone) {
-    Set-TimeZone -Id $TimeZone
-    Write-Change "time zone $TimeZone"
-} else {
-    Write-Same "time zone $TimeZone"
-}
+# "Set time zone automatically": the tzautoupdate service on demand, location allowed.
+Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' 'Start' 3
+Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' 'Value' 'Allow' 'String'
+Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc\Service\Configuration' 'Status' 1
+Write-Host "  Time zone now: $((Get-TimeZone).Id) (updates itself when Windows locates the box)"
 if ($env:COMPUTERNAME -ne $ComputerName) {
     Rename-Computer -NewName $ComputerName -Force -WarningAction SilentlyContinue
     Write-Attention "computer renamed to $ComputerName; takes effect after a restart"

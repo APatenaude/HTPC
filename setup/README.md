@@ -22,7 +22,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
 | Power | `lib/Set-Power.ps1` | S3 sleep after 30 min, hibernate available, no self-wake, keyboard/controller wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
-| System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, Eastern time, computer name TV |
+| System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | automatic sign-in, password kept as an LSA secret (from the answer file, or typed) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 |
 
