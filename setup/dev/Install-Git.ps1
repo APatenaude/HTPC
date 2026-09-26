@@ -8,9 +8,13 @@
     installer needs elevation (a UAC click on the TV); PortableGit is the same Git,
     extracted into the user profile, and needs none. Adds its cmd folder to the user PATH.
     Not part of the finished box.
+
+    Installs to %USERPROFILE%\Tools\Git, not under AppData: the Claude desktop app is a
+    packaged app, and files it (or anything it starts) writes under AppData land in its
+    private copy, invisible to every other program.
 #>
 param(
-    [string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\Git'),
+    [string]$Destination = (Join-Path $env:USERPROFILE 'Tools\Git'),
     [string]$WorkDir = (Join-Path $env:TEMP 'htpc-setup\git')
 )
 
@@ -41,9 +45,12 @@ if ((Test-Path $gitExe) -and ((& $gitExe --version) -eq $wanted)) {
     Write-Host "$(& $gitExe --version) extracted to $Destination"
 }
 
-# PortableGit has no credential helper set, so the first push opens a "pick a helper"
-# window instead of signing in. Use Git Credential Manager, which it bundles.
-& $gitExe config --global credential.helper manager
+# PortableGit's own gitconfig sets credential.helper to a "pick a helper" window, and Git
+# runs every helper in the list. An empty entry clears that list; then use Git Credential
+# Manager (bundled), which signs in to GitHub in its own window on first push.
+& $gitExe config --global --unset-all credential.helper
+& $gitExe config --global --add credential.helper '""'
+& $gitExe config --global --add credential.helper manager
 
 $cmdDir = Join-Path $Destination 'cmd'
 $userPath = [string][Environment]::GetEnvironmentVariable('Path', 'User')

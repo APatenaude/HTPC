@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "about": "One list drives setup's app picks and, later, the launcher's library (SPEC: App catalog). default = pre-ticked in first-run setup. preset = default button map (SPEC: Controller map).",
+  "apps": [
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "type": "app",
+      "default": true,
+      "preset": "controller",
+      "install": {
+        "source": "github",
+        "repo": "shy1132/VacuumTube",
+        "asset": "^VacuumTube-Setup\\.exe$",
+        "args": "/S",
+        "checksums": "latest.yml",
+        "displayName": "^VacuumTube"
+      }
+    },
+    {
+      "id": "twitch",
+      "name": "Twitch",
+      "type": "website",
+      "url": "https://www.twitch.tv",
+      "default": true,
+      "preset": "mouse"
+    },
+    {
+      "id": "stremio",
+      "name": "Stremio",
+      "type": "app",
+      "default": true,
+      "preset": "mouse",
+      "install": { "source": "winget", "id": "Stremio.Stremio.Beta" }
+    },
+    {
+      "id": "jellyfin",
+      "name": "Jellyfin",
+      "type": "app",
+      "default": true,
+      "preset": "controller",
+      "install": { "source": "winget", "id": "Jellyfin.JellyfinMediaPlayer" }
+    },
+    {
+      "id": "moonlight",
+      "name": "Moonlight",
+      "type": "app",
+      "default": true,
+      "preset": "controller",
+      "install": { "source": "winget", "id": "MoonlightGameStreamingProject.Moonlight" }
+    },
+    {
+      "id": "edge",
+      "name": "Edge",
+      "type": "app",
+      "default": true,
+      "preset": "mouse",
+      "install": { "source": "builtin" }
+    },
+    {
+      "id": "kodi",
+      "name": "Kodi",
+      "type": "app",
+      "default": false,
+      "preset": "controller",
+      "install": { "source": "winget", "id": "XBMCFoundation.Kodi" }
+    },
+    {
+      "id": "vlc",
+      "name": "VLC",
+      "type": "app",
+      "default": false,
+      "preset": "mouse",
+      "install": { "source": "winget", "id": "VideoLAN.VLC" }
+    },
+    {
+      "id": "plex",
+      "name": "Plex HTPC",
+      "type": "app",
+      "default": false,
+      "preset": "controller",
+      "install": { "source": "winget", "id": "Plex.PlexHTPC" }
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "type": "app",
+      "default": false,
+      "preset": "mouse",
+      "install": { "source": "winget", "id": "Spotify.Spotify", "asUser": true }
+    },
+    {
+      "id": "feishin",
+      "name": "Feishin",
+      "type": "app",
+      "default": false,
+      "preset": "mouse",
+      "install": { "source": "winget", "id": "jeffvli.Feishin" }
+    },
+    { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com", "default": false, "preset": "mouse" },
+    { "id": "disneyplus", "name": "Disney+", "type": "website", "url": "https://www.disneyplus.com", "default": false, "preset": "mouse" },
+    { "id": "primevideo", "name": "Prime Video", "type": "website", "url": "https://www.primevideo.com", "default": false, "preset": "mouse" },
+    { "id": "crunchyroll", "name": "Crunchyroll", "type": "website", "url": "https://www.crunchyroll.com", "default": false, "preset": "mouse" },
+    { "id": "hbomax", "name": "HBO Max", "type": "website", "url": "https://play.hbomax.com", "default": false, "preset": "mouse" }
+  ]
+}
