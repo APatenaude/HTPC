@@ -65,7 +65,7 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Settings on TV | Essentials + system |
 | Status bar | Clock + date, controller battery, alerts |
 | Tiles | Edited on the TV |
-| Moonlight Home | Tap to game PC, hold 2 s for our menu |
+| Moonlight Home | Tap to game PC, hold 1 s for our menu (was 2 s; changed 26 Sept 2026) |
 | Idle sleep | Configurable, default 30 min |
 | YouTube links from Share sheet | Open in VacuumTube (fallback: link player) |
 | TV power on | Whenever the box boots or wakes |
@@ -97,7 +97,7 @@ Decisions of 26 September 2026 (building on the box):
 
 ## Controller map
 
-Always (launcher): Home tap = Home menu · Home hold 1 s = Power · in Moonlight tap goes to the game PC, hold 2 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
+Always (launcher): Home tap = Home menu · Home hold 1 s = Power · in Moonlight tap goes to the game PC, hold 1 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
 
 Launcher & menus: D-pad/L stick move · A select · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
 

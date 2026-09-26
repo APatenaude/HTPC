@@ -278,7 +278,12 @@ function press(button) {
       break;
     case 'a': activate(el); break;
     case 'b': back(); break;
-    case 'x': if (el && el.dataset.close) send({ type: 'close', id: el.dataset.close }); break;
+    case 'x':
+      // On an app row: that app. Anywhere else in the menu: the app it was opened over.
+      if (state.view !== 'menu') break;
+      if (el && el.dataset.close) send({ type: 'close', id: el.dataset.close });
+      else if (state.current) send({ type: 'close', id: state.current });
+      break;
     case 'home':
       if (state.view === 'home') { state.current = null; state.backdrop = null; go('menu'); }
       else back();
@@ -320,12 +325,20 @@ function onHost(msg) {
       render();
       break;
     case 'input': press(msg.button); break;
-    case 'show':
+    case 'show': {
       hideOpening();
-      state.current = msg.current || null;
-      state.backdrop = msg.backdrop || null;
-      reset(msg.view);
+      const apply = () => { state.current = msg.current || null; state.backdrop = msg.backdrop || null; reset(msg.view); };
+      if (!msg.backdrop) { apply(); break; }
+      // Show the menu once its backdrop has loaded, so it does not flash the home screen first.
+      const img = new Image();
+      let done = false;
+      const once = () => { if (!done) { done = true; apply(); } };
+      img.onload = once;
+      img.onerror = once;
+      setTimeout(once, 400);
+      img.src = msg.backdrop;
       break;
+    }
     case 'toast': toast(msg.text, msg.kind); break;
   }
 }

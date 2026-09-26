@@ -2,13 +2,13 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold1, HomeHold2 }
+enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold }
 
 /// <summary>
 /// Reads the controller through XInput directly, including the Home (Guide) button, which only
 /// the undocumented XInputGetStateEx (ordinal 100) reports. Works whichever window has focus.
 /// Raises Pressed on a background thread: D-pad and left stick repeat while held; Home fires
-/// Home on a short press, HomeHold1 after 1 s and HomeHold2 after 2 s (Moonlight's menu).
+/// Home on a short press and HomeHold as soon as it has been held for 1 s.
 /// </summary>
 sealed class ControllerService : IDisposable
 {
@@ -32,7 +32,7 @@ sealed class ControllerService : IDisposable
     };
     const ushort HomeBit = 0x0400;
     const short StickThreshold = 16000;
-    const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 1000, LongHoldMs = 2000;
+    const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 1000;
 
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
@@ -64,7 +64,7 @@ sealed class ControllerService : IDisposable
         var heldSince = new Dictionary<Pad, long>();
         var nextRepeat = new Dictionary<Pad, long>();
         long homeDown = -1;
-        int homeStage = 0;
+        bool homeHeld = false;
         long nextScan = 0, nextBattery = 0;
         var clock = System.Diagnostics.Stopwatch.StartNew();
 
@@ -119,12 +119,11 @@ sealed class ControllerService : IDisposable
             }
 
             var homeNow = (buttons & HomeBit) != 0;
-            if (homeNow && homeDown < 0) { homeDown = now; homeStage = 0; }
-            if (homeNow && homeStage == 0 && now - homeDown >= HoldMs) { homeStage = 1; Raise(Pad.HomeHold1, false); }
-            if (homeNow && homeStage == 1 && now - homeDown >= LongHoldMs) { homeStage = 2; Raise(Pad.HomeHold2, false); }
+            if (homeNow && homeDown < 0) { homeDown = now; homeHeld = false; }
+            if (homeNow && !homeHeld && now - homeDown >= HoldMs) { homeHeld = true; Raise(Pad.HomeHold, false); }
             if (!homeNow && homeDown >= 0)
             {
-                if (homeStage == 0) Raise(Pad.Home, false);
+                if (!homeHeld) Raise(Pad.Home, false);
                 homeDown = -1;
             }
 

@@ -91,6 +91,7 @@ sealed class Standby
     {
         var result = PowerSetActiveScheme(IntPtr.Zero, ref plan);
         if (result != 0) Log.Warn($"Switching to power plan {plan} failed ({result})");
+        else Log.Info($"Power plan {(plan == StandbyPlan ? "TV standby" : plan.ToString())}");
         return result == 0;
     }
 
@@ -127,7 +128,10 @@ sealed class Standby
     {
         if (Active)
         {
-            if (LastInputTick() != inputAtStandby) Wake("keyboard or mouse");
+            // Input right as the screen goes off (the button that chose Sleep, the display
+            // switching off) is not a wake: take the baseline again during the first seconds.
+            if (DateTime.Now - since < TimeSpan.FromSeconds(4)) inputAtStandby = LastInputTick();
+            else if (LastInputTick() != inputAtStandby) Wake("keyboard or mouse");
             else if (settings.DeepSleepHours > 0 && DateTime.Now - since >= TimeSpan.FromHours(settings.DeepSleepHours))
             {
                 Log.Info("Deep sleep after standby");

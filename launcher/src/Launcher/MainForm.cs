@@ -55,7 +55,8 @@ sealed class MainForm : Form
         clock.Tick += async (_, _) =>
         {
             CheckSleepTimer();
-            if (++ticks % 5 == 0) await standby.Tick();
+            // Every second in standby (wake on keyboard or mouse), every 5 s otherwise (idle check).
+            if (standby.Active || ++ticks % 5 == 0) await standby.Tick();
         };
         Directory.CreateDirectory(captureDir);
     }
@@ -159,7 +160,7 @@ sealed class MainForm : Form
         if (standby.Active) { standby.Wake($"controller {pad}"); return; }
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
-        // Inside Moonlight a tap on Home belongs to the game PC; a 2 s hold opens our menu.
+        // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
         var moonlight = app?.Id == "moonlight";
 
         switch (pad)
@@ -168,12 +169,10 @@ sealed class MainForm : Form
                 if (moonlight) return;
                 if (active) Post(new { type = "input", button = "home" }); else ShowOver(app, "menu");
                 return;
-            case Pad.HomeHold1:
-                if (moonlight) return;
-                if (active) Post(new { type = "input", button = "homeHold" }); else ShowOver(app, "power");
-                return;
-            case Pad.HomeHold2:
+            case Pad.HomeHold:
                 if (moonlight) ShowOver(app, "menu");
+                else if (active) Post(new { type = "input", button = "homeHold" });
+                else ShowOver(app, "power");
                 return;
         }
 
@@ -214,6 +213,7 @@ sealed class MainForm : Form
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
             Native.ForceForeground(window);
+            StepAside();
             Post(new { type = "opened", id, ok = true });
             Log.Info($"{id} window up after {waited + 250} ms");
             return;
@@ -226,6 +226,19 @@ sealed class MainForm : Form
         var window = apps.MainWindow(id);
         if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
         Native.ForceForeground(window);
+        StepAside();
+    }
+
+    // While an app is in front the launcher hides: Chromium-based apps (VacuumTube, Edge) stop
+    // drawing when another window covers them, which left VacuumTube grey. Home brings it back.
+    void StepAside() => Hide();
+
+    void Reveal()
+    {
+        if (!Visible) Show();
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Native.ForceForeground(Handle);
+        web.Focus();
     }
 
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
@@ -236,17 +249,18 @@ sealed class MainForm : Form
         {
             try
             {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg")) File.Delete(old);
                 var name = $"screen-{DateTime.Now.Ticks}.jpg";
                 ScreenCapture.Save(Path.Combine(captureDir, name));
                 backdrop = $"https://capture.htpc/{name}";
+                Log.Info($"Home over {app.Id}: screen captured in {clock.ElapsedMilliseconds} ms");
             }
             catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
         }
         Post(new { type = "show", view, current = app?.Id, backdrop });
         PushState();
-        Native.ForceForeground(Handle);
-        web.Focus();
+        Reveal();
     }
 
     void OnRunningChanged(string id, bool started)
@@ -257,7 +271,7 @@ sealed class MainForm : Form
         if (!LauncherActive && apps.ForegroundApp() is null)
         {
             Post(new { type = "show", view = "home" });
-            Native.ForceForeground(Handle);
+            Reveal();
         }
     }
 

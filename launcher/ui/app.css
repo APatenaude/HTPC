@@ -146,7 +146,9 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 
 /* Opening an app: shown until its window is up */
 #opening { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 36px; background: var(--bg); }
-#opening.on { display: flex; }
+/* Fades in only if the app is slow, so a quick app does not flash it. */
+#opening.on { display: flex; animation: opening-in 0.25s ease-out 0.35s both; }
+@keyframes opening-in { from { opacity: 0; } to { opacity: 1; } }
 #opening .logo { display: flex; animation: pulse 1.2s ease-in-out infinite; }
 #opening .name { font-family: var(--display); font-weight: 600; font-size: 48px; letter-spacing: -0.01em; }
 #opening .sub { font-size: 26px; color: var(--muted); }

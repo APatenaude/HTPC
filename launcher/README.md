@@ -7,9 +7,10 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 |---|---|
 | `ui/` | The web UI: Home, Home menu, Power, Sleep timer. Laid out at 1920x1080 and scaled to the screen. Opened in a normal browser it runs on demo data with the keyboard as the controller (arrows, Enter = A, Esc = B, X, H = Home, P = hold Home). |
 | `src/Launcher/MainForm.cs` | Full-screen window hosting the UI; routes the controller, apps, power, volume, brightness and the sleep timer. |
-| `src/Launcher/ControllerService.cs` | XInput polling, Home button included (XInputGetStateEx); Home tap, 1 s hold (Power) and 2 s hold (Moonlight's menu). |
+| `src/Launcher/ControllerService.cs` | XInput polling, Home button included (XInputGetStateEx); Home tap and 1 s hold (Power; in Moonlight, our menu). |
 | `src/Launcher/AppManager.cs` | Starts the catalog's apps (`setup/catalog.json`), tracks them, finds their windows, closes them. Websites get their own Edge app window and profile. |
 | `src/Launcher/SystemControls.cs` | Master volume (Core Audio), brightness dimmer layer, screen capture for the Home menu backdrop. |
+| `src/Launcher/Standby.cs` | Stay-awake standby: pause playback, screen off, "TV standby" power plan; any button wakes. Idle timer (controller included) and optional deep sleep from `C:\ProgramData\HTPC\launcher\settings.json`. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
 dimmed behind it, and the app keeps running underneath. B or the app's row returns to it.
