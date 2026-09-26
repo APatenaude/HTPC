@@ -9,7 +9,7 @@
       "default": true,
       "preset": "controller",
       "icon": { "glyph": "youtube", "color": "#FF5B52" },
-      "launch": { "exe": "%ProgramFiles%\\VacuumTube\\VacuumTube.exe" },
+      "launch": { "exe": "%ProgramFiles%\\VacuumTube\\VacuumTube.exe", "args": "--fullscreen" },
       "install": {
         "source": "github",
         "repo": "shy1132/VacuumTube",

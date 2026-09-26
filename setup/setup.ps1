@@ -13,7 +13,7 @@
       Power         S3 sleep after 30 min, hibernate available, no self-wake, wake sources
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       System        no popups over the TV, Private network, time zone, computer name TV
-      AutoLogon     automatic sign-in (password kept as an LSA secret)
+      AutoLogon     open box: no Windows password, automatic sign-in
       DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
@@ -69,7 +69,7 @@ $Steps = [ordered]@{
     Power        = { & "$lib\Set-Power.ps1" -DevKeepAwake:$DevKeepAwake }
     Updates      = { & "$lib\Set-UpdatePolicy.ps1" }
     System       = { & "$lib\Set-SystemPolicy.ps1" }
-    AutoLogon    = { & "$lib\Set-AutoLogon.ps1" -Unattended:$Unattended -Password $AutoLogonPassword }
+    AutoLogon    = { & "$lib\Set-AutoLogon.ps1" }
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
@@ -140,16 +140,6 @@ New-Item -ItemType Directory -Force $logDir | Out-Null
 $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
 Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-
-# Ask for the sign-in password now rather than halfway through, unless it is already set up
-# or the answer file left it for us.
-$AutoLogonPassword = $null
-$winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-$autoLogonSet = $winlogon.AutoAdminLogon -eq '1' -and $winlogon.DefaultUserName -eq $env:USERNAME
-if (-not $Unattended -and -not $autoLogonSet -and $null -eq $winlogon.DefaultPassword -and
-    -not ($Only -and $Only -notcontains 'AutoLogon') -and $Skip -notcontains 'AutoLogon') {
-    $AutoLogonPassword = Read-Host "Password of $env:USERNAME for automatic sign-in (Enter alone skips)" -AsSecureString
-}
 
 $results = [ordered]@{}
 foreach ($name in $Steps.Keys) {

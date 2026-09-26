@@ -48,6 +48,9 @@ Set-RegValue $edge 'PersonalizationReportingEnabled' 0
 Set-RegValue $edge 'DiagnosticData' 0
 Set-RegValue $edge 'UserFeedbackAllowed' 0
 
+Write-Host '  Open box: saved passwords fill without asking for the (blank) Windows password'
+Set-RegValue $edge 'PrimaryPasswordSetting' 0
+
 Write-Host '  TV playback: autoplay and hardware acceleration on'
 Set-RegValue $edge 'AutoplayAllowed' 1
 Set-RegValue $edge 'HardwareAccelerationModeEnabled' 1

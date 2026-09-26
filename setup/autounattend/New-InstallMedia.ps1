@@ -18,13 +18,14 @@
                         the IMAPI2FS COM objects that ship with Windows: no admin, no extra tools.
 
     Password:
-      Asked twice with Read-Host -AsSecureString, or passed as -Password. A single space is a valid
-      password; an empty one is refused. The answer file holds it base64-encoded (UTF-16LE of
-      password + "Password", PlainText false, for the account and for AutoLogon), which keeps
-      whitespace intact. That is encoding, not encryption: whoever has the stick or the ISO can read
-      the password, so neither may live in the repo (the script refuses targets inside it).
+      None by default: the box is open (decision 26 Sept 2026; setup.ps1's AutoLogon step also
+      clears any password). -AskPassword asks for one twice (Read-Host -AsSecureString), or pass it
+      as -Password. The answer file holds it base64-encoded (UTF-16LE of password + "Password",
+      PlainText false, for the account and for AutoLogon), which keeps whitespace intact. That is
+      encoding, not encryption: whoever has the stick or the ISO can read a password, so neither
+      may live in the repo (the script refuses targets inside it).
       -TestPassword (answer ISO only) makes a random password and writes it to credentials.txt
-      next to the ISO. It is never printed.
+      next to the ISO, for signing in to the VM before setup clears it. It is never printed.
 
     Image (the edition that gets installed):
       -ImageIndex N picks image N of sources\install.wim. Without it:
@@ -50,8 +51,11 @@
 .PARAMETER TestPassword
     Answer ISO only: random password, saved to credentials.txt next to the ISO.
 
+.PARAMETER AskPassword
+    Ask for an account password instead of leaving it blank.
+
 .PARAMETER Password
-    The account password as a SecureString, instead of the prompt.
+    The account password as a SecureString, instead of blank.
 
 .PARAMETER ProductKey
     Optional product key (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX) written to the media only. None by default:
@@ -77,6 +81,8 @@ param(
 
     [Parameter(ParameterSetName = 'Iso')]
     [switch]$TestPassword,
+
+    [switch]$AskPassword,
 
     [Security.SecureString]$Password,
 
@@ -382,7 +388,9 @@ function Test-InsideRepo([string]$Path) {
 foreach ($file in $templatePath, $bootstrapPath) {
     if (-not (Test-Path -LiteralPath $file)) { throw "Missing $file" }
 }
-if ($TestPassword -and $Password) { throw 'Use either -TestPassword or -Password.' }
+if (@($TestPassword.IsPresent, [bool]$Password, $AskPassword.IsPresent) -eq $true | Select-Object -Skip 1) {
+    throw 'Use only one of -TestPassword, -Password and -AskPassword.'
+}
 
 $mediaRoot = $null
 if ($PSCmdlet.ParameterSetName -eq 'Usb') {
@@ -409,10 +417,11 @@ try {
         $plain = New-RandomPassword
     } elseif ($Password) {
         $plain = ConvertFrom-SecurePassword $Password
-    } else {
+    } elseif ($AskPassword) {
         $plain = Read-NewPassword
+    } else {
+        $plain = ''   # open box: no password
     }
-    if ($plain.Length -eq 0) { throw 'Empty password refused (a single space is allowed).' }
 
     $text = New-AnswerFileXml $plain $index
     Assert-AnswerFile $text $plain $index

@@ -1,26 +1,26 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Signs the box's user in automatically at every boot (SPEC N1).
+    Makes the box open: no Windows password and automatic sign-in at every boot (SPEC N1).
 
 .DESCRIPTION
-    Keeps the password as the LSA secret DefaultPassword (like Sysinternals Autologon), not
-    in plain text in the registry. Where the password comes from:
-      - after a USB install: the answer file's AutoLogon left it in Winlogon\DefaultPassword;
-        it is moved to the LSA secret and the plain-text copy is deleted
-      - otherwise: typed at the prompt (never stored anywhere else); Enter alone skips
-    The password is checked with LogonUser before it is saved.
-
-.PARAMETER Unattended
-    No prompt: without a password from the answer file, the step is skipped.
-.PARAMETER Password
-    Already asked for (setup.ps1 asks at the start so nobody waits for the prompt).
+    Decision (26 Sept 2026): Windows does not guard access to the box; if a lock is ever
+    wanted it will be a PIN in the launcher. So:
+      - the account's password is cleared and never expires
+      - Winlogon signs it in by itself (AutoAdminLogon, with an empty DefaultPassword)
+      - an LSA secret DefaultPassword left by an earlier setup is deleted, since Winlogon
+        would use it instead of the empty value
+    So that Windows never asks for anything:
+      - automatic sign-in also after a sign-out (ForceAutoLogon), not only after a restart
+      - nothing can lock the session (no Win+L lock, no screen saver)
+      - no Windows Hello / PIN setup, no "sign in with a Microsoft account" offers
+      - Windows Security's Account protection page (which flags the blank password) hidden
+    The Power step turns off "require sign-in on wake"; the Edge step stops Edge asking for the
+    Windows password before filling saved passwords. Kept on purpose: a blank-password account
+    cannot be used over the network (LimitBlankPasswordUse), so the open box is open only at
+    the TV. UAC prompts become a plain Yes.
 #>
-param(
-    [switch]$Unattended,
-    [Security.SecureString]$Password,
-    [string]$UserName = $env:USERNAME
-)
+param([string]$UserName = $env:USERNAME)
 
 . "$PSScriptRoot\Common.ps1"
 Assert-Admin
@@ -29,9 +29,8 @@ Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Security;
 
-public static class HtpcLsaSecret {
+public static class HtpcLogon {
     [StructLayout(LayoutKind.Sequential)]
     struct UnicodeString { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
 
@@ -39,110 +38,95 @@ public static class HtpcLsaSecret {
     struct ObjectAttributes { public int Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes; public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService; }
 
     [DllImport("advapi32.dll")] static extern uint LsaOpenPolicy(IntPtr systemName, ref ObjectAttributes attributes, uint access, out IntPtr handle);
-    [DllImport("advapi32.dll")] static extern uint LsaStorePrivateData(IntPtr handle, ref UnicodeString key, ref UnicodeString data);
+    [DllImport("advapi32.dll")] static extern uint LsaStorePrivateData(IntPtr handle, ref UnicodeString key, IntPtr data);
     [DllImport("advapi32.dll")] static extern uint LsaRetrievePrivateData(IntPtr handle, ref UnicodeString key, out IntPtr data);
     [DllImport("advapi32.dll")] static extern uint LsaFreeMemory(IntPtr buffer);
     [DllImport("advapi32.dll")] static extern uint LsaClose(IntPtr handle);
     [DllImport("advapi32.dll")] static extern int LsaNtStatusToWinError(uint status);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool LogonUser(string user, string domain, IntPtr password, int logonType, int provider, out IntPtr token);
+    static extern bool LogonUser(string user, string domain, string password, int logonType, int provider, out IntPtr token);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
-
-    const uint PolicyAllAccess = 0x000F0FFF;
-    const int LogonInteractive = 2;
-
-    static UnicodeString Wrap(IntPtr buffer, int chars) {
-        UnicodeString s = new UnicodeString();
-        s.Buffer = buffer;
-        s.Length = (ushort)(chars * 2);
-        s.MaximumLength = (ushort)(chars * 2 + 2);
-        return s;
-    }
 
     static IntPtr OpenPolicy() {
         ObjectAttributes attributes = new ObjectAttributes();
         attributes.Length = Marshal.SizeOf(attributes);
         IntPtr handle;
-        uint status = LsaOpenPolicy(IntPtr.Zero, ref attributes, PolicyAllAccess, out handle);
+        uint status = LsaOpenPolicy(IntPtr.Zero, ref attributes, 0x000F0FFF, out handle);
         if (status != 0) throw new Win32Exception(LsaNtStatusToWinError(status));
         return handle;
     }
 
-    public static void Store(string keyName, SecureString value) {
-        IntPtr policy = OpenPolicy();
-        IntPtr keyBuffer = Marshal.StringToHGlobalUni(keyName);
-        IntPtr valueBuffer = Marshal.SecureStringToGlobalAllocUnicode(value);
-        try {
-            UnicodeString key = Wrap(keyBuffer, keyName.Length);
-            UnicodeString data = Wrap(valueBuffer, value.Length);
-            uint status = LsaStorePrivateData(policy, ref key, ref data);
-            if (status != 0) throw new Win32Exception(LsaNtStatusToWinError(status));
-        } finally {
-            Marshal.ZeroFreeGlobalAllocUnicode(valueBuffer);
-            Marshal.FreeHGlobal(keyBuffer);
-            LsaClose(policy);
-        }
+    static UnicodeString Key(string name, IntPtr buffer) {
+        UnicodeString s = new UnicodeString();
+        s.Buffer = buffer;
+        s.Length = (ushort)(name.Length * 2);
+        s.MaximumLength = (ushort)(name.Length * 2 + 2);
+        return s;
     }
 
-    public static bool Exists(string keyName) {
+    public static bool SecretExists(string name) {
         IntPtr policy = OpenPolicy();
-        IntPtr keyBuffer = Marshal.StringToHGlobalUni(keyName);
+        IntPtr buffer = Marshal.StringToHGlobalUni(name);
         try {
-            UnicodeString key = Wrap(keyBuffer, keyName.Length);
+            UnicodeString key = Key(name, buffer);
             IntPtr data;
             if (LsaRetrievePrivateData(policy, ref key, out data) != 0) return false;
             if (data != IntPtr.Zero) LsaFreeMemory(data);
             return true;
-        } finally {
-            Marshal.FreeHGlobal(keyBuffer);
-            LsaClose(policy);
-        }
+        } finally { Marshal.FreeHGlobal(buffer); LsaClose(policy); }
     }
 
-    public static bool CheckPassword(string user, SecureString password) {
-        IntPtr passwordBuffer = Marshal.SecureStringToGlobalAllocUnicode(password);
+    // Storing no data deletes the secret.
+    public static void DeleteSecret(string name) {
+        IntPtr policy = OpenPolicy();
+        IntPtr buffer = Marshal.StringToHGlobalUni(name);
         try {
-            IntPtr token;
-            if (!LogonUser(user, ".", passwordBuffer, LogonInteractive, 0, out token)) return false;
-            CloseHandle(token);
-            return true;
-        } finally {
-            Marshal.ZeroFreeGlobalAllocUnicode(passwordBuffer);
-        }
+            UnicodeString key = Key(name, buffer);
+            uint status = LsaStorePrivateData(policy, ref key, IntPtr.Zero);
+            if (status != 0) throw new Win32Exception(LsaNtStatusToWinError(status));
+        } finally { Marshal.FreeHGlobal(buffer); LsaClose(policy); }
+    }
+
+    // Windows refuses blank-password logons outside the console with ERROR_ACCOUNT_RESTRICTION
+    // (1327), and a wrong password with ERROR_LOGON_FAILURE (1326): 1327 means blank.
+    public static bool HasBlankPassword(string user) {
+        IntPtr token;
+        if (LogonUser(user, ".", "", 2 /* interactive */, 0, out token)) { CloseHandle(token); return true; }
+        return Marshal.GetLastWin32Error() == 1327;
     }
 }
 '@
 
-$winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-$current = Get-ItemProperty $winlogon
-# A rename done earlier in this run only takes effect after a restart; sign in to the new name.
-$computer = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
-
-if ($Password) {
-    if ($Password.Length -eq 0) { Write-Attention 'Automatic sign-in skipped'; return }
-} elseif ($null -ne $current.DefaultPassword) {
-    $password = New-Object Security.SecureString
-    foreach ($ch in $current.DefaultPassword.ToCharArray()) { $password.AppendChar($ch) }
-    Write-Host '  Using the password the answer file left for the first sign-ins'
-} elseif ($current.AutoAdminLogon -eq '1' -and $current.DefaultUserName -eq $UserName -and
-          $current.DefaultDomainName -eq $computer -and [HtpcLsaSecret]::Exists('DefaultPassword')) {
-    Write-Same "automatic sign-in as $UserName already set"
-    return
-} elseif ($Unattended) {
-    Write-Attention 'No password from the answer file; automatic sign-in not set'
-    return
+if ([HtpcLogon]::HasBlankPassword($UserName)) {
+    Write-Same "$UserName has no password"
 } else {
-    $password = Read-Host "  Password of $UserName for automatic sign-in (Enter alone skips)" -AsSecureString
-    if ($password.Length -eq 0) { Write-Attention 'Automatic sign-in skipped'; return }
+    ([ADSI]"WinNT://$env:COMPUTERNAME/$UserName,user").SetPassword('')
+    Write-Change "password of $UserName removed"
+}
+if ((Get-LocalUser -Name $UserName).PasswordExpires) {
+    Set-LocalUser -Name $UserName -PasswordNeverExpires $true
+    Write-Change "password of $UserName never expires"
+}
+if ([HtpcLogon]::SecretExists('DefaultPassword')) {
+    [HtpcLogon]::DeleteSecret('DefaultPassword')
+    Write-Change 'old automatic sign-in secret deleted'
 }
 
-if (-not [HtpcLsaSecret]::CheckPassword($UserName, $password)) { throw "That is not the password of $UserName" }
-[HtpcLsaSecret]::Store('DefaultPassword', $password)
-$password.Dispose()
-
+# A rename done earlier in this run only takes effect after a restart; sign in to the new name.
+$computer = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
+$winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 Set-RegValue $winlogon 'AutoAdminLogon' '1' 'String'
 Set-RegValue $winlogon 'DefaultUserName' $UserName 'String'
 Set-RegValue $winlogon 'DefaultDomainName' $computer 'String'
-Remove-RegValue $winlogon 'DefaultPassword'
+Set-RegValue $winlogon 'DefaultPassword' '' 'String'
+Set-RegValue $winlogon 'ForceAutoLogon' '1' 'String'
 Remove-RegValue $winlogon 'AutoLogonCount'
-Write-Change "automatic sign-in as $UserName (password kept as an LSA secret)"
+
+# Nothing locks the session or asks for credentials.
+Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' 'DisableLockWorkstation' 1
+Set-RegValue 'HKCU:\Control Panel\Desktop' 'ScreenSaveActive' '0' 'String'
+Set-RegValue 'HKCU:\Control Panel\Desktop' 'ScreenSaverIsSecure' '0' 'String'
+Set-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork' 'Enabled' 0
+Set-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork' 'DisablePostLogonProvisioning' 1
+Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'NoConnectedUser' 1
+Set-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Account protection' 'UILockdown' 1

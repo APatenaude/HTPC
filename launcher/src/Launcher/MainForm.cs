@@ -53,11 +53,17 @@ sealed class MainForm : Form
         base.OnLoad(e);
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
-        Native.ForceForeground(Handle); // as the shell it starts in front; in dev it pushes past other windows
         controller.Start();
         clock.Start();
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
+    }
+
+    // As the shell it starts in front; in dev it also pushes past the windows already open.
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        Native.ForceForeground(Handle);
     }
 
     async Task InitWebView()
@@ -169,7 +175,33 @@ sealed class MainForm : Form
     void Open(string id)
     {
         if (apps.IsRunning(id)) { SwitchTo(id); return; }
-        if (!apps.Launch(id)) Post(new { type = "toast", text = $"{apps.Get(id)?.Name ?? id} could not be started", kind = "warn" });
+        var name = apps.Get(id)?.Name ?? id;
+        if (!apps.Launch(id))
+        {
+            Post(new { type = "opened", id, ok = false, text = $"{name} could not be started" });
+            return;
+        }
+        _ = BringUpWhenReady(id, name);
+    }
+
+    /// <summary>
+    /// Apps can take seconds to show a window, by which time Windows no longer lets them take the
+    /// foreground, so they open behind the launcher. Wait for the window and bring it forward.
+    /// </summary>
+    async Task BringUpWhenReady(string id, string name)
+    {
+        for (var waited = 0; waited < 30_000; waited += 250)
+        {
+            await Task.Delay(250);
+            if (!apps.IsRunning(id)) { Post(new { type = "opened", id, ok = false, text = $"{name} closed right away" }); return; }
+            var window = apps.MainWindow(id);
+            if (window == IntPtr.Zero) continue;
+            Native.ForceForeground(window);
+            Post(new { type = "opened", id, ok = true });
+            Log.Info($"{id} window up after {waited + 250} ms");
+            return;
+        }
+        Post(new { type = "opened", id, ok = false, text = $"{name} is taking long to open" });
     }
 
     void SwitchTo(string id)

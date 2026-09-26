@@ -44,6 +44,8 @@ Set-PowerValue 'Hibernate after (s)' $sub.Sleep '9d7815a6-7ee4-497e-8888-515a05f
 Set-PowerValue 'Allow wake timers' $sub.Sleep 'bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d' 0
 Set-PowerValue 'Power button action (1 = sleep)' $sub.Buttons '7648efa3-dd9c-4e3e-b566-50f929386280' 1
 Set-PowerValue 'USB selective suspend' $sub.Usb '48e6b7a6-50f5-4782-a5d4-53bb8f07e226' 0
+# The box is open (no Windows password, SPEC N1): no sign-in screen after sleep either.
+Set-PowerValue 'Require sign-in on wake' 'fea3413e-7e05-4911-9a71-700331f1c294' '0e796bdb-100d-47d6-a2d5-f7d2daa51f51' 0
 powercfg /setactive SCHEME_CURRENT
 
 powercfg /hibernate on
@@ -63,7 +65,9 @@ $pads = @(powercfg /devicequery wake_programmable | Where-Object { $_ -match 'XI
 if ($pads) {
     foreach ($device in $pads) { powercfg /deviceenablewake $device; Write-Change "wake on: $device" }
 } else {
-    Write-Attention 'No controller can wake the box yet (the 8BitDo dongle is not seen as XInput)'
+    # The 8BitDo 2.4 GHz dongle has no USB remote wakeup (deepest wake state S0), so it can wake
+    # Modern Standby laptops but not this S3 box. Keyboard, power button and Wake-on-LAN can.
+    Write-Attention 'No controller receiver here can wake the box from sleep'
 }
 
 foreach ($nic in Get-NetAdapter -Physical | Where-Object { $_.MediaType -eq '802.3' }) {

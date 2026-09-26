@@ -144,6 +144,14 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .opt.focused { background: var(--tile-focus); }
 #timer-status.on { color: var(--accent); }
 
+/* Opening an app: shown until its window is up */
+#opening { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 36px; background: var(--bg); }
+#opening.on { display: flex; }
+#opening .logo { display: flex; animation: pulse 1.2s ease-in-out infinite; }
+#opening .name { font-family: var(--display); font-weight: 600; font-size: 48px; letter-spacing: -0.01em; }
+#opening .sub { font-size: 26px; color: var(--muted); }
+@keyframes pulse { 50% { transform: scale(0.92); opacity: 0.7; } }
+
 /* Alerts: top right, never over the middle of a video */
 #toasts { position: absolute; top: 48px; right: 48px; display: flex; flex-direction: column; gap: 16px; align-items: flex-end; }
 .toast {

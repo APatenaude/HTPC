@@ -208,6 +208,14 @@ function move(dir) {
 function go(view) { state.stack.push(state.view); state.view = view; render(); }
 function reset(view) { state.stack = []; state.view = view; render(); }
 
+function showOpening(t) {
+  const el = $('opening');
+  el.innerHTML = `<span class="logo" style="color:${esc(t.color)}">${icon(t.glyph, 160, 1.5)}</span>` +
+    `<span class="name">Opening ${esc(t.name)}</span><span class="sub">Home comes back here anytime</span>`;
+  el.classList.add('on');
+}
+function hideOpening() { $('opening').classList.remove('on'); }
+
 function toast(text, kind) {
   const el = document.createElement('div');
   el.className = 'toast' + (kind === 'warn' ? ' warn' : '');
@@ -220,7 +228,12 @@ function activate(el) {
   if (!el) return;
   const act = el.dataset.act, arg = el.dataset.arg;
   switch (act) {
-    case 'launch': send({ type: 'launch', id: arg }); break;
+    case 'launch': {
+      const t = state.tiles.find((x) => x.id === arg);
+      if (t && !t.running) showOpening(t);
+      send({ type: 'launch', id: arg });
+      break;
+    }
     case 'switch': send({ type: 'switchTo', id: arg }); break;
     case 'home': state.current = null; state.backdrop = null; send({ type: 'home' }); reset('home'); break;
     case 'view': go(arg); break;
@@ -292,14 +305,23 @@ function onHost(msg) {
       Object.assign(state, msg.settings || {});
       render();
       break;
+    case 'opened':
+      hideOpening();
+      if (!msg.ok) toast(msg.text, 'warn');
+      break;
     case 'state':
-      if (msg.running) for (const t of state.tiles) t.running = msg.running.includes(t.id);
+      if (msg.running) {
+        for (const t of state.tiles) t.running = msg.running.includes(t.id);
+        // The app the menu was opened over has closed: B and Home now lead home, not to it.
+        if (state.current && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
+      }
       for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;
     case 'input': press(msg.button); break;
     case 'show':
+      hideOpening();
       state.current = msg.current || null;
       state.backdrop = msg.backdrop || null;
       reset(msg.view);

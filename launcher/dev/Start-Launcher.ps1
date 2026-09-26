@@ -39,4 +39,30 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $task
+
+# The launcher cannot take the foreground from an elevated window (the Claude app runs as
+# admin on the dev box), so this shell hands it over once the window exists.
+Add-Type -Namespace HtpcDev -Name Front -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+'@
+$window = [IntPtr]::Zero
+for ($i = 0; $i -lt 40 -and $window -eq [IntPtr]::Zero; $i++) {
+    Start-Sleep -Milliseconds 250
+    $p = Get-Process HtpcLauncher -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($p) { $window = $p.MainWindowHandle }
+}
+if ($window -ne [IntPtr]::Zero) {
+    $pidOut = 0
+    $thread = [HtpcDev.Front]::GetWindowThreadProcessId([HtpcDev.Front]::GetForegroundWindow(), [ref]$pidOut)
+    $me = [HtpcDev.Front]::GetCurrentThreadId()
+    $attached = [HtpcDev.Front]::AttachThreadInput($me, $thread, $true)
+    [void][HtpcDev.Front]::BringWindowToTop($window)
+    [void][HtpcDev.Front]::SetForegroundWindow($window)
+    if ($attached) { [void][HtpcDev.Front]::AttachThreadInput($me, $thread, $false) }
+}
 Write-Host "Launcher started. Log: $env:ProgramData\HTPC\logs\launcher.log"
