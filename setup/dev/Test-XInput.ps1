@@ -27,17 +27,18 @@ public static class XInputProbe {
 }
 '@
 
-$names = [ordered]@{
-    0x0001 = 'Up'; 0x0002 = 'Down'; 0x0004 = 'Left'; 0x0008 = 'Right'
-    0x0010 = 'Start'; 0x0020 = 'Select'; 0x0040 = 'L3'; 0x0080 = 'R3'
-    0x0100 = 'LB'; 0x0200 = 'RB'; 0x0400 = 'Home'
-    0x1000 = 'A'; 0x2000 = 'B'; 0x4000 = 'X'; 0x8000 = 'Y'
-}
+# Pairs, not an [ordered] dictionary: indexing one of those with an int reads by position.
+$names = @(
+    @(0x0001, 'Up'), @(0x0002, 'Down'), @(0x0004, 'Left'), @(0x0008, 'Right'),
+    @(0x0010, 'Start'), @(0x0020, 'Select'), @(0x0040, 'L3'), @(0x0080, 'R3'),
+    @(0x0100, 'LB'), @(0x0200, 'RB'), @(0x0400, 'Home'),
+    @(0x1000, 'A'), @(0x2000, 'B'), @(0x4000, 'X'), @(0x8000, 'Y')
+)
 $batteryTypes = @{ 0 = 'disconnected'; 1 = 'wired'; 2 = 'alkaline'; 3 = 'NiMH'; 255 = 'unknown' }
 $batteryLevels = @{ 0 = 'empty'; 1 = 'low'; 2 = 'medium'; 3 = 'full' }
 
 function Get-Pressed([XInputProbe+Gamepad]$Pad) {
-    $list = foreach ($bit in $names.Keys) { if ($Pad.Buttons -band $bit) { $names[$bit] } }
+    $list = @(foreach ($pair in $names) { if ($Pad.Buttons -band $pair[0]) { $pair[1] } })
     if ($Pad.LeftTrigger -gt 128) { $list += 'LT' }
     if ($Pad.RightTrigger -gt 128) { $list += 'RT' }
     $list -join '+'

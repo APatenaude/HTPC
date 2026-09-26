@@ -46,7 +46,7 @@ No newer Intel driver is needed for decoding; what is missing is the HEVC extens
 
 | Device | IDs | Notes |
 |---|---|---|
-| 8BitDo 2.4 GHz dongle | 2DC8:301C | Seen as a vendor-defined HID device only, **not XInput** (controller off or wrong mode) |
+| 8BitDo 2.4 GHz dongle | 2DC8:310A with the controller on (2DC8:301C while off) | "Xbox 360 Controller for Windows" (XInput) plus keyboard, mouse and consumer-control HID interfaces. Every button reads through XInputGetStateEx, Home included. Not in `wake_programmable`, so waking from it is still unproven |
 | Dell keyboard | 413C:2107 | Wake-armed |
 | 2.4 GHz mouse | 0000:0538 | Wake-armed |
 | USB audio + HID composite | 0573:1573 | Unidentified |
