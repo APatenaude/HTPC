@@ -1,0 +1,38 @@
+/* On-screen keyboard: a 1920x560 band ("Keyboard over a website" on the design canvas),
+   scaled to its window's width. */
+
+html, body { background: #16181C; }
+
+#kb {
+  position: absolute; left: 0; top: 0; width: 1920px; height: 560px;
+  transform-origin: 0 0; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  background: var(--panel); color: var(--text);
+  font-family: 'Atkinson Hyperlegible', sans-serif;
+}
+
+.kb-head { display: flex; align-items: center; gap: 20px; height: 68px; padding: 8px 96px 0; box-sizing: border-box; }
+.kb-into { font-size: 22px; color: var(--muted); }
+.kb-field { font-size: 24px; font-weight: 700; max-width: 900px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.kb-typed { font-size: 24px; color: var(--text-2); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; max-width: 700px; }
+
+.kb-rows { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 8px; }
+.kb-row { display: flex; gap: 10px; }
+
+.kb-key {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 84px; height: 56px; border-radius: 14px; box-sizing: border-box;
+  background: #22252B; color: var(--text);
+  font-size: 26px; font-weight: 700; line-height: 1;
+  transition: background 0.08s ease-out, transform 0.08s ease-out;
+}
+.kb-key.w132 { width: 132px; } .kb-key.w170 { width: 170px; } .kb-key.w400 { width: 400px; }
+.kb-key.primary { background: var(--accent); color: var(--bg); }
+.kb-key.on { background: #3A3F48; box-shadow: 0 0 0 4px var(--accent); }
+.kb-key.primary.on { background: #B4D8FF; }
+.kb-key.latched { color: var(--accent); }
+.kb-key.locked { background: var(--accent-bg); color: var(--accent); }
+.kb-key.hit { transform: scale(0.94); }
+.kb-key .icon { flex-shrink: 0; }
+
+#kb .hints { margin-top: auto; }

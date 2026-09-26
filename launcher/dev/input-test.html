@@ -58,6 +58,9 @@
   document.getElementById('scroller').addEventListener('scroll', show);
   addEventListener('popstate', () => add('popstate (back)'));
   history.pushState({}, '', '#one'); history.pushState({}, '', '#two');
+  // ?focus=text or ?focus=password: that field has the focus from the start (on-screen keyboard test).
+  const start = new URLSearchParams(location.search).get('focus');
+  if (start) document.getElementById(start).focus();
   show();
 </script>
 </body>

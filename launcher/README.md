@@ -12,6 +12,7 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `src/Launcher/SystemControls.cs` | Master volume (Core Audio), brightness dimmer layer, screen capture for the Home menu backdrop. |
 | `src/Launcher/Standby.cs` | Sleep modes (Settings): screen off (standby: pause playback, video output off, apps in Efficiency mode; hold Home 0.5 s to wake, with a buzz), Windows sleep, hibernate. Idle timer counts the controller. Settings in `%LOCALAPPDATA%\HTPC\settings.json`. |
 | `src/Launcher/Tv.cs` | TV control (Roku ECP): found by SSDP, matched by EDID, one profile per TV; off/on with the box, follows the TV's own remote. |
+| `src/Launcher/KeyboardForm.cs`, `TextFieldWatcher.cs`, `ui/keyboard.*` | On-screen keyboard (SPEC N11): a band over the app that never takes the focus, so its keys (SendInput) land in the app's text field. Pops up when a text field gets the focus in an app on the Mouse or Keyboard preset (UI Automation focus events, only listened to while such an app is in front), R3 opens it anywhere but Moonlight. A type, X delete, Y space, LT shift, LB/RB move the cursor, Start Enter, Select shows a password, B closes (and it stays closed for that field). |
 | `src/Launcher/ButtonMap.cs`, `PadMapper.cs`, `Input.cs` | Button presets (SPEC N13): Mouse (Edge, Twitch, Stremio, websites; also any window that is not a catalog app) and Keyboard. Applied to the app in front on the controller thread, sent with SendInput. Controller preset = the app reads the pad itself. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
@@ -23,6 +24,7 @@ dimmed behind it, and the app keeps running underneath. B or the app's row retur
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screen.ps1
     powershell -ExecutionPolicy Bypass -File launcher\dev\Send-Pad.ps1 -Press A      # controller input without a controller
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1           # Mouse preset, end to end, on a test page
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1 -Keyboard # on-screen keyboard: click a field, type
 
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
@@ -32,6 +34,6 @@ Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 
 ## Not built yet
 
-The button map editor (per-app changes to a preset), on-screen keyboard, idle sleep, "when this
+The button map editor (per-app changes to a preset), typing from the phone, idle sleep, "when this
 video ends", Roku TV control, settings, tile editing, library, first-run setup, running as the
 shell with a watchdog.

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown }
+enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT }
 
 /// <summary>
 /// Reads the controller through XInput directly, including the Home (Guide) button, which only
@@ -61,6 +61,7 @@ sealed class ControllerService : IDisposable
     const ushort HomeBit = 0x0400;
     const short StickThreshold = 16000;
     const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 500;
+    const int TriggerDown = 96, TriggerUp = 48; // a trigger counts as a button past half-way
 
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
@@ -128,7 +129,7 @@ sealed class ControllerService : IDisposable
     uint lastPacket;
     readonly Dictionary<Pad, long> nextRepeat = new();
     long homeDown = -1;
-    bool homeHeld;
+    bool homeHeld, ltDown, rtDown;
     long nextScan, nextBattery;
 
     void Run()
@@ -171,6 +172,12 @@ sealed class ControllerService : IDisposable
                     Raise(button, true);
                 }
             }
+
+            // Triggers as buttons (the on-screen keyboard's Shift), with some play so they do not flicker.
+            if (!ltDown && pad.LeftTrigger >= TriggerDown) { ltDown = true; Raise(Pad.LT, false); }
+            else if (ltDown && pad.LeftTrigger < TriggerUp) ltDown = false;
+            if (!rtDown && pad.RightTrigger >= TriggerDown) { rtDown = true; Raise(Pad.RT, false); }
+            else if (rtDown && pad.RightTrigger < TriggerUp) rtDown = false;
 
             // Home is logged (it is rare): the log shows every press, for diagnosing wake.
             var homeNow = (buttons & HomeBit) != 0;

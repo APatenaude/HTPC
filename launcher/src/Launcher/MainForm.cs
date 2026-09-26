@@ -25,6 +25,12 @@ sealed class MainForm : Form
     readonly System.Windows.Forms.Timer mouseWatch = new() { Interval = 200 };
     readonly CursorHider cursor = new();
     readonly PadMapper mapper = new();
+    readonly KeyboardForm keyboard = new();
+    readonly TextFieldWatcher textFields = new();
+    TextField? keyboardField;    // the field the keyboard was opened for
+    bool keyboardAuto;           // opened by that field getting the focus: closes when it loses it
+    TextField? dismissedField;   // closed with B: not opened again until another element has the focus
+    TextField? lastField;        // the latest text field that had the focus
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
@@ -51,6 +57,8 @@ sealed class MainForm : Form
         apps = new AppManager(options.CatalogPath);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
         controller.Mapper = mapper;
+        keyboard.Message += OnKeyboardMessage;
+        textFields.FocusChanged += field => BeginInvoke(() => OnTextField(field));
         controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
         controller.StatusChanged += (connected, _) => BeginInvoke(() =>
         {
@@ -150,6 +158,8 @@ sealed class MainForm : Form
         };
         core.Navigate("https://launcher.htpc/index.html");
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
+        try { await keyboard.Init(env, options.UiDir); }
+        catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
     }
 
     // --- Messages from the UI ----------------------------------------------------------------
@@ -252,6 +262,11 @@ sealed class MainForm : Form
             if (window != IntPtr.Zero && !foregroundIsOurs)
                 map = foregroundApp is null ? ButtonMap.Mouse : ButtonMap.For(foregroundApp.Preset);
         }
+        // Text fields are watched (for the keyboard to pop up) only while an app with a button map
+        // is in front: Chromium-based apps build their accessibility tree while anyone listens.
+        // Apps on the Controller preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard.
+        textFields.Enabled = map is not null;
+        if (keyboard.Visible) map = null; // the controller drives the keyboard
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
         mapper.Map = map;
@@ -270,6 +285,16 @@ sealed class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) return;
+        if (keyboard.Visible)
+        {
+            if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
+            if (pad is Pad.Home or Pad.HomeHold) CloseKeyboard("Home"); // and on to Home as usual
+            else
+            {
+                if (ButtonName(pad) is { } name) keyboard.Post(new { type = "input", button = name });
+                return;
+            }
+        }
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
         // The controller is in use: no mouse pointer on the TV, unless a preset moves it.
@@ -290,15 +315,80 @@ sealed class MainForm : Form
                 return;
         }
 
-        if (!active) return; // the app reads the pad itself (Controller preset) or the button map drives it
-        var button = pad switch
+        // R3: the on-screen keyboard, for the text field that has the focus (not in Moonlight:
+        // R3 is a game button there).
+        if (pad == Pad.R3 && !active && !moonlight)
         {
-            Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
-            Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
-            Pad.LB => "lb", Pad.RB => "rb",
-            _ => null
-        };
-        if (button is not null) Post(new { type = "input", button });
+            var field = lastField is { } f && f.ProcessId == Native.ProcessOf(Native.GetForegroundWindow()) ? f : null;
+            OpenKeyboard(field, auto: false);
+            return;
+        }
+
+        if (!active) return; // the app reads the pad itself (Controller preset) or the button map drives it
+        if (ButtonName(pad) is { } button) Post(new { type = "input", button });
+    }
+
+    static string? ButtonName(Pad pad) => pad switch
+    {
+        Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
+        Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
+        Pad.LB => "lb", Pad.RB => "rb", Pad.LT => "lt", Pad.RT => "rt",
+        _ => null
+    };
+
+    // --- On-screen keyboard --------------------------------------------------------------------
+
+    void OnTextField(TextField? field)
+    {
+        if (field is null)
+        {
+            dismissedField = null;
+            if (keyboard.Visible && keyboardAuto) CloseKeyboard("the text field lost the focus");
+            return;
+        }
+        lastField = field;
+        if (dismissedField is { } d && d.ProcessId == field.ProcessId && d.Name == field.Name) return;
+        if (standby.Active || LauncherActive || !textFields.Enabled) return;
+        if (keyboard.Visible && keyboardField == field) return;
+        OpenKeyboard(field, auto: true);
+    }
+
+    void OpenKeyboard(TextField? field, bool auto)
+    {
+        keyboardField = field;
+        keyboardAuto = auto;
+        mapper.Map = null; // at once: the controller now drives the keyboard
+        keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false, field?.Bounds ?? Rectangle.Empty);
+        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")} \"{field.Name}\"")})");
+    }
+
+    void CloseKeyboard(string reason)
+    {
+        keyboard.Dismiss(reason);
+        keyboardAuto = false;
+    }
+
+    void OnKeyboardMessage(JsonElement m)
+    {
+        switch (m.GetProperty("type").GetString())
+        {
+            case "type":
+                Input.Type(m.GetProperty("text").GetString() ?? "");
+                break;
+            case "key":
+                switch (m.GetProperty("key").GetString())
+                {
+                    case "backspace": Input.Tap(0x08); break;
+                    case "left": Input.Tap(0x25); break;
+                    case "right": Input.Tap(0x27); break;
+                    case "enter": Input.Tap(0x0D); CloseKeyboard("Enter"); break;
+                }
+                break;
+            case "close":
+                dismissedField = keyboardField;
+                CloseKeyboard("B");
+                break;
+        }
     }
 
     // --- Apps and the Home menu ----------------------------------------------------------------
@@ -358,6 +448,7 @@ sealed class MainForm : Form
     void Reveal()
     {
         mapper.Map = null; // at once, not at the next UpdateMapper: the launcher takes the controller
+        CloseKeyboard("launcher");
         cursor.Hide();
         if (!Visible) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
@@ -431,6 +522,7 @@ sealed class MainForm : Form
         if (active)
         {
             mapper.Map = null;
+            CloseKeyboard("standby");
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
             Post(new { type = "blank" });
             if (!Visible) Show();
@@ -515,6 +607,8 @@ sealed class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         controller.Dispose();
+        textFields.Dispose();
+        keyboard.Dispose();
         cursor.Restore();
         dimmer.Close();
         base.OnFormClosed(e);

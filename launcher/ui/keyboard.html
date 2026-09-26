@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Keyboard</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="keyboard.css">
+</head>
+<body>
+<!-- The on-screen keyboard (SPEC N11), in a window of its own over the app: it never takes the
+     focus, so what it types goes to the app's text field. Opened in a normal browser it runs
+     on its own with the keyboard as the controller (arrows, Enter = A, Esc = B, Backspace = X). -->
+<section id="kb" aria-label="On-screen keyboard">
+  <div class="kb-head">
+    <span class="kb-into">Typing into</span>
+    <span class="kb-field" id="kb-field"></span>
+    <span class="kb-typed" id="kb-typed"></span>
+  </div>
+  <div class="kb-rows" id="kb-rows"></div>
+  <footer class="hints" id="kb-hints"></footer>
+</section>
+<script src="icons.js"></script>
+<script src="keyboard.js"></script>
+</body>
+</html>
