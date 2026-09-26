@@ -1,6 +1,6 @@
 # TV box: needs, wants and plan
 
-Draft 1 · 26 September 2026 · Design canvas: https://claude.ai/artifact/6kXG7DKA3nVAxW5LGhv1ph
+Draft 2 · 26 September 2026 (after review 1) · Design canvas: https://claude.ai/artifact/6kXG7DKA3nVAxW5LGhv1ph
 
 One person, one TV, one controller. A launcher of our own replaces the Windows
 desktop, opens six apps full screen, and turns the iPhone into a remote and a
@@ -25,8 +25,8 @@ desktop, opens six apps full screen, and turns the iPhone into a remote and a
 - **N3 Six apps.** YouTube (VacuumTube), Twitch (twitch.tv in its own Edge app window with extensions), Stremio, Jellyfin Desktop, Moonlight, Edge.
 - **N4 Home button over any app.** Overlay slides in, apps keep running, X closes one.
 - **N5 Hardware video decoding everywhere**, with a check runnable from Settings.
-- **N6 Sleep and wake.** From the menu and after 30 min idle; wake with the controller; one switch to Hibernate.
-- **N7 The TV follows the box** via Roku ECP (HTTP, port 8060): on + input switch at wake, off at sleep; box sleeps when the TV is turned off with its own remote (poll `query/device-info` power mode).
+- **N6 Sleep and wake.** From the menu and after a configurable idle time (15 min, 30 min, 1 h, 2 h, never; default 30 min); wake with the controller; one switch to Hibernate.
+- **N7 The TV follows the box** via Roku ECP (HTTP, port 8060): TV on + input switch whenever the box boots or wakes, off at sleep; box sleeps when the TV is turned off with its own remote (poll `query/device-info` power mode, same approach as the user's existing sound-switch script).
 - **N8 iPhone remote web app.** Touchpad and arrows, keyboard, now playing and volume, open apps, paste a link, sleep/restart.
 - **N9 Casting from the iPhone.** YouTube cast button (VacuumTube), Jellyfin "Play on", "Send to TV" Shortcut in the Share sheet.
 - **N10 Scripted install.** Clean Windows in, finished box out. Nothing updates unless asked.
@@ -60,6 +60,10 @@ Music/Navidrome · content rows ("Live now", "Continue watching") · HDR · surr
 | Settings on TV | Essentials + system |
 | Status bar | Clock + date, controller battery, alerts |
 | Tiles | Edited on the TV |
+| Moonlight Home | Tap to game PC, hold 2 s for our menu |
+| Idle sleep | Configurable, default 30 min |
+| YouTube links from Share sheet | Open in VacuumTube (fallback: link player) |
+| TV power on | Whenever the box boots or wakes |
 
 ## Controller map (proposal)
 
@@ -67,7 +71,7 @@ Music/Navidrome · content rows ("Live now", "Continue watching") · HDR · surr
 |---|---|---|
 | Everywhere | Home (tap) | Home menu over the app |
 | Everywhere | Home (hold 1 s) | Power menu |
-| Moonlight | Home | Tap goes to the game PC, hold opens the menu (open question) |
+| Moonlight | Home | Tap goes to the game PC, hold 2 s opens the menu |
 | Launcher & menus | D-pad / L stick | Move |
 | | A / B | Select / back |
 | | X | Close app (Home menu) · delete (keyboard) |
@@ -124,9 +128,6 @@ Music/Navidrome · content rows ("Live now", "Continue watching") · HDR · surr
 
 ## Open questions
 
-1. Moonlight: tap Home goes to the game PC, hold opens our menu?
-2. Mouse-mode button layout: anything to move?
-3. Sleep after 30 minutes idle: right number?
-4. YouTube links from the Share sheet: VacuumTube (if it can open a link) or the link player?
-5. The user's existing TV-detect / sound-switch script: mirror its detection mechanism.
-6. Look: blue focus glow, 4 tiles per row, 24-hour clock.
+1. Mouse-mode button layout: anything to move?
+2. Look: blue focus glow, 4 tiles per row, 24-hour clock.
+3. Can VacuumTube be handed a YouTube link to open? (Verify before build; fallback is the link player.)
