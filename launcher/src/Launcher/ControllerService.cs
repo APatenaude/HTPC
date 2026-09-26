@@ -27,6 +27,28 @@ sealed class ControllerService : IDisposable
     // Undocumented, like GetStateEx: turns a wireless controller off, as holding its Home button does.
     [DllImport("xinput1_4.dll", EntryPoint = "#103")] static extern uint XInputPowerOffController(uint index);
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct Vibration { public ushort Left, Right; }
+    [DllImport("xinput1_4.dll")] static extern uint XInputSetState(uint index, ref Vibration vibration);
+
+    /// <summary>
+    /// A short "hello" on the rumble motors: two quick pulses, the second one stronger. Tells the
+    /// user the box is waking while the screen and TV are still coming on.
+    /// </summary>
+    public void RumbleWake()
+    {
+        var slot = currentSlot;
+        if (slot < 0) return;
+        Task.Run(async () =>
+        {
+            void Set(ushort left, ushort right) { var v = new Vibration { Left = left, Right = right }; XInputSetState((uint)slot, ref v); }
+            Set(14000, 22000); await Task.Delay(110);
+            Set(0, 0); await Task.Delay(90);
+            Set(26000, 40000); await Task.Delay(170);
+            Set(0, 0);
+        });
+    }
+
     static readonly (ushort Bit, Pad Pad)[] Buttons =
     {
         (0x0001, Pad.Up), (0x0002, Pad.Down), (0x0004, Pad.Left), (0x0008, Pad.Right),

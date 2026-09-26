@@ -74,13 +74,17 @@ function renderStatus() {
     '</div>';
 }
 
+// Tiles are rebuilt only when something on them changed, so their entrance animation does not
+// replay on every refresh.
+let tilesHtml = '';
 function renderTiles() {
-  $('tiles').innerHTML = state.tiles.map((t) =>
+  const html = state.tiles.map((t) =>
     `<div class="tile" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
       (t.running ? '<span class="badge">Running</span>' : '') +
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
       `<span class="name">${esc(t.name)}</span>` +
     '</div>').join('');
+  if (html !== tilesHtml) { $('tiles').innerHTML = html; tilesHtml = html; }
   updateHomeHints();
 }
 
@@ -259,6 +263,7 @@ function renderTvSection() {
   return body;
 }
 
+let shownSection = null;   // the section's content animates in only when the section changes
 function renderSettings() {
   const nav = `<nav class="snav"><div class="snav-title">${icon('chevleft', 36, 2)}<span>Settings</span></div>` +
     SECTIONS.map(([id, glyph, label]) =>
@@ -268,8 +273,10 @@ function renderSettings() {
   const body = state.section === 'sleep' ? renderSleepSection()
     : state.section === 'tv' ? renderTvSection()
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
-  $('settings').innerHTML = nav + `<div class="spane"><main>${body}</main>` +
-    `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['LB RB', 'Sections'], ['B', 'Back']])}</footer></div>`;
+  const entering = state.section !== shownSection;
+  shownSection = state.section;
+  $('settings').innerHTML = nav + `<div class="spane"><main${entering ? ' class="enter"' : ''}>${body}</main>` +
+    `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['LB', 'Sections'], ['RB', 'Options'], ['B', 'Back']])}</footer></div>`;
 }
 
 function changeSetting(key, step) {
@@ -395,21 +402,18 @@ function wrapTarget(cur, dir) {
   return far;
 }
 
-// Settings: LB/RB change section from anywhere; right from the section list goes into the
-// section, left (off a value) or B from the section comes back to the list.
+// Settings, two columns: LB (or left, off a value) goes to the section list, RB (or right) into
+// the section's options; B from the options also returns to the list. Up/down in the list
+// changes section.
 function settingsPress(button, el) {
   const inNav = el && el.dataset.section;
   const navItem = () => $('settings').querySelector(`[data-section="${state.section}"]`);
-  const i = SECTIONS.findIndex(([id]) => id === state.section);
+  const firstOption = () => $('settings').querySelector('.spane [data-nav]');
   switch (button) {
-    case 'lb': case 'rb': {
-      state.section = SECTIONS[(i + (button === 'rb' ? 1 : -1) + SECTIONS.length) % SECTIONS.length][0];
-      render();
-      setFocus(navItem());
-      return true;
-    }
+    case 'lb': setFocus(navItem()); return true;
+    case 'rb': if (firstOption()) setFocus(firstOption()); return true;
     case 'right':
-      if (inNav) { const first = $('settings').querySelector('.spane [data-nav]'); if (first) setFocus(first); return true; }
+      if (inNav) { if (firstOption()) setFocus(firstOption()); return true; }
       return false;
     case 'left':
       if (!inNav && !(el && el.dataset.setting)) { setFocus(navItem()); return true; }

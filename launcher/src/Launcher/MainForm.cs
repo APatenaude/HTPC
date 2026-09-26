@@ -26,7 +26,6 @@ sealed class MainForm : Form
     readonly CursorHider cursor = new();
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
-    bool homeWoke;          // a Home press just woke the box: swallow its release
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
@@ -54,7 +53,7 @@ sealed class MainForm : Form
         controller.StatusChanged += (connected, _) => BeginInvoke(() =>
         {
             // A sleeping 8BitDo controller reconnects on the first press: that press wakes the box.
-            if (connected && standby.Active) standby.Wake("controller reconnected");
+            if (connected && standby.Active) { standby.Wake("controller reconnected"); controller.RumbleWake(); }
             PushState();
         });
         tv = new TvService(settings);
@@ -228,17 +227,16 @@ sealed class MainForm : Form
 
     void OnPad(Pad pad, bool repeat)
     {
-        // In standby only Home wakes the box, the moment it goes down (a tap-on-release missed
-        // slower presses in the dark); everything else is swallowed. Nothing here may move the
-        // pointer: Windows counts that as input and turns the display back on.
+        // In standby only holding Home for 0.5 s wakes the box (a deliberate press; taps and
+        // other buttons are swallowed), and the controller buzzes to say so while the screen and
+        // TV come on. The release after a hold raises nothing, so it does not open the menu.
+        // Nothing here may move the pointer: Windows counts that as input and turns the display on.
         if (standby.Active)
         {
-            if (pad == Pad.HomeDown) { homeWoke = true; standby.Wake("controller Home"); }
+            if (pad == Pad.HomeHold) { standby.Wake("controller Home held"); controller.RumbleWake(); }
             return;
         }
         if (pad == Pad.HomeDown) return;
-        // The release of the press that woke the box is not also a Home tap or hold.
-        if (homeWoke && pad is Pad.Home or Pad.HomeHold) { homeWoke = false; return; }
         cursor.Hide(); // the controller is in use: no mouse pointer on the TV
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();

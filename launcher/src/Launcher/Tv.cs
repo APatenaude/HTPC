@@ -189,6 +189,10 @@ sealed class TvService
     readonly LauncherSettings settings;
     string? lastPower;
     int lastInput;
+    // After the box itself turns the TV on or off, the TV takes seconds to get there; its
+    // state meanwhile is not the remote. (A wake read "still off" and put the box back to sleep.)
+    DateTime quietUntil;
+    void Quiet() => quietUntil = DateTime.Now.AddSeconds(20);
     public Edid? Screen { get; private set; }
     public List<RokuTv> Found { get; private set; } = new();
 
@@ -253,6 +257,7 @@ sealed class TvService
     {
         if (Profile is not { OffWithBox: true } || Current is not { } tv || tv.Locked) return;
         lastPower = "off"; // our own key: the next poll must not read it as the remote
+        Quiet();
         if (await Roku.Key(tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
     }
 
@@ -276,6 +281,7 @@ sealed class TvService
         {
             lastPower = "PowerOn";
             lastInput = p.Input;
+            Quiet();
             var tv = await Roku.Describe(known.Id, known.BaseUrl);
             if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) return;
             if (tv is not { IsOn: true })
@@ -301,6 +307,7 @@ sealed class TvService
     {
         if (Profile is not { } p || Current is not { } tv || tv.Locked) return false;
         lastPower = "off";
+        Quiet();
         if (!await Roku.Key(tv.BaseUrl, "PowerOff")) return false;
         await Task.Delay(5000);
         await BringUp(p, tv);
@@ -319,6 +326,7 @@ sealed class TvService
             return;
         }
         Found = Found.Select(t => t.Id == tv.Id ? tv : t).ToList();
+        if (DateTime.Now < quietUntil) { lastPower = tv.PowerMode; lastInput = tv.ActiveInput; return; }
         var on = tv.IsOn;
         var was = lastPower == "PowerOn";
         var changed = lastPower is not null && (on != was || (on && tv.ActiveInput != lastInput));
