@@ -53,7 +53,7 @@ sealed class MainForm : Form
         controller.StatusChanged += (connected, _) => BeginInvoke(() =>
         {
             // A sleeping 8BitDo controller reconnects on the first press: that press wakes the box.
-            if (connected && standby.Active) { standby.Wake("controller reconnected"); controller.RumbleWake(); }
+            if (connected && standby.Active) standby.Wake("controller reconnected");
             PushState();
         });
         tv = new TvService(settings);
@@ -234,7 +234,7 @@ sealed class MainForm : Form
         if (standby.Active)
         {
             if (pad is Pad.HomeDown or Pad.HomeHold or Pad.Home) Log.Info($"Standby: {pad} reached the launcher");
-            if (pad == Pad.HomeHold) { standby.Wake("controller Home held"); controller.RumbleWake(); }
+            if (pad == Pad.HomeHold) standby.Wake("controller Home held"); // it has buzzed already
             return;
         }
         if (pad == Pad.HomeDown) return;

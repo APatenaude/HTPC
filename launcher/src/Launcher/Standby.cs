@@ -71,11 +71,14 @@ sealed class LauncherSettings
 }
 
 /// <summary>
-/// Sleep, in the mode chosen in Settings. Standby is the default (decision of 26 Sept 2026):
-/// this box has only S3 sleep and the 8BitDo dongle cannot wake it from S3, so standby pauses
-/// playback, turns the screen off and switches to the "TV standby" power plan while the box
-/// stays on; a tap on Home brings it back. MainForm puts the launcher in front as a black
-/// screen meanwhile, so no app gets the controller's input.
+/// Sleep, in the mode chosen in Settings. Screen off (standby) is the default (decision of
+/// 26 Sept 2026): this box has only S3 sleep and the 8BitDo dongle cannot wake it from S3, so
+/// standby pauses playback and turns the video output off while the box stays on; holding Home
+/// for 0.5 s brings it back. MainForm puts the launcher in front as a black screen meanwhile,
+/// so no app gets the controller's input.
+///
+/// No low-power plan any more: capping the CPU (20%, one core) saved nothing measurable and
+/// froze the box for 5-7 s on the first Home press after a quiet spell (26 Sept 2026 log).
 /// </summary>
 sealed class Standby
 {
@@ -87,8 +90,8 @@ sealed class Standby
     [DllImport("powrprof.dll")] static extern uint PowerSetActiveScheme(IntPtr root, ref Guid scheme);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
 
-    // Created by setup (setup\lib\Set-Power.ps1); switching plans needs no admin rights.
-    static readonly Guid StandbyPlan = new("8d3c4f6a-2b71-4e59-a0c3-6f1e9b27d5c4");
+    // The former "TV standby" plan (removed): if a crash left it active, back to Balanced.
+    static readonly Guid OldStandbyPlan = new("8d3c4f6a-2b71-4e59-a0c3-6f1e9b27d5c4");
     static readonly Guid BalancedPlan = new("381b4222-f694-41f0-9685-ff5bb260df2e");
 
     [StructLayout(LayoutKind.Sequential)] struct LastInputInfo { public uint Size; public uint Time; }
@@ -101,7 +104,6 @@ sealed class Standby
     readonly DisplayPower display = new();
     readonly ControllerService controller;
     readonly LauncherSettings settings;
-    Guid planBeforeStandby = BalancedPlan;
     DateTime since;
 
     public bool Active { get; private set; }
@@ -117,8 +119,7 @@ sealed class Standby
         // The launcher decides when the box sleeps: keep Windows from sleeping on its own
         // (Windows' idle timer ignores the controller).
         SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
-        // Left in the standby plan by a crash or a restart during standby: back to normal.
-        if (ActivePlan() == StandbyPlan) SetPlan(BalancedPlan);
+        if (ActivePlan() == OldStandbyPlan) { var balanced = BalancedPlan; PowerSetActiveScheme(IntPtr.Zero, ref balanced); }
     }
 
     /// <summary>Sleep as set in Settings (Power menu, sleep timer, idle); screen off if the set mode is not available.</summary>
@@ -139,6 +140,7 @@ sealed class Standby
         Log.Info($"Standby ({reason})");
         Active = true;
         controller.Slow = true;
+        controller.WakeMode = true;
         await PausePlayback();
         // The launcher goes in front first: bringing a window forward can inject a key press,
         // which would turn the display straight back on. Then the video output goes off
@@ -147,12 +149,7 @@ sealed class Standby
         await Task.Delay(300);
         display.Off();
         _ = Task.Delay(3000).ContinueWith(_ => { if (Active) display.Off(); });
-        // Switching power plans takes Windows seconds: in the background.
-        _ = Task.Run(() =>
-        {
-            planBeforeStandby = ActivePlan() is { } current && current != StandbyPlan ? current : BalancedPlan;
-            SetPlan(StandbyPlan);
-        });
+
         // No XInput power-off here: the 8BitDo ignores it (it switches itself off after 15 idle
         // minutes) and it was a suspect in missed wake presses.
         since = DateTime.Now;
@@ -178,11 +175,10 @@ sealed class Standby
         var clock = System.Diagnostics.Stopwatch.StartNew();
         Active = false;
         controller.Slow = false;
+        controller.WakeMode = false;
         display.On();
         NudgeMouse();
         var screenMs = clock.ElapsedMilliseconds;
-        var plan = planBeforeStandby;
-        _ = Task.Run(() => SetPlan(plan));
         Changed?.Invoke(false);
         Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
     }
@@ -225,14 +221,6 @@ sealed class Standby
         if (PowerGetActiveScheme(IntPtr.Zero, out var ptr) != 0) return null;
         try { return Marshal.PtrToStructure<Guid>(ptr); }
         finally { LocalFree(ptr); }
-    }
-
-    static bool SetPlan(Guid plan)
-    {
-        var result = PowerSetActiveScheme(IntPtr.Zero, ref plan);
-        if (result != 0) Log.Warn($"Switching to power plan {plan} failed ({result})");
-        else Log.Info($"Power plan {(plan == StandbyPlan ? "TV standby" : plan.ToString())}");
-        return result == 0;
     }
 
     // Tick count (ms since boot) of the last keyboard or mouse input. GetLastInputInfo gives a

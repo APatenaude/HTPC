@@ -91,9 +91,18 @@ sealed class ControllerService : IDisposable
         return result == 0;
     }
 
+    /// <summary>
+    /// Standby: a 0.5 s hold on Home buzzes right here on the controller thread, the moment it is
+    /// reached, before the box does anything else (the user needs to know the hold counted: the
+    /// buzz used to come 1.5-2 s later, people kept holding, and the 8BitDo switched itself off).
+    /// </summary>
+    public bool WakeMode { get; set; }
+
     public ControllerService()
     {
-        thread = new Thread(Run) { IsBackground = true, Name = "XInput" };
+        // High priority: input must get through even while Windows is busy (turning the display
+        // back on, for instance).
+        thread = new Thread(Run) { IsBackground = true, Name = "XInput", Priority = ThreadPriority.Highest };
     }
 
     public void Start() => thread.Start();
@@ -124,6 +133,7 @@ sealed class ControllerService : IDisposable
                 {
                     Log.Info($"Controller connected in slot {slot}");
                     currentSlot = slot;
+                    if (WakeMode) RumbleWake(); // switched on in standby: that wakes the box
                     nextBattery = 0;
                     // Buttons already down at connect (the Home press that switched the controller
                     // on) are not new presses: that press only wakes the box.
@@ -177,7 +187,13 @@ sealed class ControllerService : IDisposable
             // Home is logged (it is rare): the log shows every press, for diagnosing wake.
             var homeNow = (buttons & HomeBit) != 0;
             if (homeNow && homeDown < 0) { homeDown = now; homeHeld = false; Log.Info("Home down"); Raise(Pad.HomeDown, false); }
-            if (homeNow && !homeHeld && now - homeDown >= HoldMs) { homeHeld = true; Log.Info("Home held"); Raise(Pad.HomeHold, false); }
+            if (homeNow && !homeHeld && now - homeDown >= HoldMs)
+            {
+                homeHeld = true;
+                if (WakeMode) RumbleWake();
+                Log.Info("Home held");
+                Raise(Pad.HomeHold, false);
+            }
             if (!homeNow && homeDown >= 0)
             {
                 Log.Info($"Home up after {now - homeDown} ms");

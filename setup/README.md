@@ -19,7 +19,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc` |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
-| Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); "TV standby" low-power plan; no self-wake; keyboard and WoL wake, not mouse |
+| Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | automatic sign-in, password kept as an LSA secret (from the answer file, or typed) |

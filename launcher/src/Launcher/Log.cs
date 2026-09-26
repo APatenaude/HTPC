@@ -1,10 +1,27 @@
+using System.Collections.Concurrent;
+
 namespace Htpc.Launcher;
 
-/// <summary>Plain text log in C:\ProgramData\HTPC\logs\launcher.log (SPEC: the launcher writes logs).</summary>
+/// <summary>
+/// Plain text log in C:\ProgramData\HTPC\logs\launcher.log (SPEC: the launcher writes logs).
+/// Lines are queued and written by a background thread, so logging never blocks the caller
+/// (the controller thread logs every Home press).
+/// </summary>
 static class Log
 {
-    static readonly object Gate = new();
     static readonly string FilePath = PickPath();
+    static readonly BlockingCollection<string> Queue = new();
+
+    static Log()
+    {
+        new Thread(() =>
+        {
+            foreach (var line in Queue.GetConsumingEnumerable())
+            {
+                try { File.AppendAllText(FilePath, line); } catch (IOException) { }
+            }
+        }) { IsBackground = true, Name = "Log", Priority = ThreadPriority.BelowNormal }.Start();
+    }
 
     static string PickPath()
     {
@@ -27,12 +44,6 @@ static class Log
     public static void Warn(string message) => Write("WARN", message);
     public static void Error(string message, Exception? e = null) => Write("ERROR", e is null ? message : $"{message}: {e}");
 
-    static void Write(string level, string message)
-    {
-        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {level,-5} {message}{Environment.NewLine}";
-        lock (Gate)
-        {
-            try { File.AppendAllText(FilePath, line); } catch (IOException) { }
-        }
-    }
+    static void Write(string level, string message) =>
+        Queue.Add($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {level,-5} {message}{Environment.NewLine}");
 }
