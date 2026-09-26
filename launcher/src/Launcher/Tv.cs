@@ -206,6 +206,15 @@ sealed class TvService
 
     public TvService(LauncherSettings settings) => this.settings = settings;
 
+    /// <summary>--no-tv: the TV is watched and shown in Settings but never sent a key.</summary>
+    public bool HandsOff { get; init; }
+
+    bool Refuse(string what)
+    {
+        if (HandsOff) Log.Info($"TV {what} skipped (--no-tv)");
+        return HandsOff;
+    }
+
     public TvProfile? Profile => Screen is not null && settings.Tvs.TryGetValue(Screen.Key, out var p) ? p : null;
 
     RokuTv? Current => Profile is { } p ? Found.FirstOrDefault(t => t.Id == p.DeviceId) : null;
@@ -220,7 +229,11 @@ sealed class TvService
         // While the TV is off, Windows may report a placeholder monitor (maker MS_, no name):
         // keep the last real one.
         if (Edid.Current() is { Name.Length: > 0 } edid) Screen = edid;
-        Found = await Roku.FindAll(TimeSpan.FromSeconds(3));
+        var found = await Roku.FindAll(TimeSpan.FromSeconds(3));
+        // The profile's TV missing from one search (the network blinked, as when a Hyper-V
+        // switch comes up) is kept at its last address: it is most likely still there.
+        if (Current is { } known && found.All(t => t.Id != known.Id)) found.Add(known);
+        Found = found;
         Log.Info($"Screen {Screen?.Key ?? "unknown"}; TVs found: {string.Join(", ", Found.Select(t => $"{t.Name} ({t.Model}, {t.EcpMode}, {t.PowerMode})"))}");
         if (Screen is not null && Profile is null)
         {
@@ -255,7 +268,7 @@ sealed class TvService
 
     public async Task TurnOff()
     {
-        if (Profile is not { OffWithBox: true } || Current is not { } tv || tv.Locked) return;
+        if (Profile is not { OffWithBox: true } || Current is not { } tv || tv.Locked || Refuse("off")) return;
         lastPower = "off"; // our own key: the next poll must not read it as the remote
         Quiet();
         if (await Roku.Key(tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
@@ -270,7 +283,7 @@ sealed class TvService
     /// </summary>
     public async Task TurnOn()
     {
-        if (Profile is not { OnWithBox: true } p || Current is not { } known || known.Locked) return;
+        if (Profile is not { OnWithBox: true } p || Current is not { } known || known.Locked || Refuse("on")) return;
         await BringUp(p, known);
     }
 
@@ -317,7 +330,7 @@ sealed class TvService
     /// <summary>Test from Settings: off, then back on.</summary>
     public async Task<bool> Test()
     {
-        if (Profile is not { } p || Current is not { } tv || tv.Locked) return false;
+        if (Profile is not { } p || Current is not { } tv || tv.Locked || Refuse("test")) return false;
         lastPower = "off";
         Quiet();
         if (!await Roku.Key(tv.BaseUrl, "PowerOff")) return false;
@@ -326,14 +339,19 @@ sealed class TvService
         return (await Roku.Describe(tv.Id, tv.BaseUrl))?.IsOn == true;
     }
 
+    DateTime nextSearch;
+
     /// <summary>Every few seconds: notices the TV turned off or on with its own remote.</summary>
     public async Task Poll()
     {
-        if (Profile is not { } p || Current is not { } known) return;
-        var tv = await Roku.Describe(known.Id, known.BaseUrl);
+        if (Profile is not { } p) return;
+        var tv = Current is { } known ? await Roku.Describe(known.Id, known.BaseUrl) : null;
         if (tv is null)
         {
-            // Moved to another IP: search again.
+            // Not answering, or never found (network down, TV unplugged, moved to another IP):
+            // search again, once a minute at most.
+            if (DateTime.Now < nextSearch) return;
+            nextSearch = DateTime.Now.AddMinutes(1);
             await Discover();
             return;
         }

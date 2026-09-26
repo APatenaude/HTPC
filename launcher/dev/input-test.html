@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Input test</title>
+<!-- Dev: shows the keyboard and mouse input a page receives, to check the button presets
+     (launcher\dev\Test-Presets.ps1 opens it in Edge and drives the launcher with Send-Pad.ps1). -->
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #111318; color: #e8e6e1; font: 22px/1.35 Consolas, monospace; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; height: 100vh; box-sizing: border-box; }
+  #log { overflow: hidden; white-space: pre; }
+  #side { display: flex; flex-direction: column; gap: 16px; }
+  #counts { white-space: pre; font-size: 26px; }
+  input { font: inherit; padding: 8px; background: #1d2028; color: inherit; border: 2px solid #3a3f4b; border-radius: 8px; }
+  input:focus { border-color: #7fb2ff; outline: none; }
+  #tall { height: 4000px; background: repeating-linear-gradient(#1a1d24 0 100px, #151820 100px 200px); border-radius: 8px; }
+  #scroller { flex: 1; overflow: auto; }
+</style>
+</head>
+<body>
+<main>
+  <div id="log"></div>
+  <div id="side">
+    <div id="counts"></div>
+    <input id="text" placeholder="Text field" autocomplete="off">
+    <input id="password" type="password" placeholder="Password field">
+    <div id="scroller"><div id="tall"></div></div>
+  </div>
+</main>
+<script>
+  const log = [], counts = { move: 0, wheelY: 0, wheelX: 0, down: 0, up: 0, keys: 0 };
+  let last = null;
+  function add(line) {
+    log.push(`${(performance.now() / 1000).toFixed(2).padStart(7)}  ${line}`);
+    if (log.length > 36) log.shift();
+    document.getElementById('log').textContent = log.join('\n');
+  }
+  function show() {
+    const pos = last ? `${last.x},${last.y}` : '-';
+    document.getElementById('counts').textContent =
+      `pointer ${pos}\nmoves ${counts.move}\nwheel y ${counts.wheelY}  x ${counts.wheelX}\n` +
+      `buttons down ${counts.down} up ${counts.up}\nkeys ${counts.keys}\nscrollTop ${document.getElementById('scroller').scrollTop}`;
+  }
+  addEventListener('mousemove', e => { counts.move++; last = { x: e.screenX, y: e.screenY }; show(); });
+  addEventListener('mousedown', e => { counts.down++; add(`mousedown ${e.button} at ${e.screenX},${e.screenY}`); show(); });
+  addEventListener('mouseup', e => { counts.up++; add(`mouseup ${e.button}`); show(); });
+  addEventListener('contextmenu', e => { e.preventDefault(); add('contextmenu'); });
+  addEventListener('wheel', e => { counts.wheelY += e.deltaY; counts.wheelX += e.deltaX; show(); }, { passive: true });
+  addEventListener('keydown', e => {
+    counts.keys++;
+    const mods = ['ctrl', 'shift', 'alt'].filter(m => e[m + 'Key']).join('+');
+    add(`keydown ${e.key} (${e.code})${mods ? ' ' + mods : ''}${e.repeat ? ' repeat' : ''}`);
+    if (['Tab', 'F11', 'Escape'].includes(e.key) || e.key === 'BrowserBack') e.preventDefault();
+    show();
+  });
+  addEventListener('keyup', e => add(`keyup ${e.key}`));
+  document.getElementById('scroller').addEventListener('scroll', show);
+  addEventListener('popstate', () => add('popstate (back)'));
+  history.pushState({}, '', '#one'); history.pushState({}, '', '#two');
+  show();
+</script>
+</body>
+</html>

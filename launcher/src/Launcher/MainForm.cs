@@ -24,6 +24,7 @@ sealed class MainForm : Form
     readonly System.Windows.Forms.Timer clock = new() { Interval = 1000 };
     readonly System.Windows.Forms.Timer mouseWatch = new() { Interval = 200 };
     readonly CursorHider cursor = new();
+    readonly PadMapper mapper = new();
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
@@ -49,6 +50,7 @@ sealed class MainForm : Form
 
         apps = new AppManager(options.CatalogPath);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        controller.Mapper = mapper;
         controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
         controller.StatusChanged += (connected, _) => BeginInvoke(() =>
         {
@@ -56,7 +58,7 @@ sealed class MainForm : Form
             if (connected && standby.Active) standby.Wake("controller reconnected");
             PushState();
         });
-        tv = new TvService(settings);
+        tv = new TvService(settings) { HandsOff = options.NoTv };
         tv.Changed += () => BeginInvoke(() => Post(new { type = "tv", tv = tv.Describe() }));
         tv.TvStateChanged += (on, showingBox) => BeginInvoke(() => OnTvState(on, showingBox));
         clock.Tick += async (_, _) =>
@@ -72,7 +74,7 @@ sealed class MainForm : Form
         {
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
         };
-        mouseWatch.Tick += (_, _) => cursor.Check();
+        mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
         Directory.CreateDirectory(captureDir);
     }
 
@@ -225,6 +227,36 @@ sealed class MainForm : Form
 
     bool LauncherActive => Native.GetForegroundWindow() == Handle || ContainsFocus;
 
+
+    IntPtr lastForeground;
+    CatalogApp? foregroundApp;
+    bool foregroundIsOurs;
+
+    /// <summary>
+    /// Picks the button map for the app in front (its catalog preset). None while the launcher
+    /// is in front or in standby. A window that belongs to none of the catalog's apps (the
+    /// desktop, a window an app opened) gets the Mouse preset, so it can still be used.
+    /// </summary>
+    void UpdateMapper()
+    {
+        ButtonMap? map = null;
+        if (!standby.Active && !LauncherActive)
+        {
+            var window = Native.GetForegroundWindow();
+            if (window != lastForeground)
+            {
+                lastForeground = window;
+                foregroundApp = apps.ForegroundApp();
+                foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
+            }
+            if (window != IntPtr.Zero && !foregroundIsOurs)
+                map = foregroundApp is null ? ButtonMap.Mouse : ButtonMap.For(foregroundApp.Preset);
+        }
+        // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
+        if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
+        mapper.Map = map;
+    }
+
     void OnPad(Pad pad, bool repeat)
     {
         // In standby only holding Home for 0.5 s wakes the box (a deliberate press; taps and
@@ -238,9 +270,10 @@ sealed class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) return;
-        cursor.Hide(); // the controller is in use: no mouse pointer on the TV
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
+        // The controller is in use: no mouse pointer on the TV, unless a preset moves it.
+        if (mapper.Map is null) cursor.Hide();
         // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
         var moonlight = app?.Id == "moonlight";
 
@@ -257,7 +290,7 @@ sealed class MainForm : Form
                 return;
         }
 
-        if (!active) return; // Controller preset: the app reads the pad itself.
+        if (!active) return; // the app reads the pad itself (Controller preset) or the button map drives it
         var button = pad switch
         {
             Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
@@ -324,6 +357,8 @@ sealed class MainForm : Form
 
     void Reveal()
     {
+        mapper.Map = null; // at once, not at the next UpdateMapper: the launcher takes the controller
+        cursor.Hide();
         if (!Visible) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Native.ForceForeground(Handle);
@@ -395,6 +430,7 @@ sealed class MainForm : Form
         tvChangedItself = false;
         if (active)
         {
+            mapper.Map = null;
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
             Post(new { type = "blank" });
             if (!Visible) Show();
@@ -409,9 +445,14 @@ sealed class MainForm : Form
         }
     }
 
-    // Dev and test hook: PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Standby"),
-    // 1 = enter standby / 0 = wake, 0).
+    // Dev and test hooks:
+    //   PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Standby"), 1 = enter standby /
+    //     0 = wake / 2 = enter standby leaving the TV as it is, 0)
+    //   PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Pad"), buttons | LT << 16 | RT << 24,
+    //     LX | LY << 16 | RX << 32 | RY << 48): acts as if the controller were in that state;
+    //     wParam -1 goes back to the real controller (launcher\dev\Send-Pad.ps1).
     static readonly int StandbyMessage = RegisterWindowMessage("HtpcLauncher.Standby");
+    static readonly int PadMessage = RegisterWindowMessage("HtpcLauncher.Pad");
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     static extern int RegisterWindowMessage(string name);
 
@@ -419,7 +460,15 @@ sealed class MainForm : Form
     {
         if (m.Msg == StandbyMessage && standby is not null)
         {
+            if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone
             if (m.WParam != IntPtr.Zero) standby.Enter("message"); else standby.Wake("message");
+            return;
+        }
+        if (m.Msg == PadMessage)
+        {
+            long w = m.WParam, l = m.LParam;
+            controller.Inject(w == -1 ? null : new PadState((ushort)w, (byte)(w >> 16), (byte)(w >> 24),
+                (short)l, (short)(l >> 16), (short)(l >> 32), (short)(l >> 48)));
             return;
         }
         base.WndProc(ref m);

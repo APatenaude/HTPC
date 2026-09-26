@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
@@ -109,78 +110,65 @@ sealed class ControllerService : IDisposable
 
     public void Dispose() => stopping = true;
 
+    /// <summary>Applies the button map of the app in front (Mouse, Keyboard presets) at every poll.</summary>
+    public PadMapper? Mapper { get; set; }
+
+    // Dev and test: a made-up controller state used instead of the real one (see Inject).
+    volatile StrongBox<PadState>? injected;
+
+    /// <summary>
+    /// Dev and test: acts as if the controller were in this state (buttons, triggers, sticks)
+    /// until the next call; null goes back to the real controller.
+    /// </summary>
+    public void Inject(PadState? state) => injected = state is { } s ? new StrongBox<PadState>(s) : null;
+
+    // Controller thread only.
+    int slot = -1;
+    ushort previous;
+    uint lastPacket;
+    readonly Dictionary<Pad, long> nextRepeat = new();
+    long homeDown = -1;
+    bool homeHeld;
+    long nextScan, nextBattery;
+
     void Run()
     {
-        int slot = -1;
-        ushort previous = 0;
-        uint lastPacket = 0;
-        var heldSince = new Dictionary<Pad, long>();
-        var nextRepeat = new Dictionary<Pad, long>();
-        long homeDown = -1;
-        bool homeHeld = false;
-        long nextScan = 0, nextBattery = 0;
         var clock = System.Diagnostics.Stopwatch.StartNew();
-
         while (!stopping)
         {
             var now = clock.ElapsedMilliseconds;
-            if (slot < 0 && now >= nextScan)
+            State state;
+            if (injected is { } fake)
             {
-                for (uint i = 0; i < 4 && slot < 0; i++)
-                    if (XInputGetStateEx(i, out _) == 0) slot = (int)i;
-                nextScan = now + 300;
-                if (slot >= 0)
-                {
-                    Log.Info($"Controller connected in slot {slot}");
-                    currentSlot = slot;
-                    if (WakeMode) RumbleWake(); // switched on in standby: that wakes the box
-                    nextBattery = 0;
-                    // Buttons already down at connect (the Home press that switched the controller
-                    // on) are not new presses: that press only wakes the box.
-                    if (XInputGetStateEx((uint)slot, out var first) == 0)
-                    {
-                        previous = first.Pad.Buttons;
-                        if ((first.Pad.Buttons & HomeBit) != 0) { homeDown = now; homeHeld = true; }
-                    }
-                }
+                var f = fake.Value;
+                state = new State { Packet = lastPacket + 1, Pad = new Gamepad { Buttons = f.Buttons, LeftTrigger = f.LT, RightTrigger = f.RT, LX = f.LX, LY = f.LY, RX = f.RX, RY = f.RY } };
             }
-            if (slot < 0) { SetStatus(false, null); Thread.Sleep(50); continue; }
-
-            if (XInputGetStateEx((uint)slot, out var state) != 0)
-            {
-                Log.Info("Controller disconnected");
-                slot = -1; currentSlot = -1; previous = 0; homeDown = -1; heldSince.Clear();
-                SetStatus(false, null);
-                continue;
-            }
-            if (now >= nextBattery)
-            {
-                SetStatus(true, ReadBattery((uint)slot));
-                nextBattery = now + 30_000;
-            }
+            else if (!ReadController(now, out state)) continue;
             if (state.Packet != lastPacket) { lastPacket = state.Packet; LastActivity = DateTime.Now; }
 
-            var buttons = state.Pad.Buttons;
-            // The left stick counts as the D-pad.
-            if (state.Pad.LY > StickThreshold) buttons |= 0x0001;
-            if (state.Pad.LY < -StickThreshold) buttons |= 0x0002;
-            if (state.Pad.LX < -StickThreshold) buttons |= 0x0004;
-            if (state.Pad.LX > StickThreshold) buttons |= 0x0008;
+            var pad = state.Pad;
+            Mapper?.Update(new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY), now, enabled: !WakeMode);
 
-            foreach (var (bit, pad) in Buttons)
+            var buttons = pad.Buttons;
+            // The left stick counts as the D-pad.
+            if (pad.LY > StickThreshold) buttons |= 0x0001;
+            if (pad.LY < -StickThreshold) buttons |= 0x0002;
+            if (pad.LX < -StickThreshold) buttons |= 0x0004;
+            if (pad.LX > StickThreshold) buttons |= 0x0008;
+
+            foreach (var (bit, button) in Buttons)
             {
                 var down = (buttons & bit) != 0;
                 var was = (previous & bit) != 0;
                 if (down && !was)
                 {
-                    heldSince[pad] = now;
-                    nextRepeat[pad] = now + RepeatDelayMs;
-                    Raise(pad, false);
+                    nextRepeat[button] = now + RepeatDelayMs;
+                    Raise(button, false);
                 }
-                else if (down && pad <= Pad.Right && now >= nextRepeat[pad])
+                else if (down && button <= Pad.Right && now >= nextRepeat[button])
                 {
-                    nextRepeat[pad] = now + RepeatEveryMs;
-                    Raise(pad, true);
+                    nextRepeat[button] = now + RepeatEveryMs;
+                    Raise(button, true);
                 }
             }
 
@@ -206,6 +194,50 @@ sealed class ControllerService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Finds the controller (a scan every 300 ms while there is none) and reads it. False when
+    /// there is nothing to read this time round (the caller loops again).
+    /// </summary>
+    bool ReadController(long now, out State state)
+    {
+        state = default;
+        if (slot < 0 && now >= nextScan)
+        {
+            for (uint i = 0; i < 4 && slot < 0; i++)
+                if (XInputGetStateEx(i, out _) == 0) slot = (int)i;
+            nextScan = now + 300;
+            if (slot >= 0)
+            {
+                Log.Info($"Controller connected in slot {slot}");
+                currentSlot = slot;
+                if (WakeMode) RumbleWake(); // switched on in standby: that wakes the box
+                nextBattery = 0;
+                // Buttons already down at connect (the Home press that switched the controller
+                // on) are not new presses: that press only wakes the box.
+                if (XInputGetStateEx((uint)slot, out var first) == 0)
+                {
+                    previous = first.Pad.Buttons;
+                    if ((first.Pad.Buttons & HomeBit) != 0) { homeDown = now; homeHeld = true; }
+                }
+            }
+        }
+        if (slot < 0) { SetStatus(false, null); Thread.Sleep(50); return false; }
+
+        if (XInputGetStateEx((uint)slot, out state) != 0)
+        {
+            Log.Info("Controller disconnected");
+            slot = -1; currentSlot = -1; previous = 0; homeDown = -1;
+            Mapper?.Update(default, now, enabled: false); // lets go of anything the map holds down
+            SetStatus(false, null);
+            return false;
+        }
+        if (now >= nextBattery)
+        {
+            SetStatus(true, ReadBattery((uint)slot));
+            nextBattery = now + 30_000;
+        }
+        return true;
+    }
     void Raise(Pad pad, bool repeat)
     {
         try { Pressed?.Invoke(pad, repeat); }

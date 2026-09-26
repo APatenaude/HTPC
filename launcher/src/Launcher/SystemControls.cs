@@ -177,6 +177,15 @@ sealed class CursorHider
         Hidden = true;
     }
 
+    /// <summary>Shows the pointer again, in the middle of the screen (it was parked at the edge).</summary>
+    public void Show()
+    {
+        if (!Hidden) return;
+        Restore();
+        var screen = Screen.PrimaryScreen!.Bounds;
+        SetCursorPos(screen.X + screen.Width / 2, screen.Y + screen.Height / 2);
+    }
+
     /// <summary>Call regularly: shows the pointer again once the mouse has moved.</summary>
     public void Check()
     {

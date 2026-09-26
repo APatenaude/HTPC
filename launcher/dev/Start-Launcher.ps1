@@ -15,8 +15,11 @@
     Half-screen window instead of full screen.
 .PARAMETER NoBuild
     Start the last build.
+.PARAMETER NoTv
+    Never send the TV a key (no on at start, no off in standby): for working on the box while
+    nobody is watching the TV.
 #>
-param([switch]$Dev, [switch]$Windowed, [switch]$NoBuild)
+param([switch]$Dev, [switch]$Windowed, [switch]$NoBuild, [switch]$NoTv)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -34,6 +37,7 @@ if (-not $NoBuild) {
 $arguments = @('--ui', "`"$(Join-Path $root 'ui')`"")
 if ($Dev) { $arguments += '--dev' }
 if ($Windowed) { $arguments += '--windowed' }
+if ($NoTv) { $arguments += '--no-tv' }
 $action = New-ScheduledTaskAction -Execute $exe -Argument ($arguments -join ' ') -WorkingDirectory (Split-Path $exe)
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries

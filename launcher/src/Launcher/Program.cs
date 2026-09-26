@@ -1,7 +1,10 @@
 namespace Htpc.Launcher;
 
-/// <summary>Command line: --dev (dev tools, F5 reload), --windowed, --ui DIR, --catalog FILE.</summary>
-sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath)
+/// <summary>
+/// Command line: --dev (dev tools, F5 reload), --windowed, --ui DIR, --catalog FILE,
+/// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV).
+/// </summary>
+sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv)
 {
     public static Options Parse(string[] args)
     {
@@ -15,7 +18,8 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath)
             args.Contains("--dev"),
             args.Contains("--windowed"),
             Value("--ui", Path.Combine(baseDir, "ui")),
-            Value("--catalog", FindCatalog(baseDir)));
+            Value("--catalog", FindCatalog(baseDir)),
+            args.Contains("--no-tv"));
     }
 
     // An installed box keeps the catalog with setup; a build has its own copy next to the exe.
