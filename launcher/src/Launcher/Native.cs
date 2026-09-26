@@ -69,6 +69,22 @@ static class Native
         return found;
     }
 
+    // --- EcoQoS (Efficiency mode) -----------------------------------------------------------
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct PowerThrottlingState { public uint Version, ControlMask, StateMask; }
+
+    [DllImport("kernel32.dll")]
+    static extern bool SetProcessInformation(IntPtr process, int infoClass, ref PowerThrottlingState info, int size);
+
+    /// <summary>Execution-speed throttling on or off for a process (ProcessPowerThrottling).</summary>
+    public static void SetEcoQos(IntPtr process, bool on)
+    {
+        const uint ExecutionSpeed = 0x1;
+        var state = new PowerThrottlingState { Version = 1, ControlMask = ExecutionSpeed, StateMask = on ? ExecutionSpeed : 0 };
+        SetProcessInformation(process, 4 /* ProcessPowerThrottling */, ref state, Marshal.SizeOf<PowerThrottlingState>());
+    }
+
     // --- Process tree (Toolhelp) -----------------------------------------------------------
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

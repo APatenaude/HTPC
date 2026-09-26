@@ -67,7 +67,7 @@ sealed class MainForm : Form
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         standby = new Standby(Handle, controller, settings);
-        standby.Changed += active => Log.Info(active ? "In standby" : "Awake");
+        standby.Changed += OnStandbyChanged;
         Log.Info($"Standby after {settings.IdleMinutes} min idle; deep sleep after {settings.DeepSleepHours} h (0 = never)");
         controller.Start();
         clock.Start();
@@ -231,7 +231,14 @@ sealed class MainForm : Form
 
     // While an app is in front the launcher hides: Chromium-based apps (VacuumTube, Edge) stop
     // drawing when another window covers them, which left VacuumTube grey. Home brings it back.
-    void StepAside() => Hide();
+    // It blanks itself first (behind the app, unseen), so its next appearance starts dark
+    // instead of flashing the screen it last showed.
+    async void StepAside()
+    {
+        Post(new { type = "blank" });
+        await Task.Delay(150);
+        if (!LauncherActive) Hide();
+    }
 
     void Reveal()
     {
@@ -284,13 +291,53 @@ sealed class MainForm : Form
         {
             case "sleep":
                 // Stay-awake standby; the launcher wakes on the home screen.
-                Post(new { type = "show", view = "home" });
                 standby.Enter("Power menu");
                 break;
             case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
             case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
             case "desktop": WindowState = FormWindowState.Minimized; break;
         }
+    }
+
+    string? appBeforeStandby;
+
+    // Standby: the launcher goes in front as a black screen (the display is off anyway). Apps
+    // behind it get no controller input (Chromium and SDL apps read the pad only when in front)
+    // and, being covered, stop drawing; they also go into Efficiency mode. Waking returns to
+    // the app that was in front, or to the home screen.
+    void OnStandbyChanged(bool active)
+    {
+        Log.Info(active ? "In standby" : "Awake");
+        if (active)
+        {
+            appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
+            Post(new { type = "blank" });
+            if (!Visible) Show();
+            Native.ForceForeground(Handle);
+            apps.SetEfficiencyMode(true);
+        }
+        else
+        {
+            apps.SetEfficiencyMode(false);
+            if (appBeforeStandby is not null && apps.IsRunning(appBeforeStandby)) SwitchTo(appBeforeStandby);
+            else { Post(new { type = "show", view = "home" }); Reveal(); }
+        }
+    }
+
+    // Dev and test hook: PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Standby"),
+    // 1 = enter standby / 0 = wake, 0).
+    static readonly int StandbyMessage = RegisterWindowMessage("HtpcLauncher.Standby");
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int RegisterWindowMessage(string name);
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == StandbyMessage && standby is not null)
+        {
+            if (m.WParam != IntPtr.Zero) standby.Enter("message"); else standby.Wake("message");
+            return;
+        }
+        base.WndProc(ref m);
     }
 
     void SetSleepTimer(JsonElement minutes)

@@ -143,14 +143,28 @@ function renderTimer() {
   $('timer-hints').innerHTML = hints([['A', 'Set'], ['B', 'Back']]);
 }
 
+function renderConfirm() {
+  const c = state.confirm;
+  $('confirm-box').innerHTML =
+    `<h2>Close ${esc(c.name)}?</h2><p>It stops, and anything playing in it ends.</p>` +
+    '<div class="buttons">' +
+      `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">Close</div>` +
+      '<div class="button" data-nav data-id="confirm-cancel" data-act="cancel">Cancel</div>' +
+    '</div>' +
+    `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`;
+}
+
 function render() {
   const keep = state.memory[state.view];
+  // A confirmation sits over the view it was opened from, which stays visible under it.
+  const under = state.view === 'confirm' ? state.stack[state.stack.length - 1] : null;
   renderStatus();
   renderTiles();
-  if (state.view === 'menu') renderMenu();
+  if (state.view === 'menu' || under === 'menu') renderMenu();
   if (state.view === 'power') renderPower();
   if (state.view === 'timer') renderTimer();
-  for (const v of ['home', 'menu', 'power', 'timer']) $(v).classList.toggle('on', v === state.view);
+  if (state.view === 'confirm') renderConfirm();
+  for (const v of ['home', 'menu', 'power', 'timer', 'confirm']) $(v).classList.toggle('on', v === state.view || v === under);
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
@@ -246,6 +260,8 @@ function activate(el) {
       render();
       break;
     }
+    case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
+    case 'cancel': back(); break;
     case 'settings': toast('Settings come in a later update'); break;
     case 'soon': toast(`${arg} come in a later update`); break;
   }
@@ -278,12 +294,14 @@ function press(button) {
       break;
     case 'a': activate(el); break;
     case 'b': back(); break;
-    case 'x':
+    case 'x': {
       // On an app row: that app. Anywhere else in the menu: the app it was opened over.
       if (state.view !== 'menu') break;
-      if (el && el.dataset.close) send({ type: 'close', id: el.dataset.close });
-      else if (state.current) send({ type: 'close', id: state.current });
+      const id = (el && el.dataset.close) || state.current;
+      const t = id && state.tiles.find((x) => x.id === id);
+      if (t) { state.confirm = { id: t.id, name: t.name }; go('confirm'); }
       break;
+    }
     case 'home':
       if (state.view === 'home') { state.current = null; state.backdrop = null; go('menu'); }
       else back();
@@ -310,6 +328,7 @@ function onHost(msg) {
       Object.assign(state, msg.settings || {});
       render();
       break;
+    case 'blank': $('stage').classList.add('blank'); break;
     case 'opened':
       hideOpening();
       if (!msg.ok) toast(msg.text, 'warn');
@@ -327,7 +346,12 @@ function onHost(msg) {
     case 'input': press(msg.button); break;
     case 'show': {
       hideOpening();
-      const apply = () => { state.current = msg.current || null; state.backdrop = msg.backdrop || null; reset(msg.view); };
+      const apply = () => {
+        state.current = msg.current || null;
+        state.backdrop = msg.backdrop || null;
+        reset(msg.view);
+        $('stage').classList.remove('blank');
+      };
       if (!msg.backdrop) { apply(); break; }
       // Show the menu once its backdrop has loaded, so it does not flash the home screen first.
       const img = new Image();

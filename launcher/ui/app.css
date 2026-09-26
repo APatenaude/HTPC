@@ -144,6 +144,24 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .opt.focused { background: var(--tile-focus); }
 #timer-status.on { color: var(--accent); }
 
+/* Hidden launcher (an app is in front, or standby): nothing to draw */
+#stage.blank { visibility: hidden; }
+
+/* Confirmation over the Home menu */
+#confirm { align-items: center; justify-content: center; }
+.dialog {
+  width: 760px; box-sizing: border-box; padding: 48px; border-radius: 32px; background: var(--row);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; gap: 20px;
+}
+.dialog h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 44px; letter-spacing: -0.01em; }
+.dialog p { margin: 0; font-size: 26px; color: var(--text-2); }
+.dialog .buttons { display: flex; gap: 20px; margin-top: 16px; }
+.dialog .button {
+  flex: 1; display: flex; align-items: center; justify-content: center; height: 88px; border-radius: 22px;
+  background: var(--track); font-family: var(--display); font-weight: 600; font-size: 30px;
+}
+.dialog .button.focused { background: var(--tile-focus); }
+
 /* Opening an app: shown until its window is up */
 #opening { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 36px; background: var(--bg); }
 /* Fades in only if the app is slow, so a quick app does not flash it. */

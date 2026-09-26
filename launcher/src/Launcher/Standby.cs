@@ -108,6 +108,9 @@ sealed class Standby
         planBeforeStandby = ActivePlan() is { } current && current != StandbyPlan ? current : BalancedPlan;
         SetPlan(StandbyPlan);
         controller.Slow = true;
+        // Controller off: no input reaches any app while asleep. Home switches it back on,
+        // and that reconnect wakes the box (MainForm).
+        controller.PowerOff();
         Changed?.Invoke(true);
     }
 
@@ -115,12 +118,17 @@ sealed class Standby
     {
         if (!Active) return;
         Log.Info($"Wake ({reason})");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         Active = false;
         controller.Slow = false;
-        SetPlan(planBeforeStandby);
         SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1)); // screen on
         NudgeMouse();
+        var screenMs = clock.ElapsedMilliseconds;
+        // Switching the power plan takes Windows over a second; do it off the UI thread.
+        var plan = planBeforeStandby;
+        Task.Run(() => SetPlan(plan));
         Changed?.Invoke(false);
+        Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
     }
 
     /// <summary>Called every few seconds: wakes on keyboard or mouse input, enters standby when idle.</summary>

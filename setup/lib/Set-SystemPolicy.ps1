@@ -7,6 +7,8 @@
     - Diagnostic data at the minimum LTSC allows; no consumer features, tips, Spotlight or
       "finish setting up" screens; no lock screen; no toast notifications; no error-report
       dialogs; no Sticky/Filter/Toggle Keys prompts; no Game DVR.
+    - Less background work: Windows Search indexing and SysMain (prefetch) off, no peer-to-peer
+      update sharing.
     - Connected networks set to Private (the phone remote and TV discovery need the LAN).
     - Automatic time zone (Windows location services; the Wi-Fi adapter locates the box
       from nearby networks even while it uses Ethernet); computer name TV (tv.local).
@@ -58,6 +60,22 @@ foreach ($protocol in 'ms-gamebar', 'ms-gamebarservices', 'ms-gamingoverlay') {
     Set-RegValue $key 'NoOpenWith' '' 'String'
     Set-RegValue "$key\shell\open\command" '(default)' "`"$env:SystemRoot\System32\systray.exe`"" 'String'
 }
+
+Write-Host '  Less background work (lower power, especially in standby)'
+# A TV box has no files to index and no app launch patterns worth prefetching.
+foreach ($service in 'WSearch', 'SysMain') {
+    $s = Get-Service $service -ErrorAction SilentlyContinue
+    if (-not $s) { continue }
+    if ($s.StartType -ne 'Disabled') {
+        Set-Service $service -StartupType Disabled
+        Stop-Service $service -Force -ErrorAction SilentlyContinue
+        Write-Change "service $service stopped and disabled"
+    } else {
+        Write-Same "service $service disabled"
+    }
+}
+# Windows updates come over HTTP only, without uploading them to other PCs.
+Set-RegValue "$policies\DeliveryOptimization" 'DODownloadMode' 0
 
 Write-Host '  Network, time zone, name'
 foreach ($net in Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Public' }) {

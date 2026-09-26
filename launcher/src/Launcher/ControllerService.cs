@@ -8,7 +8,7 @@ enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Hom
 /// Reads the controller through XInput directly, including the Home (Guide) button, which only
 /// the undocumented XInputGetStateEx (ordinal 100) reports. Works whichever window has focus.
 /// Raises Pressed on a background thread: D-pad and left stick repeat while held; Home fires
-/// Home on a short press and HomeHold as soon as it has been held for 1 s.
+/// Home on a short press and HomeHold as soon as it has been held for 0.5 s.
 /// </summary>
 sealed class ControllerService : IDisposable
 {
@@ -23,6 +23,8 @@ sealed class ControllerService : IDisposable
 
     [DllImport("xinput1_4.dll", EntryPoint = "#100")] static extern uint XInputGetStateEx(uint index, out State state);
     [DllImport("xinput1_4.dll")] static extern uint XInputGetBatteryInformation(uint index, byte deviceType, out Battery battery);
+    // Undocumented, like GetStateEx: turns a wireless controller off, as holding its Home button does.
+    [DllImport("xinput1_4.dll", EntryPoint = "#103")] static extern uint XInputPowerOffController(uint index);
 
     static readonly (ushort Bit, Pad Pad)[] Buttons =
     {
@@ -32,7 +34,7 @@ sealed class ControllerService : IDisposable
     };
     const ushort HomeBit = 0x0400;
     const short StickThreshold = 16000;
-    const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 1000;
+    const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 500;
 
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
@@ -46,6 +48,20 @@ sealed class ControllerService : IDisposable
 
     readonly Thread thread;
     volatile bool stopping;
+    volatile int currentSlot = -1;
+
+    /// <summary>
+    /// Turns the controller off (standby: no input reaches any app). Pressing Home turns it
+    /// back on, and the reconnect wakes the box. False if it is not connected or refuses.
+    /// </summary>
+    public bool PowerOff()
+    {
+        var slot = currentSlot;
+        if (slot < 0) return false;
+        var result = XInputPowerOffController((uint)slot);
+        Log.Info($"Controller power off (slot {slot}): {(result == 0 ? "done" : $"refused ({result})")}");
+        return result == 0;
+    }
 
     public ControllerService()
     {
@@ -75,15 +91,27 @@ sealed class ControllerService : IDisposable
             {
                 for (uint i = 0; i < 4 && slot < 0; i++)
                     if (XInputGetStateEx(i, out _) == 0) slot = (int)i;
-                nextScan = now + 1000;
-                if (slot >= 0) { Log.Info($"Controller connected in slot {slot}"); nextBattery = 0; }
+                nextScan = now + 300;
+                if (slot >= 0)
+                {
+                    Log.Info($"Controller connected in slot {slot}");
+                    currentSlot = slot;
+                    nextBattery = 0;
+                    // Buttons already down at connect (the Home press that switched the controller
+                    // on) are not new presses: that press only wakes the box.
+                    if (XInputGetStateEx((uint)slot, out var first) == 0)
+                    {
+                        previous = first.Pad.Buttons;
+                        if ((first.Pad.Buttons & HomeBit) != 0) { homeDown = now; homeHeld = true; }
+                    }
+                }
             }
             if (slot < 0) { SetStatus(false, null); Thread.Sleep(50); continue; }
 
             if (XInputGetStateEx((uint)slot, out var state) != 0)
             {
                 Log.Info("Controller disconnected");
-                slot = -1; previous = 0; homeDown = -1; heldSince.Clear();
+                slot = -1; currentSlot = -1; previous = 0; homeDown = -1; heldSince.Clear();
                 SetStatus(false, null);
                 continue;
             }

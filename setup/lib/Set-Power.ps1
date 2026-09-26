@@ -14,8 +14,10 @@
       - no wake timers and no maintenance wake: the box never wakes itself
       - power button = real sleep (S3); no sign-in on wake (the box is open)
       - USB selective suspend off: the controller dongle stays awake and quick
-    "TV standby" also: CPU capped at 30% without boost, PCIe link power saving, disk off after
-    5 min, Wi-Fi at maximum power saving. Ethernet stays up (phone remote, TV control, WoL).
+    "TV standby" also: CPU capped at 20%, no boost, most efficient energy preference, only one
+    core kept awake; PCIe links at lowest power; Wi-Fi at maximum power saving. Ethernet stays
+    up (phone remote, TV control, WoL). The launcher adds Efficiency mode for running apps and
+    a slower controller poll. The disk never powers down in either plan: waking it took 11 s.
 
     Also: hibernate available (full hiberfile) for the optional deep sleep, Fast Startup off,
     wake from the keyboard and an Ethernet magic packet, not from the mouse (a bump would
@@ -63,15 +65,19 @@ foreach ($plan in $Balanced, $StandbyPlan) {
     Set-PowerValue $plan 'Turn off display after (s)' $Video '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e' 0
     Set-PowerValue $plan 'Power button action (1 = sleep)' $Buttons '7648efa3-dd9c-4e3e-b566-50f929386280' 1
     Set-PowerValue $plan 'USB selective suspend' $Usb '48e6b7a6-50f5-4782-a5d4-53bb8f07e226' 0
+    # Spinning the SSD down made waking take 11 s (measured 26 Sept 2026); it saves ~nothing.
+    Set-PowerValue $plan 'Turn off disk after (s)' $Disk '6738e2c4-e8a5-4a42-b16a-e040e769756e' 0
     Set-PowerValue $plan 'Require sign-in on wake' $NoGroup '0e796bdb-100d-47d6-a2d5-f7d2daa51f51' 0
 }
 
-Write-Host '  Plan: TV standby, power savings'
-Set-PowerValue $StandbyPlan 'Maximum processor state (%)' $Processor 'bc5038f7-23e0-4960-96da-33abaf5935ec' 30
+Write-Host '  Plan: TV standby, power savings (screen off: nothing needs speed)'
+Set-PowerValue $StandbyPlan 'Maximum processor state (%)' $Processor 'bc5038f7-23e0-4960-96da-33abaf5935ec' 20
 Set-PowerValue $StandbyPlan 'Minimum processor state (%)' $Processor '893dee8e-2bef-41e0-89c6-b55d0929964c' 5
 Set-PowerValue $StandbyPlan 'Processor boost (0 = off)' $Processor 'be337238-0d82-4146-a960-4f3749d470c7' 0 -Optional
+Set-PowerValue $StandbyPlan 'Energy performance preference (100 = most efficient)' $Processor '36687f9e-e3a5-4dbf-b1dc-15eb381c6863' 100 -Optional
+Set-PowerValue $StandbyPlan 'Core parking: most cores awake (%)' $Processor 'ea062031-0e34-4ff1-9b6d-eb1059334028' 25 -Optional
+Set-PowerValue $StandbyPlan 'Core parking: fewest cores awake (%)' $Processor '0cc5b647-c1df-4637-891a-dec35c318583' 0 -Optional
 Set-PowerValue $StandbyPlan 'PCIe link state power (2 = maximum savings)' $Pcie 'ee12f906-d277-404b-b6da-e5fa1a576df5' 2 -Optional
-Set-PowerValue $StandbyPlan 'Turn off disk after (s)' $Disk '6738e2c4-e8a5-4a42-b16a-e040e769756e' 300
 Set-PowerValue $StandbyPlan 'Wi-Fi power saving (3 = maximum)' $Wireless '12bbebe6-58d6-4636-95bb-3217ef867c1a' 3 -Optional
 
 powercfg /setactive $Balanced

@@ -140,6 +140,28 @@ sealed class AppManager
         return null;
     }
 
+    /// <summary>
+    /// Standby: running apps go into Windows' Efficiency mode (idle priority and EcoQoS, the
+    /// economy clock), as Task Manager does; false puts them back to normal.
+    /// </summary>
+    public void SetEfficiencyMode(bool on)
+    {
+        List<Process> list;
+        lock (running) list = running.Values.Where(p => !p.HasExited).ToList();
+        foreach (var root in list)
+            foreach (var pid in Native.ProcessTree((uint)root.Id))
+            {
+                try
+                {
+                    using var p = Process.GetProcessById((int)pid);
+                    p.PriorityClass = on ? ProcessPriorityClass.Idle : ProcessPriorityClass.Normal;
+                    Native.SetEcoQos(p.Handle, on);
+                }
+                catch (Exception) { } // exited meanwhile, or not ours to change
+            }
+        Log.Info($"Apps {(on ? "in" : "out of")} efficiency mode ({list.Count} running)");
+    }
+
     public void Close(string id)
     {
         Process? p;
