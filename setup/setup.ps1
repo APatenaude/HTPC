@@ -14,7 +14,7 @@
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
-      DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1)
+      DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
 
@@ -70,6 +70,8 @@ $Steps = [ordered]@{
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
+        # A virtual machine (the clean-install test) has no video decoder to check.
+        if ((Get-CimInstance Win32_ComputerSystem).Model -eq 'Virtual Machine') { Write-Attention 'virtual machine: no hardware video decoder to check; skipped'; return }
         & $tool
         if ($LASTEXITCODE -ne 0) { throw 'Some codecs are not hardware decoded (table above)' }
     }

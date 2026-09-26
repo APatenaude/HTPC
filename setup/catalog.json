@@ -35,7 +35,7 @@
       "preset": "mouse",
       "icon": { "glyph": "film", "color": "#7C8CFF" },
       "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe" },
-      "install": { "source": "winget", "id": "Stremio.Stremio.Beta" }
+      "install": { "source": "winget", "id": "Stremio.Stremio.Beta", "blockInbound": [ "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-runtime.exe" ] }
     },
     {
       "id": "jellyfin",

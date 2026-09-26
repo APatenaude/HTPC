@@ -13,6 +13,14 @@
     on demand, from the launcher later). Entries marked "asUser" (Spotify refuses to
     install elevated) are skipped when running elevated.
 
+    Nothing may pop up on the TV:
+      - an app its installer starts (Stremio does) is closed again;
+      - programs listed in an entry's install.blockInbound get an inbound Block rule in Windows
+        Firewall. Without any rule, Windows asks "allow this app on public and private
+        networks?" the first time the program listens (Stremio's streaming service did, on the
+        first clean install in the test VM). None needs to be reached from other devices:
+        Stremio's player talks to its service on the box itself.
+
 .PARAMETER Ids
     Catalog ids to install instead of the default picks, e.g. -Ids kodi,vlc
 #>
@@ -56,6 +64,29 @@ function Save-GithubAsset($Install) {
         Write-Attention "$($asset.name) has no published SHA-256; not verified"
     }
     [pscustomobject]@{ File = $file; Tag = $release.tag_name }
+}
+
+# Closes what an installer started (a program that did not run before, from the app's folder).
+function Stop-StartedByInstaller($App, [int[]]$Before) {
+    if (-not $App.launch.exe) { return }
+    $dir = Split-Path ([Environment]::ExpandEnvironmentVariables($App.launch.exe)) -Parent
+    Start-Sleep -Seconds 2   # installers start the app as they exit
+    $started = Get-Process | Where-Object { $Before -notcontains $_.Id -and $_.Path -and $_.Path.StartsWith($dir + '\', [StringComparison]::OrdinalIgnoreCase) }
+    foreach ($p in $started) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        Write-Change "closed $($p.ProcessName), started by the $($App.name) installer"
+    }
+}
+
+# An inbound Block rule per program in install.blockInbound (paths may use %VARIABLES%).
+function Add-InboundBlock($App) {
+    foreach ($program in @($App.install.blockInbound | Where-Object { $_ })) {
+        $path = [Environment]::ExpandEnvironmentVariables($program)
+        $name = "HTPC: $($App.name) ($(Split-Path $path -Leaf)) not reachable from the network"
+        if (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue) { Write-Same "firewall: $name"; continue }
+        New-NetFirewallRule -DisplayName $name -Direction Inbound -Program $path -Action Block -Profile Any | Out-Null
+        Write-Change "firewall: $name"
+    }
 }
 
 function New-StartMenuShortcut([string]$Name, [string]$Target) {
@@ -119,12 +150,15 @@ foreach ($app in $picked) {
     try {
         if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
         if ($app.install.asUser -and (Test-Admin)) { Write-Attention "$($app.name) must be installed without admin rights; skipped"; continue }
+        if (Test-Admin) { Add-InboundBlock $app }   # before the app can first run
+        $before = @(Get-Process | Select-Object -ExpandProperty Id)
         switch ($app.install.source) {
             'winget'  { Install-FromWinget $app }
             'github'  { Install-FromGithub $app }
             'builtin' { Write-Same "$($app.name) ships with Windows" }
             default   { throw "Unknown install source '$($app.install.source)'" }
         }
+        Stop-StartedByInstaller $app $before
     } catch {
         Write-Attention "$($app.name): $($_.Exception.Message)"
         $failed += $app.name
