@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTPC answer file template: Windows 11 (IoT) Enterprise LTSC 2024, x64, UEFI/GPT.
+  docs/SPEC.md, Architecture > Install.
+
+  Not usable as is. setup/autounattend/New-InstallMedia.ps1 fills the placeholders and writes
+  the result to the install media as autounattend.xml:
+    __PASSWORD__     base64 of UTF-16LE (password + "Password"), PlainText false (both places)
+    __IMAGE_INDEX__  image in sources\install.wim; the whole InstallFrom element is removed
+                     when a product key picks the edition instead
+    __PRODUCT_KEY__  the whole ProductKey element is removed when no key is given
+  The account password and product keys never go into this repo.
+
+  What it does:
+    windowsPE    en-US; LabConfig bypass keys (TPM, Secure Boot, RAM) so a bare VM passes;
+                 wipes disk 0 and creates EFI, MSR, Windows and Recovery (at the end) with a
+                 diskpart script (Microsoft's documented UEFI layout); no Dynamic Update
+    specialize   computer name TV (reachable as tv.local through Windows mDNS),
+                 initial time zone Eastern Standard Time (only a starting value: setup.ps1
+                 turns on automatic time zone), no automatic device encryption (BitLocker)
+    oobeSystem   en-US; every OOBE page skipped; local account "user" in Administrators;
+                 AutoLogon for the first 3 logons (setup.ps1 makes it permanent);
+                 first logon runs htpc\Start-HtpcSetup.cmd from the install media
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>0409:00000409</InputLocale>
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <DynamicUpdate>
+        <Enable>false</Enable>
+        <WillShowUI>Never</WillShowUI>
+      </DynamicUpdate>
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>__IMAGE_INDEX__</Value>
+            </MetaData>
+          </InstallFrom>
+          <!-- Partition 3 of disk 0 is the Windows partition made by the diskpart script below. -->
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <InstallToAvailablePartition>false</InstallToAvailablePartition>
+          <WillShowUI>OnError</WillShowUI>
+        </OSImage>
+      </ImageInstall>
+      <RunSynchronous>
+        <!-- Insurance for VMs and odd firmware: skip the Windows 11 hardware checks. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <!--
+          Disk 0: 1 EFI 300 MB, 2 MSR 16 MB, 3 Windows (rest), 4 Recovery ~1 GB at the end.
+          Each Path must stay under 260 characters, hence the script is written in pieces.
+          On error diskpart's log is shown and setup waits, so a failure is visible on screen.
+        -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>cmd.exe /d /c "&gt;X:\htpc-diskpart.txt (echo SELECT DISK=0&amp;echo CLEAN&amp;echo CONVERT GPT&amp;echo CREATE PARTITION EFI SIZE=300&amp;echo FORMAT QUICK FS=FAT32 LABEL=System&amp;echo CREATE PARTITION MSR SIZE=16)"</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>cmd.exe /d /c "&gt;&gt;X:\htpc-diskpart.txt (echo CREATE PARTITION PRIMARY&amp;echo SHRINK MINIMUM=1024&amp;echo FORMAT QUICK FS=NTFS LABEL=Windows&amp;echo CREATE PARTITION PRIMARY&amp;echo FORMAT QUICK FS=NTFS LABEL=Recovery)"</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Path>cmd.exe /d /c "&gt;&gt;X:\htpc-diskpart.txt (echo SET ID=de94bba4-06d1-4d40-a16a-bfd50179d6ac&amp;echo GPT ATTRIBUTES=0x8000000000000001)"</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Path>cmd.exe /d /c "diskpart.exe /s X:\htpc-diskpart.txt &gt;X:\htpc-diskpart.log || (type X:\htpc-diskpart.log &amp; echo diskpart failed, see above. &amp; pause &amp; exit /b 1)"</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <ProductKey>
+          <Key>__PRODUCT_KEY__</Key>
+          <WillShowUI>OnError</WillShowUI>
+        </ProductKey>
+      </UserData>
+    </component>
+  </settings>
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <!-- 24H2 turns on device encryption by itself; with a local account the key is backed up nowhere. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg.exe add HKLM\SYSTEM\CurrentControlSet\Control\BitLocker /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <ComputerName>TV</ComputerName>
+      <!--
+        Initial value only, so the clock is not on Pacific (the default) until location resolves.
+        The real setting is automatic: setup.ps1 turns on tzautoupdate and location.
+      -->
+      <TimeZone>Eastern Standard Time</TimeZone>
+    </component>
+  </settings>
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>0409:00000409</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <!-- Setup keeps this password in Winlogon DefaultPassword; setup.ps1 moves it to an LSA secret. -->
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <LogonCount>3</LogonCount>
+        <Username>user</Username>
+        <Password>
+          <Value>__PASSWORD__</Value>
+          <PlainText>false</PlainText>
+        </Password>
+      </AutoLogon>
+      <!--
+        Runs once, elevated, at the first logon: finds the ready drive that holds
+        htpc\setup\setup.ps1 (DriveInfo.IsReady avoids "no disk" prompts on empty card readers)
+        and runs htpc\Start-HtpcSetup.cmd from it. That script copies htpc\setup to
+        C:\ProgramData\HTPC\setup, runs setup.ps1 -Unattended and logs to
+        C:\ProgramData\HTPC\logs\bootstrap.log.
+      -->
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$d = [IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and (Test-Path -LiteralPath ($_.Name + 'htpc\setup\setup.ps1')) -and (Test-Path -LiteralPath ($_.Name + 'htpc\Start-HtpcSetup.cmd')) } | Select-Object -First 1; if ($d) { cmd.exe /d /c ($d.Name + 'htpc\Start-HtpcSetup.cmd'); exit $LASTEXITCODE }; $null = New-Item -ItemType Directory -Force C:\ProgramData\HTPC\logs; Add-Content C:\ProgramData\HTPC\logs\bootstrap.log ((Get-Date -Format s) + ' ERROR: no drive holds htpc\setup\setup.ps1'); exit 1"</CommandLine>
+          <Description>HTPC bootstrap: copy setup from the install media and run setup.ps1</Description>
+          <RequiresUserInput>false</RequiresUserInput>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>user</Name>
+            <DisplayName>user</DisplayName>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>__PASSWORD__</Value>
+              <PlainText>false</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+    </component>
+  </settings>
+</unattend>
