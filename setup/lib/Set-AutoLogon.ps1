@@ -13,9 +13,12 @@
 
 .PARAMETER Unattended
     No prompt: without a password from the answer file, the step is skipped.
+.PARAMETER Password
+    Already asked for (setup.ps1 asks at the start so nobody waits for the prompt).
 #>
 param(
     [switch]$Unattended,
+    [Security.SecureString]$Password,
     [string]$UserName = $env:USERNAME
 )
 
@@ -115,7 +118,9 @@ $current = Get-ItemProperty $winlogon
 # A rename done earlier in this run only takes effect after a restart; sign in to the new name.
 $computer = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
 
-if ($null -ne $current.DefaultPassword) {
+if ($Password) {
+    if ($Password.Length -eq 0) { Write-Attention 'Automatic sign-in skipped'; return }
+} elseif ($null -ne $current.DefaultPassword) {
     $password = New-Object Security.SecureString
     foreach ($ch in $current.DefaultPassword.ToCharArray()) { $password.AppendChar($ch) }
     Write-Host '  Using the password the answer file left for the first sign-ins'

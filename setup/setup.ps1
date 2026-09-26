@@ -66,7 +66,7 @@ $Steps = [ordered]@{
     Power        = { & "$lib\Set-Power.ps1" -DevKeepAwake:$DevKeepAwake }
     Updates      = { & "$lib\Set-UpdatePolicy.ps1" }
     System       = { & "$lib\Set-SystemPolicy.ps1" }
-    AutoLogon    = { & "$lib\Set-AutoLogon.ps1" -Unattended:$Unattended }
+    AutoLogon    = { & "$lib\Set-AutoLogon.ps1" -Unattended:$Unattended -Password $AutoLogonPassword }
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
@@ -135,6 +135,16 @@ New-Item -ItemType Directory -Force $logDir | Out-Null
 $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
 Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+
+# Ask for the sign-in password now rather than halfway through, unless it is already set up
+# or the answer file left it for us.
+$AutoLogonPassword = $null
+$winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+$autoLogonSet = $winlogon.AutoAdminLogon -eq '1' -and $winlogon.DefaultUserName -eq $env:USERNAME
+if (-not $Unattended -and -not $autoLogonSet -and $null -eq $winlogon.DefaultPassword -and
+    -not ($Only -and $Only -notcontains 'AutoLogon') -and $Skip -notcontains 'AutoLogon') {
+    $AutoLogonPassword = Read-Host "Password of $env:USERNAME for automatic sign-in (Enter alone skips)" -AsSecureString
+}
 
 $results = [ordered]@{}
 foreach ($name in $Steps.Keys) {
