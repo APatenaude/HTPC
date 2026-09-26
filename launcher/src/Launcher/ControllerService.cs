@@ -2,13 +2,14 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold }
+enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown }
 
 /// <summary>
 /// Reads the controller through XInput directly, including the Home (Guide) button, which only
 /// the undocumented XInputGetStateEx (ordinal 100) reports. Works whichever window has focus.
 /// Raises Pressed on a background thread: D-pad and left stick repeat while held; Home fires
-/// Home on a short press and HomeHold as soon as it has been held for 0.5 s.
+/// HomeDown the moment it goes down (standby wakes on that), then Home on a short press or
+/// HomeHold as soon as it has been held for 0.5 s.
 /// </summary>
 sealed class ControllerService : IDisposable
 {
@@ -150,7 +151,7 @@ sealed class ControllerService : IDisposable
             }
 
             var homeNow = (buttons & HomeBit) != 0;
-            if (homeNow && homeDown < 0) { homeDown = now; homeHeld = false; }
+            if (homeNow && homeDown < 0) { homeDown = now; homeHeld = false; Raise(Pad.HomeDown, false); }
             if (homeNow && !homeHeld && now - homeDown >= HoldMs) { homeHeld = true; Raise(Pad.HomeHold, false); }
             if (!homeNow && homeDown >= 0)
             {

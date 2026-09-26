@@ -26,6 +26,7 @@ sealed class MainForm : Form
     readonly CursorHider cursor = new();
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
+    bool homeWoke;          // a Home press just woke the box: swallow its release
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
@@ -227,10 +228,17 @@ sealed class MainForm : Form
 
     void OnPad(Pad pad, bool repeat)
     {
-        // In standby only a tap on Home wakes the box; everything else is swallowed. Holding Home
-        // (3 s switches the 8BitDo off) raises HomeHold instead, so it does not wake it. Nothing
-        // here may move the pointer: Windows counts that as input and turns the display back on.
-        if (standby.Active) { if (pad == Pad.Home) standby.Wake("controller Home"); return; }
+        // In standby only Home wakes the box, the moment it goes down (a tap-on-release missed
+        // slower presses in the dark); everything else is swallowed. Nothing here may move the
+        // pointer: Windows counts that as input and turns the display back on.
+        if (standby.Active)
+        {
+            if (pad == Pad.HomeDown) { homeWoke = true; standby.Wake("controller Home"); }
+            return;
+        }
+        if (pad == Pad.HomeDown) return;
+        // The release of the press that woke the box is not also a Home tap or hold.
+        if (homeWoke && pad is Pad.Home or Pad.HomeHold) { homeWoke = false; return; }
         cursor.Hide(); // the controller is in use: no mouse pointer on the TV
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
@@ -255,6 +263,7 @@ sealed class MainForm : Form
         {
             Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
             Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
+            Pad.LB => "lb", Pad.RB => "rb",
             _ => null
         };
         if (button is not null) Post(new { type = "input", button });

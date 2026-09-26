@@ -269,7 +269,7 @@ function renderSettings() {
     : state.section === 'tv' ? renderTvSection()
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
   $('settings').innerHTML = nav + `<div class="spane"><main>${body}</main>` +
-    `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['B', 'Back']])}</footer></div>`;
+    `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['LB RB', 'Sections'], ['B', 'Back']])}</footer></div>`;
 }
 
 function changeSetting(key, step) {
@@ -375,7 +375,50 @@ function move(dir) {
     const score = main + Math.abs(side) * 2;
     if (score < bestScore) { bestScore = score; best = el; }
   }
+  if (!best) best = wrapTarget(cur, dir);
   if (best) setFocus(best);
+}
+
+// Past the end of a row or a list: the far end of the same row or column.
+function wrapTarget(cur, dir) {
+  const r = cur.getBoundingClientRect();
+  const horizontal = dir === 'left' || dir === 'right';
+  let far = null, farDist = 0;
+  for (const el of items()) {
+    if (el === cur) continue;
+    const q = el.getBoundingClientRect();
+    const inLine = horizontal ? (q.top < r.bottom && q.bottom > r.top) : (q.left < r.right && q.right > r.left);
+    if (!inLine) continue;
+    const dist = dir === 'right' ? r.left - q.left : dir === 'left' ? q.left - r.left : dir === 'down' ? r.top - q.top : q.top - r.top;
+    if (dist > farDist) { farDist = dist; far = el; }
+  }
+  return far;
+}
+
+// Settings: LB/RB change section from anywhere; right from the section list goes into the
+// section, left (off a value) or B from the section comes back to the list.
+function settingsPress(button, el) {
+  const inNav = el && el.dataset.section;
+  const navItem = () => $('settings').querySelector(`[data-section="${state.section}"]`);
+  const i = SECTIONS.findIndex(([id]) => id === state.section);
+  switch (button) {
+    case 'lb': case 'rb': {
+      state.section = SECTIONS[(i + (button === 'rb' ? 1 : -1) + SECTIONS.length) % SECTIONS.length][0];
+      render();
+      setFocus(navItem());
+      return true;
+    }
+    case 'right':
+      if (inNav) { const first = $('settings').querySelector('.spane [data-nav]'); if (first) setFocus(first); return true; }
+      return false;
+    case 'left':
+      if (!inNav && !(el && el.dataset.setting)) { setFocus(navItem()); return true; }
+      return inNav; // nothing to the left of the list
+    case 'b':
+      if (!inNav) { setFocus(navItem()); return true; }
+      return false;
+  }
+  return false;
 }
 
 // ---- Actions ------------------------------------------------------------------------------
@@ -451,6 +494,7 @@ function back() {
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
   const el = focusedEl();
+  if (state.view === 'settings' && settingsPress(button, el)) return;
   switch (button) {
     case 'up': case 'down': move(button); break;
     case 'left': case 'right':
@@ -482,7 +526,7 @@ function press(button) {
 }
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
-  Escape: 'b', Backspace: 'b', x: 'x', h: 'home', p: 'homeHold' };
+  Escape: 'b', Backspace: 'b', x: 'x', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb' };
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }

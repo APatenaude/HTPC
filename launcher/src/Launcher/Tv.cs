@@ -213,7 +213,9 @@ sealed class TvService
     /// </summary>
     public async Task Discover()
     {
-        Screen = Edid.Current();
+        // While the TV is off, Windows may report a placeholder monitor (maker MS_, no name):
+        // keep the last real one.
+        if (Edid.Current() is { Name.Length: > 0 } edid) Screen = edid;
         Found = await Roku.FindAll(TimeSpan.FromSeconds(3));
         Log.Info($"Screen {Screen?.Key ?? "unknown"}; TVs found: {string.Join(", ", Found.Select(t => $"{t.Name} ({t.Model}, {t.EcpMode}, {t.PowerMode})"))}");
         if (Screen is not null && Profile is null)
@@ -254,29 +256,55 @@ sealed class TvService
         if (await Roku.Key(tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
     }
 
+    int turningOn;
+
+    /// <summary>
+    /// On, and on the box's input, with as few keys as possible: a Roku TV comes back on its last
+    /// input, and a second input key made it switch twice. So: no PowerOn if it is on already,
+    /// and the input key only if it has not landed on the box's input a few seconds later.
+    /// </summary>
     public async Task TurnOn()
     {
-        if (Profile is not { OnWithBox: true } p || Current is not { } tv || tv.Locked) return;
-        lastPower = "PowerOn";
-        lastInput = p.Input;
-        if (!await Roku.Key(tv.BaseUrl, "PowerOn")) return;
-        Log.Info($"TV {tv.Name} on");
-        if (p.Input > 0)
+        if (Profile is not { OnWithBox: true } p || Current is not { } known || known.Locked) return;
+        await BringUp(p, known);
+    }
+
+    async Task BringUp(TvProfile p, RokuTv known)
+    {
+        if (Interlocked.Exchange(ref turningOn, 1) == 1) return; // one at a time
+        try
         {
-            await Task.Delay(2500); // the TV needs a moment before it takes an input key
-            await Roku.Key(tv.BaseUrl, $"InputHDMI{p.Input}");
+            lastPower = "PowerOn";
+            lastInput = p.Input;
+            var tv = await Roku.Describe(known.Id, known.BaseUrl);
+            if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) return;
+            if (tv is not { IsOn: true })
+            {
+                if (!await Roku.Key(known.BaseUrl, "PowerOn")) return;
+                Log.Info($"TV {known.Name} on");
+            }
+            if (p.Input == 0) return;
+            for (var i = 0; i < 6; i++)
+            {
+                await Task.Delay(1000);
+                tv = await Roku.Describe(known.Id, known.BaseUrl);
+                if (tv is { IsOn: true } && tv.ActiveInput == p.Input) return;
+            }
+            Log.Info($"TV not on HDMI {p.Input}: switching");
+            await Roku.Key(known.BaseUrl, $"InputHDMI{p.Input}");
         }
+        finally { turningOn = 0; }
     }
 
     /// <summary>Test from Settings: off, then back on.</summary>
     public async Task<bool> Test()
     {
-        if (Current is not { } tv || tv.Locked) return false;
-        var ok = await Roku.Key(tv.BaseUrl, "PowerOff");
+        if (Profile is not { } p || Current is not { } tv || tv.Locked) return false;
+        lastPower = "off";
+        if (!await Roku.Key(tv.BaseUrl, "PowerOff")) return false;
         await Task.Delay(5000);
-        ok &= await Roku.Key(tv.BaseUrl, "PowerOn");
-        if (Profile is { Input: > 0 } p) { await Task.Delay(2500); await Roku.Key(tv.BaseUrl, $"InputHDMI{p.Input}"); }
-        return ok;
+        await BringUp(p, tv);
+        return (await Roku.Describe(tv.Id, tv.BaseUrl))?.IsOn == true;
     }
 
     /// <summary>Every few seconds: notices the TV turned off or on with its own remote.</summary>
