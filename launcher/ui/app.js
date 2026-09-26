@@ -21,7 +21,8 @@ const state = {
   stack: [],               // views to go back to
   backdrop: null,
   section: 'sleep',        // Settings section shown
-  prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true }
+  prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true },
+  power: { sleep: true, hibernate: true }   // sleep states this PC has (from the host)
 };
 
 const $ = (id) => document.getElementById(id);
@@ -79,7 +80,14 @@ function renderTiles() {
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
       `<span class="name">${esc(t.name)}</span>` +
     '</div>').join('');
-  $('home-hints').innerHTML = hints([['A', 'Open'], ['X', 'Close app'], ['Home', 'Menu'], ['Hold Home', 'Power']]);
+  updateHomeHints();
+}
+
+// "X Close app" only while the focused tile's app is running.
+function updateHomeHints() {
+  const f = $('home').querySelector('.tile.focused');
+  const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
+  $('home-hints').innerHTML = hints([['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Home', 'Menu'], ['Hold Home', 'Power']]);
 }
 
 function renderMenu() {
@@ -156,20 +164,23 @@ const SECTIONS = [
 // Values a setting row steps through with left/right (A steps forward).
 const CHOICES = {
   idleMinutes: [[15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [0, 'Never']],
-  sleepMode: [['standby', 'Standby'], ['sleep', 'Light sleep'], ['hibernate', 'Deep sleep']],
+  // Only the modes this PC has (the host reports them); screen off always works.
+  sleepMode: [['standby', 'Screen off'], ['sleep', 'Sleep'], ['hibernate', 'Hibernate']],
   sleepAfterStandbyHours: [[0, 'Never'], [1, 'After 1 hour'], [3, 'After 3 hours'], [6, 'After 6 hours'], [12, 'After 12 hours']],
   stayAwakeWhilePlaying: [[false, 'Off'], [true, 'On']]
 };
 
 // What each sleep mode means, shown under the choice and on the Power screen.
 const SLEEP_MODES = {
-  standby: { caption: 'Screen and TV off; the box stays ready. Tap Home on the controller to wake it. A few watts.',
+  standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Tap Home on the controller to wake it.',
              wake: 'Tap Home on the controller to wake' },
-  sleep: { caption: 'About 1 W. The controller can’t wake it: use the power button, the keyboard or the phone.',
+  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller can’t wake it: use the power button, the keyboard or the phone.',
            wake: 'Wake with the power button or the keyboard' },
-  hibernate: { caption: 'Almost no power, slower to come back. Wake with the power button, the keyboard or the phone.',
+  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button, the keyboard or the phone.',
                wake: 'Wake with the power button' }
 };
+
+function availableModes() { return CHOICES.sleepMode.filter(([v]) => v === 'standby' || state.power[v]); }
 
 function choiceLabel(key) {
   const c = CHOICES[key].find(([v]) => v === state.prefs[key]);
@@ -189,10 +200,12 @@ function renderSleepSection() {
   const p = state.prefs;
   return '<header><h1>Sleep &amp; power</h1>' +
       '<p>Sleep from the Power menu, the sleep timer, or when nothing happens for a while.</p></header>' +
-    settingRow('sleepMode', 'Sleep mode', SLEEP_MODES[p.sleepMode].caption,
-      '<div class="seg">' + CHOICES.sleepMode.map(([v, l]) => `<span${v === p.sleepMode ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>') +
-    (p.sleepMode === 'standby'
-      ? settingRow('sleepAfterStandbyHours', 'Then light sleep', 'After this long in standby, drop to light sleep (about 1 W; the controller can’t wake it from there)',
+    (availableModes().length > 1
+      ? settingRow('sleepMode', 'Sleep mode', SLEEP_MODES[p.sleepMode].caption,
+          '<div class="seg">' + availableModes().map(([v, l]) => `<span${v === p.sleepMode ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>')
+      : '') +
+    (p.sleepMode === 'standby' && state.power.sleep
+      ? settingRow('sleepAfterStandbyHours', 'Then Windows sleep', 'After this long with the screen off, the box goes into Windows sleep (about 1 W; the controller can’t wake it from there)',
           stepper('sleepAfterStandbyHours'))
       : '') +
     settingRow('idleMinutes', 'Sleep after', 'When nothing plays and nobody touches the controller', stepper('idleMinutes')) +
@@ -219,7 +232,7 @@ function renderSettings() {
 }
 
 function changeSetting(key, step) {
-  const list = CHOICES[key];
+  const list = key === 'sleepMode' ? availableModes() : CHOICES[key];
   const i = list.findIndex(([v]) => v === state.prefs[key]);
   const next = list[(Math.max(i, 0) + step + list.length) % list.length][0];
   state.prefs[key] = next;
@@ -271,6 +284,7 @@ function setFocus(el, chosen = true) {
   if (!el) return;
   el.classList.add('focused');
   if (chosen) state.memory[state.view] = el.dataset.id;
+  if (state.view === 'home') updateHomeHints();
   // Settings: moving through the section list shows each section right away.
   if (el.dataset.section && el.dataset.section !== state.section) {
     state.section = el.dataset.section;
@@ -427,6 +441,7 @@ function onHost(msg) {
       state.tiles = msg.tiles;
       Object.assign(state, msg.settings || {});
       if (msg.prefs) Object.assign(state.prefs, msg.prefs);
+      if (msg.power) state.power = msg.power;
       render();
       break;
     case 'blank': $('stage').classList.add('blank'); break;

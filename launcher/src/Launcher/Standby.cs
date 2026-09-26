@@ -121,13 +121,14 @@ sealed class Standby
         if (ActivePlan() == StandbyPlan) SetPlan(BalancedPlan);
     }
 
-    /// <summary>Sleep as set in Settings (Power menu, sleep timer, idle).</summary>
+    /// <summary>Sleep as set in Settings (Power menu, sleep timer, idle); screen off if the set mode is not available.</summary>
     public void Sleep(string reason)
     {
+        var (s3, s4) = Capabilities();
         switch (settings.SleepMode)
         {
-            case "sleep": RealSleep(false, reason); break;
-            case "hibernate": RealSleep(true, reason); break;
+            case "sleep" when s3: RealSleep(false, reason); break;
+            case "hibernate" when s4: RealSleep(true, reason); break;
             default: Enter(reason); break;
         }
     }
@@ -139,7 +140,13 @@ sealed class Standby
         Active = true;
         controller.Slow = true;
         await PausePlayback();
-        SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2); // screen off
+        // The launcher goes in front first: bringing a window forward can inject a key press,
+        // which would turn the display straight back on. Then the video output goes off
+        // (the TV sees no signal), and again a moment later in case something woke it.
+        Changed?.Invoke(true);
+        await Task.Delay(300);
+        DisplayOff();
+        _ = Task.Delay(3000).ContinueWith(_ => { if (Active) DisplayOff(); });
         // Switching power plans takes Windows seconds: in the background.
         _ = Task.Run(() =>
         {
@@ -150,8 +157,23 @@ sealed class Standby
         // switches itself off after 15 idle minutes, or with a 3 s hold on Home).
         controller.PowerOff();
         since = DateTime.Now;
-        Changed?.Invoke(true);
     }
+
+    // SC_MONITORPOWER 2: the display powers down (DPMS); the GPU stops sending a picture.
+    void DisplayOff() => SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2);
+
+    /// <summary>What this PC supports, read from Windows (GetPwrCapabilities).</summary>
+    public static (bool Sleep, bool Hibernate) Capabilities()
+    {
+        var caps = new byte[128];
+        if (!GetPwrCapabilities(caps)) return (false, false);
+        // SYSTEM_POWER_CAPABILITIES: SystemS3 at 5, SystemS4 at 6, HiberFilePresent at 8, AoAc at 20.
+        var s3 = caps[5] != 0 && caps[20] == 0; // Modern Standby machines have no S3
+        var s4 = caps[6] != 0 && caps[8] != 0;
+        return (s3, s4);
+    }
+
+    [DllImport("powrprof.dll")] static extern bool GetPwrCapabilities(byte[] capabilities);
 
     public void Wake(string reason)
     {
@@ -185,7 +207,8 @@ sealed class Standby
     {
         if (Active)
         {
-            if (settings.SleepAfterStandbyHours > 0 && DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
+            if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep &&
+                DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
             {
                 RealSleep(false, $"after {settings.SleepAfterStandbyHours} h in standby");
                 since = DateTime.Now; // back from it still in standby: count again

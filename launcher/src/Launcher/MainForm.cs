@@ -72,7 +72,8 @@ sealed class MainForm : Form
         standby = new Standby(Handle, controller, settings);
         standby.Changed += OnStandbyChanged;
         standby.GoingDown += () => Post(new { type = "show", view = "home" });
-        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never)");
+        var (hasS3, hasS4) = Standby.Capabilities();
+        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
         controller.Start();
         clock.Start();
         mouseWatch.Start();
@@ -123,7 +124,8 @@ sealed class MainForm : Form
         {
             case "ready":
                 uiReady = true;
-                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings });
+                var (s3, s4) = Standby.Capabilities();
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 } });
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "setting":
