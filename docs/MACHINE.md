@@ -57,8 +57,14 @@ No newer Intel driver is needed for decoding; what is missing is the HEVC extens
 | | |
 |---|---|
 | Box | Ethernet, 1 Gbps (Realtek). Wi-Fi (Realtek 8821CE) unused. Network profile: Public |
-| TV | TCL 65S41-CA Roku TV, 65", Roku OS 15.3.4, on Wi-Fi |
-| Discovery | SSDP `ST: roku:ecp` answers from the TV; ECP on port 8060 |
-| Power features | `supports-warm-standby`, `supports-wake-on-wlan`, `supports-suspend` all true |
-| Box input | HDMI 1 |
-| ECP mode | **limited**: `query/device-info` and `query/active-app` answer, `query/apps` is refused ("ECP command not allowed in Limited mode") |
+| Box's TV (per the user) | Bedroom TV: TCL 43S425-CA Roku TV, Roku OS 15.3.4, on Wi-Fi |
+| Other Roku on the network | Living room TV: TCL 65S41-CA. Not to be used for tests |
+| EDID on the box's HDMI | Maker TCL, name `65S41CA`, product code 0000, 2022 |
+| Discovery | SSDP `ST: roku:ecp` finds both TVs, though the bedroom TV missed the first search; ECP on port 8060 |
+| Power features | `supports-warm-standby` and `supports-wake-on-wlan` true on both |
+| ECP mode | **limited** on both: `query/device-info` and `query/active-app` answer, `query/apps` is refused ("ECP command not allowed in Limited mode") |
+
+The EDID names the living room model while the user says the box is on the bedroom TV, so
+either TCL reuses EDID names across models or the cabling differs from what we think. Either way,
+matching a TV profile by EDID alone (SPEC N7) may not tell two TCL Roku TVs apart; the TV step in
+first-run setup should confirm the match, for example by checking which TV reports the box's input as active.
