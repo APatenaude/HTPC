@@ -48,6 +48,16 @@ Set-RegValue 'HKCU:\Control Panel\Accessibility\Keyboard Response' 'Flags' '122'
 Set-RegValue 'HKCU:\Control Panel\Accessibility\ToggleKeys' 'Flags' '58' 'String'
 Set-RegValue "$policies\GameDVR" 'AllowGameDVR' 0
 Set-RegValue 'HKCU:\Software\Microsoft\GameBar' 'UseNexusForGameBarEnabled' 0
+# LTSC has no Xbox Game Bar, yet the controller's Home button opens ms-gamebar links and
+# Windows asks which app should open them. Point those links at systray.exe, which does
+# nothing (the launcher reads the Home button itself).
+foreach ($protocol in 'ms-gamebar', 'ms-gamebarservices', 'ms-gamingoverlay') {
+    $key = "HKLM:\SOFTWARE\Classes\$protocol"
+    Set-RegValue $key '(default)' "URL:$protocol" 'String'
+    Set-RegValue $key 'URL Protocol' '' 'String'
+    Set-RegValue $key 'NoOpenWith' '' 'String'
+    Set-RegValue "$key\shell\open\command" '(default)' "`"$env:SystemRoot\System32\systray.exe`"" 'String'
+}
 
 Write-Host '  Network, time zone, name'
 foreach ($net in Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Public' }) {

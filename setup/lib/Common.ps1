@@ -25,7 +25,7 @@ function Set-RegValue {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)]$Value,
+        [Parameter(Mandatory)][AllowEmptyString()]$Value,
         [ValidateSet('DWord', 'QWord', 'String', 'ExpandString', 'MultiString')][string]$Type = 'DWord'
     )
     if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }

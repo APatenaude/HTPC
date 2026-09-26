@@ -53,7 +53,7 @@ foreach ($i in 0..3) {
         $connected += $i
     }
 }
-if (-not $connected) { Write-Host 'No XInput controller connected.'; return }
+if ($connected.Count -eq 0) { Write-Host 'No XInput controller connected.'; return }
 
 Write-Host "Press buttons for $Seconds s (Home included)..."
 $last = @{}
