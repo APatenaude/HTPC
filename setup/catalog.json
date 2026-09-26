@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "One list drives setup's app picks and, later, the launcher's library (SPEC: App catalog). default = pre-ticked in first-run setup. preset = default button map (SPEC: Controller map).",
+  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = stand-in glyph and colour from the design until real logos. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window.",
   "apps": [
     {
       "id": "youtube",
@@ -8,6 +8,8 @@
       "type": "app",
       "default": true,
       "preset": "controller",
+      "icon": { "glyph": "youtube", "color": "#FF5B52" },
+      "launch": { "exe": "%ProgramFiles%\\VacuumTube\\VacuumTube.exe" },
       "install": {
         "source": "github",
         "repo": "shy1132/VacuumTube",
@@ -22,7 +24,8 @@
       "type": "website",
       "url": "https://www.twitch.tv",
       "default": true,
-      "preset": "mouse"
+      "preset": "mouse",
+      "icon": { "glyph": "chat", "color": "#B08CFF" }
     },
     {
       "id": "stremio",
@@ -30,6 +33,8 @@
       "type": "app",
       "default": true,
       "preset": "mouse",
+      "icon": { "glyph": "film", "color": "#7C8CFF" },
+      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe" },
       "install": { "source": "winget", "id": "Stremio.Stremio.Beta" }
     },
     {
@@ -38,6 +43,8 @@
       "type": "app",
       "default": true,
       "preset": "controller",
+      "icon": { "glyph": "library", "color": "#3DC0F0" },
+      "launch": { "exe": "%ProgramFiles%\\Jellyfin\\Jellyfin Media Player\\JellyfinMediaPlayer.exe", "args": "--tv" },
       "install": { "source": "winget", "id": "Jellyfin.JellyfinMediaPlayer" }
     },
     {
@@ -46,6 +53,8 @@
       "type": "app",
       "default": true,
       "preset": "controller",
+      "icon": { "glyph": "moon", "color": "#F5D16B" },
+      "launch": { "exe": "%ProgramFiles%\\Moonlight Game Streaming\\Moonlight.exe" },
       "install": { "source": "winget", "id": "MoonlightGameStreamingProject.Moonlight" }
     },
     {
@@ -54,6 +63,11 @@
       "type": "app",
       "default": true,
       "preset": "mouse",
+      "icon": { "glyph": "globe", "color": "#3CCB9A" },
+      "launch": {
+        "exe": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
+        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-maximized --no-first-run --no-default-browser-check"
+      },
       "install": { "source": "builtin" }
     },
     {
@@ -62,6 +76,7 @@
       "type": "app",
       "default": false,
       "preset": "controller",
+      "icon": { "glyph": "play", "color": "#5AB0FF" },
       "install": { "source": "winget", "id": "XBMCFoundation.Kodi" }
     },
     {
@@ -70,6 +85,7 @@
       "type": "app",
       "default": false,
       "preset": "mouse",
+      "icon": { "glyph": "play", "color": "#FF8A1F" },
       "install": { "source": "winget", "id": "VideoLAN.VLC" }
     },
     {
@@ -78,6 +94,7 @@
       "type": "app",
       "default": false,
       "preset": "controller",
+      "icon": { "glyph": "play", "color": "#F5B82E" },
       "install": { "source": "winget", "id": "Plex.PlexHTPC" }
     },
     {
@@ -86,6 +103,7 @@
       "type": "app",
       "default": false,
       "preset": "mouse",
+      "icon": { "glyph": "music", "color": "#1ED760" },
       "install": { "source": "winget", "id": "Spotify.Spotify", "asUser": true }
     },
     {
@@ -94,12 +112,13 @@
       "type": "app",
       "default": false,
       "preset": "mouse",
+      "icon": { "glyph": "music", "color": "#FF7AB6" },
       "install": { "source": "winget", "id": "jeffvli.Feishin" }
     },
-    { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com", "default": false, "preset": "mouse" },
-    { "id": "disneyplus", "name": "Disney+", "type": "website", "url": "https://www.disneyplus.com", "default": false, "preset": "mouse" },
-    { "id": "primevideo", "name": "Prime Video", "type": "website", "url": "https://www.primevideo.com", "default": false, "preset": "mouse" },
-    { "id": "crunchyroll", "name": "Crunchyroll", "type": "website", "url": "https://www.crunchyroll.com", "default": false, "preset": "mouse" },
-    { "id": "hbomax", "name": "HBO Max", "type": "website", "url": "https://play.hbomax.com", "default": false, "preset": "mouse" }
+    { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#FF4B55" } },
+    { "id": "disneyplus", "name": "Disney+", "type": "website", "url": "https://www.disneyplus.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#4D8DFF" } },
+    { "id": "primevideo", "name": "Prime Video", "type": "website", "url": "https://www.primevideo.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#2BB0F5" } },
+    { "id": "crunchyroll", "name": "Crunchyroll", "type": "website", "url": "https://www.crunchyroll.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#FF8A2B" } },
+    { "id": "hbomax", "name": "HBO Max", "type": "website", "url": "https://play.hbomax.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#8A7BFF" } }
   ]
 }

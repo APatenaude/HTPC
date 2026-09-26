@@ -1,0 +1,276 @@
+using System.Text.Json;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
+
+namespace Htpc.Launcher;
+
+/// <summary>
+/// The full-screen launcher window: hosts the web UI (ui\) in WebView2 and connects it to the
+/// controller, the apps, power, volume and brightness.
+///
+/// Apps open on top of this window. The Home button brings it back: a capture of the app's
+/// screen becomes the backdrop behind the Home menu while the app keeps running underneath.
+/// </summary>
+sealed class MainForm : Form
+{
+    static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    readonly Options options;
+    readonly WebView2 web = new() { Dock = DockStyle.Fill };
+    readonly AppManager apps;
+    readonly ControllerService controller = new();
+    readonly AudioVolume audio = new();
+    readonly Dimmer dimmer = new();
+    readonly System.Windows.Forms.Timer clock = new() { Interval = 1000 };
+    readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
+
+    bool uiReady;
+    int brightness = 100;
+    DateTime? sleepAt;
+    string? sleepLabel;
+    bool sleepWarned;
+
+    public MainForm(Options options)
+    {
+        this.options = options;
+        Text = "TV";
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.Manual;
+        BackColor = Color.FromArgb(13, 14, 17);
+        web.DefaultBackgroundColor = BackColor;
+        Controls.Add(web);
+
+        apps = new AppManager(options.CatalogPath);
+        apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
+        controller.StatusChanged += (_, _) => BeginInvoke(PushState);
+        clock.Tick += (_, _) => CheckSleepTimer();
+        Directory.CreateDirectory(captureDir);
+    }
+
+    protected override async void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        var screen = Screen.PrimaryScreen!.Bounds;
+        Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+        Native.ForceForeground(Handle); // as the shell it starts in front; in dev it pushes past other windows
+        controller.Start();
+        clock.Start();
+        try { await InitWebView(); }
+        catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
+    }
+
+    async Task InitWebView()
+    {
+        var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "launcher-webview");
+        var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
+        await web.EnsureCoreWebView2Async(env);
+        var core = web.CoreWebView2;
+        core.Settings.AreDevToolsEnabled = options.Dev;
+        core.Settings.AreDefaultContextMenusEnabled = options.Dev;
+        core.Settings.AreBrowserAcceleratorKeysEnabled = options.Dev;
+        core.Settings.IsZoomControlEnabled = false;
+        core.Settings.IsPinchZoomEnabled = false;
+        core.Settings.IsSwipeNavigationEnabled = false;
+        core.Settings.IsStatusBarEnabled = false;
+        core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
+        core.WebMessageReceived += OnWebMessage;
+        core.ProcessFailed += (_, args) =>
+        {
+            Log.Error($"WebView2 process failed: {args.ProcessFailedKind}");
+            if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) core.Reload();
+        };
+        core.Navigate("https://launcher.htpc/index.html");
+        Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
+    }
+
+    // --- Messages from the UI ----------------------------------------------------------------
+
+    void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+        var m = doc.RootElement;
+        string? Str(string name) => m.TryGetProperty(name, out var v) ? v.ToString() : null;
+        switch (Str("type"))
+        {
+            case "ready":
+                uiReady = true;
+                Post(new { type = "init", tiles = TileList(), settings = StateObject() });
+                break;
+            case "launch": Open(Str("id")!); break;
+            case "switchTo": case "resume": SwitchTo(Str("id")!); break;
+            case "close": apps.Close(Str("id")!); break;
+            case "power": Power(Str("action")!); break;
+            case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
+            case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
+            case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
+        }
+    }
+
+    void Post(object message)
+    {
+        if (uiReady) web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, Json));
+    }
+
+    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id) }).ToList();
+
+    object StateObject() => new
+    {
+        type = "state",
+        running = apps.RunningIds(),
+        volume = audio.Get() ?? 0,
+        brightness,
+        controller = controller.Connected,
+        battery = controller.BatteryLevel,
+        timer = sleepAt is null ? null : new { label = sleepLabel, endsAt = new DateTimeOffset(sleepAt.Value).ToUnixTimeMilliseconds() }
+    };
+
+    void PushState() => Post(StateObject());
+
+    // --- Controller --------------------------------------------------------------------------
+
+    bool LauncherActive => Native.GetForegroundWindow() == Handle || ContainsFocus;
+
+    void OnPad(Pad pad, bool repeat)
+    {
+        var active = LauncherActive;
+        var app = active ? null : apps.ForegroundApp();
+        // Inside Moonlight a tap on Home belongs to the game PC; a 2 s hold opens our menu.
+        var moonlight = app?.Id == "moonlight";
+
+        switch (pad)
+        {
+            case Pad.Home:
+                if (moonlight) return;
+                if (active) Post(new { type = "input", button = "home" }); else ShowOver(app, "menu");
+                return;
+            case Pad.HomeHold1:
+                if (moonlight) return;
+                if (active) Post(new { type = "input", button = "homeHold" }); else ShowOver(app, "power");
+                return;
+            case Pad.HomeHold2:
+                if (moonlight) ShowOver(app, "menu");
+                return;
+        }
+
+        if (!active) return; // Controller preset: the app reads the pad itself.
+        var button = pad switch
+        {
+            Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
+            Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
+            _ => null
+        };
+        if (button is not null) Post(new { type = "input", button });
+    }
+
+    // --- Apps and the Home menu ----------------------------------------------------------------
+
+    void Open(string id)
+    {
+        if (apps.IsRunning(id)) { SwitchTo(id); return; }
+        if (!apps.Launch(id)) Post(new { type = "toast", text = $"{apps.Get(id)?.Name ?? id} could not be started", kind = "warn" });
+    }
+
+    void SwitchTo(string id)
+    {
+        var window = apps.MainWindow(id);
+        if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
+        Native.ForceForeground(window);
+    }
+
+    /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
+    void ShowOver(CatalogApp? app, string view)
+    {
+        string? backdrop = null;
+        if (app is not null)
+        {
+            try
+            {
+                foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg")) File.Delete(old);
+                var name = $"screen-{DateTime.Now.Ticks}.jpg";
+                ScreenCapture.Save(Path.Combine(captureDir, name));
+                backdrop = $"https://capture.htpc/{name}";
+            }
+            catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
+        }
+        Post(new { type = "show", view, current = app?.Id, backdrop });
+        PushState();
+        Native.ForceForeground(Handle);
+        web.Focus();
+    }
+
+    void OnRunningChanged(string id, bool started)
+    {
+        PushState();
+        if (started) return;
+        // An app closed by itself (or crashed) while in front: come back to the home screen.
+        if (!LauncherActive && apps.ForegroundApp() is null)
+        {
+            Post(new { type = "show", view = "home" });
+            Native.ForceForeground(Handle);
+        }
+    }
+
+    // --- Power and the sleep timer ----------------------------------------------------------------
+
+    void Power(string action)
+    {
+        Log.Info($"Power: {action}");
+        switch (action)
+        {
+            case "sleep":
+                Post(new { type = "show", view = "home" });
+                Application.SetSuspendState(PowerState.Suspend, false, false);
+                break;
+            case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
+            case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
+            case "desktop": WindowState = FormWindowState.Minimized; break;
+        }
+    }
+
+    void SetSleepTimer(JsonElement minutes)
+    {
+        sleepWarned = false;
+        if (minutes.ValueKind == JsonValueKind.Number && minutes.GetInt32() > 0)
+        {
+            var m = minutes.GetInt32();
+            sleepAt = DateTime.Now.AddMinutes(m);
+            sleepLabel = m switch { 60 => "1 hour", 90 => "1 h 30", 120 => "2 hours", _ => $"{m} min" };
+            Log.Info($"Sleep timer: {sleepLabel}");
+        }
+        else
+        {
+            if (minutes.ValueKind == JsonValueKind.String)
+                Post(new { type = "toast", text = "“When this video ends” comes in a later update", kind = "warn" });
+            sleepAt = null;
+            sleepLabel = null;
+        }
+        PushState();
+    }
+
+    void CheckSleepTimer()
+    {
+        if (sleepAt is null) return;
+        var left = sleepAt.Value - DateTime.Now;
+        if (!sleepWarned && left <= TimeSpan.FromMinutes(1))
+        {
+            sleepWarned = true;
+            Post(new { type = "toast", text = "Going to sleep in 1 minute" });
+        }
+        if (left <= TimeSpan.Zero)
+        {
+            sleepAt = null;
+            sleepLabel = null;
+            PushState();
+            Power("sleep");
+        }
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        controller.Dispose();
+        dimmer.Close();
+        base.OnFormClosed(e);
+    }
+}

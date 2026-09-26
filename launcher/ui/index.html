@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TV</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="stage">
+  <div id="backdrop"></div>
+
+  <section id="home" class="view">
+    <header class="status" id="status"></header>
+    <main class="tiles-wrap"><div class="tiles" id="tiles"></div></main>
+    <footer class="hints" id="home-hints"></footer>
+  </section>
+
+  <section id="menu" class="view overlay">
+    <aside class="panel" id="menu-panel"></aside>
+  </section>
+
+  <section id="power" class="view overlay">
+    <div class="center">
+      <h1>Power</h1>
+      <div class="cards" id="power-cards"></div>
+      <p class="note" id="power-note"></p>
+    </div>
+    <footer class="hints" id="power-hints"></footer>
+  </section>
+
+  <section id="timer" class="view overlay">
+    <div class="center">
+      <div class="title-block">
+        <span class="accent-icon" id="timer-icon"></span>
+        <h1>Sleep timer</h1>
+        <p class="lead">The box and the TV go to sleep when it runs out. A warning comes 1 minute before.</p>
+      </div>
+      <div class="timer-grid" id="timer-grid"></div>
+      <p class="note" id="timer-status"></p>
+    </div>
+    <footer class="hints" id="timer-hints"></footer>
+  </section>
+
+  <div id="toasts"></div>
+</div>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
