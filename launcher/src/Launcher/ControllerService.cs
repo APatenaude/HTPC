@@ -41,8 +41,10 @@ sealed class ControllerService : IDisposable
         if (slot < 0) return;
         Task.Run(async () =>
         {
-            void Set(ushort left, ushort right) { var v = new Vibration { Left = left, Right = right }; XInputSetState((uint)slot, ref v); }
-            Set(14000, 22000); await Task.Delay(110);
+            uint Set(ushort left, ushort right) { var v = new Vibration { Left = left, Right = right }; return XInputSetState((uint)slot, ref v); }
+            var result = Set(14000, 22000);
+            Log.Info($"Wake buzz (slot {slot}): {(result == 0 ? "sent" : $"refused ({result})")}");
+            await Task.Delay(110);
             Set(0, 0); await Task.Delay(90);
             Set(26000, 40000); await Task.Delay(170);
             Set(0, 0);
@@ -172,11 +174,13 @@ sealed class ControllerService : IDisposable
                 }
             }
 
+            // Home is logged (it is rare): the log shows every press, for diagnosing wake.
             var homeNow = (buttons & HomeBit) != 0;
-            if (homeNow && homeDown < 0) { homeDown = now; homeHeld = false; Raise(Pad.HomeDown, false); }
-            if (homeNow && !homeHeld && now - homeDown >= HoldMs) { homeHeld = true; Raise(Pad.HomeHold, false); }
+            if (homeNow && homeDown < 0) { homeDown = now; homeHeld = false; Log.Info("Home down"); Raise(Pad.HomeDown, false); }
+            if (homeNow && !homeHeld && now - homeDown >= HoldMs) { homeHeld = true; Log.Info("Home held"); Raise(Pad.HomeHold, false); }
             if (!homeNow && homeDown >= 0)
             {
+                Log.Info($"Home up after {now - homeDown} ms");
                 if (!homeHeld) Raise(Pad.Home, false);
                 homeDown = -1;
             }

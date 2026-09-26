@@ -412,6 +412,9 @@ function settingsPress(button, el) {
   switch (button) {
     case 'lb': setFocus(navItem()); return true;
     case 'rb': if (firstOption()) setFocus(firstOption()); return true;
+    case 'a':
+      if (inNav) { if (firstOption()) setFocus(firstOption()); return true; }
+      return false;
     case 'right':
       if (inNav) { if (firstOption()) setFocus(firstOption()); return true; }
       return false;

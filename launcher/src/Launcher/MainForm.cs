@@ -81,7 +81,7 @@ sealed class MainForm : Form
         base.OnLoad(e);
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
-        standby = new Standby(Handle, controller, settings);
+        standby = new Standby(controller, settings);
         standby.Changed += OnStandbyChanged;
         standby.GoingDown += () =>
         {
@@ -233,6 +233,7 @@ sealed class MainForm : Form
         // Nothing here may move the pointer: Windows counts that as input and turns the display on.
         if (standby.Active)
         {
+            if (pad is Pad.HomeDown or Pad.HomeHold or Pad.Home) Log.Info($"Standby: {pad} reached the launcher");
             if (pad == Pad.HomeHold) { standby.Wake("controller Home held"); controller.RumbleWake(); }
             return;
         }

@@ -287,14 +287,26 @@ sealed class TvService
             if (tv is not { IsOn: true })
             {
                 if (!await Roku.Key(known.BaseUrl, "PowerOn")) return;
-                Log.Info($"TV {known.Name} on");
+                Log.Info($"TV {known.Name}: on sent");
+                // A TV in deeper standby can miss the first PowerOn: check, and send it once more.
+                for (var i = 0; i < 8 && tv is not { IsOn: true }; i++)
+                {
+                    await Task.Delay(1000);
+                    tv = await Roku.Describe(known.Id, known.BaseUrl);
+                    if (i == 4 && tv is not { IsOn: true })
+                    {
+                        Log.Info($"TV {known.Name} still {tv?.PowerMode ?? "silent"}: on sent again");
+                        await Roku.Key(known.BaseUrl, "PowerOn");
+                    }
+                }
+                Log.Info($"TV {known.Name}: {tv?.PowerMode ?? "no answer"}");
             }
             if (p.Input == 0) return;
             for (var i = 0; i < 6; i++)
             {
+                if (tv is { IsOn: true } && tv.ActiveInput == p.Input) return;
                 await Task.Delay(1000);
                 tv = await Roku.Describe(known.Id, known.BaseUrl);
-                if (tv is { IsOn: true } && tv.ActiveInput == p.Input) return;
             }
             Log.Info($"TV not on HDMI {p.Input}: switching");
             await Roku.Key(known.BaseUrl, $"InputHDMI{p.Input}");

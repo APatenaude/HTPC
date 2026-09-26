@@ -79,7 +79,6 @@ sealed class LauncherSettings
 /// </summary>
 sealed class Standby
 {
-    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
     [DllImport("user32.dll")] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint flags);
@@ -96,11 +95,10 @@ sealed class Standby
     [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int Dx, Dy; public uint Data, Flags, Time; public IntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public MouseInput Mouse; public long Padding; }
 
-    const int WM_SYSCOMMAND = 0x0112, SC_MONITORPOWER = 0xF170;
     const uint ES_CONTINUOUS = 0x80000000, ES_SYSTEM_REQUIRED = 0x1, ES_DISPLAY_REQUIRED = 0x2;
     const int SystemExecutionState = 16;
 
-    readonly IntPtr window;
+    readonly DisplayPower display = new();
     readonly ControllerService controller;
     readonly LauncherSettings settings;
     Guid planBeforeStandby = BalancedPlan;
@@ -112,9 +110,8 @@ sealed class Standby
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
 
-    public Standby(IntPtr window, ControllerService controller, LauncherSettings settings)
+    public Standby(ControllerService controller, LauncherSettings settings)
     {
-        this.window = window;
         this.controller = controller;
         this.settings = settings;
         // The launcher decides when the box sleeps: keep Windows from sleeping on its own
@@ -148,22 +145,18 @@ sealed class Standby
         // (the TV sees no signal), and again a moment later in case something woke it.
         Changed?.Invoke(true);
         await Task.Delay(300);
-        DisplayOff();
-        _ = Task.Delay(3000).ContinueWith(_ => { if (Active) DisplayOff(); });
+        display.Off();
+        _ = Task.Delay(3000).ContinueWith(_ => { if (Active) display.Off(); });
         // Switching power plans takes Windows seconds: in the background.
         _ = Task.Run(() =>
         {
             planBeforeStandby = ActivePlan() is { } current && current != StandbyPlan ? current : BalancedPlan;
             SetPlan(StandbyPlan);
         });
-        // Works for Xbox wireless controllers; the 8BitDo dongle accepts it and stays on (it
-        // switches itself off after 15 idle minutes, or with a 3 s hold on Home).
-        controller.PowerOff();
+        // No XInput power-off here: the 8BitDo ignores it (it switches itself off after 15 idle
+        // minutes) and it was a suspect in missed wake presses.
         since = DateTime.Now;
     }
-
-    // SC_MONITORPOWER 2: the display powers down (DPMS); the GPU stops sending a picture.
-    void DisplayOff() => SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2);
 
     /// <summary>What this PC supports, read from Windows (GetPwrCapabilities).</summary>
     public static (bool Sleep, bool Hibernate) Capabilities()
@@ -185,7 +178,7 @@ sealed class Standby
         var clock = System.Diagnostics.Stopwatch.StartNew();
         Active = false;
         controller.Slow = false;
-        SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1)); // screen on
+        display.On();
         NudgeMouse();
         var screenMs = clock.ElapsedMilliseconds;
         var plan = planBeforeStandby;

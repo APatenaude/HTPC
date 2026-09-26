@@ -107,6 +107,44 @@ sealed class Dimmer : Form
 }
 
 /// <summary>
+/// Turns the display (the video output) off and on from its own thread: Windows can take
+/// seconds inside SC_MONITORPOWER, and on the launcher's UI thread that delayed the Home press
+/// meant to wake the box.
+/// </summary>
+sealed class DisplayPower
+{
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    const int WM_SYSCOMMAND = 0x0112, SC_MONITORPOWER = 0xF170;
+
+    Form? window;
+
+    public DisplayPower()
+    {
+        using var ready = new ManualResetEventSlim();
+        var thread = new Thread(() =>
+        {
+            window = new Form { ShowInTaskbar = false };
+            _ = window.Handle; // create it on this thread, never shown
+            ready.Set();
+            Application.Run();
+        }) { IsBackground = true, Name = "Display power" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        ready.Wait();
+    }
+
+    public void Off() => Send(2);
+    public void On() => Send(-1);
+
+    void Send(int state) => window!.BeginInvoke(() =>
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        SendMessage(window.Handle, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)state);
+        Log.Info($"Display {(state == 2 ? "off" : "on")} ({clock.ElapsedMilliseconds} ms)");
+    });
+}
+
+/// <summary>
 /// Hides the mouse pointer while the controller is in use and shows it again when a real mouse
 /// moves: every system cursor is swapped for a blank one (SetSystemCursor), and the pointer is
 /// parked at the right edge so no hover effects linger. Showing reloads the standard cursors.
