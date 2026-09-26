@@ -19,6 +19,13 @@ $ErrorActionPreference = 'Stop'
 
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
-Set-ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
+
+# When this runs under -ExecutionPolicy Bypass, the machine policy is still saved but
+# Set-ExecutionPolicy reports the process-scope override as an error. Ignore that one.
+try {
+    Set-ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
+} catch [System.Security.SecurityException] {
+    if ((Get-ExecutionPolicy -Scope LocalMachine) -ne 'RemoteSigned') { throw }
+}
 
 Write-Host 'Sleep and screen-off disabled on AC (dev session). Execution policy:' (Get-ExecutionPolicy -Scope LocalMachine)
