@@ -6,9 +6,9 @@
 
 | | |
 |---|---|
-| Edition | Windows 11 Enterprise LTSC 2024 (EditionID `EnterpriseS`, not `IoTEnterpriseS`) |
-| Build | 24H2, 26100.1742; September 2026 security update installed, reboot pending |
-| Activation | Not activated: MAK key, status Notification, error 0xC004F034 |
+| Edition | Windows 11 IoT Enterprise LTSC 2024 (`IoTEnterpriseS`; was `EnterpriseS` until the IoT key went in) |
+| Build | 24H2, 26100.9457 after the September 2026 security update (installed from 26100.1742) |
+| Activation | Activated (the first key, a MAK for plain Enterprise LTSC, failed with 0xC004F034) |
 | VBS / memory integrity | Running (hypervisor present), which is why Hybrid Sleep is unavailable |
 
 ## Power
@@ -38,7 +38,7 @@ No newer Intel driver is needed for decoding; what is missing is the HEVC extens
 
 | | |
 |---|---|
-| Edge | 122.0.2365.106 (the ISO's copy; Edge Update has not run yet) |
+| Edge | 122.0.2365.106 on the ISO; Edge Update brought it to 154.0.4258.37 the same day |
 | WebView2 Runtime | 153.0.4234.48, machine-wide |
 | Edge policies | None |
 

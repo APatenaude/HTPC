@@ -11,10 +11,9 @@
       "install": {
         "source": "github",
         "repo": "shy1132/VacuumTube",
-        "asset": "^VacuumTube-Setup\\.exe$",
-        "args": "/S",
-        "checksums": "latest.yml",
-        "displayName": "^VacuumTube"
+        "asset": "^VacuumTube-x64-Portable\\.zip$",
+        "installDir": "VacuumTube",
+        "exe": "VacuumTube.exe"
       }
     },
     {

@@ -6,8 +6,8 @@
 .DESCRIPTION
     Installs the catalog entries marked "default" (or the ids given with -Ids). Sources:
       winget   winget install from the community source, silent
-      github   latest GitHub release asset, checked against the release's electron-builder
-               checksum file when the entry names one, run with the entry's silent args
+      github   latest GitHub release asset, checked against GitHub's published SHA-256;
+               either a zip unpacked into Program Files or an installer run silently
       builtin  ships with Windows (Edge); nothing to do
     Websites have nothing to install. Already installed apps are left alone (updates are
     on demand, from the launcher later). Entries marked "asUser" (Spotify refuses to
@@ -39,41 +39,73 @@ function Install-FromWinget($App) {
     Write-Change "$($App.name) installed"
 }
 
-# electron-builder's latest.yml carries a base64 SHA-512 of the installer.
-function Assert-ElectronBuilderChecksum([string]$File, [string]$YamlText) {
-    $expected = [regex]::Match($YamlText, '(?m)^sha512:\s*(\S+)').Groups[1].Value
-    $path = [regex]::Match($YamlText, '(?m)^path:\s*(\S+)').Groups[1].Value
-    if (-not $expected -or $path -ne (Split-Path $File -Leaf)) { throw "No checksum for $(Split-Path $File -Leaf) in the release's checksum file" }
-    $hex = (Get-FileHash $File -Algorithm SHA512).Hash
-    $bytes = [byte[]]::new($hex.Length / 2)
-    for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
-    if ([Convert]::ToBase64String($bytes) -ne $expected) { throw "SHA-512 mismatch for $File" }
-}
-
-function Install-FromGithub($App) {
-    $i = $App.install
-    $existing = Get-InstalledProgram $i.displayName | Select-Object -First 1
-    if ($existing) { Write-Same "$($App.name) already installed ($($existing.DisplayName) $($existing.DisplayVersion))"; return }
-
-    $release = Invoke-RestMethod "https://api.github.com/repos/$($i.repo)/releases/latest" -Headers @{ 'User-Agent' = 'htpc-setup' }
-    $asset = $release.assets | Where-Object { $_.name -match $i.asset } | Select-Object -First 1
-    if (-not $asset) { throw "$($i.repo) $($release.tag_name) has no asset matching $($i.asset)" }
+# Downloads the latest release asset matching $Install.asset and checks the SHA-256 that
+# GitHub publishes for release assets.
+function Save-GithubAsset($Install) {
+    $release = Invoke-RestMethod "https://api.github.com/repos/$($Install.repo)/releases/latest" -Headers @{ 'User-Agent' = 'htpc-setup' }
+    $asset = $release.assets | Where-Object { $_.name -match $Install.asset } | Select-Object -First 1
+    if (-not $asset) { throw "$($Install.repo) $($release.tag_name) has no asset matching $($Install.asset)" }
 
     New-Item -ItemType Directory -Force $WorkDir | Out-Null
     $file = Join-Path $WorkDir $asset.name
     Write-Host "  Downloading $($asset.name) ($($release.tag_name), $([math]::Round($asset.size / 1MB)) MB)"
     Invoke-WebRequest $asset.browser_download_url -OutFile $file -UseBasicParsing
-    if ($i.checksums) {
-        $sums = $release.assets | Where-Object { $_.name -eq $i.checksums } | Select-Object -First 1
-        if (-not $sums) { throw "$($i.repo) $($release.tag_name) has no $($i.checksums)" }
-        Assert-ElectronBuilderChecksum $file (Invoke-RestMethod $sums.browser_download_url -Headers @{ 'User-Agent' = 'htpc-setup' })
+    if ($asset.digest -match '^sha256:([0-9a-f]{64})$') {
+        if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $Matches[1].ToUpper()) { throw "SHA-256 mismatch for $($asset.name)" }
+    } else {
+        Write-Attention "$($asset.name) has no published SHA-256; not verified"
+    }
+    [pscustomobject]@{ File = $file; Tag = $release.tag_name }
+}
+
+function New-StartMenuShortcut([string]$Name, [string]$Target) {
+    $link = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\$Name.lnk"
+    $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
+    $shortcut.TargetPath = $Target
+    $shortcut.WorkingDirectory = Split-Path $Target -Parent
+    $shortcut.Save()
+}
+
+# Two kinds of GitHub entry:
+#   installDir + exe    a zip unpacked into Program Files\<installDir>, plus a Start menu
+#                       shortcut. VacuumTube: its NSIS installer crashes on this box (in the
+#                       installer's System.dll plugin), and a folder is simpler to update.
+#                       Its "-x64-Portable.zip" is the plain Windows app (VacuumTube-x64.zip
+#                       is the macOS build); portable mode only starts with a portable.txt
+#                       next to the exe, so data stays in %APPDATA%\VacuumTube.
+#   args + displayName  an installer run silently, detected by its uninstall entry.
+function Install-FromGithub($App) {
+    $i = $App.install
+    if ($i.installDir) {
+        $dir = Join-Path $env:ProgramFiles $i.installDir
+        $exe = Join-Path $dir $i.exe
+        if (Test-Path $exe) { Write-Same "$($App.name) already installed ($dir)"; return }
+
+        $download = Save-GithubAsset $i
+        $staging = Join-Path $WorkDir "$($App.id)-unpacked"
+        if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($download.File, $staging)
+        $top = @(Get-ChildItem $staging)
+        $source = if ($top.Count -eq 1 -and $top[0].PSIsContainer) { $top[0].FullName } else { $staging }
+        if (-not (Test-Path (Join-Path $source $i.exe))) { throw "$($i.exe) is not in $(Split-Path $download.File -Leaf)" }
+
+        New-Item -ItemType Directory -Force $dir | Out-Null
+        Copy-Item (Join-Path $source '*') $dir -Recurse -Force
+        Remove-Item $staging -Recurse -Force
+        New-StartMenuShortcut $i.installDir $exe
+        Write-Change "$($App.name) $($download.Tag) unpacked to $dir"
+        return
     }
 
-    Write-Host "  Installing $($App.name) $($release.tag_name)"
-    $p = Start-Process $file -ArgumentList $i.args -Wait -PassThru
-    if ($p.ExitCode -ne 0) { throw "$($asset.name) exited with code $($p.ExitCode)" }
+    $existing = Get-InstalledProgram $i.displayName | Select-Object -First 1
+    if ($existing) { Write-Same "$($App.name) already installed ($($existing.DisplayName) $($existing.DisplayVersion))"; return }
+    $download = Save-GithubAsset $i
+    Write-Host "  Installing $($App.name) $($download.Tag)"
+    $p = Start-Process $download.File -ArgumentList $i.args -Wait -PassThru
+    if ($p.ExitCode -ne 0) { throw "$(Split-Path $download.File -Leaf) exited with code $($p.ExitCode)" }
     if (-not (Get-InstalledProgram $i.displayName)) { throw "$($App.name) installer finished but no uninstall entry matches $($i.displayName)" }
-    Write-Change "$($App.name) $($release.tag_name) installed"
+    Write-Change "$($App.name) $($download.Tag) installed"
 }
 
 $entries = (Get-Content $Catalog -Raw | ConvertFrom-Json).apps

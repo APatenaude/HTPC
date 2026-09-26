@@ -59,7 +59,7 @@ foreach ($device in $armed | Where-Object { $_ -match 'mouse' }) {
     powercfg /devicedisablewake $device
     Write-Change "wake off: $device"
 }
-$pads = @(powercfg /devicequery wake_programmable | Where-Object { $_ -match 'XINPUT|Xbox|8BitDo|Controller|Game' })
+$pads = @(powercfg /devicequery wake_programmable | Where-Object { $_ -match 'XINPUT|Xbox|8BitDo|Gamepad|Game controller' })
 if ($pads) {
     foreach ($device in $pads) { powercfg /deviceenablewake $device; Write-Change "wake on: $device" }
 } else {

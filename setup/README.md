@@ -28,6 +28,16 @@ answer file runs it with `-Unattended` at the first sign-in.
 
 `catalog.json` is the one app list for setup now and the launcher's library later.
 
+`tools/Test-HwDecode.ps1` also runs on its own (`-Json` for the launcher): it lists the
+driver's decoders and, when mpv or ffmpeg is present, plays the 4K clips in
+`tools/hwdecode-clips` with hardware decoding forced.
+
+## Clean install and test VM
+
+`autounattend/` holds the answer file template and `New-InstallMedia.ps1`, which writes a
+USB stick (asks for the password) or an answer ISO for the VM. `test/` builds and drives the
+Hyper-V test VM. See `autounattend/README.md`.
+
 ## Dev tools (not in the finished box)
 
 | Script | Does |
@@ -36,6 +46,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | `dev/Enable-DevSession.ps1` | Never sleep or blank the screen on AC; execution policy RemoteSigned |
 | `dev/Enable-HyperV.ps1` | Hyper-V on, current user in Hyper-V Administrators (for the test VM) |
 | `dev/Test-XInput.ps1` | Lists XInput controllers, prints buttons as pressed (Home included) |
+| `dev/Install-MediaTools.ps1` | ffmpeg and mpv for the current user (decoding test clips and playback check) |
 
 ## Changes made by hand on the dev box
 
@@ -45,9 +56,11 @@ answer file runs it with `-Unattended` at the first sign-in.
 | 2026-09-26 | winget v1.29.380 for user "user" (App Installer + Windows App Runtime 1.8) | `lib/Install-Winget.ps1` |
 | 2026-09-26 | Sleep and screen-off disabled on AC, RemoteSigned | `dev/Enable-DevSession.ps1` |
 | 2026-09-26 | Hyper-V enabled, user in Hyper-V Administrators | `dev/Enable-HyperV.ps1` |
+| 2026-09-26 | ffmpeg 9.0.2 and mpv 0.41.0 for the current user | `dev/Install-MediaTools.ps1` |
+| 2026-09-26 | setup.ps1 -DevKeepAwake: all steps except Codecs; the Microsoft Store was added (`wsreset -i`) while trying HEVC | `setup.ps1` |
 
 To undo before calling the box finished: run setup.ps1 without `-DevKeepAwake` (restores
-sleep) and remove PortableGit.
+sleep) and remove PortableGit, ffmpeg and mpv.
 
 ## Running scripts from the Claude desktop app
 

@@ -35,6 +35,8 @@
     First sign-in after a USB install: no prompts, window closes by itself.
 .PARAMETER DevKeepAwake
     While we develop on the box: the Power step keeps never-sleep.
+.PARAMETER NoPause
+    Close the window at the end without waiting for Enter.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -DevKeepAwake
@@ -44,7 +46,8 @@ param(
     [string[]]$Skip,
     [string[]]$Apps,
     [switch]$Unattended,
-    [switch]$DevKeepAwake
+    [switch]$DevKeepAwake,
+    [switch]$NoPause
 )
 
 $lib = Join-Path $PSScriptRoot 'lib'
@@ -106,8 +109,10 @@ function Split-List([string[]]$Values) { @($Values | ForEach-Object { $_ -split 
 
 if (Test-AppDataRedirected) {
     Write-Host 'Relaunching setup outside this app (its AppData writes are redirected)...'
+    # Already admin: the task runs elevated too, so no second UAC prompt.
+    $runLevel = if (Test-Admin) { 'Highest' } else { 'Limited' }
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
-    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel $runLevel
     Register-ScheduledTask -TaskName $RelaunchTask -Action $action -Principal $principal -Force | Out-Null
     Start-ScheduledTask -TaskName $RelaunchTask
     Write-Host "Setup continues in its own window. Logs: $HtpcData\logs"
@@ -174,5 +179,5 @@ Write-Host "Log: $log"
     ConvertTo-Json | Out-File (Join-Path $logDir 'setup-last.json') -Encoding ascii
 Stop-Transcript | Out-Null
 
-if (-not $Unattended) { Read-Host 'Press Enter to close' | Out-Null }
+if (-not $Unattended -and -not $NoPause) { Read-Host 'Press Enter to close' | Out-Null }
 if (@($results.Values | Where-Object { $_ -ne 'OK' }).Count) { exit 1 }
