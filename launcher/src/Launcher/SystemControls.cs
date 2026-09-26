@@ -106,6 +106,52 @@ sealed class Dimmer : Form
     }
 }
 
+/// <summary>
+/// Hides the mouse pointer while the controller is in use and shows it again when a real mouse
+/// moves: every system cursor is swapped for a blank one (SetSystemCursor), and the pointer is
+/// parked at the right edge so no hover effects linger. Showing reloads the standard cursors.
+/// </summary>
+sealed class CursorHider
+{
+    [DllImport("user32.dll")] static extern bool SetSystemCursor(IntPtr cursor, uint id);
+    [DllImport("user32.dll")] static extern IntPtr CreateCursor(IntPtr instance, int hotX, int hotY, int width, int height, byte[] andPlane, byte[] xorPlane);
+    [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, IntPtr value, uint winIni);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+
+    const uint SPI_SETCURSORS = 0x57;
+    static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32640, 32641, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
+
+    Point parkedAt;
+    public bool Hidden { get; private set; }
+
+    public CursorHider() => Restore(); // a previous crash may have left the cursors blank
+
+    public void Hide()
+    {
+        if (Hidden) return;
+        var blankAnd = Enumerable.Repeat((byte)0xFF, 32 * 4).ToArray();
+        var blankXor = new byte[32 * 4];
+        foreach (var id in CursorIds) SetSystemCursor(CreateCursor(IntPtr.Zero, 0, 0, 32, 32, blankAnd, blankXor), id);
+        var screen = Screen.PrimaryScreen!.Bounds;
+        parkedAt = new Point(screen.Right - 1, screen.Top + screen.Height / 2);
+        SetCursorPos(parkedAt.X, parkedAt.Y);
+        Hidden = true;
+    }
+
+    /// <summary>Call regularly: shows the pointer again once the mouse has moved.</summary>
+    public void Check()
+    {
+        if (Hidden && GetCursorPos(out var now) && now != parkedAt) Restore();
+    }
+
+    public void Restore()
+    {
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+        Hidden = false;
+    }
+}
+
 static class ScreenCapture
 {
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);

@@ -21,7 +21,7 @@ const state = {
   stack: [],               // views to go back to
   backdrop: null,
   section: 'sleep',        // Settings section shown
-  prefs: { idleMinutes: 30, deepSleepHours: 0, deepSleepHibernate: false, stayAwakeWhilePlaying: true }
+  prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true }
 };
 
 const $ = (id) => document.getElementById(id);
@@ -79,7 +79,7 @@ function renderTiles() {
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
       `<span class="name">${esc(t.name)}</span>` +
     '</div>').join('');
-  $('home-hints').innerHTML = hints([['A', 'Open'], ['Home', 'Menu'], ['Hold Home', 'Power']]);
+  $('home-hints').innerHTML = hints([['A', 'Open'], ['X', 'Close app'], ['Home', 'Menu'], ['Hold Home', 'Power']]);
 }
 
 function renderMenu() {
@@ -120,6 +120,7 @@ const POWER = [
 ];
 
 function renderPower() {
+  POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
   $('power-cards').innerHTML = POWER.map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
       `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join('');
@@ -155,9 +156,19 @@ const SECTIONS = [
 // Values a setting row steps through with left/right (A steps forward).
 const CHOICES = {
   idleMinutes: [[15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [120, '2 hours'], [0, 'Never']],
-  deepSleepHours: [[0, 'Never'], [1, 'After 1 hour'], [3, 'After 3 hours'], [6, 'After 6 hours'], [12, 'After 12 hours']],
-  deepSleepHibernate: [[false, 'Sleep'], [true, 'Hibernate']],
+  sleepMode: [['standby', 'Standby'], ['sleep', 'Light sleep'], ['hibernate', 'Deep sleep']],
+  sleepAfterStandbyHours: [[0, 'Never'], [1, 'After 1 hour'], [3, 'After 3 hours'], [6, 'After 6 hours'], [12, 'After 12 hours']],
   stayAwakeWhilePlaying: [[false, 'Off'], [true, 'On']]
+};
+
+// What each sleep mode means, shown under the choice and on the Power screen.
+const SLEEP_MODES = {
+  standby: { caption: 'Screen and TV off; the box stays ready. Tap Home on the controller to wake it. A few watts.',
+             wake: 'Tap Home on the controller to wake' },
+  sleep: { caption: 'About 1 W. The controller can’t wake it: use the power button, the keyboard or the phone.',
+           wake: 'Wake with the power button or the keyboard' },
+  hibernate: { caption: 'Almost no power, slower to come back. Wake with the power button, the keyboard or the phone.',
+               wake: 'Wake with the power button' }
 };
 
 function choiceLabel(key) {
@@ -176,23 +187,22 @@ function stepper(key) {
 
 function renderSleepSection() {
   const p = state.prefs;
-  const deep = p.deepSleepHours > 0;
   return '<header><h1>Sleep &amp; power</h1>' +
-      '<p>Sleep turns the screen and TV off; the box stays ready and wakes with Home on the controller.</p></header>' +
+      '<p>Sleep from the Power menu, the sleep timer, or when nothing happens for a while.</p></header>' +
+    settingRow('sleepMode', 'Sleep mode', SLEEP_MODES[p.sleepMode].caption,
+      '<div class="seg">' + CHOICES.sleepMode.map(([v, l]) => `<span${v === p.sleepMode ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>') +
+    (p.sleepMode === 'standby'
+      ? settingRow('sleepAfterStandbyHours', 'Then light sleep', 'After this long in standby, drop to light sleep (about 1 W; the controller can’t wake it from there)',
+          stepper('sleepAfterStandbyHours'))
+      : '') +
     settingRow('idleMinutes', 'Sleep after', 'When nothing plays and nobody touches the controller', stepper('idleMinutes')) +
     `<div class="srow" data-nav data-id="set-timer" data-act="view" data-arg="timer">` +
       '<div class="text"><span class="label">Sleep timer</span><span class="caption">A countdown you set. Also in the Home menu.</span></div>' +
       `<div class="value link">${esc(state.timer ? timerText() : 'Off')}${icon('chevright', 28, 2)}</div></div>` +
-    settingRow('deepSleepHours', 'Deep sleep',
-      'After sleeping this long the box sleeps fully (about 1 W instead of a few). Home on the controller cannot wake it then: use the phone, the keyboard or the power button.',
-      stepper('deepSleepHours')) +
-    (deep ? settingRow('deepSleepHibernate', 'Deep sleep type', 'Hibernate if the box wakes up by itself or comes back to a black screen',
-      '<div class="seg">' + CHOICES.deepSleepHibernate.map(([v, l]) => `<span${v === p.deepSleepHibernate ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>') : '') +
     settingRow('stayAwakeWhilePlaying', 'Stay awake while video plays', 'Even if you don’t touch the controller for hours',
       `<div class="toggle${p.stayAwakeWhilePlaying ? ' on' : ''}"><span></span></div>`) +
     '<div class="sbuttons">' +
       '<div class="sbutton" data-nav data-id="set-sleepnow" data-act="power-action" data-arg="sleep">Sleep now</div>' +
-      '<div class="sbutton" data-nav data-id="set-deepnow" data-act="power-action" data-arg="deepsleep">Deep sleep now</div>' +
     '</div>';
 }
 
@@ -380,10 +390,13 @@ function press(button) {
       break;
     case 'b': back(); break;
     case 'x': {
-      // On an app row: that app. Anywhere else in the menu: the app it was opened over.
-      if (state.view !== 'menu') break;
-      const id = (el && el.dataset.close) || state.current;
-      const t = id && state.tiles.find((x) => x.id === id);
+      // Home screen: the focused tile, if it is running. Menu: the focused app row, else the
+      // app the menu was opened over.
+      let id = null;
+      if (state.view === 'home' && el && el.dataset.arg) id = el.dataset.arg;
+      else if (state.view === 'menu') id = (el && el.dataset.close) || state.current;
+      else break;
+      const t = id && state.tiles.find((x) => x.id === id && x.running);
       if (t) { state.confirm = { id: t.id, name: t.name }; go('confirm'); }
       break;
     }
@@ -398,6 +411,8 @@ function press(button) {
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
   Escape: 'b', Backspace: 'b', x: 'x', h: 'home', p: 'homeHold' };
 addEventListener('keydown', (e) => {
+  // Blank (standby, the launcher black in front): a real key press wakes the box.
+  if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }
   const b = KEYS[e.key];
   if (!b) return;
   e.preventDefault();

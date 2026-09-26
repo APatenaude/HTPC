@@ -7,16 +7,20 @@ namespace Htpc.Launcher;
 /// <summary>Launcher settings (Settings on the TV), kept in %LOCALAPPDATA%\HTPC\settings.json.</summary>
 sealed class LauncherSettings
 {
-    /// <summary>Standby after this long without input and without playback; 0 = never.</summary>
+    /// <summary>Sleep after this long without input and without playback; 0 = never.</summary>
     public int IdleMinutes { get; set; } = 30;
 
-    /// <summary>Deep sleep after this long in standby; 0 = never (the default: the controller cannot wake it from there).</summary>
-    public int DeepSleepHours { get; set; }
+    /// <summary>
+    /// What Sleep does: "standby" (screen and TV off, Home on the controller wakes it, a few
+    /// watts), "sleep" (S3, about 1 W) or "hibernate" (almost nothing). The controller can wake
+    /// only from standby: its dongle has no USB remote wakeup.
+    /// </summary>
+    public string SleepMode { get; set; } = "standby";
 
-    /// <summary>Deep sleep hibernates instead of S3 sleep.</summary>
-    public bool DeepSleepHibernate { get; set; }
+    /// <summary>From standby, go to S3 sleep after this long; 0 = never.</summary>
+    public int SleepAfterStandbyHours { get; set; }
 
-    /// <summary>No idle standby while something plays, even with the controller untouched.</summary>
+    /// <summary>No idle sleep while something plays, even with the controller untouched.</summary>
     public bool StayAwakeWhilePlaying { get; set; } = true;
 
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -43,14 +47,18 @@ sealed class LauncherSettings
         catch (Exception e) { Log.Error("Saving settings", e); }
     }
 
-    /// <summary>Applies one value sent by the Settings screen; false for an unknown key.</summary>
+    /// <summary>Applies one value sent by the Settings screen; false for an unknown key or value.</summary>
     public bool Set(string key, JsonElement value)
     {
         switch (key)
         {
             case "idleMinutes": IdleMinutes = value.GetInt32(); break;
-            case "deepSleepHours": DeepSleepHours = value.GetInt32(); break;
-            case "deepSleepHibernate": DeepSleepHibernate = value.GetBoolean(); break;
+            case "sleepMode":
+                var mode = value.GetString();
+                if (mode is not ("standby" or "sleep" or "hibernate")) return false;
+                SleepMode = mode;
+                break;
+            case "sleepAfterStandbyHours": SleepAfterStandbyHours = value.GetInt32(); break;
             case "stayAwakeWhilePlaying": StayAwakeWhilePlaying = value.GetBoolean(); break;
             default: return false;
         }
@@ -60,10 +68,11 @@ sealed class LauncherSettings
 }
 
 /// <summary>
-/// Stay-awake standby (decision of 26 Sept 2026): this box has only S3 sleep, and the 8BitDo
-/// dongle cannot wake it from S3. So "sleep" pauses playback and turns the screen off (the TV
-/// follows once TV control exists) while the box stays on and the controller keeps working;
-/// any button brings everything back. Real sleep only after DeepSleepHours in standby.
+/// Sleep, in the mode chosen in Settings. Standby is the default (decision of 26 Sept 2026):
+/// this box has only S3 sleep and the 8BitDo dongle cannot wake it from S3, so standby pauses
+/// playback, turns the screen off and switches to the "TV standby" power plan while the box
+/// stays on; a tap on Home brings it back. MainForm puts the launcher in front as a black
+/// screen meanwhile, so no app gets the controller's input.
 /// </summary>
 sealed class Standby
 {
@@ -91,11 +100,14 @@ sealed class Standby
     readonly IntPtr window;
     readonly ControllerService controller;
     readonly LauncherSettings settings;
+    Guid planBeforeStandby = BalancedPlan;
     DateTime since;
-    uint inputAtStandby;
 
     public bool Active { get; private set; }
     public event Action<bool>? Changed;
+
+    /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
+    public event Action? GoingDown;
 
     public Standby(IntPtr window, ControllerService controller, LauncherSettings settings)
     {
@@ -109,7 +121,85 @@ sealed class Standby
         if (ActivePlan() == StandbyPlan) SetPlan(BalancedPlan);
     }
 
-    Guid planBeforeStandby = BalancedPlan;
+    /// <summary>Sleep as set in Settings (Power menu, sleep timer, idle).</summary>
+    public void Sleep(string reason)
+    {
+        switch (settings.SleepMode)
+        {
+            case "sleep": RealSleep(false, reason); break;
+            case "hibernate": RealSleep(true, reason); break;
+            default: Enter(reason); break;
+        }
+    }
+
+    public async void Enter(string reason)
+    {
+        if (Active) return;
+        Log.Info($"Standby ({reason})");
+        Active = true;
+        controller.Slow = true;
+        await PausePlayback();
+        SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2); // screen off
+        // Switching power plans takes Windows seconds: in the background.
+        _ = Task.Run(() =>
+        {
+            planBeforeStandby = ActivePlan() is { } current && current != StandbyPlan ? current : BalancedPlan;
+            SetPlan(StandbyPlan);
+        });
+        // Works for Xbox wireless controllers; the 8BitDo dongle accepts it and stays on (it
+        // switches itself off after 15 idle minutes, or with a 3 s hold on Home).
+        controller.PowerOff();
+        since = DateTime.Now;
+        Changed?.Invoke(true);
+    }
+
+    public void Wake(string reason)
+    {
+        if (!Active) return;
+        Log.Info($"Wake ({reason})");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Active = false;
+        controller.Slow = false;
+        SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1)); // screen on
+        NudgeMouse();
+        var screenMs = clock.ElapsedMilliseconds;
+        var plan = planBeforeStandby;
+        _ = Task.Run(() => SetPlan(plan));
+        Changed?.Invoke(false);
+        Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
+    }
+
+    /// <summary>
+    /// Real sleep (S3) or hibernate. The controller cannot wake the box from these: the power
+    /// button, the keyboard or the phone (Wake-on-LAN) do.
+    /// </summary>
+    public void RealSleep(bool hibernate, string reason)
+    {
+        Log.Info($"{(hibernate ? "Hibernate" : "Sleep (S3)")} ({reason})");
+        GoingDown?.Invoke();
+        Application.SetSuspendState(hibernate ? PowerState.Hibernate : PowerState.Suspend, false, false);
+    }
+
+    /// <summary>Called every few seconds: sleeps when idle, and from standby after the set hours.</summary>
+    public async Task Tick()
+    {
+        if (Active)
+        {
+            if (settings.SleepAfterStandbyHours > 0 && DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
+            {
+                RealSleep(false, $"after {settings.SleepAfterStandbyHours} h in standby");
+                since = DateTime.Now; // back from it still in standby: count again
+            }
+            return;
+        }
+        if (settings.IdleMinutes <= 0) return;
+        var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
+        var controllerIdle = DateTime.Now - controller.LastActivity;
+        if (controllerIdle < idle) idle = controllerIdle;
+        if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
+        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await IsPlaying())) return;
+        Sleep($"idle {settings.IdleMinutes} min");
+    }
 
     static Guid? ActivePlan()
     {
@@ -126,86 +216,14 @@ sealed class Standby
         return result == 0;
     }
 
-    public async void Enter(string reason)
-    {
-        if (Active) return;
-        Log.Info($"Standby ({reason})");
-        Active = true;
-        since = DateTime.Now;
-        inputAtStandby = LastInputTick();
-        await PausePlayback();
-        SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)2); // screen off
-        // Low-power plan (CPU capped, PCIe/disk/Wi-Fi saving) and a lazier controller poll.
-        planBeforeStandby = ActivePlan() is { } current && current != StandbyPlan ? current : BalancedPlan;
-        SetPlan(StandbyPlan);
-        controller.Slow = true;
-        // Controller off: no input reaches any app while asleep. Home switches it back on,
-        // and that reconnect wakes the box (MainForm).
-        controller.PowerOff();
-        Changed?.Invoke(true);
-    }
-
-    public void Wake(string reason)
-    {
-        if (!Active) return;
-        Log.Info($"Wake ({reason})");
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        Active = false;
-        controller.Slow = false;
-        SendMessage(window, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1)); // screen on
-        NudgeMouse();
-        var screenMs = clock.ElapsedMilliseconds;
-        // Switching the power plan takes Windows over a second; do it off the UI thread.
-        var plan = planBeforeStandby;
-        Task.Run(() => SetPlan(plan));
-        Changed?.Invoke(false);
-        Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
-    }
-
-    /// <summary>Called every few seconds: wakes on keyboard or mouse input, enters standby when idle.</summary>
-    public async Task Tick()
-    {
-        if (Active)
-        {
-            // Input right as the screen goes off (the button that chose Sleep, the display
-            // switching off) is not a wake: take the baseline again during the first seconds.
-            if (DateTime.Now - since < TimeSpan.FromSeconds(4)) inputAtStandby = LastInputTick();
-            else if (LastInputTick() != inputAtStandby) Wake("keyboard or mouse");
-            else if (settings.DeepSleepHours > 0 && DateTime.Now - since >= TimeSpan.FromHours(settings.DeepSleepHours))
-            {
-                DeepSleep($"after {settings.DeepSleepHours} h in standby");
-                since = DateTime.Now; // back from deep sleep still in standby: count again
-            }
-            return;
-        }
-        if (settings.IdleMinutes <= 0) return;
-        var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
-        var controllerIdle = DateTime.Now - controller.LastActivity;
-        if (controllerIdle < idle) idle = controllerIdle;
-        if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
-        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await IsPlaying())) return;
-        Enter($"idle {settings.IdleMinutes} min");
-    }
-
-    /// <summary>Real sleep (S3) or hibernate. Only the phone (Wake-on-LAN), keyboard or power button wake it.</summary>
-    public void DeepSleep(string reason)
-    {
-        Log.Info($"Deep sleep ({reason}, {(settings.DeepSleepHibernate ? "hibernate" : "S3")})");
-        Application.SetSuspendState(settings.DeepSleepHibernate ? PowerState.Hibernate : PowerState.Suspend, false, false);
-    }
-
-    static uint LastInputTick()
-    {
-        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
-        return GetLastInputInfo(ref info) ? info.Time : 0;
-    }
-
-    // GetLastInputInfo gives a 32-bit tick; compare it against the 64-bit clock's low bits.
+    // Tick count (ms since boot) of the last keyboard or mouse input. GetLastInputInfo gives a
+    // 32-bit tick; compare it against the 64-bit clock's low bits.
     static long LastInputAgeTicks()
     {
+        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+        var last = GetLastInputInfo(ref info) ? info.Time : 0;
         var now = Environment.TickCount64;
-        var elapsed = unchecked((uint)now - LastInputTick());
-        return now - elapsed;
+        return now - unchecked((uint)now - last);
     }
 
     /// <summary>A player holding "display required" (the classic way to keep the screen on).</summary>

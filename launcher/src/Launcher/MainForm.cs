@@ -22,6 +22,8 @@ sealed class MainForm : Form
     readonly AudioVolume audio = new();
     readonly Dimmer dimmer = new();
     readonly System.Windows.Forms.Timer clock = new() { Interval = 1000 };
+    readonly System.Windows.Forms.Timer mouseWatch = new() { Interval = 200 };
+    readonly CursorHider cursor = new();
     readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
@@ -58,6 +60,7 @@ sealed class MainForm : Form
             // Every second in standby (wake on keyboard or mouse), every 5 s otherwise (idle check).
             if (standby.Active || ++ticks % 5 == 0) await standby.Tick();
         };
+        mouseWatch.Tick += (_, _) => cursor.Check();
         Directory.CreateDirectory(captureDir);
     }
 
@@ -68,9 +71,11 @@ sealed class MainForm : Form
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         standby = new Standby(Handle, controller, settings);
         standby.Changed += OnStandbyChanged;
-        Log.Info($"Standby after {settings.IdleMinutes} min idle; deep sleep after {settings.DeepSleepHours} h (0 = never)");
+        standby.GoingDown += () => Post(new { type = "show", view = "home" });
+        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never)");
         controller.Start();
         clock.Start();
+        mouseWatch.Start();
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
     }
@@ -120,6 +125,7 @@ sealed class MainForm : Form
                 uiReady = true;
                 Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings });
                 break;
+            case "wake": standby.Wake("keyboard"); break;
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
                 break;
@@ -159,8 +165,11 @@ sealed class MainForm : Form
 
     void OnPad(Pad pad, bool repeat)
     {
+        cursor.Hide(); // the controller is in use: no mouse pointer on the TV
         // In standby any button only wakes the box.
-        if (standby.Active) { standby.Wake($"controller {pad}"); return; }
+        // In standby only a tap on Home wakes the box; everything else is swallowed. Holding Home
+        // (3 s switches the 8BitDo off) raises HomeHold instead, so it does not wake it.
+        if (standby.Active) { if (pad == Pad.Home) standby.Wake("controller Home"); return; }
         var active = LauncherActive;
         var app = active ? null : apps.ForegroundApp();
         // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
@@ -293,12 +302,8 @@ sealed class MainForm : Form
         switch (action)
         {
             case "sleep":
-                // Stay-awake standby; the launcher wakes on the home screen.
-                standby.Enter("Power menu");
-                break;
-            case "deepsleep":
-                Post(new { type = "show", view = "home" });
-                standby.DeepSleep("Settings");
+                // In the mode chosen in Settings (standby by default).
+                standby.Sleep("Power menu");
                 break;
             case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
             case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
@@ -381,13 +386,14 @@ sealed class MainForm : Form
             sleepAt = null;
             sleepLabel = null;
             PushState();
-            standby.Enter("sleep timer");
+            standby.Sleep("sleep timer");
         }
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         controller.Dispose();
+        cursor.Restore();
         dimmer.Close();
         base.OnFormClosed(e);
     }
