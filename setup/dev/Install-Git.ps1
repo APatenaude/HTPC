@@ -41,6 +41,10 @@ if ((Test-Path $gitExe) -and ((& $gitExe --version) -eq $wanted)) {
     Write-Host "$(& $gitExe --version) extracted to $Destination"
 }
 
+# PortableGit has no credential helper set, so the first push opens a "pick a helper"
+# window instead of signing in. Use Git Credential Manager, which it bundles.
+& $gitExe config --global credential.helper manager
+
 $cmdDir = Join-Path $Destination 'cmd'
 $userPath = [string][Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $cmdDir) {
