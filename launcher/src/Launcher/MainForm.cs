@@ -16,7 +16,7 @@ sealed partial class MainForm : Form
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     readonly Options options;
-    readonly WebView2 web = new() { Dock = DockStyle.Fill };
+    WebView2 web = new() { Dock = DockStyle.Fill };   // replaced for a newer WebView2 runtime (MainForm.Updates.cs)
     readonly AppManager apps;
     LibraryService library = null!;   // created in the constructor, after apps
     List<InstalledProgram> lastScan = new();
@@ -96,12 +96,15 @@ sealed partial class MainForm : Form
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         Directory.CreateDirectory(captureDir);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
+        InitAlerts();   // MainForm.Alerts.cs
         InitSettings(); // MainForm.Settings.cs
     }
 
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+        // A launcher update or a restart for Windows updates left word (MainForm.Updates.cs).
+        var handoff = TakeHandoffAtStart();
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         apps.Adopt(); // apps left open by a previous launcher
@@ -114,15 +117,18 @@ sealed partial class MainForm : Form
             // UI thread would deadlock the awaits inside.
             Task.Run(() => tv.TurnOff()).Wait(3000);
         };
+        AlertsLoaded(); // MainForm.Alerts.cs
         var (hasS3, hasS4) = Standby.Capabilities();
         Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
         controller.Start();
         clock.Start();
         mouseWatch.Start();
-        try { await InitWebView(); }
-        catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
+        await StartWebView(); // MainForm.Shell.cs: tries again, else exits for the watchdog
         StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
-        await StartTv(); // on (and to the box's input) if the box has just booted: MainForm.Tv.cs
+        // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
+        // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
+        await StartTv(leaveTvAlone: handoff is not null);
+        ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
@@ -161,6 +167,9 @@ sealed partial class MainForm : Form
         core.Settings.IsPinchZoomEnabled = false;
         core.Settings.IsSwipeNavigationEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
+        // Nothing typed in the launcher (a Wi-Fi password) is kept or offered by WebView2.
+        core.Settings.IsPasswordAutosaveEnabled = false;
+        core.Settings.IsGeneralAutofillEnabled = false;
         core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += OnWebMessage;
@@ -168,6 +177,7 @@ sealed partial class MainForm : Form
         {
             Log.Error($"WebView2 process failed: {args.ProcessFailedKind}");
             if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) core.Reload();
+            else if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited) ExitForRestart("the WebView2 browser process ended");
         };
         core.Navigate(setupMode ? "https://launcher.htpc/setup.html" : "https://launcher.htpc/index.html");
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
@@ -244,6 +254,7 @@ sealed partial class MainForm : Form
         volume = audio.Get() ?? 0,
         brightness,
         controller = controller.Connected,
+        desktop = desktop.Active, // MainForm.Shell.cs: the Power menu shows Back to TV
         battery = controller.BatteryLevel,
         timer = sleepTimer.Describe(),
         phone = PhoneSummary() // MainForm.Phone.cs: { url, paired, pairingOpen }, null while the remote is off
@@ -365,6 +376,7 @@ sealed partial class MainForm : Form
         Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
         Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
         Pad.LB => "lb", Pad.RB => "rb", Pad.LT => "lt", Pad.RT => "rt",
+        Pad.R3 => "r3", // the launcher's own text fields: the on-screen keyboard
         _ => null
     };
 
@@ -407,7 +419,9 @@ sealed partial class MainForm : Form
         keyboardAuto = auto;
         mapper.Map = null; // at once: the controller now drives the keyboard
         keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false, field?.Bounds ?? Rectangle.Empty);
-        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")} \"{field.Name}\"")})");
+        // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
+        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"";
+        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")}{label}")})");
     }
 
     void CloseKeyboard(string reason)
@@ -422,15 +436,15 @@ sealed partial class MainForm : Form
         switch (m.GetProperty("type").GetString())
         {
             case "type":
-                Input.Type(m.GetProperty("text").GetString() ?? "");
+                TypeText(m.GetProperty("text").GetString() ?? "");
                 break;
             case "key":
                 switch (m.GetProperty("key").GetString())
                 {
-                    case "backspace": Input.Tap(0x08); break;
-                    case "left": Input.Tap(0x25); break;
-                    case "right": Input.Tap(0x27); break;
-                    case "enter": Input.Tap(0x0D); CloseKeyboard("Enter"); break;
+                    case "backspace": TypeKey("backspace"); break;
+                    case "left": TypeKey("left"); break;
+                    case "right": TypeKey("right"); break;
+                    case "enter": TypeKey("enter"); CloseKeyboard("Enter"); break;
                     case var extra: KeyboardExtraKey(extra); break;
                 }
                 break;
@@ -510,7 +524,7 @@ sealed partial class MainForm : Form
             Log.Info($"Setup finished: starting {installed}");
             try
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(installed) { UseShellExecute = true });
+                StartInstalled(installed); // MainForm.Shell.cs: through the watchdog
                 Close();
                 return;
             }
@@ -532,7 +546,7 @@ sealed partial class MainForm : Form
         var name = apps.Get(id)?.Name ?? id;
         if (!apps.Launch(id))
         {
-            Post(new { type = "opened", id, ok = false, text = $"{name} could not be started" });
+            AppDidntOpen(id, $"{name} didn’t open", "It isn’t installed, or its program wasn’t found.", retry: false);
             return;
         }
         _ = BringUpWhenReady(id, name);
@@ -549,7 +563,7 @@ sealed partial class MainForm : Form
             await Task.Delay(250);
             // Edge started on a profile that is already open hands over to it and exits.
             if (!apps.IsRunning(id)) apps.Adopt(id);
-            if (!apps.IsRunning(id)) { Post(new { type = "opened", id, ok = false, text = $"{name} closed right away" }); return; }
+            if (!apps.IsRunning(id)) { AppDidntOpen(id, $"{name} didn’t open", "It closed while starting.", retry: true); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
             if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
@@ -559,11 +573,12 @@ sealed partial class MainForm : Form
             Log.Info($"{id} window up after {waited + 250} ms");
             return;
         }
-        Post(new { type = "opened", id, ok = false, text = $"{name} is taking long to open" });
+        AppDidntOpen(id, $"{name} is taking long to open", "It may still appear. Home comes back here.", retry: false);
     }
 
     void SwitchTo(string id)
     {
+        if (id == DesktopMode.Id) { ShowDesktop(); return; } // B in the menu opened over the desktop
         var window = apps.MainWindow(id);
         if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
         if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
@@ -596,8 +611,10 @@ sealed partial class MainForm : Form
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
     void ShowOver(CatalogApp? app, string view)
     {
+        var focus = LauncherComingForward(view); // alerts off the app before the capture
         string? backdrop = null;
-        if (app is not null)
+        var overDesktop = app is null && desktop.Active; // desktop mode: B goes back to it
+        if (app is not null || overDesktop)
         {
             try
             {
@@ -606,11 +623,11 @@ sealed partial class MainForm : Form
                 var name = $"screen-{DateTime.Now.Ticks}.jpg";
                 ScreenCapture.Save(Path.Combine(captureDir, name));
                 backdrop = $"https://capture.htpc/{name}";
-                Log.Info($"Home over {app.Id}: screen captured in {clock.ElapsedMilliseconds} ms");
+                Log.Info($"Home over {app?.Id ?? DesktopMode.Id}: screen captured in {clock.ElapsedMilliseconds} ms");
             }
             catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
         }
-        Post(new { type = "show", view, current = app?.Id, backdrop });
+        Post(new { type = "show", view, current = app?.Id ?? (overDesktop ? DesktopMode.Id : null), backdrop, focus });
         PushState();
         Reveal();
     }
@@ -619,10 +636,10 @@ sealed partial class MainForm : Form
     {
         PushState();
         if (started) return;
-        // An app closed by itself (or crashed) while in front: come back to the home screen.
-        if (!LauncherActive && apps.ForegroundApp() is null)
+        // An app closed by itself (or crashed) while in front: come back to the home screen, on its tile.
+        if (!LauncherActive && apps.ForegroundApp() is null && !desktop.Active)
         {
-            Post(new { type = "show", view = "home" });
+            Post(new { type = "show", view = "home", focus = $"tile:{id}" });
             Reveal();
         }
     }
@@ -638,12 +655,14 @@ sealed partial class MainForm : Form
                 // In the mode chosen in Settings (standby by default).
                 standby.Sleep("Power menu");
                 break;
-            case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
+            case "restart": apps.MarkAllClosing("restart"); System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
             case "shutdown":
+                apps.MarkAllClosing("shut down");
                 tv.TurnOffBeforeShutdown(); // the TV goes off with a shut down (not with a restart)
                 System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0");
                 break;
-            case "desktop": WindowState = FormWindowState.Minimized; break;
+            case "desktop": EnterDesktop(); break; // MainForm.Shell.cs
+            case "tv": BackToTv(); break;
         }
     }
 
@@ -691,6 +710,7 @@ sealed partial class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
+        if (m.Msg == DesktopMode.BackToTvMessage) { BackToTv(); return; } // HtpcLauncher.exe --tv
         if (m.Msg == StandbyMessage && standby is not null)
         {
             if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone

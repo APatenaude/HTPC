@@ -57,6 +57,9 @@ sealed class TvService
     /// <summary>Found TVs or the profile changed: refresh Settings.</summary>
     public event Action? Changed;
 
+    /// <summary>After TurnOn: true once the TV reads as on, false when it could not be reached (the alerts time the cards they held back by it).</summary>
+    public event Action<bool>? TurnOnResult;
+
     public TvService(TvParts parts)
     {
         this.parts = parts;
@@ -408,6 +411,7 @@ sealed class TvService
     async Task BringUp(TvProfile p, TvDevice known, ITvDriver d)
     {
         if (Interlocked.Exchange(ref turningOn, 1) == 1) return; // one at a time
+        bool? on = null;
         try
         {
             var caps = d.Info.Caps;
@@ -427,7 +431,7 @@ sealed class TvService
                     tv = await d.Refresh(known, false, cancel);
                 }
             }
-            if (tv is { State.IsOn: true } && (p.Input == 0 || tv.State.Input == p.Input)) { notices.Answered(); return; }
+            if (tv is { State.IsOn: true } && (p.Input == 0 || tv.State.Input == p.Input)) { notices.Answered(); on = true; return; }
             if (tv is not { State.IsOn: true })
             {
                 if (!caps.HasFlag(TvCaps.PowerOn) && !CanWake(p, d)) return;
@@ -436,7 +440,7 @@ sealed class TvService
                 await Wake(p, d);
                 if (caps.HasFlag(TvCaps.PowerOn) && (!caps.HasFlag(TvCaps.OffIsToggle) || tv?.State.Power == TvPower.Off))
                 {
-                    if (!await d.PowerOn(known, cancel)) { notices.Silent(known.Name, ScreenOn(), failedAction: true); return; }
+                    if (!await d.PowerOn(known, cancel)) { notices.Silent(known.Name, ScreenOn(), failedAction: true); on = false; return; }
                 }
                 Log.Info($"TV {known.Name}: on sent");
                 // A TV in deeper standby can miss the first "on": check, and send it once more.
@@ -452,8 +456,9 @@ sealed class TvService
                     }
                 }
                 Log.Info($"TV {known.Name}: {tv?.State.Raw ?? "no answer"}");
-                if (tv is null) notices.Silent(known.Name, ScreenOn(), failedAction: true); else notices.Answered();
+                if (tv is null) { notices.Silent(known.Name, ScreenOn(), failedAction: true); on = false; } else notices.Answered();
             }
+            if (tv is { State.IsOn: true }) on = true;
             if (p.Input == 0 || !caps.HasFlag(TvCaps.SelectInput)) return;
             for (var i = 0; i < 6; i++)
             {
@@ -464,7 +469,11 @@ sealed class TvService
             Log.Info($"TV not on HDMI {p.Input}: switching");
             await d.SelectInput(known, p.Input, cancel);
         }
-        finally { turningOn = 0; }
+        finally
+        {
+            turningOn = 0;
+            if (on is { } result) TurnOnResult?.Invoke(result);
+        }
     }
 
     /// <summary>Test from Settings: off, then back on.</summary>

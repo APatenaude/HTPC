@@ -184,6 +184,8 @@ sealed partial class MainForm
 
     void StartLibraryJob(string id, string action, bool addToHome)
     {
+        // An uninstall or update ends the app on purpose: its exit is no crash (AppExitClassifier).
+        if (action != "install") apps.MarkClosing(id, $"library {action}");
         if (!library.Enqueue(id, action, addToHome, out var error))
         {
             toastWarn(error);

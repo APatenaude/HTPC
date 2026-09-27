@@ -32,7 +32,8 @@ sealed partial class MainForm
     /// restarts the launcher after a crash, so a crash soon after a boot does not turn the TV on
     /// again. Nothing passes it today.
     /// </summary>
-    Task StartTv() => tv.Startup(TimeSpan.FromMilliseconds(Environment.TickCount64), Environment.GetCommandLineArgs().Contains("--restarted"));
+    Task StartTv(bool leaveTvAlone = false) => tv.Startup(TimeSpan.FromMilliseconds(Environment.TickCount64),
+        leaveTvAlone || Environment.GetCommandLineArgs().Contains("--restarted"));
 
     /// <summary>An alert's "Set up" / "TV settings": Settings › TV over whatever is on screen.</summary>
     void OpenTvSettings()

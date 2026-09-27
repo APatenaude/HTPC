@@ -73,7 +73,7 @@ function renderStatus() {
     `<div class="clock"><span class="time">${timeText(now)}</span><span class="date">${esc(dateText(now))}</span></div>` +
     '<div class="pills">' +
       (state.timer ? `<div class="pill timer">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
-      (state.alert ? `<div class="pill alert">${icon(state.alert.glyph || 'info', 28, 2)}<span>${esc(state.alert.text)}</span></div>` : '') +
+      noticePillsHtml() + // alerts (notices.js)
       `<div class="pill"${low ? ' style="color: var(--warn)"' : ''}>${icon('controller', 32)}<b>${esc(batteryText())}</b></div>` +
       `<div class="round" data-nav data-id="settings" data-act="settings" aria-label="Settings">${icon('sliders', 28, 2)}</div>` +
       `<div class="round" data-nav data-id="power" data-act="power" aria-label="Power">${icon('power', 28, 2)}</div>` +
@@ -124,12 +124,15 @@ function renderMenu() {
           (t.id === state.current ? '<span class="tag">Now</span>' : '') +
         '</div>').join('')
     : '<div class="empty">No apps open</div>';
+  // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
+  $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
   $('menu-panel').innerHTML =
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
+    noticeRowsHtml() + // alerts with something to do (notices.js)
     `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 38, 2)}Home screen</div>` +
-    `<span class="section">Open apps</span>${apps}` +
-    '<span class="section">Quick</span>' +
+    `<span class="section">Open apps</span><div class="apps">${apps}</div>` +
+    '<span class="section quick-label">Quick</span>' +
     `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 34)}` +
       `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
     `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 34)}` +
@@ -150,10 +153,12 @@ const POWER = [
   { id: 'shutdown', glyph: 'power', label: 'Shut down', caption: '' },
   { id: 'desktop', glyph: 'desktop', label: 'Desktop mode', caption: 'Normal Windows desktop, for maintenance' }
 ];
+// While the Windows desktop is up (desktop mode, state.desktop from the host), its card leads back.
+const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close the Windows desktop and taskbar' };
 
 function renderPower() {
   POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
-  $('power-cards').innerHTML = POWER.map((p) =>
+  $('power-cards').innerHTML = POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
       `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join('');
   $('power-note').innerHTML = '';
@@ -448,7 +453,8 @@ function hostMessage(type, fn) { EXT.host[type] = fn; }
 // shown / left for the Settings section in view (none while Settings is not).
 let sectionInView = null;
 function sectionHooks() {
-  const now = state.view === 'settings' ? state.section : null;
+  // The TV method dialog over Settings is still the TV section (its list keeps refreshing).
+  const now = state.view === 'settings' || state.view === 'tvmethod' ? state.section : null;
   if (now === sectionInView) return;
   const was = EXT.sections[sectionInView];
   sectionInView = now;
@@ -504,13 +510,8 @@ function showOpening(t) {
 }
 function hideOpening() { $('opening').classList.remove('on'); }
 
-function toast(text, kind) {
-  const el = document.createElement('div');
-  el.className = 'toast' + (kind === 'warn' ? ' warn' : '');
-  el.innerHTML = icon(kind === 'warn' ? 'warn' : 'info', 30, 2) + `<span>${esc(text)}</span>`;
-  $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 5000);
-}
+// A short message from the page, drawn with the alerts (notices.js).
+function toast(text, kind) { if (text) noticeOwn(text, kind); }
 
 function activate(el) {
   if (!el) return;
@@ -526,7 +527,14 @@ function activate(el) {
     case 'home': state.current = null; state.backdrop = null; send({ type: 'home' }); reset('home'); break;
     case 'view': go(arg); break;
     case 'power': go('power'); break;
-    case 'power-action': send({ type: 'power', action: arg }); break;
+    case 'power-action':
+      if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
+        text: 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.' });
+      // One wrong press of A must not switch the box off: the controller cannot turn it back on.
+      else if (arg === 'shutdown') ask({ title: 'Shut down the box?', yes: 'Shut down', onYes: () => send({ type: 'power', action: 'shutdown' }),
+        text: 'It turns off completely: the controller can’t turn it back on. Use the box’s power button to start it again.' });
+      else send({ type: 'power', action: arg });
+      break;
     case 'timer': {
       const o = TIMER[Number(arg)];
       state.timer = o.minutes === 0 ? null : { label: o.label, endsAt: o.minutes === 'video' ? 'video' : Date.now() + o.minutes * 60000 };
@@ -584,6 +592,8 @@ function press(button) {
       break;
     case 'b': back(); break;
     case 'x': {
+      // An alert's row: dismisses it, and nothing else (never on to the close below).
+      if (el && el.dataset.alert) { noticeDismiss(el.dataset.alert); break; }
       // Home screen: the focused tile, if it is running. Menu: the focused app row, else the
       // app the menu was opened over.
       let id = null;
@@ -595,10 +605,17 @@ function press(button) {
       break;
     }
     case 'home':
-      if (state.view === 'home') { state.current = null; state.backdrop = null; go('menu'); }
+      if (state.view === 'home') {
+        state.current = null; state.backdrop = null;
+        // An actionable alert on screen: the menu opens on its row; otherwise where it was left.
+        const f = noticeHomeFocus();
+        if (f) state.memory.menu = f;
+        go('menu');
+      }
       else back();
       break;
     case 'homeHold': if (state.view !== 'power') go('power'); break;
+    case 'r3': { const f = textField(); if (f) openKeyboardFor(f); break; }  // textinput.js
     case 'start':
       // Home screen: options for the focused tile (Move, Rename, Change icon, Remove).
       if (state.view === 'home' && el && el.dataset.arg && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
@@ -611,6 +628,9 @@ const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }
+  // A text field has the focus: the key is the field's (Backspace deletes, x types an x), only
+  // Enter and Escape still confirm and cancel (textinput.js).
+  if (keyGuard(e)) return;
   const b = KEYS[e.key];
   if (!b) return;
   e.preventDefault();
@@ -633,15 +653,15 @@ function onHost(msg) {
     case 'blank': $('stage').classList.add('blank'); break;
     case 'opened':
       hideOpening();
-      if (!msg.ok) toast(msg.text, 'warn');
+      if (!msg.ok && msg.text) toast(msg.text, 'warn'); // failures come as alerts now
       break;
     case 'state':
       if (msg.running) {
         for (const t of state.tiles) t.running = msg.running.includes(t.id);
         // The app the menu was opened over has closed: B and Home now lead home, not to it.
-        if (state.current && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
+        if (state.current && state.current !== 'desktop' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
-      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone']) if (k in msg) state[k] = msg[k];
+      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone', 'desktop']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;
@@ -651,6 +671,10 @@ function onHost(msg) {
       const apply = () => {
         state.current = msg.current || null;
         state.backdrop = msg.backdrop || null;
+        // focus: the element to land on (an alert's row, the tile of an app that just closed);
+        // section: the Settings section to open (an alert's action).
+        if (msg.focus) state.memory[msg.view] = msg.focus;
+        if (msg.section) state.section = msg.section;
         reset(msg.view);
         $('stage').classList.remove('blank');
       };

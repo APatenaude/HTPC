@@ -109,7 +109,8 @@ sealed class RokuDriver : ITvDriver
     /// <summary>False (and logged) when the Roku at this address is another one.</summary>
     static bool SameTv(string id, string serial, Uri baseUrl)
     {
-        if (serial.Length == 0 || string.Equals(serial, id, StringComparison.OrdinalIgnoreCase)) return true;
+        // No serial at all is not proof either: every Roku reports one.
+        if (serial.Length > 0 && string.Equals(serial, id, StringComparison.OrdinalIgnoreCase)) return true;
         Log.Warn($"Roku at {baseUrl.Host} is another TV now; nothing sent to it");
         return false;
     }
@@ -125,9 +126,11 @@ sealed class RokuDriver : ITvDriver
     /// </summary>
     async Task<bool> Key(TvDevice tv, string key, CancellationToken cancel)
     {
-        if (!(seen.TryGetValue(tv.Address.Authority, out var last) && clock.Now - last.At < Vouch && SameTv(tv.Id, last.Serial, tv.Address)))
+        // Fresh: read less than 10 s ago; a negative age (the clock set back, as at the autumn change) is not.
+        bool Fresh(DateTime at) => clock.Now - at >= TimeSpan.Zero && clock.Now - at < Vouch;
+        if (!(seen.TryGetValue(tv.Address.Authority, out var last) && Fresh(last.At) && SameTv(tv.Id, last.Serial, tv.Address)))
         {
-            if (seen.TryGetValue(tv.Address.Authority, out last) && clock.Now - last.At < Vouch) return false; // read recently: another TV
+            if (seen.TryGetValue(tv.Address.Authority, out last) && Fresh(last.At)) return false; // read recently: another TV
             if (await Read(tv.Id, tv.Address, cancel) is not { Tv: not null })
             {
                 Log.Warn($"Roku {key}: not sent, {tv.Name} not confirmed at {tv.Address.Host}");

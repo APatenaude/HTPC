@@ -175,6 +175,13 @@ sealed class Standby
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
 
+    /// <summary>
+    /// True while something must not be cut off by a real sleep or hibernate (an update being
+    /// installed): Sleep then goes to standby instead, and the "sleep after hours of standby"
+    /// waits. Standby itself is fine: the box keeps running.
+    /// </summary>
+    public Func<bool>? HoldOffRealSleep { get; set; }
+
     public Standby(ControllerService controller, LauncherSettings settings, MediaWatcher media)
     {
         this.controller = controller;
@@ -190,6 +197,7 @@ sealed class Standby
     public void Sleep(string reason)
     {
         var (s3, s4) = Capabilities();
+        if (HoldOffRealSleep?.Invoke() == true) { s3 = false; s4 = false; }
         switch (settings.SleepMode)
         {
             case "sleep" when s3: RealSleep(false, reason); break;
@@ -268,7 +276,8 @@ sealed class Standby
     {
         if (Active)
         {
-            if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep &&
+            WarnIdle(false);
+            if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep && HoldOffRealSleep?.Invoke() != true &&
                 DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
             {
                 RealSleep(false, $"after {settings.SleepAfterStandbyHours} h in standby");
@@ -276,15 +285,34 @@ sealed class Standby
             }
             return;
         }
-        if (settings.IdleMinutes <= 0) return;
+        if (settings.IdleMinutes <= 0) { WarnIdle(false); return; }
         var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
         var controllerIdle = DateTime.Now - controller.LastActivity;
         if (controllerIdle < idle) idle = controllerIdle;
         var phoneIdle = DateTime.Now - PhoneActivity;
         if (phoneIdle < idle) idle = phoneIdle;
-        if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
-        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) return;
+        var left = TimeSpan.FromMinutes(settings.IdleMinutes) - idle;
+        if (left > IdleWarningTime) { WarnIdle(false); return; }
+        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) { WarnIdle(false); return; }
+        // The last minute: say so first (any button keeps the box awake), then sleep.
+        if (left > TimeSpan.Zero) { WarnIdle(true); return; }
+        WarnIdle(false);
         Sleep($"idle {settings.IdleMinutes} min");
+    }
+
+    /// <summary>The idle sleep warning comes this long before (the Tick runs every 5 s, so 55 to 60 s).</summary>
+    public static readonly TimeSpan IdleWarningTime = TimeSpan.FromMinutes(1);
+
+    bool idleWarned;
+
+    /// <summary>Idle sleep is a minute away (true), or no longer coming (false): the warning alert.</summary>
+    public event Action<bool>? IdleWarning;
+
+    void WarnIdle(bool on)
+    {
+        if (on == idleWarned) return;
+        idleWarned = on;
+        IdleWarning?.Invoke(on);
     }
 
     static Guid? ActivePlan()

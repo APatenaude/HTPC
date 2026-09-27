@@ -26,7 +26,7 @@ const BUTTONS = [['a', 'A'], ['b', 'B'], ['x', 'X'], ['y', 'Y'], ['lb', 'LB'], [
 const STEP_NAMES = { RestorePoint: 'Restore point', Winget: 'App installer', Apps: 'Apps', Codecs: 'Video codecs',
   Edge: 'Edge settings', Power: 'Power and sleep', Updates: 'Windows updates', System: 'No pop-ups, network, time',
   AutoLogon: 'Sign-in without a password', Launcher: 'Home screen', Library: 'Installing from the TV', PhoneRemote: 'Phone remote',
-  DecodeCheck: 'Video decoding check' };
+  Shell: 'Start straight into the home screen', DecodeCheck: 'Video decoding check' };
 
 const state = {
   step: 'welcome',
@@ -147,7 +147,9 @@ function views() {
   lines.push(['ok', `${state.picked.size} apps on the home screen`]);
   for (const [name, v] of failed) lines.push(['warn', `${STEP_NAMES[name] || name}: ${String(v).replace(/^FAILED: /, '')}`]);
   const restart = r.restartNeeded && r.restartNeeded.length;
-  if (restart) lines.push(['warn', 'Restart the box once to finish (the name change)']);
+  if (restart) lines.push(['warn', r.restartNeeded.includes('shell')
+    ? 'Restart the box once to finish: from then on it starts straight into this home screen'
+    : 'Restart the box once to finish (the name change)']);
   return {
     main: `<div class="su-col"><h1 class="big">${failed.length ? 'Almost set' : 'All set'}</h1>` +
       `<div class="su-summary">${lines.map(([k, text]) =>
@@ -226,17 +228,24 @@ function render() {
 }
 
 /**
- * The Wi-Fi step's list: the Wi-Fi component's job (WifiUI, not built here). To wire it: load its
- * script in setup.html before setup.js and put its call in here, drawing into `el` with data-nav
- * rows (the controller moves through them like any other) and sending its "wifi.*" messages;
- * the host passes those on through its [UiMessages("wifi.")] handler. Until then the step
- * says what to do, and Next goes on (the TV search just finds nothing without a network).
+ * The Wi-Fi step's list: the Wi-Fi component (wifi.js, WifiUI, the same as Settings › Wi-Fi)
+ * draws its data-nav rows into `el` (the controller moves through them like any other) and sends
+ * its "wifi.*" messages to the host's [UiMessages("wifi.")] handler. goStep starts and stops its
+ * scanning with the step; press and onHost hand it its buttons and messages.
  */
 function mountWifi(el) {
   if (!el) return;
   if (typeof WifiUI === 'undefined') {
-    el.innerHTML = '<div class="su-row">Plug in a network cable, then press Next. (Picking a Wi-Fi network here comes with the Wi-Fi screen.)</div>';
+    el.innerHTML = '<div class="su-row">Plug in a network cable, then press Next.</div>';
+    return;
   }
+  el.innerHTML = WifiUI.html();
+  WifiUI.afterRender();
+}
+
+function wifiRedraw(focusId) {
+  if (focusId) state.focus = focusId;
+  if (state.step === 'wifi') render();
 }
 
 // ---- Focus ----------------------------------------------------------------------------------
@@ -252,6 +261,8 @@ function setFocus(el) {
   if (!el) { state.focus = null; return; }
   el.classList.add('focused');
   state.focus = el.dataset.id;
+  // The Wi-Fi step's list scrolls: a row the focus moves to comes into view.
+  if (el.closest('.wifi-scroll')) el.scrollIntoView({ block: 'nearest' });
 }
 
 function move(dir) {
@@ -282,6 +293,11 @@ function goStep(name) {
   state.step = name;
   state.focus = null;
   state.dialog = false;
+  // The Wi-Fi step scans only while it shows.
+  if (typeof WifiUI !== 'undefined' && (name === 'wifi') !== (was === 'wifi')) {
+    if (name === 'wifi') WifiUI.start({ changed: wifiRedraw, toast });
+    else WifiUI.stop();
+  }
   const tvNow = name === 'tv' || name === 'input', tvBefore = was === 'tv' || was === 'input';
   if (tvNow !== tvBefore) send({ type: 'tv.showing', on: tvNow });
   clearInterval(readTimer);
@@ -350,6 +366,8 @@ function press(button, fromController) {
     if (BUTTONS.some(([b]) => b === button)) { state.pressed.add(button); render(); }
     return;
   }
+  // The Wi-Fi list and its password form take their own buttons first (A on a network, B in the form).
+  if (step === 'wifi' && typeof WifiUI !== 'undefined' && WifiUI.press(button, document.querySelector('[data-nav].focused'))) return;
   switch (button) {
     case 'up': case 'down': case 'left': case 'right': move(button); break;
     case 'a': activate(state.focus); break;
@@ -370,6 +388,8 @@ function toast(text, kind) {
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a', Escape: 'b' };
 addEventListener('keydown', (e) => {
+  // A key typed into a field (the Wi-Fi password) stays in it (textinput.js).
+  if (typeof keyGuard === 'function' && keyGuard(e)) return;
   const b = KEYS[e.key];
   if (!b) return;
   e.preventDefault();
@@ -381,7 +401,11 @@ addEventListener('keydown', (e) => {
 // ---- Host messages --------------------------------------------------------------------------
 
 function onHost(m) {
+  if (typeof WifiUI !== 'undefined' && WifiUI.handle(m)) return; // wifi.state, wifi.result
   switch (m.type) {
+    // The on-screen keyboard's and the phone's typing, into the focused field (textinput.js).
+    case 'text.insert': if (typeof textInsert === 'function') textInsert(m.text); break;
+    case 'text.key': if (typeof textKey === 'function') textKey(m.key); break;
     case 'init':
       state.apps = m.apps || [];
       state.picked = new Set(state.apps.filter((a) => a.default).map((a) => a.id));
@@ -443,6 +467,8 @@ if (host) {
     state.declined = q.get('declined') === '1';
     if (step === 'done') state.result = { ok: true, results: {}, restartNeeded: q.get('restart') === '1' ? ['ComputerName'] : [] };
     goStep(step);
+    // setup.html#wifi?wired=0&wifi=password: the Wi-Fi component's sample states (wifi.js demo).
+    if (step === 'wifi' && typeof WifiUI !== 'undefined') { WifiUI.demo(q.get('wifi') || 'wifi'); render(); }
     if (q.get('read')) onHost({ type: 'tv.read', power: q.get('read') === 'off' ? 'off' : 'on', input: Number(q.get('read')) || 0 });
     if (q.get('dialog') === '1') { state.dialog = true; render(); }
   }

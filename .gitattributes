@@ -3,3 +3,6 @@
 *.psm1 text eol=crlf
 *.cmd text eol=crlf
 *.bat text eol=crlf
+# TvLab's recorded traces and EDID fixtures, byte for byte
+launcher/dev/TvLab/golden/** text eol=lf
+*.bin binary

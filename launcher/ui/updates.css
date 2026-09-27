@@ -1,0 +1,41 @@
+/* Settings › Updates (updates.js). Design: "Settings: updates" on the TV Box canvas. */
+
+.upd { display: flex; gap: 40px; min-height: 0; }
+.upd-list { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.upd-side { width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; }
+
+.upd-row { min-height: 84px; padding: 12px 28px; gap: 22px; border-radius: 20px; }
+.upd-row .glyph { display: flex; flex-shrink: 0; }
+.upd-row .label { font-size: 27px; }
+.upd-row .caption { font-size: 21px; }
+.upd-row .notes { font-size: 20px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upd-status { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; white-space: nowrap; }
+.upd-status.update { color: var(--warn); }
+.upd-status.ok { color: #7FD1AE; }
+.upd-status.busy { color: var(--accent); }
+.upd-status.quiet { color: var(--muted); font-weight: 400; }
+.upd-status.bad { color: #FF8A7A; }
+
+.upd-card { padding: 28px; border-radius: 24px; background: #16181C; display: flex; flex-direction: column; gap: 14px; }
+.upd-card h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; }
+.upd-card p { margin: 0; font-size: 22px; line-height: 1.4; color: var(--text-2); }
+.upd-card .small { font-size: 21px; color: var(--muted); }
+.upd-card .sbutton { justify-content: center; height: 68px; margin-top: 6px; font-size: 24px; }
+.upd-card .sbutton.primary { height: 76px; background: var(--accent); color: var(--bg); font-size: 28px; font-weight: 700; }
+.upd-card .sbutton.primary.focused { background: #A9D2FF; }
+.upd-card .pair { display: flex; gap: 12px; }
+.upd-card .pair .sbutton { flex: 1; padding: 0 16px; }
+
+.upd-bar { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
+.upd-bar span { display: block; height: 100%; background: var(--accent); border-radius: 5px; transition: width 0.4s ease; }
+
+.upd-checked { display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--muted); }
+
+/* "Restarting the TV launcher": the last thing the old launcher shows (exit code 75). */
+/* Shown like any view (.view.on in app.css): no display here, or it covers every screen. */
+#updrestart { align-items: center; justify-content: center; background: var(--bg); }
+#updrestart .center { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+#updrestart .accent-icon { color: var(--accent); }
+#updrestart h1 { font-size: 56px; }
+#updrestart p { margin: 0; font-size: 28px; color: var(--text-2); }
+

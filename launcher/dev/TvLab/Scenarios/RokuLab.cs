@@ -23,7 +23,7 @@ static class RokuLab
         {
             var path = LabPaths.Golden("roku", name);
             if (!File.Exists(path)) { Check.That(false, $"{name}: no golden trace (run: TvLab roku --record-baseline)"); continue; }
-            var expected = File.ReadAllText(path).TrimEnd('\n').Split('\n').ToList();
+            var expected = File.ReadAllText(path).Replace("\r\n", "\n").TrimEnd('\n').Split('\n').ToList(); // a checkout may have made them CRLF
             var lines = await RunOne(run, NewHostFactory);
             var actual = RokuScenarios.Normalize(lines);
             var same = expected.SequenceEqual(actual);

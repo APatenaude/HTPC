@@ -13,13 +13,18 @@
 
     Two changes make that safe:
       1. C:\ProgramData\HTPC is locked: inheritance off, SYSTEM and Administrators full control,
-         Users read only. Two sub-folders stay user-writable - logs\ (the launcher's log) and user\
+         Users read only. Three sub-folders stay user-writable - logs\ (the launcher's log), tv\ (the TV
+         code's address cache) and user\
          (progress for per-user installs the launcher runs itself). state\ is admin-write, user-read
          (SYSTEM writes machine-job progress and staging there; the launcher only reads it).
          Without this, any standard process could plant files where SYSTEM or an elevated setup
          later reads or runs them (ProgramData is world-writable by default).
-      2. The \HTPC\Jobs task runs as SYSTEM with no trigger, one instance at a time and a 30-minute
-         limit; its security is set so the TV user may run it but not change it.
+      2. The \HTPC\Jobs task runs as SYSTEM, one instance at a time, with a 4-hour limit (Windows
+         updates install one at a time from the TV and a cumulative update alone can take close to
+         an hour on the N97; the launcher stops an app job long before, after 10 minutes without
+         progress); its security is set so the TV user may run it but not change it. Its only
+         trigger is Windows starting, with no token: that run finishes or undoes a launcher
+         update a power cut interrupted (jobs\reconcile.ps1).
 
     Idempotent: safe to re-run.
 #>
@@ -40,12 +45,24 @@ $SidAdmins = New-Sid 'S-1-5-32-544'
 $SidUsers  = New-Sid 'S-1-5-32-545'
 $Inherit = 'ContainerInherit,ObjectInherit'
 
-foreach ($sub in @('', 'logs', 'user', 'state')) {
-    $path = if ($sub) { Join-Path $HtpcData $sub } else { $HtpcData }
-    New-Item -ItemType Directory -Force $path | Out-Null
+# A junction or symbolic link where one of these folders should be (a standard user can plant one
+# before the first lock, or in a folder that stays theirs to write): Set-Acl would change the
+# link's target instead (Program Files\HTPC, state\...). The link goes - only the link, never what
+# it points at - and a real folder takes its place, before any ACL is set.
+function Assert-RealFolder([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        if ($item.PSIsContainer) { [IO.Directory]::Delete($Path) } else { [IO.File]::Delete($Path) }
+        Write-Change "$Path was a link; replaced by a real folder"
+    }
+    New-Item -ItemType Directory -Force $Path | Out-Null
 }
 
-# Root and state\: Users read only. logs\ and user\: Users may write.
+foreach ($sub in @('', 'logs', 'user', 'state', 'tv')) {
+    Assert-RealFolder $(if ($sub) { Join-Path $HtpcData $sub } else { $HtpcData })
+}
+
+# Root and state\: Users read only. logs\, user\ and tv\: Users may write.
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)   # inheritance off, drop inherited rules
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($SidSystem, 'FullControl', $Inherit, 'None', 'Allow')))
@@ -61,9 +78,13 @@ if (-not $current.AreAccessRulesProtected) {
     Write-Same "$HtpcData already locked"
 }
 
-# logs\ and user\ get Users Modify back (the launcher writes there at standard rights).
-foreach ($sub in @('logs', 'user')) {
+# logs\, user\ and tv\ get Users Modify back (the launcher writes there at standard rights; tv\ is
+# the TV code's address cache and its own files, which nothing elevated reads).
+foreach ($sub in @('logs', 'user', 'tv')) {
     $path = Join-Path $HtpcData $sub
+    # Checked again now that the root is locked (Users can no longer create anything in it): a
+    # link planted in a writable sub-folder's place before this run is replaced here.
+    Assert-RealFolder $path
     $subAcl = Get-Acl -LiteralPath $path
     $hasWrite = $subAcl.Access | Where-Object { $_.IdentityReference -eq $SidUsers.Translate([Security.Principal.NTAccount]) -and $_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify -and -not $_.IsInherited }
     if (-not $hasWrite) {
@@ -81,16 +102,20 @@ $taskPath = '\HTPC\'
 $taskName = 'Jobs'
 $argument = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $installerScript + '" -Job "$(Arg0)"'
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
+# By full path: a bare name would be looked up through PATH, as SYSTEM.
+$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$action = New-ScheduledTaskAction -Execute $powershell -Argument $argument
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
+$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 4) `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$trigger = New-ScheduledTaskTrigger -AtStartup
 
 $existing = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
-if ($existing -and $existing.Actions[0].Arguments -eq $argument) {
+if ($existing -and $existing.Actions[0].Arguments -eq $argument -and $existing.Actions[0].Execute -eq $powershell -and
+    $existing.Settings.ExecutionTimeLimit -eq 'PT4H' -and @($existing.Triggers).Count -eq 1) {
     Write-Same "scheduled task $taskPath$taskName already registered"
 } else {
-    Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+    Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Principal $principal -Settings $settings -Trigger $trigger -Force | Out-Null
     Write-Change "scheduled task $taskPath$taskName registered (runs as SYSTEM)"
 }
 
