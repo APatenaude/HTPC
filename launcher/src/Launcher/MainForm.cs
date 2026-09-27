@@ -170,6 +170,9 @@ sealed partial class MainForm : Form
         core.Settings.IsPinchZoomEnabled = false;
         core.Settings.IsSwipeNavigationEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
+        // Nothing typed in the launcher (a Wi-Fi password) is kept or offered by WebView2.
+        core.Settings.IsPasswordAutosaveEnabled = false;
+        core.Settings.IsGeneralAutofillEnabled = false;
         core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += OnWebMessage;

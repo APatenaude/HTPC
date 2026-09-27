@@ -88,7 +88,7 @@ if ($Shots.Count -gt 0) {
         $png = Join-Path $OutDir (($route -replace '[^\w-]', '_') + '.png')
         Remove-Item $png -ErrorAction SilentlyContinue
         try {
-            Invoke-Edge @("--screenshot=$png", "$url#$route") (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png }
+            Invoke-Edge @("--screenshot=$png", $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" })) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png }
             "$route -> $png"
         } catch { Write-Warning "${route}: $($_.Exception.Message)"; $failed = 1 }
     }

@@ -242,7 +242,7 @@ sealed class WifiService : IDisposable
         {
             var reasonText = WlanNative.ReasonText(reason);
             Log.Info($"Wi-Fi: join failed, reason {reason} ({reasonText})");
-            var kind = WifiReasons.Classify(reason);
+            var kind = WifiReasons.Classify(reason, reasonText);
             return new(ssid, false, kind, kind switch
             {
                 "wrong-password" => "Wrong password. Check it and try again.",
@@ -395,7 +395,9 @@ sealed class WifiService : IDisposable
     {
         try
         {
-            if (await Radio.RequestAccessAsync() != RadioAccessStatus.Allowed) { Log.Warn("Wi-Fi radio: access refused"); return false; }
+            // Asked with a time limit: WinRT access requests can go unanswered in a desktop app.
+            var access = Radio.RequestAccessAsync().AsTask();
+            if (await Task.WhenAny(access, Task.Delay(10_000)) != access || access.Result != RadioAccessStatus.Allowed) { Log.Warn("Wi-Fi radio: access refused or unanswered"); return false; }
             var radio = (await Radio.GetRadiosAsync()).FirstOrDefault(r => r.Kind == RadioKind.WiFi);
             if (radio is null) return false;
             var result = await radio.SetStateAsync(on ? RadioState.On : RadioState.Off);
@@ -505,14 +507,4 @@ static class LocationConsent
 
     // The consent store names a desktop app by its path, with # for \.
     static string ExeKey() => (Environment.ProcessPath ?? "").Replace('\\', '#');
-}
-
-/// <summary>
-/// WIP: which WLAN reason codes mean a wrong password. To be filled from NetProbe's dump of
-/// WlanReasonCodeToString over the MSMSEC range (the Windows SDK headers are not on the box);
-/// until then every failure is reported with Windows' own text.
-/// </summary>
-static class WifiReasons
-{
-    public static string Classify(uint reason) => "failed";
 }

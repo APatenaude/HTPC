@@ -153,3 +153,29 @@ static class WifiProfile
     /// </summary>
     public static bool AskBeforeRadioOff(bool wifiCarriesInternet, bool cableUp) => wifiCarriesInternet && !cableUp;
 }
+
+/// <summary>
+/// What a failed join's WLAN reason code means for the user. The codes are Windows' own
+/// (WlanReasonCodeToString on this box, launcher\dev\NetProbe): a wrong WPA password shows as
+/// "PSK mismatch suspected", or as the key exchange timing out; the rest are a key Windows could
+/// not use. Anything else: Windows' own text.
+/// </summary>
+static class WifiReasons
+{
+    static readonly HashSet<uint> WrongPassword = new()
+    {
+        0x48014, // PSK mismatch suspected
+        0x48005, // dynamic key exchange did not succeed within configured time (wrong WPA2 key)
+        0x48012, // entered key is not in a valid format
+        0x40003, 0x40004, // invalid key / PSK length
+        0x40016, 0x40017, 0x4001D, // characters a key cannot have
+    };
+
+    public static string Classify(uint reason, string? text = null)
+    {
+        if (WrongPassword.Contains(reason)) return "wrong-password";
+        var t = (text ?? "").ToLowerInvariant();
+        if (t.Contains("not available") || t.Contains("not found") || t.Contains("out of range")) return "not-found";
+        return "failed";
+    }
+}

@@ -100,6 +100,7 @@ sealed partial class MainForm
             if (place == AlertPlace.Standby) { internet.Paused = true; if (foreignWindows is not null) foreignWindows.Paused = true; }
             if (alertPlace == AlertPlace.Standby) Awake();
             alertPlace = place;
+            WifiStandby(); // MainForm.Wifi.cs: no scans in standby
         }
         alertCenter.SetPlace(place, moonlight);
     }

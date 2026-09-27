@@ -9,7 +9,9 @@
       dialogs; no Sticky/Filter/Toggle Keys prompts; no Game DVR.
     - Less background work: Windows Search indexing and SysMain (prefetch) off, no peer-to-peer
       update sharing.
-    - Connected networks set to Private (the phone remote and TV discovery need the LAN).
+    - Connected networks set to Private (the phone remote and TV discovery need the LAN), and
+      every network joined later too (a SYSTEM task on Windows' network-connected event).
+    - Location allowed for desktop apps and the launcher (its Wi-Fi list needs it since 24H2).
     - Automatic time zone (Windows location services; the Wi-Fi adapter locates the box
       from nearby networks even while it uses Ethernet); computer name TV (tv.local).
     User-level settings apply to the account running setup (the box has one user).
@@ -90,7 +92,32 @@ foreach ($net in Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -e
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' 'Start' 3
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' 'Value' 'Allow' 'String'
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc\Service\Configuration' 'Status' 1
+# Wi-Fi in the launcher (Settings > Wi-Fi, the first-run Wi-Fi step): since Windows 11 24H2 a
+# desktop app gets the list of networks only with location allowed, for this user, for desktop
+# apps and for that program (else ERROR_ACCESS_DENIED, or a prompt nobody can answer with the
+# controller). A "Deny" left from an earlier answer is replaced.
+$consent = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'
+$launcherExe = Join-Path $env:ProgramFiles 'HTPC\Launcher\HtpcLauncher.exe'
+foreach ($key in $consent, "$consent\NonPackaged", "$consent\NonPackaged\$($launcherExe -replace '\\', '#')") {
+    Set-RegValue $key 'Value' 'Allow' 'String'
+}
 Write-Host "  Time zone now: $((Get-TimeZone).Id) (updates itself when Windows locates the box)"
+
+# Every network the box joins later (Wi-Fi from the TV) becomes Private too: a task run as
+# SYSTEM when Windows connects to a network (NetworkProfile event 10000). A fixed command, no
+# parameters: it only turns Public networks Private.
+$taskName = '\HTPC\Networks private'
+$command = "Get-NetConnectionProfile | Where-Object { `$_.NetworkCategory -eq 'Public' } | Set-NetConnectionProfile -NetworkCategory Private"
+$eventClass = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler
+$trigger = New-CimInstance -CimClass $eventClass -ClientOnly
+$trigger.Enabled = $true
+$trigger.Subscription = '<QueryList><Query Id="0" Path="Microsoft-Windows-NetworkProfile/Operational"><Select Path="Microsoft-Windows-NetworkProfile/Operational">*[System[EventID=10000]]</Select></Query></QueryList>'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$command`""
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$existing = Get-ScheduledTask -TaskPath '\HTPC\' -TaskName 'Networks private' -ErrorAction SilentlyContinue
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -Force | Out-Null
+if ($existing) { Write-Same 'task: joined networks become Private' } else { Write-Change 'task: joined networks become Private' }
 if ($env:COMPUTERNAME -ne $ComputerName) {
     Rename-Computer -NewName $ComputerName -Force -WarningAction SilentlyContinue
     Write-Attention "computer renamed to $ComputerName; takes effect after a restart"

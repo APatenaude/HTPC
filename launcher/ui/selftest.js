@@ -132,6 +132,56 @@
   reset('home');
   check('status bar: the pill shows', $('status').textContent.includes('4 updates'));
 
+  // ---- Wi-Fi (wifi.js) ------------------------------------------------------------------------------
+  const asked = [], toasts = [];
+  const box = document.createElement('div');
+  $('stage').appendChild(box);
+  const draw = () => { box.innerHTML = WifiUI.html(); WifiUI.afterRender(); };
+  const node = (id) => box.querySelector(`[data-id="${id}"]`);
+  WifiUI.demo('wifi');   // online only through Wi-Fi
+  sent.length = 0;
+  WifiUI.start({ changed: draw, ask: (q) => asked.push(q), toast: (t) => toasts.push(t) });
+  check('Wi-Fi: shown, the host starts scanning', lastSent('wifi.watch') && lastSent('wifi.watch').on === true);
+  draw();
+  check('Wi-Fi: the network in use is at the top', node('wifi-current') && node('wifi-current').textContent.includes('Connected'));
+  WifiUI.press('a', node('wifi-radio'));
+  check('Wi-Fi: switch off while online only through it asks first', asked.length === 1 && /Turn Wi-Fi off/.test(asked[0].title) && !lastSent('wifi.radio'));
+  WifiUI.press('x', node('wifi-current'));
+  check('Wi-Fi: X on the network in use asks before forgetting it', asked.length === 2 && /Forget/.test(asked[1].title) && /offline/.test(asked[1].text));
+  WifiUI.press('a', node('wifi-net:3'));
+  check('Wi-Fi: a WEP network is refused with the reason, no form', !WifiUI.joining && toasts.some((t) => /WEP/.test(t)));
+  WifiUI.press('a', node('wifi-net:0'));
+  draw();
+  const pw = document.getElementById('wifi-password-input');
+  check('Wi-Fi: a locked network opens the password form', WifiUI.joining && pw && pw.type === 'password' && pw.autocomplete === 'off');
+  check('Wi-Fi: ... and the keyboard for its field', lastSent('text.keyboard') && lastSent('text.keyboard').password === true);
+  pw.value = 'hunter22';
+  WifiUI.press('a', node('wifi-go'));
+  const j = lastSent('wifi.join');
+  check('Wi-Fi: Join sends the name and the password', j && j.ssid === '[Network name 2]' && j.password === 'hunter22' && !j.hidden);
+  WifiUI.handle({ type: 'wifi.result', ssid: '[Network name 2]', ok: false, reason: 'wrong-password', text: 'Wrong password. Check it and try again.' });
+  draw();
+  check('Wi-Fi: wrong password: the form stays, says so, field emptied', WifiUI.joining && box.textContent.includes('Wrong password') && document.getElementById('wifi-password-input').value === '');
+  WifiUI.press('b', node('wifi-password'));
+  check('Wi-Fi: B leaves the form and the keyboard', !WifiUI.joining && lastSent('text.done'));
+  WifiUI.press('a', node('wifi-hidden'));
+  draw();
+  WifiUI.press('right', node('wifi-security'));
+  document.getElementById('wifi-name-input').value = '[Hidden]';
+  document.getElementById('wifi-password-input').value = 'abcdefgh';
+  WifiUI.press('a', node('wifi-go'));
+  const h = lastSent('wifi.join');
+  check('Wi-Fi: a hidden network: name, security, password', h && h.hidden === true && h.ssid === '[Hidden]' && h.security === 'wpa3sae' && h.password === 'abcdefgh');
+  WifiUI.handle({ type: 'wifi.result', ssid: '[Hidden]', ok: true, reason: 'ok', text: 'Connected to [Hidden]' });
+  check('Wi-Fi: joined: back to the list', !WifiUI.joining && toasts.includes('Connected to [Hidden]'));
+  WifiUI.demo('location');
+  draw();
+  WifiUI.press('a', node('wifi-allow'));
+  check('Wi-Fi: location refused: the Allow row asks the host', !!lastSent('wifi.allowLocation'));
+  WifiUI.stop();
+  check('Wi-Fi: hidden, the host stops scanning', lastSent('wifi.watch').on === false);
+  box.remove();
+
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
   console.log = log;

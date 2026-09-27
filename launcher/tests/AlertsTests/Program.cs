@@ -6,7 +6,70 @@ using Htpc.Launcher;
 AppExitChecks.Run();
 AlertChecks.Run();
 InternetChecks.Run();
+WifiChecks.Run();
 return T.Summary();
+
+static class WifiChecks
+{
+    public static void Run()
+    {
+        T.Group("Wi-Fi: security, passwords, profiles");
+        var both = new[] { (WifiProfile.AuthRsnaPsk, WifiProfile.CipherCcmp, true), (WifiProfile.AuthWpa3Sae, WifiProfile.CipherCcmp, true) };
+        var wpa3Adapter = new HashSet<(int, int)> { (WifiProfile.AuthRsnaPsk, WifiProfile.CipherCcmp), (WifiProfile.AuthWpa3Sae, WifiProfile.CipherCcmp) };
+        var wpa2Adapter = new HashSet<(int, int)> { (WifiProfile.AuthRsnaPsk, WifiProfile.CipherCcmp) };
+        T.Equal("WPA2+WPA3 router, WPA3 adapter: transition mode", WifiSecurity.Wpa3Transition, WifiProfile.Choose(both, wpa3Adapter).Security);
+        T.Equal("WPA2+WPA3 router, WPA2-only adapter: WPA2", WifiSecurity.Wpa2Psk, WifiProfile.Choose(both, wpa2Adapter).Security);
+        T.Equal("WPA3-only router, WPA3 adapter", WifiSecurity.Wpa3Sae, WifiProfile.Choose(new[] { (WifiProfile.AuthWpa3Sae, WifiProfile.CipherCcmp, true) }, wpa3Adapter).Security);
+        T.Equal("open", WifiSecurity.Open, WifiProfile.Choose(new[] { (WifiProfile.AuthOpen, WifiProfile.CipherNone, false) }, null).Security);
+        T.Equal("OWE (Enhanced Open)", WifiSecurity.Owe, WifiProfile.Choose(new[] { (WifiProfile.AuthOwe, WifiProfile.CipherCcmp, true) }, null).Security);
+        T.Equal("WEP", WifiSecurity.Wep, WifiProfile.Choose(new[] { (WifiProfile.AuthOpen, WifiProfile.CipherWep, true) }, null).Security);
+        T.Equal("802.1X", WifiSecurity.Enterprise, WifiProfile.Choose(new[] { (WifiProfile.AuthRsna, WifiProfile.CipherCcmp, true) }, null).Security);
+        T.Check("WEP refused with a reason", WifiProfile.Refusal(WifiSecurity.Wep) is not null);
+        T.Check("802.1X refused with a reason", WifiProfile.Refusal(WifiSecurity.Enterprise) is not null);
+        T.Check("WEP: no profile is ever built", Throws(() => WifiProfile.Build("x", WifiSecurity.Wep, 0, null, false)));
+
+        T.Equal("password of 7 characters: too short", "The password has 8 to 63 characters.", WifiProfile.CheckKey(WifiSecurity.Wpa2Psk, "1234567"));
+        T.Equal("8 characters: fine", null, WifiProfile.CheckKey(WifiSecurity.Wpa2Psk, "12345678"));
+        T.Equal("63 characters: fine", null, WifiProfile.CheckKey(WifiSecurity.Wpa2Psk, new string('a', 63)));
+        T.Check("64 characters that are not hex: refused", WifiProfile.CheckKey(WifiSecurity.Wpa2Psk, new string('g', 64)) is not null);
+        T.Equal("64 hex digits (a raw key): fine for WPA2", null, WifiProfile.CheckKey(WifiSecurity.Wpa2Psk, new string('a', 64)));
+        T.Check("64 hex digits: not for WPA3", WifiProfile.CheckKey(WifiSecurity.Wpa3Sae, new string('a', 64)) is not null);
+        T.Check("a non-ASCII character: refused", WifiProfile.CheckKey(WifiSecurity.Wpa2Psk, "motdepassé1") is not null);
+        T.Equal("open networks need none", null, WifiProfile.CheckKey(WifiSecurity.Open, ""));
+
+        T.Equal("SSID in hex, UTF-8", "43616CC3A9", WifiProfile.Hex("Calé"));
+        var xml = WifiProfile.Build("Café & <Co>", WifiSecurity.Wpa2Psk, WifiProfile.CipherCcmp, "p&ss<word>", hidden: true);
+        var doc = System.Xml.Linq.XDocument.Parse(xml);
+        System.Xml.Linq.XNamespace ns = "http://www.microsoft.com/networking/WLAN/profile/v1";
+        T.Equal("profile: name escaped and read back", "Café & <Co>", doc.Root!.Element(ns + "name")!.Value);
+        T.Equal("profile: hex SSID", WifiProfile.Hex("Café & <Co>"), doc.Descendants(ns + "hex").Single().Value);
+        T.Equal("profile: hidden = nonBroadcast", "true", doc.Descendants(ns + "nonBroadcast").Single().Value);
+        T.Equal("profile: WPA2PSK / AES", "WPA2PSK/AES", doc.Descendants(ns + "authentication").Single().Value + "/" + doc.Descendants(ns + "encryption").Single().Value);
+        T.Equal("profile: key in clear for Windows to encrypt (protected=false)", "false", doc.Descendants(ns + "protected").Single().Value);
+        T.Equal("profile: key material escaped and read back", "p&ss<word>", doc.Descendants(ns + "keyMaterial").Single().Value);
+        var t = WifiProfile.Build("Home", WifiSecurity.Wpa3Transition, WifiProfile.CipherCcmp, "12345678", false);
+        T.Check("profile: transition mode says so", t.Contains("<transitionMode") && t.Contains("WPA3SAE"));
+        var open = WifiProfile.Build("Guest", WifiSecurity.Open, WifiProfile.CipherNone, null, false);
+        T.Check("profile: open has no key", !open.Contains("sharedKey") && open.Contains("<authentication>open</authentication>"));
+        T.Check("profile: raw 64-digit key is a networkKey", WifiProfile.Build("x", WifiSecurity.Wpa2Psk, WifiProfile.CipherCcmp, new string('b', 64), false).Contains("<keyType>networkKey</keyType>"));
+        T.Check("profile: 33-byte name refused", Throws(() => WifiProfile.Build(new string('n', 33), WifiSecurity.Open, 0, null, false)));
+        T.Equal("name that is not UTF-8: shown in hex", "0xFF00", WifiProfile.SsidText(new byte[] { 0xFF, 0x00 }));
+
+        T.Group("Wi-Fi: wording and decisions");
+        T.Equal("signal 80: strong", "strong signal", WifiProfile.SignalWords(80));
+        T.Equal("signal 45: good", "good signal", WifiProfile.SignalWords(45));
+        T.Equal("signal 20: weak", "weak signal", WifiProfile.SignalWords(20));
+        T.Check("radio off while Wi-Fi carries the internet and no cable: ask first", WifiProfile.AskBeforeRadioOff(true, false));
+        T.Check("... with a cable up: no need", !WifiProfile.AskBeforeRadioOff(true, true));
+        T.Check("... on the cable already: no need", !WifiProfile.AskBeforeRadioOff(false, true));
+        T.Equal("reason 0x48014 (PSK mismatch): wrong password", "wrong-password", WifiReasons.Classify(0x48014));
+        T.Equal("reason 0x48005 (key exchange timed out): wrong password", "wrong-password", WifiReasons.Classify(0x48005));
+        T.Equal("a 'not available' text: not found", "not-found", WifiReasons.Classify(0x20002, "The network is not available."));
+        T.Equal("anything else: failed", "failed", WifiReasons.Classify(1));
+    }
+
+    static bool Throws(Action a) { try { a(); return false; } catch (ArgumentException) { return true; } }
+}
 
 static class AppExitChecks
 {

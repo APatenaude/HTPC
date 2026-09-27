@@ -26,7 +26,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
-| System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
+| System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network (and every network joined later, a SYSTEM task), automatic time zone, location for the launcher's Wi-Fi list, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
 | Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; started at sign-in |
 | Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\` and `user\` stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 30-min limit, the TV user may run it) |
