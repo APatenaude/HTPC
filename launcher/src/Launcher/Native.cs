@@ -130,6 +130,38 @@ static class Native
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32FirstW(IntPtr snapshot, ref ProcessEntry32 entry);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32NextW(IntPtr snapshot, ref ProcessEntry32 entry);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr process, int flags, System.Text.StringBuilder name, ref int size);
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int infoClass, IntPtr info, int length, out int returnLength);
+    const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    /// <summary>A process's program path and command line (null where it cannot be read).</summary>
+    public static (string? Path, string? CommandLine) ProcessInfo(int processId)
+    {
+        var h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)processId);
+        if (h == IntPtr.Zero) return (null, null);
+        try
+        {
+            var name = new System.Text.StringBuilder(1024);
+            var size = name.Capacity;
+            var path = QueryFullProcessImageName(h, 0, name, ref size) ? name.ToString() : null;
+            // ProcessCommandLineInformation (60): a UNICODE_STRING followed by the text.
+            string? commandLine = null;
+            NtQueryInformationProcess(h, 60, IntPtr.Zero, 0, out var needed);
+            if (needed > 0)
+            {
+                var buffer = Marshal.AllocHGlobal(needed);
+                try
+                {
+                    if (NtQueryInformationProcess(h, 60, buffer, needed, out _) == 0)
+                        commandLine = Marshal.PtrToStringUni(Marshal.ReadIntPtr(buffer, IntPtr.Size), (ushort)Marshal.ReadInt16(buffer) / 2);
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            return (path, commandLine);
+        }
+        finally { CloseHandle(h); }
+    }
 
     /// <summary>The process and all its descendants.</summary>
     public static HashSet<uint> ProcessTree(uint root)

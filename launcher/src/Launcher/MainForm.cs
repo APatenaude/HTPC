@@ -66,7 +66,7 @@ sealed class MainForm : Form
             closeSoon.Stop();
             if (keyboard.Visible && keyboardAuto) CloseKeyboard("the text field lost the focus");
         };
-        textFields.FocusChanged += field => BeginInvoke(() => OnTextField(field));
+        textFields.FocusChanged += (field, pid) => BeginInvoke(() => OnTextField(field, pid));
         controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
         controller.StatusChanged += (connected, _) => BeginInvoke(() =>
         {
@@ -99,6 +99,7 @@ sealed class MainForm : Form
         base.OnLoad(e);
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+        apps.Adopt(); // apps left open by a previous launcher
         standby = new Standby(controller, settings);
         standby.Changed += OnStandbyChanged;
         standby.GoingDown += () =>
@@ -367,14 +368,18 @@ sealed class MainForm : Form
     static bool SameField(TextField? a, TextField? b) =>
         a is not null && b is not null && a.ProcessId == b.ProcessId && a.Name == b.Name && a.IsPassword == b.IsPassword;
 
-    void OnTextField(TextField? field)
+    void OnTextField(TextField? field, int processId)
     {
         if (field is null)
         {
             dismissedField = null;
-            // Not at once: a suggestion list (Edge's address bar, a site's search box) or a page
-            // update takes the focus for an instant and gives it back, and the keyboard flickered.
-            if (keyboard.Visible && keyboardAuto) closeSoon.Start();
+            if (!keyboard.Visible || !keyboardAuto) return;
+            // While the keyboard is up the controller drives it, so the user cannot have moved
+            // the focus: moves inside the same app are the app's own (Edge's suggestion list
+            // takes the focus for a second or more as you type; pages re-render). Only another
+            // app taking the focus closes it, and not at once (it may come straight back).
+            if (keyboardField is { } typing && typing.ProcessId == processId) return;
+            closeSoon.Start();
             return;
         }
         closeSoon.Stop();
@@ -509,6 +514,7 @@ sealed class MainForm : Form
 
     void Open(string id)
     {
+        apps.Adopt(id); // already open without our knowing: switch to it, no second copy
         if (apps.IsRunning(id)) { SwitchTo(id); return; }
         var name = apps.Get(id)?.Name ?? id;
         if (!apps.Launch(id))
@@ -528,6 +534,8 @@ sealed class MainForm : Form
         for (var waited = 0; waited < 30_000; waited += 250)
         {
             await Task.Delay(250);
+            // Edge started on a profile that is already open hands over to it and exits.
+            if (!apps.IsRunning(id)) apps.Adopt(id);
             if (!apps.IsRunning(id)) { Post(new { type = "opened", id, ok = false, text = $"{name} closed right away" }); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;

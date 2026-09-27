@@ -19,8 +19,11 @@ sealed record TextField(int ProcessId, string Name, bool IsPassword, Rectangle B
 /// </summary>
 sealed class TextFieldWatcher : IDisposable
 {
-    /// <summary>A text field got the focus (non-null), or the focus moved elsewhere (null). Any thread.</summary>
-    public event Action<TextField?>? FocusChanged;
+    /// <summary>
+    /// The focus moved: to a text field (non-null), or to something else (null), in the given
+    /// process. Any thread.
+    /// </summary>
+    public event Action<TextField?, int>? FocusChanged;
 
     readonly BlockingCollection<Action> work = new();
     readonly Thread thread;
@@ -103,7 +106,7 @@ sealed class TextFieldWatcher : IDisposable
         var field = editable && Get(IsEnabled) is true && Get(IsKeyboardFocusable) is true && Get(ValueIsReadOnly) is not true
             ? new TextField(pid, (Get(Name) as string ?? "").Trim(), Get(IsPassword) is true, ToRectangle(Get(BoundingRectangle)))
             : null;
-        FocusChanged?.Invoke(field);
+        FocusChanged?.Invoke(field, pid);
     }
 
     static Rectangle ToRectangle(object? value) =>

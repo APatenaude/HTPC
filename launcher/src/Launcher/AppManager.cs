@@ -71,11 +71,72 @@ sealed class AppManager
         lock (running) return running.Where(r => !r.Value.HasExited).Select(r => r.Key).ToList();
     }
 
+    // Edge profile folder of a website tile, or the one in an app's --user-data-dir argument.
+    static string? EdgeProfile(CatalogApp app)
+    {
+        if (app.Type == "website") return Path.Combine(EdgeProfiles, app.Id);
+        var m = System.Text.RegularExpressions.Regex.Match(Environment.ExpandEnvironmentVariables(app.Args ?? ""), "--user-data-dir=\"?([^\"]+)\"?");
+        return m.Success ? m.Groups[1].Value.Trim() : null;
+    }
+
+    /// <summary>
+    /// Takes over the catalog's apps that are already running without the launcher knowing (it
+    /// was restarted, or the app was opened some other way), so a tile switches to them instead
+    /// of opening a second copy. An app is recognised by its program path, or for Edge-based
+    /// ones (websites, the Edge tile) by the Edge profile folder it runs on; the main process,
+    /// not a helper (no --type=), is the one tracked. Only the given app, or all.
+    /// </summary>
+    public void Adopt(string? onlyId = null)
+    {
+        var wanted = (onlyId is null ? byId.Values : new[] { Get(onlyId) }.OfType<CatalogApp>())
+            .Where(a => !IsRunning(a.Id)).ToList();
+        if (wanted.Count == 0) return;
+        foreach (var p in Process.GetProcesses())
+        {
+            if (p.Id == Environment.ProcessId || p.SessionId != Process.GetCurrentProcess().SessionId) { p.Dispose(); continue; }
+            var (path, commandLine) = Native.ProcessInfo(p.Id);
+            if (path is null || (commandLine?.Contains("--type=", StringComparison.OrdinalIgnoreCase) ?? false)) { p.Dispose(); continue; }
+            CatalogApp? match = null;
+            foreach (var app in wanted)
+            {
+                var profile = EdgeProfile(app);
+                if (profile is not null)
+                {
+                    if (path.Equals(EdgeExe, StringComparison.OrdinalIgnoreCase) && commandLine is not null
+                        && System.Text.RegularExpressions.Regex.IsMatch(commandLine, "--user-data-dir=\"?" + System.Text.RegularExpressions.Regex.Escape(profile) + "\"?(\\s|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        match = app;
+                }
+                else if (app.Exe is not null && path.Equals(Environment.ExpandEnvironmentVariables(app.Exe), StringComparison.OrdinalIgnoreCase))
+                    match = app;
+                if (match is not null) break;
+            }
+            if (match is null) { p.Dispose(); continue; }
+            wanted.Remove(match);
+            Track(match.Id, p);
+            Log.Info($"{match.Id} was already running (pid {p.Id}): taken over");
+            RunningChanged?.Invoke(match.Id, true);
+            if (wanted.Count == 0) break;
+        }
+    }
+
+    void Track(string id, Process process)
+    {
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) =>
+        {
+            Log.Info($"{id} exited ({SafeExitCode(process)})");
+            lock (running) if (running.TryGetValue(id, out var p) && p == process) running.Remove(id);
+            RunningChanged?.Invoke(id, false);
+        };
+        lock (running) running[id] = process;
+    }
+
     /// <summary>Starts the app; returns false (and logs why) when it cannot.</summary>
     public bool Launch(string id)
     {
         var app = Get(id);
         if (app is null) return false;
+        Adopt(id);
         if (IsRunning(id)) return true;
 
         ProcessStartInfo psi;
@@ -112,14 +173,7 @@ sealed class AppManager
         try
         {
             var process = Process.Start(psi)!;
-            process.EnableRaisingEvents = true;
-            process.Exited += (_, _) =>
-            {
-                Log.Info($"{id} exited ({SafeExitCode(process)})");
-                lock (running) if (running.TryGetValue(id, out var p) && p == process) running.Remove(id);
-                RunningChanged?.Invoke(id, false);
-            };
-            lock (running) running[id] = process;
+            Track(id, process);
             Log.Info($"Started {id}: {psi.FileName} {psi.Arguments} (pid {process.Id})");
             RunningChanged?.Invoke(id, true);
             return true;
