@@ -22,7 +22,7 @@
 .upd-card .small { font-size: 21px; color: var(--muted); }
 .upd-card .sbutton { justify-content: center; height: 68px; margin-top: 6px; font-size: 24px; }
 .upd-card .sbutton.primary { height: 76px; background: var(--accent); color: var(--bg); font-size: 28px; font-weight: 700; }
-.upd-card .sbutton.primary.focused { background: #A9D2FF; }
+.upd-card .sbutton.primary.focused { background: #A9D2FF; box-shadow: 0 0 0 4px #16181C, 0 0 0 8px var(--accent) !important; }
 .upd-card .pair { display: flex; gap: 12px; }
 .upd-card .pair .sbutton { flex: 1; padding: 0 16px; }
 

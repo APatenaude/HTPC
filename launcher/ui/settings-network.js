@@ -7,7 +7,8 @@
 const setFocusBeforeWifi = setFocus;
 setFocus = function (el, chosen) {   // eslint-disable-line no-global-assign
   setFocusBeforeWifi(el, chosen);
-  if (el && el.closest && el.closest('.wifi-scroll')) el.scrollIntoView({ block: 'nearest' });
+  const list = el && el.closest && el.closest('.wifi-scroll');
+  if (list) { el.scrollIntoView({ block: 'nearest' }); listEdges(list); }   // its ends fade where there is more
 };
 
 function wifiChanged(focusId) {

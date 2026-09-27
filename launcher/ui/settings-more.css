@@ -83,7 +83,7 @@
 
 /* Button map editor */
 #buttons { flex-direction: column; background: var(--bg); }
-.bedit { flex-grow: 1; min-height: 0; display: flex; gap: 48px; padding: 64px 96px 0; }
+.bedit { flex: 1 1 0; min-height: 0; display: flex; gap: 48px; padding: 64px 96px 0; }
 .bmain { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
 .bmain header { display: flex; flex-direction: column; gap: 8px; }
 .bmain h1 { font-size: 48px; }
@@ -147,6 +147,8 @@
 .bk { display: flex; align-items: center; justify-content: center; height: 46px; border-radius: 12px; background: var(--chip); font-size: 18px; font-weight: 700; white-space: nowrap; }
 .bk.on { background: var(--accent); color: var(--bg); }
 .bk.focused, .bmod.focused, .buse.focused { box-shadow: 0 0 0 4px var(--accent) !important; }
+/* In the accent colour itself (picked, Use it): the ring set apart from it */
+.bk.on.focused, .bmod.on.focused, .buse.focused:not(.off) { box-shadow: 0 0 0 4px var(--row), 0 0 0 8px var(--accent) !important; }
 .bcombo { display: flex; align-items: center; gap: 16px; margin-top: auto; font-size: 26px; font-weight: 700; }
 .bcombo .grow { flex-grow: 1; }
 .buse { display: flex; align-items: center; height: 60px; padding: 0 28px; border-radius: 18px; background: var(--accent); color: var(--bg); font-size: 24px; font-weight: 700; }

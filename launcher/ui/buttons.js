@@ -102,7 +102,6 @@ function changesText(app) {
 }
 
 addView('maps', {
-  wrap: false,   // up on the first app, down on the last: stays there
   render() {
     const apps = maps.data ? maps.data.apps : [];
     const rows = apps.map((a) =>
@@ -116,12 +115,11 @@ addView('maps', {
         '<p>Each app gets its own buttons. Home always opens the menu.</p></header>' +
         `<div class="mlist">${rows || '<p class="snote">Loading…</p>'}</div>` +
       `</main><footer class="hints">${hints([['A', 'Edit'], ['B', 'Back']])}</footer></div>`, '.mlist', 'maps');
-    setTimeout(() => keepInView('maps', '.mlist'), 0);
   },
+  focused() { keepInView('maps', '.mlist'); },   // the list scrolls to the focus
   press(button, el) {
     if (button !== 'up' && button !== 'down') return false;
     stepFocus(el, button);
-    keepInView('maps', '.mlist');
     return true;
   },
   demo() { mapsDemo(); },
@@ -186,17 +184,12 @@ function menuAppCard() {
 
 // The focused element of a scrolling list stays in view, clear of the list's faded ends (the
 // list scrolls, nothing around it: app.js's scrollIntoBox); the ends fade only where there is
-// more to scroll to (.more-up, .more-down).
+// more to scroll to (app.js's listEdges).
 function keepInView(view, listSelector) {
   const f = document.querySelector(`#${view} [data-nav].focused`);
   const list = f && f.closest(listSelector);
   if (list) scrollIntoBox(f, list, 64);
   for (const l of document.querySelectorAll(`#${view} :is(${listSelector})`)) listEdges(l);
-}
-
-function listEdges(list) {
-  list.classList.toggle('more-up', list.scrollTop > 2);
-  list.classList.toggle('more-down', list.scrollTop + list.clientHeight < list.scrollHeight - 2);
 }
 
 // Re-renders a view with its scrolling list left where it was (the clock and the host redraw
@@ -323,7 +316,6 @@ function presetRow(app) {
 }
 
 addView('buttons', {
-  wrap: false,
   render() {
     const app = mapApp(maps.id);
     if (!app) { $('buttons').innerHTML = '<div class="bedit"><p class="snote">Loading…</p></div>'; return; }
@@ -349,8 +341,8 @@ addView('buttons', {
       `<aside class="baside">${aside}</aside></div>` +
       `<footer class="hints">${hints(list)}</footer>`,
       '.blist, .bkeys', `${app.id}:${row}:${maps.picking ? maps.cat : ''}:${maps.combo ? 'combo' : ''}:${maps.choosingPreset ? 'preset' : ''}`);
-    setTimeout(() => keepInView('buttons', '.blist, .bkeys'), 0); // after app.js has put the focus back
   },
+  focused() { keepInView('buttons', '.blist, .bkeys'); },   // the lists scroll to the focus
   focus(list) {
     if (maps.combo) return list.find((e) => e.dataset.key === maps.combo.key) || list.find((e) => e.dataset.key);
     if (maps.picking) return list.find((e) => e.classList.contains('on') && e.dataset.value) || list.find((e) => e.dataset.value);
@@ -480,7 +472,6 @@ function pickPress(button, el, app) {
     }
     case 'up': case 'down':   // along the list, which scrolls; it stops at its ends
       stepFocus(el, button);
-      keepInView('buttons', '.blist');
       return true;
   }
   return true;

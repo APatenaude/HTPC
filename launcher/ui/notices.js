@@ -75,6 +75,26 @@ function renderNotices() {
     if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
     before = el.nextSibling;
   }
+  noticeAvoid(typeof focusedEl === 'function' ? focusedEl() : null);
+}
+
+// The cards never cover the focus (the status bar's Settings and Power, a tile at the top
+// right): over it, only the newest shows, on one line; still over it, at the bottom right,
+// above the hints; until the focus moves on.
+function noticeAvoid(el) {
+  const box = $('toasts');
+  if (!box) return;
+  box.classList.remove('compact', 'low');
+  if (!el || !box.children.length) return;
+  const over = () => {
+    const a = box.getBoundingClientRect(), r = el.getBoundingClientRect(), g = 8 * ($('stage').getBoundingClientRect().width / 1920 || 1);
+    return r.left - g < a.right && r.right + g > a.left && r.top - g < a.bottom && r.bottom + g > a.top;
+  };
+  if (!over()) return;
+  box.classList.add('compact');
+  if (!over()) return;
+  box.classList.add('low');
+  if (over()) box.classList.remove('low');
 }
 
 // Home pressed while an actionable card is on screen: the menu opens on its row.
@@ -154,10 +174,11 @@ addEventListener('DOMContentLoaded', () => {
   hostMessage('text.', (msg) => { if (msg.type === 'text.insert') textInsert(msg.text); else if (msg.type === 'text.key') textKey(msg.key); });
   if (host || !location.hash) return;
   const route = location.hash.slice(1);
-  if (route === 'selftest') {
-    const s = document.createElement('script');
-    s.src = 'selftest.js';
-    document.body.appendChild(s);
-  } else if (!noticeDemo(route)) return;
+  // #selftest: the self-test, the UI audit (audit.js) at its end; #audit, #audit?page=...: the
+  // audit alone. In order (async off); loaded before the page's load event, which waits for them.
+  const load = (src) => { const s = document.createElement('script'); s.src = src; s.async = false; document.body.appendChild(s); };
+  if (route === 'selftest') { load('audit.js'); load('selftest.js'); }
+  else if (route.startsWith('audit')) { window.auditRoute = route; load('audit.js'); }
+  else if (!noticeDemo(route)) return;
   history.replaceState(null, '', location.pathname + location.search);
 });

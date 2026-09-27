@@ -263,6 +263,16 @@ parser, alerts overlay, the autostart guard on a fake registry), `launcher\tests
 (alerts, app exits, internet rules, Wi-Fi profiles and passwords). The page's own checks:
 `launcher\dev\Test-Ui.ps1 -SelfTest`; screenshots: `-Shots alerts,settings/wifi,"?wifi=password#settings/wifi"`.
 
+The self-test ends with the UI audit (`ui/audit.js`, a "focus walker"): every page is set up in a
+stress state (24 tiles, 20 library apps, 15 Wi-Fi networks, 10 Bluetooth devices, long names...)
+and walked with the D-pad through `press()`, the controller's path. At each focus: the element,
+its ring and its zoom are whole inside every box that clips them, on screen, above the hints and
+not covered; and for the page: everything focusable is reached, nothing wraps round, B leaves,
+one hint bar shows, every press takes at most 50 ms (timed in a second, real-time run,
+`index.html#audit`). **Every new view must be in the walker**: an `auditPage()` in audit.js for
+each view (`addView`) and each Settings section (what to set up, how to open it); a view without
+one fails the audit. `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element.
+
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
 `-NoTv` never sends the TV a key (no on at start, no off in standby): for working on the box

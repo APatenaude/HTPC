@@ -4,6 +4,10 @@
 :root { --bad: #FF8A7A; --bad-bg: #33201E; }
 
 #toasts { top: 48px; right: 96px; width: 680px; gap: 14px; align-items: stretch; }
+/* The focus is under the cards (noticeAvoid): the newest only, on one line; or at the bottom */
+#toasts.compact > :not(:first-child) { display: none; }
+#toasts.compact .title, #toasts.compact .body { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toasts.low { top: auto; bottom: 120px; }
 
 /* Icon, text and action centred on one line whether the text is one line or two: the card is at
    least as tall as the icon plus its padding, and the text block sits in the middle of it. */
@@ -38,15 +42,18 @@
 .alert-row .chip { display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-size: 22px; color: #D9D8D4; }
 .alert-row .chip .key { min-width: 40px; height: 40px; font-size: 20px; }
 
-/* Many open apps (and alert rows): two columns of shorter rows, and the panel scrolls if it
-   still does not fit, with the button hints kept at the bottom. */
-#menu-panel { overflow-y: auto; scrollbar-width: none; }
+/* Many open apps (and alert rows): two columns of shorter rows, and the panel's rows scroll if
+   they still do not fit (.panel-scroll, app.css), with the button hints kept at the bottom. */
+#menu-panel { overflow: hidden; }
 #menu-panel .apps { display: flex; flex-direction: column; gap: 14px; }
 #menu-panel.crowded .apps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 #menu-panel.crowded .apps .row { height: 72px; padding: 0 20px; gap: 14px; font-size: 26px; }
 #menu-panel.crowded .apps .row .grow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #menu-panel.crowded .quick-label { display: none; }
-#menu-panel .hints { position: sticky; bottom: 0; background: var(--panel); flex-shrink: 0; }
+#menu-panel.crowded .row.big { height: 76px; }
+#menu-panel.crowded .row.slider { height: 72px; }
+#menu-panel.crowded .quick { height: 96px; }
+#menu-panel .hints { flex-shrink: 0; }
 
 /* Status bar pills */
 .pill.alert.bad { background: var(--bad-bg); color: var(--bad); }

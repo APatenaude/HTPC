@@ -49,7 +49,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 @keyframes view-in { from { opacity: 0; transform: scale(1.015); } to { opacity: 1; transform: none; } }
 #menu.on { animation: none; }   /* the panel slides in instead */
 #home.behind, #home.stay { animation: none; }   /* stay: back from under an overlay, it never left */
-#home.behind .hints { visibility: hidden; }    /* the overlay's hints are the ones that count */
+#home.behind .hints, .view.under .hints { visibility: hidden; }   /* the overlay's hints are the ones that count */
 
 /* Coming back from a hidden launcher or standby: fade up from dark */
 #stage { transition: opacity 0.35s ease-out; }
@@ -86,8 +86,17 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .pill.alert { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
 .round { display: flex; width: 60px; height: 60px; border-radius: 30px; background: var(--tile); align-items: center; justify-content: center; }
 
-.tiles-wrap { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 96px; }
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 48px; }
+/* The tiles, centred while they fit (auto margins); more than fit, they scroll here (app.js
+   keepTileInView: the focused tile whole, its zoom and ring too), the clock and the hints stay.
+   Padding: room for the zoom and the ring at the ends; the ends fade where there are more. */
+.tiles-wrap { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 96px; overflow: hidden; }
+.tiles { flex-shrink: 0; margin: auto 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 48px; }
+.tiles-wrap.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.tiles-wrap.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent); }
+.tiles-wrap.more-up.more-down {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
 .tile {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
   aspect-ratio: 16 / 10; border-radius: 28px; box-sizing: border-box;
@@ -95,6 +104,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
   transition: transform 0.15s ease, box-shadow 0.15s ease, translate 0.22s ease, opacity 0.15s ease;
 }
 .tile .name { font-family: var(--display); font-weight: 600; font-size: 34px; letter-spacing: -0.01em; }
+/* A long name: two lines at most, centred, clear of the tile's edges */
+.tile .name { max-width: calc(100% - 48px); text-align: center; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 /* An app's icon (appIcon): its logo, full colour, or its glyph. */
 .appicon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .appicon > img { display: none; object-fit: contain; }
@@ -144,6 +155,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .quicks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .quick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 116px; border-radius: 22px; background: var(--row); font-size: 22px; color: #D9D8D4; }
 .panel .hints { margin: auto -48px 0; padding: 0 48px; }
+/* The panel's rows: they scroll (to the focus) when there are too many; room for the rings */
+.panel-scroll { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: hidden; padding: 8px; margin: -8px -8px 0; }
+.panel-scroll > * { flex-shrink: 0; }
 
 /* The Home menu over an app: its buttons, beside the panel (buttons.js menuAppCard) */
 #menu-app { position: absolute; right: 96px; bottom: 96px; width: 800px; }
@@ -201,9 +215,9 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .sitem.focused { background: var(--tile-focus); color: #FFFFFF; }
 .spane { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Room at the bottom: the pane scrolls to the focus (app.js scrollIntoBox) with its ring clear of the hints */
-.spane main { flex-grow: 1; min-height: 0; padding: 72px 96px 32px 80px; display: flex; flex-direction: column; gap: 14px; }
+.spane main { flex: 1 1 0; min-height: 0; padding: 72px 96px 32px 80px; display: flex; flex-direction: column; gap: 14px; }
 /* Scrolled into view (the pane, a list scrolling itself), a row keeps room around it for its focus ring */
-.spane [data-nav] { scroll-margin: 20px 0; }
+.spane [data-nav] { scroll-margin: 32px 0; }
 /* Not squeezed: the pane scrolls instead. A list that scrolls itself (Wi-Fi, Bluetooth, Button maps) still fits in it. */
 .spane main > :not(.wifi-scroll):not(.mlist) { flex-shrink: 0; }
 .spane header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }

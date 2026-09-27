@@ -10,6 +10,10 @@ sealed partial class MainForm
 {
     readonly AppLogos logos = new();
     bool logosWired;
+    // Logos arriving one after the other (a pass after each tile added, after each install): the
+    // tiles, the library and the maps go to the UI once they have stopped for a moment, not once
+    // per logo (each push redrew them, the library's install checks with it).
+    readonly System.Windows.Forms.Timer logoPush = new() { Interval = 400 };
 
     [UiReady]
     void StartLogos()
@@ -17,7 +21,8 @@ sealed partial class MainForm
         if (!logosWired)
         {
             logosWired = true;
-            logos.Changed += () => OnUi(() => { PushTiles(); PushLibraryCatalog(); PostMaps(); });
+            logoPush.Tick += (_, _) => { logoPush.Stop(); PushTiles(); PushLibraryCatalog(); PostMaps(); };
+            logos.Changed += () => OnUi(() => { logoPush.Stop(); logoPush.Start(); });
             clock.Tick += (_, _) => { if (ticks % 600 == 0 && !setupMode && standby is { Active: false }) RefreshLogos(); };
         }
         RefreshLogos();

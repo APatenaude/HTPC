@@ -343,19 +343,43 @@ sealed class AppManager
         }
     }
 
+    // The Start menu's shortcuts, read once a minute at most (the library asks for every app it
+    // lists, each time it is shown or an install moves or a logo arrives), and each shortcut's
+    // target once: walking the Start menu and resolving shortcuts took the UI thread a few tens
+    // of ms per app. ForgetShortcuts after an install or an uninstall.
+    static readonly object shortcutGate = new();
+    static List<string>? shortcuts;
+    static DateTime shortcutsAt;
+    static readonly Dictionary<string, string> shortcutTargets = new(StringComparer.OrdinalIgnoreCase);
+
+    public static void ForgetShortcuts()
+    {
+        lock (shortcutGate) { shortcuts = null; shortcutTargets.Clear(); }
+    }
+
     /// <summary>
     /// The program behind the Start menu shortcut named most like the app ("VLC media player"
     /// for VLC), from all users' Start menu and the user's own; uninstall shortcuts skipped.
     /// </summary>
     static string? StartMenuTarget(string name)
     {
-        var roots = new[]
+        List<string> all;
+        lock (shortcutGate)
         {
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
-            Environment.GetFolderPath(Environment.SpecialFolder.Programs),
-        };
-        var links = roots.Where(Directory.Exists)
-            .SelectMany(r => Directory.EnumerateFiles(r, "*.lnk", SearchOption.AllDirectories))
+            if (shortcuts is null || DateTime.UtcNow - shortcutsAt > TimeSpan.FromMinutes(1))
+            {
+                var roots = new[]
+                {
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
+                    Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+                };
+                shortcuts = roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFiles(r, "*.lnk", SearchOption.AllDirectories)).ToList();
+                shortcutsAt = DateTime.UtcNow;
+                shortcutTargets.Clear();
+            }
+            all = shortcuts;
+        }
+        var links = all
             .Where(l => Path.GetFileNameWithoutExtension(l).Contains(name, StringComparison.OrdinalIgnoreCase)
                      && !Path.GetFileNameWithoutExtension(l).Contains("uninstall", StringComparison.OrdinalIgnoreCase))
             .OrderBy(l => Path.GetFileNameWithoutExtension(l).Length);
@@ -363,8 +387,14 @@ sealed class AppManager
         {
             try
             {
-                dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
-                string target = shell.CreateShortcut(link).TargetPath;
+                string? target;
+                lock (shortcutGate) shortcutTargets.TryGetValue(link, out target);
+                if (target is null)
+                {
+                    dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+                    target = (string)shell.CreateShortcut(link).TargetPath ?? "";
+                    lock (shortcutGate) shortcutTargets[link] = target;
+                }
                 if (target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target)) return target;
             }
             catch (Exception e) { Log.Warn($"Shortcut {link}: {e.Message}"); }

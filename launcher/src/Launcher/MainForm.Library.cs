@@ -213,6 +213,7 @@ sealed partial class MainForm
 
     void OnJobFinished(LibraryJob job, bool ok, string text)
     {
+        AppManager.ForgetShortcuts(); // what is installed changed: the Start menu is read again
         toast(text, ok ? null : "warn");
         PushLibraryProgress();
         PushLibraryCatalog();

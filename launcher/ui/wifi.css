@@ -19,3 +19,10 @@
 .spane main:has(.wifi-scroll) { min-height: 0; overflow: hidden; }
 .wifi-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 14px; padding: 6px; margin: -6px; }
 .wifi-scroll > .srow { flex-shrink: 0; }
+/* Its ends fade where there is more (settings-network.js listEdges); rows come into view clear of them (scroll-margin, app.css) */
+.wifi-scroll.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.wifi-scroll.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent); }
+.wifi-scroll.more-up.more-down {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}

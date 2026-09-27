@@ -19,6 +19,8 @@
   background: none; box-shadow: inset 0 0 0 2px var(--key-edge); font-size: 25px; color: var(--text-2); }
 .tv-card.add.focused { background: var(--tile-focus); box-shadow: 0 0 0 4px var(--accent); }
 .tv-card-name { display: flex; align-items: center; gap: 14px; font-size: 27px; }
+.tv-card-name .icon { flex-shrink: 0; }
+.tv-card-name span { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .tv-card.current .tv-card-name { font-weight: 700; }
 .tv-card-line { font-size: 21px; color: var(--text-2); }
 .tv-now { align-self: flex-start; display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 16px;
@@ -49,6 +51,10 @@
   animation: pop 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 .tv-dialog h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 38px; letter-spacing: -0.01em; }
+/* Settings' dialog: its rows scroll (app.js setFocus) inside it, the hints stay; room for rings */
+.tv-list { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden; padding: 8px; margin: -8px; }
+.tv-list > * { flex-shrink: 0; }
+.tv-dialog .hints { flex-shrink: 0; }
 .tv-dialog p { margin: 0 0 14px; font-size: 23px; color: var(--text-2); }
 .tv-dialog .tv-label { margin-top: 8px; }
 .tv-mrow { display: flex; align-items: center; gap: 22px; min-height: 92px; padding: 14px 26px; box-sizing: border-box; border-radius: 20px;
