@@ -114,6 +114,12 @@ sealed class ControllerService : IDisposable
     /// <summary>Applies the button map of the app in front (Mouse, Keyboard presets) at every poll.</summary>
     public PadMapper? Mapper { get; set; }
 
+    /// <summary>
+    /// The controller as last polled (Settings › Controller's button test). Read from another
+    /// thread it may mix two polls, which a display does not mind.
+    /// </summary>
+    public PadState LastState { get; private set; }
+
     // Dev and test: a made-up controller state used instead of the real one (see Inject).
     volatile StrongBox<PadState>? injected;
 
@@ -148,7 +154,8 @@ sealed class ControllerService : IDisposable
             if (state.Packet != lastPacket) { lastPacket = state.Packet; LastActivity = DateTime.Now; }
 
             var pad = state.Pad;
-            Mapper?.Update(new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY), now, enabled: !WakeMode);
+            LastState = new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY);
+            Mapper?.Update(LastState, now, enabled: !WakeMode);
 
             var buttons = pad.Buttons;
             // The left stick counts as the D-pad.

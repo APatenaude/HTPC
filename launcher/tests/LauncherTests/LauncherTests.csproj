@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Checks for the button maps, PadMapper, the video-end detector, the sleep timer, the
+       decode-check parser and the alerts overlay: dotnet run (in this folder). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Htpc.Launcher</RootNamespace>
+    <NoWarn>$(NoWarn);CS8321;WFO1000</NoWarn>
+    <Src>..\..\src\Launcher\</Src>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(Src)ButtonMap.cs;$(Src)ButtonMapStore.cs;$(Src)PadMapper.cs;$(Src)MediaWatcher.cs;$(Src)SleepTimer.cs;$(Src)DecodeCheck.cs;$(Src)SetupRunner.cs;$(Src)Standby.cs;$(Src)ControllerService.cs;$(Src)SystemControls.cs;$(Src)Tv.cs;$(Src)AlertsForm.cs;$(Src)TileStore.cs;$(Src)PhonePointer.cs" />
+  </ItemGroup>
+</Project>

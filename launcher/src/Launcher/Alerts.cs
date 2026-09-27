@@ -286,7 +286,7 @@ sealed class AlertCenter : IAlerts
             e = new Entry { Spec = spec, OnAction = onAction, Raised = now, Waiting = true };
             e.RecentRaises.Enqueue(now);
             entries.Add(e);
-            log($"Alert {spec.Id}: {spec.Title}{(spec.Body is null ? "" : $" ({spec.Body})")}");
+            log($"Alert {spec.Id}"); // the id only: a pairing code or a phone's name has no place in the log
         }
         Refresh();
     }

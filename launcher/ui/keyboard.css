@@ -27,6 +27,8 @@ html, body { background: #16181C; }
   transition: background 0.08s ease-out, transform 0.08s ease-out;
 }
 .kb-key.w132 { width: 132px; } .kb-key.w170 { width: 170px; } .kb-key.w400 { width: 400px; }
+.kb-key.w110 { width: 110px; } .kb-key.w150 { width: 150px; }
+.kb-key.extra { font-size: 21px; color: var(--text-2); background: #1D2025; }
 .kb-key.primary { background: var(--accent); color: var(--bg); }
 .kb-key.on { background: #3A3F48; box-shadow: 0 0 0 4px var(--accent); }
 .kb-key.primary.on { background: #B4D8FF; }

@@ -30,11 +30,18 @@ sealed class SetupRunner
         poll.Tick += (_, _) => Poll();
     }
 
-    /// <summary>The setup folder shipped with this exe (setup\ next to it), if there is one.</summary>
+    /// <summary>
+    /// The setup folder shipped with this exe (setup\ next to it), else the one setup keeps in
+    /// C:\ProgramData\HTPC\setup (the installed launcher running setup again from About).
+    /// </summary>
     public static string? FindSetupDir()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "setup");
-        return File.Exists(Path.Combine(dir, "setup.ps1")) ? dir : null;
+        var dirs = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "setup"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "setup"),
+        };
+        return dirs.FirstOrDefault(d => File.Exists(Path.Combine(d, "setup.ps1")));
     }
 
     /// <summary>

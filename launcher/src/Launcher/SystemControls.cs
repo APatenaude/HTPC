@@ -49,6 +49,15 @@ sealed class AudioVolume
         return (IAudioEndpointVolume)endpoint;
     }
 
+    // Without an audio device (the TV off on an HDMI-only box) every read fails: once a minute in the log is enough.
+    static DateTime quietUntil;
+    static void Warn(string message)
+    {
+        if (DateTime.Now < quietUntil) return;
+        quietUntil = DateTime.Now.AddMinutes(1);
+        Log.Warn(message);
+    }
+
     /// <summary>0 to 100, or null when there is no audio device.</summary>
     public int? Get()
     {
@@ -57,7 +66,7 @@ sealed class AudioVolume
             Marshal.ThrowExceptionForHR(Endpoint().GetMasterVolumeLevelScalar(out var level));
             return (int)Math.Round(level * 100);
         }
-        catch (Exception e) { Log.Warn($"Reading volume: {e.Message}"); return null; }
+        catch (Exception e) { Warn($"Reading volume: {e.Message}"); return null; }
     }
 
     public void Set(int percent)
@@ -67,7 +76,7 @@ sealed class AudioVolume
             var context = Guid.Empty;
             Marshal.ThrowExceptionForHR(Endpoint().SetMasterVolumeLevelScalar(Math.Clamp(percent, 0, 100) / 100f, ref context));
         }
-        catch (Exception e) { Log.Warn($"Setting volume: {e.Message}"); }
+        catch (Exception e) { Warn($"Setting volume: {e.Message}"); }
     }
 
     /// <summary>Up or down by a step (the controller's and keyboard's volume buttons: no Windows flyout); the new level.</summary>
@@ -91,7 +100,7 @@ sealed class AudioVolume
                 Marshal.ThrowExceptionForHR(Endpoint().GetMute(out var mute));
                 return mute;
             }
-            catch (Exception e) { Log.Warn($"Reading mute: {e.Message}"); return null; }
+            catch (Exception e) { Warn($"Reading mute: {e.Message}"); return null; }
         }
         set
         {
@@ -100,7 +109,7 @@ sealed class AudioVolume
                 var context = Guid.Empty;
                 Marshal.ThrowExceptionForHR(Endpoint().SetMute(value ?? false, ref context));
             }
-            catch (Exception e) { Log.Warn($"Setting mute: {e.Message}"); }
+            catch (Exception e) { Warn($"Setting mute: {e.Message}"); }
         }
     }
 }

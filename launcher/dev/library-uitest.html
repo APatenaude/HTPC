@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Library UI logic test</title>
+<link rel="stylesheet" href="../ui/app.css">
+<link rel="stylesheet" href="../ui/library.css">
+<script>
+// A host stub: capture what the UI sends, and keep the message listener so the test can feed
+// host messages. With a "host" present the UI does not run its browser demo, so the test drives
+// everything. Results print into #results; run headless with --dump-dom.
+window.__sent = [];
+window.chrome = { webview: {
+  postMessage: function (m) { window.__sent.push(m); },
+  addEventListener: function (t, cb) { if (t === 'message') window.__host = cb; },
+  removeEventListener: function () {},
+} };
+</script>
+</head>
+<body>
+<div id="stage">
+  <div id="backdrop"></div>
+  <section id="home" class="view"><header class="status" id="status"></header><main class="tiles-wrap"><div class="tiles" id="tiles"></div></main><footer class="hints" id="home-hints"></footer></section>
+  <section id="menu" class="view overlay"><aside class="panel" id="menu-panel"></aside></section>
+  <section id="power" class="view overlay"><div class="center"><h1>Power</h1><div class="cards" id="power-cards"></div><p class="note" id="power-note"></p></div><footer class="hints" id="power-hints"></footer></section>
+  <section id="timer" class="view overlay"><div class="center"><div class="title-block"><span class="accent-icon" id="timer-icon"></span><h1>Sleep timer</h1><p class="lead"></p></div><div class="timer-grid" id="timer-grid"></div><p class="note" id="timer-status"></p></div><footer class="hints" id="timer-hints"></footer></section>
+  <section id="settings" class="view"></section>
+  <section id="confirm" class="view overlay"><div class="dialog" id="confirm-box"></div></section>
+  <div id="opening"></div>
+  <div id="toasts"></div>
+</div>
+<pre id="results" style="position:fixed;left:0;top:0;z-index:9;color:#fff;font:14px monospace;padding:8px;background:#111"></pre>
+<script src="../ui/icons.js"></script>
+<script src="../ui/app.js"></script>
+<script src="../ui/library.js"></script>
+<script>
+let pass = 0, fail = 0;
+const out = [];
+function check(label, ok) { out.push((ok ? 'ok   ' : 'FAIL ') + label); if (ok) pass++; else fail++; }
+function lastSent(type) { for (let i = window.__sent.length - 1; i >= 0; i--) if (window.__sent[i].type === type) return window.__sent[i]; return null; }
+function feed(msg) { if (window.__host) window.__host({ data: msg }); }
+function focus(sel) { const e = document.querySelector(sel); if (e) setFocus(e); return e; }
+function activeTab() { const t = document.querySelector('#addtile .at-tab.on'); return t ? t.textContent : ''; }
+
+function run() {
+  feed({ type: 'init', libraryAvailable: true, settings: { controller: true, battery: 'full' }, tiles: [
+    { id: 'youtube', name: 'YouTube', glyph: 'youtube', color: '#FF5B52' },
+    { id: 'twitch', name: 'Twitch', glyph: 'chat', color: '#B08CFF' },
+    { id: 'stremio', name: 'Stremio', glyph: 'film', color: '#7C8CFF' },
+    { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', color: '#3DC0F0' },
+    { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B' },
+    { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A' },
+  ] });
+  check('home shows an Add tile "+"', !!document.querySelector('.tile.add'));
+
+  // Start on a focused home tile opens Tile options.
+  focus('.tile[data-arg="youtube"]');
+  press('start');
+  check('Start on a tile opens Tile options', document.getElementById('tileopts').classList.contains('on'));
+  press('b');
+
+  // The "+" tile opens the Add tile screen and asks the host for the catalog.
+  focus('.tile.add'); press('a');
+  check('A on "+" opens Add tile', document.getElementById('addtile').classList.contains('on'));
+  check('library.list requested', !!lastSent('library.list'));
+  feed({ type: 'library.catalog', apps: [
+    { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: 'x', type: 'app', state: 'install', canUninstall: true },
+    { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F', desc: 'x', type: 'app', state: 'installed', canUninstall: true },
+  ], sites: [ { id: 'netflix', name: 'Netflix', color: '#FF4B55', desc: '', type: 'website', state: 'add' } ] });
+  check('Library tab shows app cards', document.querySelectorAll('#addtile .lc-app').length === 2);
+
+  // Tabs switch with RB / LB.
+  press('rb');
+  check('RB -> On this box tab', /On this box/.test(activeTab()));
+  check('startMenu requested', !!lastSent('library.startMenu'));
+  press('rb'); check('RB -> Website tab', /Website/.test(activeTab()));
+  press('lb'); press('lb'); check('LB back to Library tab', /Library/.test(activeTab()));
+
+  // A on an installed app (VLC) appends it to the home order and returns home.
+  window.__sent.length = 0;
+  focus('[data-arg="vlc"]'); press('a');
+  const order = lastSent('tile.order');
+  check('A on an installed app sends tile.order', !!order);
+  check('tile.order includes vlc at the end', order && order.ids[order.ids.length - 1] === 'vlc');
+  check('after adding, back on home', document.getElementById('home').classList.contains('on'));
+
+  // A on an app to install (Kodi) opens the dialog; the button sends library.install(addToHome).
+  focus('.tile.add'); press('a');
+  feed({ type: 'library.catalog', apps: [ { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: 'x', type: 'app', state: 'install', canUninstall: true } ], sites: [] });
+  focus('[data-arg="kodi"]'); press('a');
+  check('Install opens the Installing dialog', document.getElementById('installing').classList.contains('on'));
+  window.__sent.length = 0;
+  focus('[data-act="installBtn"][data-arg="home"]'); press('a');
+  const inst = lastSent('library.install');
+  check('Install and add to home sends library.install (addToHome)', inst && inst.id === 'kodi' && inst.addToHome === true);
+
+  // Tile options > Move: D-pad reorders on the home grid, A drops with a tile.order.
+  reset('home');
+  focus('.tile[data-arg="youtube"]'); press('start');
+  focus('[data-act="opt-move"]'); press('a');
+  check('Move enters move mode on home', document.getElementById('home').classList.contains('on') && !!document.querySelector('.tile.moving'));
+  window.__sent.length = 0;
+  press('right'); press('a');
+  const moved = lastSent('tile.order');
+  check('drop sends tile.order', !!moved);
+  check('youtube moved after twitch', moved && moved.ids.indexOf('twitch') === 0 && moved.ids.indexOf('youtube') === 1);
+
+  // Website form: the inline keyboard builds the model; Add sends the typed url.
+  reset('home'); focus('.tile.add'); press('a');
+  press('rb'); press('rb');
+  window.__sent.length = 0;
+  'netflix.com'.split('').forEach((ch) => EXT.actions['key'](null, ch));
+  check('typing shows in the Address field', /netflix\.com/.test(document.querySelector('#addtile .ws-fields').textContent));
+  EXT.actions['addsite']();
+  const site = lastSent('library.addWebsite');
+  check('Add sends library.addWebsite with the typed url', site && site.url === 'netflix.com');
+
+  document.getElementById('results').textContent = out.join('\n') + '\n\n' + pass + ' passed, ' + fail + ' failed';
+}
+addEventListener('DOMContentLoaded', () => setTimeout(run, 0));
+</script>
+</body>
+</html>

@@ -20,6 +20,8 @@ const state = {
   memory: {},              // last focused item per view
   stack: [],               // views to go back to
   backdrop: null,
+  moving: null,            // id of the tile being moved (Tile options > Move)
+  libraryAvailable: true,  // whether installing from the TV is set up (the host reports it)
   section: 'sleep',        // Settings section shown
   prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true },
   power: { sleep: true, hibernate: true },  // sleep states this PC has (from the host)
@@ -50,7 +52,11 @@ function dateText(d) { return d.toLocaleDateString('en-GB', { weekday: 'long', d
 
 function timerText() {
   if (!state.timer) return '';
-  if (state.timer.endsAt === 'video') return 'Sleep after this video';
+  // "When this video ends": nothing played yet, or the video's minutes left if its app says.
+  if (state.timer.endsAt === 'video') {
+    if (state.timer.waiting) return 'Sleep after the next video';
+    return state.timer.minutesLeft ? `Sleep after this video · ${state.timer.minutesLeft} min` : 'Sleep after this video';
+  }
   const min = Math.max(0, Math.ceil((state.timer.endsAt - Date.now()) / 60000));
   return `Sleep in ${min} min`;
 }
@@ -78,21 +84,34 @@ function renderStatus() {
 // replay on every refresh.
 let tilesHtml = '';
 function renderTiles() {
-  const html = state.tiles.map((t) =>
-    `<div class="tile" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
+  const tiles = state.tiles.map((t) =>
+    `<div class="tile${state.moving === t.id ? ' moving' : ''}" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
       (t.running ? '<span class="badge">Running</span>' : '') +
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
       `<span class="name">${esc(t.name)}</span>` +
     '</div>').join('');
+  // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen.
+  const add = state.moving ? '' :
+    '<div class="tile add" data-nav data-id="tile:+add" data-act="addtile" aria-label="Add tile">' +
+      `<span style="display:flex">${icon('plus', 80, 2)}</span><span class="name">Add tile</span></div>`;
+  const html = tiles + add;
   if (html !== tilesHtml) { $('tiles').innerHTML = html; tilesHtml = html; }
   updateHomeHints();
 }
 
-// "X Close app" only while the focused tile's app is running.
+// Hints change with the focused tile and with move mode.
 function updateHomeHints() {
+  if (state.moving) {
+    $('home-hints').innerHTML = hints([['←→↑↓', 'Move'], ['A', 'Place here'], ['B', 'Cancel']]);
+    return;
+  }
   const f = $('home').querySelector('.tile.focused');
+  const isAdd = f && f.dataset.act === 'addtile';
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
-  $('home-hints').innerHTML = hints([['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Home', 'Menu'], ['Hold Home', 'Power']]);
+  const list = isAdd
+    ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu']];
+  $('home-hints').innerHTML = hints(list);
 }
 
 function renderMenu() {
@@ -119,7 +138,7 @@ function renderMenu() {
     `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 34)}` +
       `<div class="track"><div class="fill white" style="width:${state.brightness}%"></div></div><span class="value">${state.brightness}</span></div>` +
     '<div class="quicks">' +
-      `<div class="quick" data-nav data-id="q-buttons" data-act="soon" data-arg="Button maps">${icon('controller', 34)}Buttons</div>` +
+      `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 34)}Buttons</div>` +
       `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 34)}Timer</div>` +
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
@@ -182,9 +201,9 @@ const CHOICES = {
 const SLEEP_MODES = {
   standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Tap Home on the controller to wake it.',
              wake: 'Tap Home on the controller to wake' },
-  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller can’t wake it: use the power button, the keyboard or the phone.',
+  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller and the phone can’t wake it: use the power button or the keyboard.',
            wake: 'Wake with the power button or the keyboard' },
-  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button, the keyboard or the phone.',
+  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button or the keyboard.',
                wake: 'Wake with the power button' }
 };
 
@@ -293,6 +312,7 @@ function changeSetting(key, step) {
     send({ type: 'tvChoose', id: ids[(cur + step + ids.length) % ids.length] });
     return;
   }
+  if (key.startsWith('phone.') && typeof phoneSetting === 'function') { phoneSetting(key); return; }   // phone-settings.js
   if (key.startsWith('tv.')) {
     const name = key.slice(3);
     if (!state.tv.profile) return;
@@ -514,6 +534,8 @@ function demoRoute(hash) {
     if (EXT.sections[arg] && EXT.sections[arg].demo) EXT.sections[arg].demo();
   }
   if (EXT.views[view] && EXT.views[view].demo) EXT.views[view].demo(arg);
+  // #timer/video: the sleep timer set to "when this video ends", 23 minutes left.
+  if (view === 'timer' && arg === 'video') state.timer = { label: 'This video ends', endsAt: 'video', minutesLeft: 23 };
   go(view);
 }
 
@@ -586,6 +608,8 @@ function back() {
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
   const el = focusedEl();
+  // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
+  if (state.moving && EXT.actions['tile-move'] && EXT.actions['tile-move'](el, button)) return;
   // Added views and Settings sections first (their own buttons), then the usual.
   const view = EXT.views[state.view];
   if (view && view.press && view.press(button, el)) return;
@@ -630,11 +654,15 @@ function press(button) {
       break;
     case 'homeHold': if (state.view !== 'power') go('power'); break;
     case 'r3': { const f = textField(); if (f) openKeyboardFor(f); break; }  // textinput.js
+    case 'start':
+      // Home screen: options for the focused tile (Move, Rename, Change icon, Remove).
+      if (state.view === 'home' && el && el.dataset.arg && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
+      break;
   }
 }
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
-  Escape: 'b', Backspace: 'b', x: 'x', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb' };
+  Escape: 'b', Backspace: 'b', x: 'x', y: 'y', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb', o: 'start' };
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }
@@ -657,8 +685,10 @@ function onHost(msg) {
       if (msg.prefs) Object.assign(state.prefs, msg.prefs);
       if (msg.power) state.power = msg.power;
       if (msg.tv) state.tv = msg.tv;
+      if ('libraryAvailable' in msg) state.libraryAvailable = msg.libraryAvailable;
       render();
       break;
+    case 'tiles': state.tiles = msg.tiles; render(); break;
     case 'blank': $('stage').classList.add('blank'); break;
     case 'tv': state.tv = msg.tv; if (state.view === 'settings') render(); break;
     case 'opened':
@@ -671,7 +701,7 @@ function onHost(msg) {
         // The app the menu was opened over has closed: B and Home now lead home, not to it.
         if (state.current && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
-      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert']) if (k in msg) state[k] = msg[k];
+      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;

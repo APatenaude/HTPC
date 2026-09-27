@@ -32,21 +32,21 @@ sealed partial class MainForm
     void InitAlerts()
     {
         alertOverlay = new AlertsFormOverlay(overlay);
-        alertCenter = new AlertCenter(alertOverlay, Post, OnUi);
-        internet = new InternetWatch(online => OnUi(() => OnInternet(online)));
+        alertCenter = new AlertCenter(alertOverlay, Post, OnUiQueued);
+        internet = new InternetWatch(online => OnUiQueued(() => OnInternet(online)));
         internetRules.Woke(DateTime.Now); // the launcher just started: the network may still be coming up
 
         mouseWatch.Tick += (_, _) => UpdateAlertPlace();
         clock.Tick += (_, _) => AlertsTick();
-        apps.Exited += e => OnUi(() => OnAppExit(e));
+        apps.Exited += e => OnUiQueued(() => OnAppExit(e));
         apps.RunningChanged += (id, started) => { if (started) alertCenter.Clear("app:" + id); };
-        tv.TurnOnResult += ok => OnUi(() => OnTvTurnOn(ok));
-        tv.TvStateChanged += (on, _) => { if (on) OnUi(() => { alertCenter.Clear("tv"); alertCenter.ScreenOn(); }); };
+        tv.TurnOnResult += ok => OnUiQueued(() => OnTvTurnOn(ok));
+        tv.TvStateChanged += (on, _) => { if (on) OnUiQueued(() => { alertCenter.Clear("tv"); alertCenter.ScreenOn(); }); };
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.
-            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUi(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; });
-            if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUi(() => internetRules.Woke(DateTime.Now));
+            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; });
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUiQueued(() => internetRules.Woke(DateTime.Now));
         };
         Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => apps.MarkAllClosing("Windows is signing out or shutting down");
     }
@@ -54,7 +54,7 @@ sealed partial class MainForm
     /// <summary>OnLoad, once standby exists and the window has its handle.</summary>
     void AlertsLoaded()
     {
-        standby.IdleWarning += on => OnUi(() => OnIdleWarning(on));
+        standby.IdleWarning += on => OnUiQueued(() => OnIdleWarning(on));
         List<Action> early;
         lock (beforeHandle) { early = beforeHandle.ToList(); beforeHandle.Clear(); }
         foreach (var a in early) BeginInvoke(a);
@@ -73,7 +73,7 @@ sealed partial class MainForm
     }
 
     /// <summary>Runs on the UI thread, later; before the window exists, once it does.</summary>
-    void OnUi(Action action)
+    void OnUiQueued(Action action)
     {
         if (IsHandleCreated) { BeginInvoke(action); return; }
         lock (beforeHandle) beforeHandle.Add(action);
@@ -112,7 +112,7 @@ sealed partial class MainForm
         internet.Paused = false;
         if (foreignWindows is not null) foreignWindows.Paused = false;
         if (options.NoTv || tv.Profile is not { OnWithBox: true })
-            _ = Task.Delay(3000).ContinueWith(_ => OnUi(alertCenter.ScreenOn));
+            _ = Task.Delay(3000).ContinueWith(_ => OnUiQueued(alertCenter.ScreenOn));
     }
 
     /// <summary>
