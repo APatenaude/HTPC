@@ -195,7 +195,7 @@ function renderTab() {
   }
   // As on the design: the power button on Remote, the playing app's name on Playing.
   const media = state.box.media;
-  $('power').hidden = tab === 'playing';
+  $('power').hidden = tab !== 'remote';
   $('media-app').hidden = tab !== 'playing' || !media || !media.app;
   if (media && media.app) $('media-app').textContent = media.app;
   $('status').hidden = tab === 'playing';
@@ -301,15 +301,15 @@ setInterval(() => { if (state.tab === 'playing') renderPlaying(); }, 1000);
 // the phone's keyboard stays up while Type's buttons are used.
 function pressable(el, onPress, { repeat = false, onHold = null } = {}) {
   let timer = 0, holdDone = false, touching = false, lastPointer = 0;
-  const stop = () => { clearTimeout(timer); clearInterval(timer); timer = 0; el.classList.remove('down'); };
+  const stop = () => { clearTimeout(timer); clearInterval(timer); timer = 0; el.classList.remove('pressed'); };
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || el.disabled) return;
     e.preventDefault();
     touching = true; holdDone = false; lastPointer = Date.now();
-    el.classList.add('down');
+    el.classList.add('pressed');
     try { el.setPointerCapture(e.pointerId); } catch (err) { /* synthetic event */ }
     if (onHold) {
-      timer = setTimeout(() => { holdDone = true; vibrate(25); onHold(); el.classList.remove('down'); }, 600);
+      timer = setTimeout(() => { holdDone = true; vibrate(25); onHold(); el.classList.remove('pressed'); }, 600);
       return;
     }
     vibrate();

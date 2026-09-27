@@ -387,12 +387,12 @@ partial class MainForm
             switch (Str("type"))
             {
                 case "ready": OnUi(() => PostPhoneInfo(qr: false)); break; // after MainForm's own handler has marked the UI ready
-                case "phoneInfo": PostPhoneInfo(qr: true); CheckPhoneReach(); break;
-                case "phoneForget":
+                case "phone.info": PostPhoneInfo(qr: true); CheckPhoneReach(); break;
+                case "phone.forget":
                     if (Str("id") is { } id && pairing?.Forget(id) == true) phones?.Disconnect(id);
                     PostPhoneInfo(qr: false);
                     break;
-                case "phoneRequireCode":
+                case "phone.requireCode":
                     if (pairing is not null && m.TryGetProperty("value", out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                     {
                         pairing.RequireCode = value.GetBoolean();
@@ -400,7 +400,7 @@ partial class MainForm
                     }
                     PostPhoneInfo(qr: false);
                     break;
-                case "alertHidden": // the stand-in's urgent alert left the screen (PhoneAlertsNow)
+                case "phone.alertHidden": // the stand-in's urgent alert left the screen (PhoneAlertsNow)
                     var hidden = Str("id");
                     (phoneAlerts as PhoneAlertsNow)?.Hidden(hidden);
                     if (hidden == PairAlert) pairing?.CancelCode(); // the code only works while the TV shows it
@@ -420,7 +420,7 @@ partial class MainForm
         var connected = phones.Clients.Select(c => c.Phone?.Id).OfType<string>().ToHashSet();
         Post(new
         {
-            type = "phone",
+            type = "phone.settings",
             phone = new
             {
                 listening = port != 0,
@@ -532,7 +532,7 @@ partial class MainForm
 
     // --- Stand-ins until the button-map and alerts work is merged ------------------------------------
     // AudioVolume with mute, SleepTimer and MediaWatcher replace the first three (PhoneAdapters.cs);
-    // the real IAlerts replaces PhoneAlertsNow (AlertsShim.cs, and "urgentAlert" in phone-settings.js).
+    // the real IAlerts replaces PhoneAlertsNow (AlertsShim.cs, and "phone.urgentAlert" in phone-settings.js).
 
     /// <summary>
     /// Alerts as the launcher can show them today: an urgent one brings the launcher up over the
@@ -558,7 +558,7 @@ partial class MainForm
                 shownOver = app?.Id;
                 form.ShowOver(app, "menu");
             }
-            form.Post(new { type = "urgentAlert", alert = new { id = alert.Id, title = alert.Title, body = alert.Body, glyph = alert.Glyph, seconds = (int?)alert.Duration?.TotalSeconds } });
+            form.Post(new { type = "phone.urgentAlert", alert = new { id = alert.Id, title = alert.Title, body = alert.Body, glyph = alert.Glyph, seconds = (int?)alert.Duration?.TotalSeconds } });
         }
 
         public void Update(string id, Func<AlertSpec, AlertSpec> change)
@@ -569,7 +569,7 @@ partial class MainForm
         public void Clear(string id)
         {
             if (!shown.Remove(id)) return;
-            form.Post(new { type = "urgentAlert", alert = new { id, title = (string?)null } });
+            form.Post(new { type = "phone.urgentAlert", alert = new { id, title = (string?)null } });
             if (shownOver is { } app && form.LauncherActive && form.apps.IsRunning(app)) form.SwitchTo(app); // back to what was on
             shownOver = null;
         }

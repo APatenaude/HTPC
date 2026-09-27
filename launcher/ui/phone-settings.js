@@ -2,10 +2,10 @@
 
 // Settings › Phone remote (SPEC N8, W3). Builds on app.js (state, render, send, icon, esc,
 // settingRow, toggle, $), which calls renderPhoneSection() and phoneSetting() and sends
-// "phone-forget" from its Settings code. The host (MainForm.Phone.cs) sends "phone" with the
+// "phone-forget" from its Settings code. The host (MainForm.Phone.cs) sends "phone.settings" with the
 // section's data. (state.phone is the host's short summary for the home screen: url, paired.)
 //
-// Also, until the alerts work is merged: "urgentAlert", an alert shown over whatever is on the
+// Also, until the alerts work is merged: "phone.urgentAlert", an alert shown over whatever is on the
 // TV (the phone's pairing code), from MainForm.Phone.cs's stand-in for IAlerts. Goes with it.
 
 (() => {
@@ -23,7 +23,7 @@ let phoneInfoAsked = 0;
 function askPhoneInfo(force) {
   if (!force && Date.now() - phoneInfoAsked < 90000) return;
   phoneInfoAsked = Date.now();
-  send({ type: 'phoneInfo' });
+  send({ type: 'phone.info' });
 }
 setInterval(() => { if (state.view === 'settings' && state.section === 'phone') askPhoneInfo(false); }, 15000);
 
@@ -44,9 +44,8 @@ function renderPhoneSection() {
   askPhoneInfo(false);
   const qrOk = p.listening && phoneQr.svg && Date.now() - phoneQr.at < 120000;
   const qr = qrOk ? phoneQr.svg : `<span class="phone-qr-wait">${icon('phone', 72, 1.5)}</span>`;
-  const how = 'Scan it with the phone’s camera' + (p.address ? `, or open ${esc(p.address)} in its browser.` : '.') +
-    '<br>iPhone: Safari › Share › Add to Home Screen.<br>Android: Chrome › ⋮ › Add to Home screen.' +
-    (p.ip ? `<br><span class="phone-ip">If tv.local doesn’t open: ${esc(p.ip)}</span>` : '');
+  const how = 'iPhone: Safari › Share › Add to Home Screen.<br>Android: Chrome › ⋮ › Add to Home screen.' +
+    (p.ip ? `<br><span class="phone-ip">Or ${esc(p.ip)}, if tv.local doesn’t open</span>` : '');
   let body = '<header><h1>Phone remote</h1><p>A small companion web app for iPhone and Android. Nothing to download from a store.</p></header>' +
     '<div class="phone-cards">' +
       `<div class="phone-card"><div class="phone-qr${qrOk ? '' : ' wait'}">${qr}</div>` +
@@ -63,7 +62,7 @@ function renderPhoneSection() {
   }
   body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'The first time a phone connects, a 4-digit code shows on the TV', toggle(p.requireCode));
   body += '<span class="ssection">Phones</span>';
-  const shown = p.phones.slice(0, 3);
+  const shown = p.phones.slice(0, problem ? 2 : 3); // what fits on the screen
   if (!shown.length && !p.unpaired) {
     body += '<div class="srow"><div class="text"><span class="label">No phones yet</span>' +
       '<span class="caption">Scan the code above with your phone.</span></div></div>';
@@ -83,7 +82,7 @@ function renderPhoneSection() {
 function phoneSetting(key) {
   if (key !== 'phone.requireCode') return;
   state.phoneSettings.requireCode = !state.phoneSettings.requireCode;
-  send({ type: 'phoneRequireCode', value: state.phoneSettings.requireCode });
+  send({ type: 'phone.requireCode', value: state.phoneSettings.requireCode });
   render();
 }
 
@@ -114,13 +113,13 @@ function hideUrgent() {
   if (!el || !urgentShown) return;
   el.classList.remove('on');
   clearTimeout(urgentTimer);
-  send({ type: 'alertHidden', id: urgentShown });
+  send({ type: 'phone.alertHidden', id: urgentShown });
   urgentShown = null;
 }
 
 function onPhoneHost(msg) {
   switch (msg.type) {
-    case 'phone': {
+    case 'phone.settings': {
       const p = msg.phone || {};
       if (p.qr && p.qr !== phoneQr.url) {
         phoneQr.url = p.qr;
@@ -132,7 +131,7 @@ function onPhoneHost(msg) {
       if (state.view === 'settings' && state.section === 'phone') render();
       break;
     }
-    case 'urgentAlert': showUrgent(msg.alert && msg.alert.title ? msg.alert : null); break;
+    case 'phone.urgentAlert': showUrgent(msg.alert && msg.alert.title ? msg.alert : null); break;
     case 'blank': hideUrgent(); break;
   }
 }
@@ -142,7 +141,7 @@ if (host) {
 } else {
   // Demo in a plain browser: index.html?section=phone#settings, index.html?pair=4821.
   const demoParams = new URLSearchParams(location.search);
-  onPhoneHost({ type: 'phone', phone: {
+  onPhoneHost({ type: 'phone.settings', phone: {
     listening: true, address: 'tv.local', ip: '192.168.1.20', requireCode: true, reach: 'ok', unpaired: 0,
     qr: 'http://192.168.1.20/?k=Qm9vc3RlZC1kZW1vLWtleQ',
     phones: [

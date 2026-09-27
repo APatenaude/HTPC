@@ -477,7 +477,7 @@ function activate(el) {
     case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
     case 'tv-test': toast('Turning the TV off and back on…'); send({ type: 'tvTest' }); break;
     case 'tv-refresh': toast('Searching for TVs…'); send({ type: 'tvRefresh' }); break;
-    case 'phone-forget': send({ type: 'phoneForget', id: arg }); break;
+    case 'phone-forget': send({ type: 'phone.forget', id: arg }); break;
     case 'cancel': back(); break;
     case 'settings': go('settings'); break;
     case 'soon': toast(`${arg} come in a later update`); break;

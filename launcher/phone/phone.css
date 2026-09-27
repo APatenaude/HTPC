@@ -43,7 +43,7 @@ button, input { font: inherit; color: inherit; }
 button { border: 0; background: var(--button); cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 button:disabled { opacity: 0.35; cursor: default; }
-button.down, button:active:not(:disabled) { background: var(--button-down); }
+button.pressed, button:active:not(:disabled) { background: var(--button-down); }
 svg { display: block; flex-shrink: 0; }
 h1, h2 { margin: 0; font-family: var(--display); font-weight: 600; }
 
@@ -72,6 +72,8 @@ h1, h2 { margin: 0; font-family: var(--display); font-weight: 600; }
 /* Tabs' content ----------------------------------------------------------------------------- */
 main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .tab { display: flex; flex-direction: column; min-height: 100%; padding-bottom: 16px; }
+/* Remote fits the screen: the touchpad (or D-pad) gives way first. */
+#tab-remote { height: 100%; min-height: 0; }
 
 .seg { display: flex; gap: 4px; margin: 4px var(--gutter) 0; padding: 4px; border-radius: 14px; background: var(--panel); flex-shrink: 0; }
 .seg button { flex: 1; height: 44px; border-radius: 10px; background: transparent; font-size: 15px; color: var(--text-2); }
@@ -95,7 +97,7 @@ main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; over
 .dpad .left { left: 2.5%; top: 36.5%; }
 .dpad .right { right: 2.5%; top: 36.5%; }
 .dpad .ok { left: 31.5%; top: 31.5%; width: 37%; height: 37%; background: var(--button-down); color: #FFF; font-family: var(--display); font-weight: 700; font-size: 20px; }
-.dpad .dir.down, .dpad .dir:active { background: rgba(255, 255, 255, 0.06); }
+.dpad .dir.pressed, .dpad .dir:active { background: rgba(255, 255, 255, 0.06); }
 
 .row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 16px var(--gutter) 0; flex-shrink: 0; }
 .tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 64px; border-radius: 18px; font-size: 13px; }
@@ -117,7 +119,7 @@ main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; over
 .keys button { grid-column: span 2; display: flex; align-items: center; justify-content: center; gap: 6px; height: 52px; border-radius: 16px; font-size: 15px; }
 .keys #shift-tab, .keys #tab { grid-column: span 3; height: 48px; font-size: 14px; color: var(--text-2); }
 .primary { background: var(--accent); color: var(--bg); font-weight: 700; }
-button.primary.down, button.primary:active { background: #B5D8FF; }
+button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .section { margin: 22px var(--gutter) 8px; font-family: var(--body); font-size: 12px; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .link { display: flex; gap: 8px; margin: 0 var(--gutter); }
 .link input { flex: 1; min-width: 0; height: 48px; padding: 0 14px; border: 0; border-radius: 14px; background: var(--button); font-size: 15px; outline: none; }
@@ -140,12 +142,12 @@ button.primary.down, button.primary:active { background: #B5D8FF; }
 .transport .small { width: 48px; height: 48px; background: transparent; color: var(--text-2); }
 .transport .mid { width: 64px; height: 64px; }
 .transport .big { width: 84px; height: 84px; background: var(--accent); color: var(--bg); }
-.transport .big.down, .transport .big:active { background: #B5D8FF; }
+.transport .big.pressed, .transport .big:active { background: #B5D8FF; }
 .timer { display: flex; align-items: center; gap: 12px; margin: 10px var(--gutter) 0; min-height: 52px; padding: 0 16px; border-radius: 16px; background: var(--accent-bg); color: var(--accent); font-size: 15px; font-weight: 700; text-align: left; }
 .timer .soft { font-weight: 400; color: var(--text-2); }
 
 /* Covers, sheets, toasts ---------------------------------------------------------------------- */
-.cover { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: rgba(13, 14, 17, 0.94); text-align: center; color: var(--accent); }
+.cover { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: var(--bg); text-align: center; color: var(--accent); }
 .cover h2 { font-size: 24px; color: var(--text); }
 .cover p { margin: 0 0 8px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
 .wide { width: 100%; max-width: 360px; height: 56px; border-radius: 16px; font-size: 16px; }
@@ -182,7 +184,7 @@ button.primary.down, button.primary:active { background: #B5D8FF; }
 /* Small phones (iPhone SE): a shorter touchpad and D-pad. */
 @media (max-height: 700px) {
   .top { padding-top: 12px; padding-bottom: 8px; }
-  .pad-area { margin-top: 10px; }
+  .pad-area { margin-top: 10px; min-height: 150px; }
   .row3 { margin-top: 10px; }
   .tile { height: 56px; }
   .volume button, .slider { height: 48px; }
