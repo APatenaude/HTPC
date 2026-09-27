@@ -56,13 +56,13 @@ interface IAlerts
     bool ClaimsHome();
 }
 
-// OverlayCard, OverlayHint and OverlayView (what the over-app layer draws) live in AlertsForm.cs.
+// OverlayCard and OverlayView (what the over-app layer draws) live in AlertsForm.cs.
 
 /// <summary>Helpers for AlertsForm's OverlayView.</summary>
 static class OverlayViews
 {
-    public static readonly OverlayView Empty = new(Array.Empty<OverlayCard>(), null);
-    public static bool IsEmpty(this OverlayView v) => v.Cards.Count == 0 && v.Hint is null;
+    public static readonly OverlayView Empty = new(Array.Empty<OverlayCard>());
+    public static bool IsEmpty(this OverlayView v) => v.Cards.Count == 0;
 }
 
 /// <summary>
@@ -125,10 +125,6 @@ sealed class AlertCenter : IAlerts
     bool moonlight;
     DateTime? holdUntil;                    // after standby: waiting for the screen
     OverlayView lastOverlay = OverlayViews.Empty;
-    OverlayHint? hint;          // the in-app hint: waiting for its app to be in front, or showing
-    TimeSpan hintFor;           // how long it shows, counted from when it first does
-    DateTime? hintUntil;        // set once it shows
-    DateTime hintDeadline;      // not in front by then: dropped
     string lastWeb = "";
 
     /// <param name="overlay">The layer over apps.</param>
@@ -193,13 +189,11 @@ sealed class AlertCenter : IAlerts
                 if (e.Spec.Duration is not null && e.Carded && e.Spec.Action is null) entries.Remove(e);
                 else e.CardUntil = null;
             }
-            hint = null;
         }
         else if (was == AlertPlace.Standby)
         {
             holdUntil = now + ScreenOnFallback; // until the TV reports on
         }
-        if (newPlace == AlertPlace.Launcher && hintUntil is not null) { hint = null; hintUntil = null; } // Home ends it
         Refresh();
     }
 
@@ -241,20 +235,6 @@ sealed class AlertCenter : IAlerts
         if (Find(id) is not { } e) return;
         log($"Alert {id} dismissed");
         entries.Remove(e);
-        Refresh();
-    }
-
-    /// <summary>
-    /// The in-app hint (AppHint), for an app that is coming to the front: it shows once the
-    /// app is (the launcher steps aside a moment later), for `showFor` from then; Home (the
-    /// launcher coming forward) or standby ends it. Null takes it away.
-    /// </summary>
-    public void ShowHint(OverlayHint? value, TimeSpan? showFor = null)
-    {
-        hint = value;
-        hintFor = showFor ?? AppHint.ShowFor;
-        hintUntil = null;
-        hintDeadline = clock() + TimeSpan.FromSeconds(10);
         Refresh();
     }
 
@@ -354,13 +334,6 @@ sealed class AlertCenter : IAlerts
         }
 
         var cards = entries.Where(e => OnScreen(e, now)).Reverse().ToList();
-        // The hint: its time starts when its app is first in front; over by then, or never got there.
-        if (hint is not null)
-        {
-            if (place == AlertPlace.App && hintUntil is null) hintUntil = now + hintFor;
-            if ((hintUntil is { } hu && now >= hu) || (hintUntil is null && now > hintDeadline)) { hint = null; hintUntil = null; }
-        }
-        var shownHint = place == AlertPlace.App ? hint : null;
 
         // Over an app: the overlay; on the launcher: the page's own cards.
         if (place == AlertPlace.App)
@@ -368,8 +341,7 @@ sealed class AlertCenter : IAlerts
             var key = moonlight ? "Hold Home" : "Home";
             var view = new OverlayView(
                 cards.Take(MaxOverApp).Select(e => new OverlayCard(e.Spec.Id, e.Spec.Title, e.Spec.Small ? null : e.Spec.Body,
-                    e.Spec.Glyph, e.Spec.Tone, e.Spec.Action is null ? null : key, e.Spec.Action)).ToList(),
-                shownHint);
+                    e.Spec.Glyph, e.Spec.Tone, e.Spec.Action is null ? null : key, e.Spec.Action)).ToList());
             if (!Same(view, lastOverlay))
             {
                 lastOverlay = view;
@@ -412,9 +384,7 @@ sealed class AlertCenter : IAlerts
 
     static string Tone(AlertTone t) => t switch { AlertTone.Warn => "warn", AlertTone.Bad => "bad", _ => "info" };
 
-    static bool Same(OverlayView a, OverlayView b) =>
-        a.Cards.SequenceEqual(b.Cards) && Equals(a.Hint?.Title, b.Hint?.Title) && Equals(a.Hint?.Caption, b.Hint?.Caption)
-        && (a.Hint?.Buttons ?? Array.Empty<(string, string)>()).SequenceEqual(b.Hint?.Buttons ?? Array.Empty<(string, string)>());
+    static bool Same(OverlayView a, OverlayView b) => a.Cards.SequenceEqual(b.Cards);
 
     /// <summary>For tests and the log: what is raised, oldest first.</summary>
     public IReadOnlyList<string> Raised => entries.Select(e => e.Spec.Id).ToList();

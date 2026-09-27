@@ -121,11 +121,14 @@ sealed class TvService
         return true;
     }
 
-    /// <summary>Launcher start: find the TV, and turn it on if the box has just booted (not after a crash restart).</summary>
-    public async Task Startup(TimeSpan uptime, bool restarted)
+    /// <summary>
+    /// Launcher start: find the TV, and turn it on if the box has just booted. Not when this
+    /// launcher was started again: startedAgain says why, for the log (null: the first start).
+    /// </summary>
+    public async Task Startup(TimeSpan uptime, string? startedAgain)
     {
         await Discover();
-        if (restarted) Log.Info("Launcher restarted after a crash: the TV is left as it is");
+        if (startedAgain is not null) Log.Info($"{startedAgain}: the TV is left as it is");
         else if (uptime < TimeSpan.FromMinutes(10)) await TurnOn();
         else Log.Info($"Box up {uptime.TotalHours:0.#} h: the TV is left as it is");
     }

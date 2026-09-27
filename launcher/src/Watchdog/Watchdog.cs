@@ -18,6 +18,10 @@
 // box once (as the shell, at most once per 6 hours), else the Windows desktop with a message,
 // and more tries after 30 s, 2 min and 10 min. Exit code 75 is a planned exit (an update, setup
 // handing over): not counted.
+// A launcher started again gets --restarted (it leaves the TV as it is) and
+// --restart-reason=<why> for its log: planned, hung, exit:<code>, ended (exit code unknown),
+// setup-ended (setup or another launcher held the mutex), not-started, watchdog-restarted
+// (this watchdog was itself started with --restarted: setup or a dev script started it again).
 //
 // Pause (nothing is restarted while one is active):
 //   HKCU\Software\HTPC\WatchdogPauseUntil  expiry (UTC, ISO 8601), written by TV Box Setup,
@@ -78,6 +82,7 @@ namespace Htpc.Watchdog
         static int fastExits;
         static int retries = -1;              // >= 0: in the fallback, index into RetryAfter
         static bool sawExit;                  // a launcher has ended since this watchdog started
+        static string restartReason;          // why, for the next launcher's --restart-reason
         static Process child;                 // the launcher this watchdog started last
         static string consumedPause;          // the HKCU pause that was there when a launcher last took the mutex
         static readonly ManualResetEvent ending = new ManualResetEvent(false);
@@ -92,6 +97,7 @@ namespace Htpc.Watchdog
             // Started again by setup (Install-Launcher): the launcher it starts is a restart too,
             // so it leaves the TV as it is (it would otherwise turn it on within 10 min of boot).
             sawExit = Array.IndexOf(args, "--restarted") >= 0;
+            if (sawExit) restartReason = "watchdog-restarted";
 
             // Elevated (started from an admin window) or inside an app package (started from the
             // Claude desktop app): the launcher would inherit that. Start again as the signed-in
@@ -148,9 +154,11 @@ namespace Htpc.Watchdog
                 if (IsHeld())
                 {
                     var holder = Holder();
-                    WaitWhileHeld(holder);
+                    var endedHung = WaitWhileHeld(holder);
                     sawExit = true;
                     var code = holder.Process != null ? ExitCode(holder.Process) : null;
+                    restartReason = holder.Pid == 0 ? "setup-ended" : endedHung ? "hung" : code == PlannedExit ? "planned"
+                        : code.HasValue ? "exit:" + code.Value.ToString(CultureInfo.InvariantCulture) : "ended";
                     var lived = holder.Started.HasValue ? DateTime.Now - holder.Started.Value : (TimeSpan?)null;
                     Log.Info((holder.Pid == 0 ? "Setup (or another launcher) ended" : "Launcher ended (pid " + holder.Pid) + (lived.HasValue ? ", ran " + Seconds(lived.Value) : "")
                         + (code.HasValue ? ", exit code " + code.Value : "") + (holder.Pid == 0 ? "" : ")"));
@@ -212,16 +220,18 @@ namespace Htpc.Watchdog
 
         // Blocks until the mutex is released or its holder dies. Every 10 s: is the launcher's
         // window still answering? Not for 60 s: it is ended, and restarted like after a crash.
-        static void WaitWhileHeld(LauncherInfo holder)
+        // True when this watchdog ended it for not responding.
+        static bool WaitWhileHeld(LauncherInfo holder)
         {
             DateTime? hungSince = null;
+            var endedHung = false;
             while (true)
             {
                 try
                 {
-                    if (launcherMutex.WaitOne(HangCheckEvery)) { launcherMutex.ReleaseMutex(); return; }
+                    if (launcherMutex.WaitOne(HangCheckEvery)) { launcherMutex.ReleaseMutex(); return endedHung; }
                 }
-                catch (AbandonedMutexException) { launcherMutex.ReleaseMutex(); return; } // ended without letting go
+                catch (AbandonedMutexException) { launcherMutex.ReleaseMutex(); return endedHung; } // ended without letting go
 
                 // Out of the fallback once a launcher has been up for a while.
                 if (retries >= 0 && holder.Started.HasValue && DateTime.Now - holder.Started.Value >= FastExit)
@@ -238,7 +248,7 @@ namespace Htpc.Watchdog
                 if (!hungSince.HasValue) { hungSince = DateTime.Now; Log.Warn("Launcher not responding"); continue; }
                 if (DateTime.Now - hungSince.Value < HangLimit) continue;
                 Log.Warn("Launcher not responding for " + Seconds(DateTime.Now - hungSince.Value) + ": ending it");
-                try { using (var p = Process.GetProcessById(holder.Pid)) p.Kill(); }
+                try { using (var p = Process.GetProcessById(holder.Pid)) p.Kill(); endedHung = true; }
                 catch (Exception e) { Log.Warn("Could not end it: " + e.Message); }
                 hungSince = null;
             }
@@ -259,10 +269,11 @@ namespace Htpc.Watchdog
         static void StartLauncher()
         {
             var restarted = sawExit;
+            var reason = restartReason ?? "ended";
             if (child != null) child.Dispose();
-            child = Native.Start(LauncherExe, restarted ? "--restarted" : "");
-            if (child == null) { sawExit = true; fastExits++; return; }
-            Log.Info("Launcher started (pid " + child.Id + (restarted ? ", --restarted" : "") + ")");
+            child = Native.Start(LauncherExe, restarted ? "--restarted --restart-reason=" + reason : "");
+            if (child == null) { sawExit = true; restartReason = "not-started"; fastExits++; return; }
+            Log.Info("Launcher started (pid " + child.Id + (restarted ? ", --restarted: " + reason : "") + ")");
             // Until it holds the mutex (a first start after an update unpacks for a while), or
             // exits before it does.
             while (!HasExited(child) && !IsHeld())
@@ -270,7 +281,9 @@ namespace Htpc.Watchdog
             if (HasExited(child) && !IsHeld())
             {
                 sawExit = true;
-                if (ExitCode(child) != PlannedExit) fastExits++;
+                var code = ExitCode(child);
+                restartReason = code == PlannedExit ? "planned" : code.HasValue ? "exit:" + code.Value.ToString(CultureInfo.InvariantCulture) : "ended";
+                if (code != PlannedExit) fastExits++;
                 Log.Warn("Launcher exited before starting up (exit code " + ExitCode(child) + ")");
             }
         }

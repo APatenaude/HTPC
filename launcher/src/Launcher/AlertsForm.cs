@@ -10,17 +10,14 @@ namespace Htpc.Launcher;
 /// <summary>One alert card (design: Alerts). Key + Action: the button hint on its right ("Home", "+15 min").</summary>
 sealed record OverlayCard(string Id, string Title, string? Body, string Glyph, AlertTone Tone, string? Key, string? Action);
 
-/// <summary>The in-app hint (design: Inside an app): a card at the bottom left with up to 8 buttons.</summary>
-sealed record OverlayHint(string Title, string Glyph, IReadOnlyList<(string Button, string Label)> Buttons, string? Caption);
-
-/// <summary>Everything the overlay shows: cards at the top right (newest first) and the hint.</summary>
-sealed record OverlayView(IReadOnlyList<OverlayCard> Cards, OverlayHint? Hint);
+/// <summary>Everything the overlay shows: cards at the top right (newest first).</summary>
+sealed record OverlayView(IReadOnlyList<OverlayCard> Cards);
 
 /// <summary>
-/// Alerts over whatever is on screen (design: Alerts, Inside an app), painted with GDI+ into a
-/// layered window: per-pixel alpha (round corners, shadows), clicks pass through, it never takes
-/// the focus, and the Home menu's screen capture (SRCCOPY) leaves it out. A windowed WebView2
-/// cannot be transparent over video and costs a renderer. It only paints what it is given
+/// Alerts over whatever is on screen (design: Alerts), painted with GDI+ into a layered
+/// window: per-pixel alpha (round corners, shadows), clicks pass through, it never takes
+/// the focus, and the Home menu's screen capture leaves it out (ScreenCapture.LeaveOut). A
+/// windowed WebView2 cannot be transparent over video and costs a renderer. It only paints what it is given
 /// (Show replaces everything; AlertCenter decides what, when and for how long), keeps clear
 /// of the on-screen keyboard's band, and stays hidden while suppressed (standby).
 /// Laid out in the design's 1920x1080 units and scaled to the screen. Icons are icons.js's
@@ -59,7 +56,7 @@ sealed class AlertsForm : Form
     };
 
     // Design units (1920 wide).
-    const float CardWidth = 680, CardsRight = 96, CardsTop = 48, CardGap = 14, HintWidth = 600, HintLeft = 48, HintBottom = 48, Shade = 40;
+    const float CardWidth = 680, CardsRight = 96, CardsTop = 48, CardGap = 14, Shade = 40;
 
     OverlayView? view;
     bool suppressed;
@@ -105,7 +102,7 @@ sealed class AlertsForm : Form
     /// <summary>Shows this view, replacing whatever was shown (UI thread). Nothing to show hides it.</summary>
     public void Show(OverlayView view)
     {
-        this.view = view.Cards.Count == 0 && view.Hint is null ? null : view;
+        this.view = view.Cards.Count == 0 ? null : view;
         Relayout();
     }
 
@@ -148,7 +145,7 @@ sealed class AlertsForm : Form
     internal static Bitmap? Render(OverlayView v, Rectangle screen, Rectangle avoid, string? iconsFile, out Rectangle at)
     {
         at = Rectangle.Empty;
-        if (v.Cards.Count == 0 && v.Hint is null) return null;
+        if (v.Cards.Count == 0) return null;
         var s = screen.Width / 1920f;
         var icons = IconsFor(iconsFile);
         using var measure = Graphics.FromHwnd(IntPtr.Zero);
@@ -159,20 +156,10 @@ sealed class AlertsForm : Form
         var cardsTop = CardsTop;
         if (!avoid.IsEmpty && avoid.Top <= screen.Top + 1) cardsTop = (avoid.Bottom - screen.Top) / s + 24;
         var cardsHeight = cards.Sum(c => c.Height) + CardGap * Math.Max(0, cards.Count - 1);
-        var cardsBox = cards.Count == 0 ? RectangleF.Empty : new RectangleF(1920 - CardsRight - CardWidth, cardsTop, CardWidth, cardsHeight);
+        var cardsBox = new RectangleF(1920 - CardsRight - CardWidth, cardsTop, CardWidth, cardsHeight);
 
-        // The hint: bottom left, above the keyboard if it is at the bottom.
-        var hintBox = RectangleF.Empty;
-        if (v.Hint is { } hint)
-        {
-            var h = HintHeight(measure, fonts, hint);
-            var bottom = screen.Height / s - HintBottom;
-            if (!avoid.IsEmpty && avoid.Bottom >= screen.Bottom - 1) bottom = (avoid.Top - screen.Top) / s - 24;
-            hintBox = new RectangleF(HintLeft, bottom - h, HintWidth, h);
-        }
-
-        // The window: both boxes and room for their shadows.
-        var all = cardsBox.IsEmpty ? hintBox : hintBox.IsEmpty ? cardsBox : RectangleF.Union(cardsBox, hintBox);
+        // The window: the cards and room for their shadows.
+        var all = cardsBox;
         all.Inflate(Shade, Shade);
         var px = Rectangle.Round(new RectangleF(screen.X + all.X * s, screen.Y + all.Y * s, all.Width * s, all.Height * s));
         px.Intersect(screen);
@@ -194,7 +181,6 @@ sealed class AlertsForm : Form
                 DrawCard(g, fonts, icons, card, new RectangleF(cardsBox.X, y, CardWidth, height));
                 y += height + CardGap;
             }
-            if (v.Hint is { } h2) DrawHint(g, fonts, icons, h2, hintBox);
         }
         at = px;
         return bitmap;
@@ -208,10 +194,7 @@ sealed class AlertsForm : Form
         public readonly Font Body = new("Segoe UI", 24, FontStyle.Regular, GraphicsUnit.Pixel);
         public readonly Font Action = new("Segoe UI", 22, FontStyle.Regular, GraphicsUnit.Pixel);
         public readonly Font Key = new("Segoe UI", 19, FontStyle.Bold, GraphicsUnit.Pixel);
-        public readonly Font HintTitle = new("Segoe UI Semibold", 30, FontStyle.Regular, GraphicsUnit.Pixel);
-        public readonly Font HintLabel = new("Segoe UI", 26, FontStyle.Regular, GraphicsUnit.Pixel);
-        public readonly Font HintCaption = new("Segoe UI", 22, FontStyle.Regular, GraphicsUnit.Pixel);
-        public void Dispose() { foreach (var f in new[] { Title, Body, Action, Key, HintTitle, HintLabel, HintCaption }) f.Dispose(); }
+        public void Dispose() { foreach (var f in new[] { Title, Body, Action, Key }) f.Dispose(); }
     }
 
     static readonly StringFormat Wrap = new(StringFormat.GenericTypographic) { Trimming = StringTrimming.EllipsisWord };
@@ -292,53 +275,6 @@ sealed class AlertsForm : Form
         using var t = new SolidBrush(MainText);
         var size = g.MeasureString(key, f.Key, 400, OneLine);
         g.DrawString(key, f.Key, t, new PointF(r.X + (r.Width - size.Width) / 2, r.Y + (r.Height - size.Height) / 2), OneLine);
-    }
-
-    // Hint: 28/32 padding, title row (icon + title), buttons in two columns, the caption.
-    static float HintHeight(Graphics g, Fonts f, OverlayHint h)
-    {
-        var rows = (Math.Min(8, h.Buttons.Count) + 1) / 2;
-        float height = 28 + 40 + (rows > 0 ? 22 + rows * 44 + (rows - 1) * 16 : 0);
-        if (h.Caption is not null) height += 22 + g.MeasureString(h.Caption, f.HintCaption, (int)(HintWidth - 64), Wrap).Height;
-        return height + 28;
-    }
-
-    static void DrawHint(Graphics g, Fonts f, Dictionary<string, string> icons, OverlayHint h, RectangleF r)
-    {
-        Shadow(g, r, 28);
-        using (var path = Rounded(r, 28))
-        {
-            using var bg = new SolidBrush(CardBg);
-            g.FillPath(bg, path);
-            using var edge = new Pen(CardEdge, 1);
-            g.DrawPath(edge, path);
-        }
-        var x = r.X + 32;
-        var y = r.Y + 28;
-        DrawIcon(g, icons, h.Glyph, new RectangleF(x, y + 4, 32, 32), Accent, 2);
-        using (var t = new SolidBrush(MainText))
-            g.DrawString(h.Title, f.HintTitle, t, new PointF(x + 46, y), OneLine);
-        y += 40 + 22;
-        var colWidth = (HintWidth - 64 - 24) / 2;
-        var buttons = h.Buttons.Take(8).ToList();
-        for (var i = 0; i < buttons.Count; i++)
-        {
-            var (button, label) = buttons[i];
-            var bx = x + (i % 2) * (colWidth + 24);
-            var by = y + (i / 2) * (44 + 16);
-            var kw = button.Length <= 1 ? 44 : g.MeasureString(button, f.Key, 400, OneLine).Width + 28;
-            DrawKey(g, f, button, new RectangleF(bx, by, kw, 44));
-            using var lt = new SolidBrush(ActionText);
-            var lh = g.MeasureString(label, f.HintLabel, 400, OneLine).Height;
-            g.DrawString(label, f.HintLabel, lt, new RectangleF(bx + kw + 12, by + (44 - lh) / 2, colWidth - kw - 12, lh + 2), OneLine);
-        }
-        var rows = (buttons.Count + 1) / 2;
-        if (rows > 0) y += rows * 44 + (rows - 1) * 16 + 22;
-        if (h.Caption is not null)
-        {
-            using var ct = new SolidBrush(Muted);
-            g.DrawString(h.Caption, f.HintCaption, ct, new RectangleF(x, y, HintWidth - 64, r.Bottom - y), Wrap);
-        }
     }
 
     // A soft shadow under a card: rounded rectangles growing outwards, fading (0 24px 60px rgba(0,0,0,.5)).

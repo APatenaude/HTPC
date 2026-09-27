@@ -7,6 +7,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- ScreenCapture.cs: Desktop Duplication through COM by hand, and its pixels. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- launcher\art\icon*.svg, built by launcher\dev\Build-Icon.ps1. -->
     <ApplicationIcon>app.ico</ApplicationIcon>

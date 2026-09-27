@@ -27,13 +27,13 @@ sealed partial class MainForm
 
     /// <summary>
     /// SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
-    /// launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
-    /// "--restarted" is for the watchdog, which does not exist yet: it will pass it when it
-    /// restarts the launcher after a crash, so a crash soon after a boot does not turn the TV on
-    /// again. Nothing passes it today.
+    /// launcher started again later leaves the TV as it is, so a crash soon after a boot does not
+    /// turn the TV on again. Again: after a handoff (a launcher update, a restart for Windows
+    /// updates), or started by the watchdog with --restarted (the last one crashed, hung or ended;
+    /// setup started the watchdog again). The log says which (Options.StartedAgain).
     /// </summary>
-    Task StartTv(bool leaveTvAlone = false) => tv.Startup(TimeSpan.FromMilliseconds(Environment.TickCount64),
-        leaveTvAlone || Environment.GetCommandLineArgs().Contains("--restarted"));
+    Task StartTv(LauncherHandoff? handoff) => tv.Startup(TimeSpan.FromMilliseconds(Environment.TickCount64),
+        options.StartedAgain(handoff?.Reason));
 
     /// <summary>An alert's "Set up" / "TV settings": Settings › TV over whatever is on screen.</summary>
     void OpenTvSettings()

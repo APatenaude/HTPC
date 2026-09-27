@@ -67,7 +67,7 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Tiles | Edited on the TV |
 | Moonlight Home | Tap to game PC, hold 1 s for our menu (was 2 s; changed 26 Sept 2026) |
 | Idle sleep | Configurable, default 30 min |
-| YouTube links from Share sheet | Open in VacuumTube (fallback: link player) |
+| YouTube links from Share sheet | Open in VacuumTube (fallback: link player; the link player was dropped on 27 September) |
 | TV power on | Whenever the box boots or wakes |
 | Preinstalled apps | Picked in first-run setup, six pre-ticked |
 | Library scope | Media apps + streaming-site tiles (client only) |
@@ -105,7 +105,7 @@ Decisions of 26 September 2026, evening (with the agents' plans):
 | Library | Kodi, VLC, Plex HTPC, Spotify, Feishin; sites Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi, Pluto TV, Kick, Crave, CBC Gem. Install and uninstall from the TV (not the Browser), keeping app data; "Add tile" also lists everything in the Start menu; line icons + colour; installs run right away at low priority |
 | Buttons | Per-app maps only for Mouse/Keyboard apps; YouTube, Jellyfin and Moonlight can only switch preset. Global pointer/scroll speeds. R3 (keyboard) editable, Home not. Extra keys (Tab, refresh, zoom, full screen, volume) on a row of the on-screen keyboard |
 | Sleep timer | "When this video ends": autoplay moving on counts as the end; a 5-minute pause counts; picked with nothing playing it waits; 3-hour cap. During the 1-minute warning, Home = +15 min |
-| Alerts | App didn't open / closed unexpectedly, no internet, idle-sleep warning, headphones, updates (home screen only), phone, TV not responding (when turning it on fails). No controller or battery alerts. Only urgent ones over video. Act on them with Home, then A in the Home menu. The button hint shows each time an app opens, 4 s |
+| Alerts | App didn't open / closed unexpectedly, no internet, idle-sleep warning, headphones, updates (home screen only), phone, TV not responding (when turning it on fails). No controller or battery alerts. Only urgent ones over video. Act on them with Home, then A in the Home menu. The button hint shows each time an app opens, 4 s (dropped on 27 September) |
 | Phone remote | http://tv.local on port 80 for good (HTTPS only later, for Android Share); pairing code for new phones; Remote, Type (with Tab/Shift+Tab) and Playing tabs; no app list; Back always goes back; links routed by site; added from a dismissible home-screen card on first boot, not a setup step; casting (N9) in a second phase |
 | Network | Every network the box joins is Private. Firewall: per-app answers (no global off switch); Stremio's service blocked; the phone remote and YouTube cast allowed on Private networks from the local subnet |
 | Wi-Fi and Bluetooth | Built into the launcher (full Wi-Fi incl. hidden networks; Bluetooth headphones and controllers; sound follows headphones); location allowed for the launcher; a Wi-Fi step in first-run setup when there's no cable; setup installs the vendor Bluetooth driver for whatever adapter a box has |
@@ -122,6 +122,8 @@ Decisions of 27 September 2026 (after the night's merges):
 | Bluetooth | The box keeps Windows' generic Bluetooth driver when Windows Update has none for its chip (this box's Realtek 0BDA:C821); a keyboard pairs only with a PIN. The launcher follows one controller (the 8BitDo); others work in games |
 | Stremio | Its update notice is off (`--autoupdater-endpoint` pointed nowhere; checked in the VM) |
 | Next | The box gets the new build in a session with the user at the TV (one Windows permission prompt); the shell switch stays for the end of development |
+| Button hint | None when an app opens (the user's choice): the Home menu opened over an app shows what its buttons do |
+| Link player | Dropped (no mpv + yt-dlp player): a link from the phone opens in its site's tile (YouTube videos in VacuumTube, Twitch in the Twitch tile), anything else in the browser. The decoding check (N5) asks the graphics driver only and plays no clips |
 
 ## Controller map
 
@@ -178,7 +180,6 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 - **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button maps (preset + overrides) applied to the foreground window, emitted via SendInput.
 - **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket + Wake-on-LAN), Samsung Tizen (websocket + WoL), Sony / Google / Android TV (Android TV Remote protocol or Bravia API), HDMI-CEC (libCEC). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
 - **Phone:** launcher serves the remote web app at `http://tv.local`; a pairing code for new phones; HTTPS with the box's own CA only later, for Android's Share target; iOS Shortcut or Android Web Share Target posts links.
-- **Link player:** mpv + yt-dlp with hardware decoding (d3d11va).
 - **App catalog:** one list (winget IDs + website tiles) drives the setup picks and the library.
 - **Keyboard and brightness:** launcher overlay layers above every app.
 - **Updates:** winget for apps, launcher self-update, Windows updates on demand, restore point first.
@@ -187,17 +188,17 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 
 1. **Base install:** USB install, setup script with the app catalog, apps with hardware decoding, decoding check.
 2. **Launcher core:** tiles, Home menu, power menu + sleep timer, controller service with presets, keyboard, brightness, sleep, Roku control.
-3. **Phone:** remote web app for iPhone and Android, Send to TV on both, link player.
+3. **Phone:** remote web app for iPhone and Android, Send to TV on both.
 4. **Polish:** settings screens, button map editor, TV profiles + other brands, app library, tile editing, alerts, first-run setup.
 
 ## Screens (on the design canvas)
 
-- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Inside an app (button hint) · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Link player · Alerts · First-run setup (incl. pick your apps)
+- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Inside an app (button hint) · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · First-run setup (incl. pick your apps)
 - **Settings:** Sleep & power · TV (profiles) · How the box controls a TV · Controller · Button maps · Button map editor · Phone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
 - **Phone:** Remote (touchpad) · Remote (arrows) · Type (+ paste link) · Playing (+ sleep timer) · Send to TV
 
 ## Open questions
 
 1. Look: colored icons, blue focus glow, 4 tiles per row, 24-hour clock.
-2. Can VacuumTube be handed a YouTube link to open? (Verify before build; fallback is the link player.)
+2. Can VacuumTube be handed a YouTube link to open? (Verify before build; the fallback was the link player, since dropped.)
 3. Library list: anything to add or drop?

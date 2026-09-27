@@ -97,6 +97,10 @@ sealed partial class MainForm : Form
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         revealTimer.Tick += (_, _) => RevealPending("400 ms");
         Directory.CreateDirectory(captureDir);
+        // The layers over apps stay out of the Home menu's backdrop (ScreenCapture).
+        ScreenCapture.LeaveOut(dimmer);
+        ScreenCapture.LeaveOut(overlay);
+        ScreenCapture.LeaveOut(volumeOsd);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
         InitAlerts();   // MainForm.Alerts.cs
         InitSettings(); // MainForm.Settings.cs
@@ -127,9 +131,10 @@ sealed partial class MainForm : Form
         mouseWatch.Start();
         await StartWebView(); // MainForm.Shell.cs: tries again, else exits for the watchdog
         StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
+        _ = Task.Run(ScreenCapture.Prepare); // the capture's GPU device, before the first Home
         // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
         // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
-        await StartTv(leaveTvAlone: handoff is not null);
+        await StartTv(handoff);
         ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
     }
 
@@ -346,7 +351,7 @@ sealed partial class MainForm : Form
             if (pad == Pad.HomeHold) standby.Wake("controller Home held"); // it has buzzed already
             return;
         }
-        if (pad == Pad.HomeDown) return;
+        if (pad == Pad.HomeDown) { CaptureEarly(); return; }
         if (keyboard.Visible)
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
@@ -642,6 +647,7 @@ sealed partial class MainForm : Form
     {
         revealTimer.Stop();
         revealPending = false; // a Home menu still waiting to show is not wanted any more
+        showOverTurn++;        // nor one still waiting for its backdrop
         Post(new { type = "blank" });
         await Task.Delay(150);
         if (LauncherActive) return;
@@ -668,30 +674,37 @@ sealed partial class MainForm : Form
     }
 
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
-    void ShowOver(CatalogApp? app, string view)
+    async void ShowOver(CatalogApp? app, string view)
     {
-        var focus = LauncherComingForward(view); // alerts off the app before the capture
-        string? backdrop = null;
+        var asked = Environment.TickCount64;
+        var focus = LauncherComingForward(view); // the alerts' cards leave the app for the launcher's own
         var overDesktop = app is null && desktop.Active; // desktop mode: B goes back to it
-        if (app is not null || overDesktop)
+        var current = app?.Id ?? (overDesktop ? DesktopMode.Id : null);
+        var turn = ++showOverTurn;
+        string? backdrop = null;
+        if (current is not null)
         {
-            try
+            // The capture Home's press started (CaptureEarly), if it is of this same screen; else
+            // one now. Off the UI thread either way: the controller and the page carry on.
+            var early = earlyCapture is { } e && asked - earlyAt < 2000 && earlyOver == Native.GetForegroundWindow() ? e : null;
+            earlyCapture = null;
+            var shot = await (early ?? CaptureBackdrop());
+            if (shot is not null)
             {
-                var clock = System.Diagnostics.Stopwatch.StartNew();
-                foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg")) File.Delete(old);
-                var name = $"screen-{DateTime.Now.Ticks}.jpg";
-                ScreenCapture.Save(Path.Combine(captureDir, name));
-                backdrop = $"https://capture.htpc/{name}";
-                Log.Info($"Home over {app?.Id ?? DesktopMode.Id}: screen captured in {clock.ElapsedMilliseconds} ms");
+                backdrop = $"https://capture.htpc/{Path.GetFileName(shot.File)}";
+                Log.Info($"Home over {current}: backdrop ready {Environment.TickCount64 - asked} ms after Home " +
+                    $"(captured in {shot.Milliseconds} ms{(early is null ? "" : ", started at the press")}; {shot.How})");
             }
-            catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
+            // Overtaken meanwhile: another Home, an app coming forward, standby, the launcher up already.
+            if (turn != showOverTurn || standby.Active || LauncherActive) { Log.Info($"Home over {current}: no longer wanted"); return; }
         }
-        Post(new { type = "show", view, current = app?.Id ?? (overDesktop ? DesktopMode.Id : null), backdrop, focus, ack = backdrop is not null });
+        Post(new { type = "show", view, current, backdrop, focus, ack = backdrop is not null });
         PushState();
         if (backdrop is null) { Reveal(); return; }
         // The hidden page last showed black (StepAside): shown at once it came up dark and faded
         // in over the app. It now shows once the page has the captured frame in place ("shown"),
         // or after 400 ms, so the frame on screen stays the app's own until the menu slides in.
+        menuAskedAt = asked;
         revealTimer.Stop();
         revealPending = true;
         revealTimer.Start();
@@ -699,15 +712,54 @@ sealed partial class MainForm : Form
 
     readonly System.Windows.Forms.Timer revealTimer = new() { Interval = 400 };
     bool revealPending;
+    long menuAskedAt;                              // the Home that ShowOver's pending menu is for
+    int showOverTurn;                              // a newer ShowOver, or an app coming forward, ends an older one
+    Task<ScreenCapture.Shot?>? earlyCapture;       // started at Home's press (CaptureEarly)
+    long earlyAt;
+    IntPtr earlyOver;                              // the window in front then
 
     void RevealPending(string why)
     {
         revealTimer.Stop();
         if (!revealPending) return;
         revealPending = false;
-        if (why != "page ready") Log.Info($"Home menu shown without the page's answer ({why})");
+        var after = Environment.TickCount64 - menuAskedAt;
+        Log.Info(why == "page ready" ? $"Home menu: page ready {after} ms after Home" : $"Home menu shown without the page's answer ({why}, {after} ms after Home)");
         Reveal();
     }
+
+    /// <summary>
+    /// Home pressed over an app or the desktop, not yet told from a hold: the Home menu is
+    /// coming either way, so its backdrop's capture starts now and is mostly done by the release.
+    /// Not in Moonlight (a tap there is the game PC's) nor with the keyboard up (Home closes it
+    /// first: it must not be in the picture).
+    /// </summary>
+    void CaptureEarly()
+    {
+        if (setupMode || keyboard.Visible || LauncherActive) return;
+        var app = apps.ForegroundApp();
+        if (app is null ? !desktop.Active : app.Id == "moonlight") return;
+        earlyAt = Environment.TickCount64;
+        earlyOver = Native.GetForegroundWindow();
+        earlyCapture = CaptureBackdrop();
+    }
+
+    /// <summary>The screen into a new file for the page (capture.htpc), on a worker thread; null if it failed.</summary>
+    Task<ScreenCapture.Shot?> CaptureBackdrop() => Task.Run(() =>
+    {
+        try
+        {
+            // The two newest stay: the page may still be loading one while the next is made.
+            foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg").OrderDescending().Skip(2))
+                try { File.Delete(old); } catch (IOException) { }
+            return (ScreenCapture.Shot?)ScreenCapture.Save(Path.Combine(captureDir, $"screen-{DateTime.Now.Ticks}.jpg"));
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"Screen capture failed: {e.Message}");
+            return null;
+        }
+    });
 
     void OnRunningChanged(string id, bool started)
     {

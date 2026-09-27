@@ -88,12 +88,12 @@ static class TvChecks
             h.Dispose(); w.Dispose();
         }
 
-        // --restarted (the watchdog after a crash): the TV is left as it is, even right after a boot.
+        // --restarted (the watchdog after a crash, say): the TV is left as it is, even right after a boot.
         {
             var (w, h) = await Start();
             var tv = w.AddRoku("roku", "X00000000001");
             h.Bind(tv, 1, RokuWorld.EdidKey);
-            await h.Tv.Startup(TimeSpan.FromMinutes(2), restarted: true);
+            await h.Tv.Startup(TimeSpan.FromMinutes(2), startedAgain: "Launcher restarted by the watchdog: the last one ended (exit code -1)");
             Check.Equal(0, Count(w, "POST ") + h.Net.WakePackets, "--restarted: nothing sent at start");
             h.Dispose(); w.Dispose();
         }

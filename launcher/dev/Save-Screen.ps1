@@ -2,6 +2,11 @@
 <#
 .SYNOPSIS
     Dev: saves a PNG of what is on the TV right now (scaled to 1920 wide), to check the launcher.
+
+.DESCRIPTION
+    The launcher's layers over apps (the brightness layer, alert cards, the volume indicator)
+    are not in it: they are kept out of every screen capture, so the Home menu's backdrop never
+    has them (ScreenCapture.LeaveOut). LauncherTests draws them into PNGs instead.
 #>
 param([string]$Path = (Join-Path $env:TEMP 'htpc-screen.png'))
 

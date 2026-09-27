@@ -8,9 +8,9 @@ namespace Htpc.Launcher;
 /// setup\tools\Test-HwDecode.ps1 -Json in the background and keeps its report in
 /// C:\ProgramData\HTPC\logs\hwdecode-last.json (About shows the last one).
 ///
-/// Driver only (-NoPlayback) for now: it asks the GPU driver which codecs it decodes in 4K.
-/// The playback half needs mpv, which comes with the link player; ffmpeg or mpv found on a
-/// dev box would otherwise decode 4K clips next to whatever the user is watching.
+/// Driver only (-NoPlayback): it asks the GPU driver which codecs it decodes in 4K. The
+/// playback half needs mpv or ffmpeg, which setup does not install; on a dev box that has one,
+/// it would decode 4K clips next to whatever the user is watching.
 /// </summary>
 sealed class DecodeCheck
 {

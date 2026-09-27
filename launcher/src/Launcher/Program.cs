@@ -5,10 +5,11 @@ namespace Htpc.Launcher;
 /// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV),
 /// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"),
 /// --version (prints the version and ends; see Program.Main),
-/// --restarted (started again by the watchdog after the last one ended: the TV is left as it is),
+/// --restarted (started again by the watchdog: the TV is left as it is) with
+/// --restart-reason=WHY (why the watchdog started it again, for the log: Watchdog.cs lists them),
 /// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one).
 /// </summary>
-sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv, bool Setup, bool Restarted, bool BackToTv)
+sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv, bool Setup, bool Restarted, string? RestartReason, bool BackToTv)
 {
     public static Options Parse(string[] args)
     {
@@ -26,8 +27,35 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath,
             args.Contains("--no-tv"),
             args.Contains("--setup") || Path.GetFileName(Environment.ProcessPath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase),
             args.Contains("--restarted"),
+            args.FirstOrDefault(a => a.StartsWith("--restart-reason=", StringComparison.Ordinal))?["--restart-reason=".Length..],
             args.Contains("--tv"));
     }
+
+    /// <summary>
+    /// For the log, when this launcher is not the box's first since it started (it then leaves
+    /// the TV as it is): "Launcher restarted by the watchdog: the last one stopped responding".
+    /// A handoff from the launcher before it (its reason) comes first, then --restarted with the
+    /// watchdog's reason (none from a watchdog older than --restart-reason). Null: the first.
+    /// </summary>
+    public string? StartedAgain(string? handoff) => handoff switch
+    {
+        "launcher-update" => "Launcher started after a launcher update",
+        "windows-restart" => "Launcher started after a restart for Windows updates",
+        not null => $"Launcher started after a handoff ({handoff})",
+        null when !Restarted => null,
+        _ => "Launcher restarted by the watchdog" + RestartReason switch
+        {
+            null or "" => "",
+            "planned" => " after a planned exit (an update, setup handing over)",
+            "hung" => ": the last one stopped responding",
+            "ended" => ": the last one ended",
+            "setup-ended" => " after setup (or another launcher) ended",
+            "not-started" => ": the last try did not start",
+            "watchdog-restarted" => ", itself started again (by setup or a dev script)",
+            var r when r.StartsWith("exit:", StringComparison.Ordinal) => $": the last one ended (exit code {r[5..]})",
+            var r => $" ({r})",
+        },
+    };
 
     // The trusted catalog sits next to the exe: for the installed launcher that is
     // Program Files\HTPC\Launcher\catalog.json (admin-write only, the same copy the \HTPC\Jobs task

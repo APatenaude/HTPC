@@ -119,6 +119,11 @@ Console.WriteLine("== ButtonMapStore");
     var text = JsonSerializer.Serialize(withMaps, opts);
     var back = JsonSerializer.Deserialize<LauncherSettings>(text, opts)!;
     Check(JsonSerializer.Serialize(back.ButtonMaps) == JsonSerializer.Serialize(json), "LauncherSettings round trip keeps buttonMaps");
+
+    // A settings file from before the in-app hint was dropped: its switch is skipped, not an error.
+    var old = JsonSerializer.Deserialize<LauncherSettings>("""{ "idleMinutes": 45, "showAppHints": false, "showKeyboardAutomatically": false }""", opts)!;
+    Check(old.IdleMinutes == 45 && !old.ShowKeyboardAutomatically, "settings with the old showAppHints still load");
+    Check(!JsonSerializer.Serialize(old, opts).Contains("showAppHints"), "showAppHints is not written back");
 }
 
 // ---------------------------------------------------------------- PadMapper
@@ -492,7 +497,6 @@ Console.WriteLine("== Alerts overlay");
         new("volume", "Volume 45", null, "speaker", AlertTone.Info, null, null),
         new("app", "Stremio closed unexpectedly", "It stopped responding and was closed. A long line to see the wrapping work as it should.", "warn", AlertTone.Bad, "A", "Reopen"),
     };
-    var hint = new OverlayHint("Mouse mode", "controller", new List<(string, string)> { ("L stick", "Move pointer"), ("R stick", "Scroll"), ("X", "Click"), ("B", "Esc"), ("A", "Enter"), ("Y", "Space"), ("R3", "Keyboard"), ("Home", "Menu") }, "Twitch's buttons. Shows for 4 seconds when the app opens.");
     void Shot(string name, OverlayView v, Rectangle screen, Rectangle avoid)
     {
         using var b = AlertsForm.Render(v, screen, avoid, iconsFile, out var at);
@@ -511,12 +515,10 @@ Console.WriteLine("== Alerts overlay");
         Console.WriteLine($"  {name}: window {at}");
     }
     var hd = new Rectangle(0, 0, 1920, 1080);
-    Shot("cards-1080", new OverlayView(cards, null), hd, Rectangle.Empty);
-    Shot("sleep-4k", new OverlayView(cards.Take(1).ToList(), null), new Rectangle(0, 0, 3840, 2160), Rectangle.Empty);
-    Shot("hint-and-card", new OverlayView(cards.Take(1).ToList(), hint), hd, Rectangle.Empty);
-    Shot("hint-keyboard-bottom", new OverlayView(Array.Empty<OverlayCard>(), hint), hd, new Rectangle(0, 1080 - 560, 1920, 560));
-    Shot("cards-keyboard-top", new OverlayView(cards.Take(2).ToList(), null), hd, new Rectangle(0, 0, 1920, 560));
-    Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>(), null), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
+    Shot("cards-1080", new OverlayView(cards), hd, Rectangle.Empty);
+    Shot("sleep-4k", new OverlayView(cards.Take(1).ToList()), new Rectangle(0, 0, 3840, 2160), Rectangle.Empty);
+    Shot("cards-keyboard-top", new OverlayView(cards.Take(2).ToList()), hd, new Rectangle(0, 0, 1920, 560));
+    Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>()), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
 
     // The volume indicator: top left, clear of the alert cards (top right) and of the keyboard.
     void VolumeShot(string name, SoundLevel level, string? output, Rectangle screen, Rectangle avoid, Action<Rectangle> check)
@@ -647,6 +649,67 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
 
 // ---------------------------------------------------------------- Logos (LogoTests.cs)
 LogoTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
+
+// ---------------------------------------------------------------- The Home menu's backdrop
+// ScreenCapture's own part: sizes, scaling (the GPU halves a 4K screen; this is what 2560 wide
+// and the GDI fallback get) and the JPEG. The screen itself is not captured here.
+Console.WriteLine("== Home menu backdrop: scaling and the JPEG");
+unsafe
+{
+    Check(ScreenCapture.TargetSize(new Size(3840, 2160)) == new Size(1920, 1080), "4K: 1920x1080");
+    Check(ScreenCapture.TargetSize(new Size(2560, 1440)) == new Size(1920, 1080), "1440p: 1920x1080");
+    Check(ScreenCapture.TargetSize(new Size(3840, 1600)) == new Size(1920, 800), "ultrawide: its proportions");
+    Check(ScreenCapture.TargetSize(new Size(1366, 768)) == new Size(1366, 768), "narrower than 1920: kept");
+
+    static uint Px(byte b, byte g, byte r) => (uint)(b | g << 8 | r << 16 | 0x7F << 24);
+    // 2:1, each 2x2 box averaged (rounded), alpha opaque; 255s must not spill into the next channel.
+    var four = new uint[]
+    {
+        Px(0, 0, 0),       Px(255, 255, 255), Px(1, 10, 200), Px(2, 20, 201),
+        Px(255, 255, 255), Px(255, 255, 255), Px(2, 30, 202), Px(2, 40, 202),
+        Px(10, 0, 0),      Px(10, 0, 0),      Px(9, 9, 9),    Px(9, 9, 9),
+        Px(10, 0, 0),      Px(10, 0, 0),      Px(9, 9, 9),    Px(9, 9, 9),
+    };
+    var two = new uint[4];
+    fixed (uint* s = four) fixed (uint* d = two) ScreenCapture.Downscale((byte*)s, 4, 4, 16, (byte*)d, 2, 2, 8);
+    Check(two[0] == (Px(191, 191, 191) | 0xFF000000), $"2:1: 0,255,255,255 averages to 191 (got {two[0]:X8})");
+    Check(two[1] == (Px(2, 25, 201) | 0xFF000000), $"2:1: rounded per channel (got {two[1]:X8})");
+    Check(two[2] == (Px(10, 0, 0) | 0xFF000000) && two[3] == (Px(9, 9, 9) | 0xFF000000), "2:1: flat boxes unchanged");
+
+    // Any other ratio: 3 -> 2 (boxes of 1 and 2 pixels), and 1:1 (a copy, opaque).
+    var three = new uint[] { Px(30, 0, 0), Px(60, 0, 0), Px(90, 0, 0), Px(30, 0, 0), Px(60, 0, 0), Px(90, 0, 0), Px(0, 0, 0), Px(0, 0, 0), Px(0, 0, 0) };
+    var out3 = new uint[4];
+    fixed (uint* s = three) fixed (uint* d = out3) ScreenCapture.Downscale((byte*)s, 3, 3, 12, (byte*)d, 2, 2, 8);
+    Check((out3[0] & 0xFF) == 30 && (out3[1] & 0xFF) == 75, $"3 -> 2 across: 30 | (60+90)/2 (got {out3[0] & 0xFF}, {out3[1] & 0xFF})");
+    Check((out3[2] & 0xFF) == 15 && (out3[3] & 0xFF) == 38, $"3 -> 2 down: rows 1-2 averaged (got {out3[2] & 0xFF}, {out3[3] & 0xFF})");
+    var same = new uint[4];
+    fixed (uint* s = four) fixed (uint* d = same) ScreenCapture.Downscale((byte*)s, 2, 2, 16, (byte*)d, 2, 2, 8);
+    Check(same[0] == (four[0] | 0xFF000000) && same[3] == (four[5] | 0xFF000000), "1:1 with a wider source stride: a copy");
+
+    // A 4K frame with padded rows (as a mapped GPU texture has): scaled, then a JPEG read back.
+    const int W = 3840, H = 2160, Stride = W * 4 + 256;
+    var frame = new byte[Stride * H];
+    for (var y = 0; y < H; y++)
+        for (var x = 0; x < Stride / 4; x++)
+        {
+            // Left half dark blue, right half light grey; the padding bright red (must not show).
+            var v = x >= W ? Px(0, 0, 255) : x < W / 2 ? Px(120, 40, 20) : Px(200, 200, 200);
+            BitConverter.TryWriteBytes(frame.AsSpan((y * Stride) + x * 4), v);
+        }
+    var file = Path.Combine(Path.GetTempPath(), "htpc-backdrop-test.jpg");
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    fixed (byte* p = frame) ScreenCapture.SaveScaled(p, W, H, Stride, ScreenCapture.TargetSize(new Size(W, H)), file);
+    Console.WriteLine($"  4K frame scaled on the CPU and saved as a JPEG in {clock.ElapsedMilliseconds} ms ({new FileInfo(file).Length / 1024} KB)");
+    using (var jpeg = new Bitmap(file))
+    {
+        Check(jpeg.Width == 1920 && jpeg.Height == 1080, $"JPEG 1920x1080 (got {jpeg.Width}x{jpeg.Height})");
+        bool Near(Color c, int r, int g, int b) => Math.Abs(c.R - r) <= 6 && Math.Abs(c.G - g) <= 6 && Math.Abs(c.B - b) <= 6;
+        Check(Near(jpeg.GetPixel(400, 500), 20, 40, 120), $"left: the dark blue (got {jpeg.GetPixel(400, 500)})");
+        Check(Near(jpeg.GetPixel(1500, 500), 200, 200, 200), $"right: the grey (got {jpeg.GetPixel(1500, 500)})");
+        Check(Near(jpeg.GetPixel(1919, 540), 200, 200, 200), $"last column: no padding in it (got {jpeg.GetPixel(1919, 540)})");
+    }
+    File.Delete(file);
+}
 
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
