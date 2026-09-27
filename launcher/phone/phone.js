@@ -137,7 +137,8 @@ function onBox(m) {
       hidePairing();
       setConn('open');
       applyState(m.state);
-      if (pendingShare !== undefined) handleShare(!!m.share);
+      if (m.ca) { $('ca-fingerprint').textContent = groupFingerprint(m.ca); $('ca-here').hidden = false; }
+      if (pendingShare !== undefined) handleShare(m.share || null);
       break;
     case 'shortcutKey':
       $('sc-url').value = m.url;
@@ -660,16 +661,25 @@ function sharedLink() {
 // undefined: nothing shared; null: shared, but no link in it.
 let pendingShare = location.pathname === '/share' ? sharedLink() : undefined;
 
-// Straight from the Share sheet (the box saw it: hello.share), the link plays at once; opened
-// any other way (a link on some web page), it asks first.
-function handleShare(fromShareSheet) {
-  const url = pendingShare;
+// Posted by this phone's Share sheet, the box hands the link back in hello (a one-time ticket):
+// it plays at once. A link in the address (/share?url=..., which any message or web page can
+// link to) always asks first.
+function handleShare(ticketLink) {
+  const url = ticketLink || pendingShare;
   pendingShare = undefined;
   if (!demo) history.replaceState(null, '', '/');
   if (!url) { toast('No link in what was shared', 'warn'); return; }
   const go = () => { send({ t: 'open', url, share: true }); toast('Sent to the TV'); };
-  if (fromShareSheet) { go(); return; }
+  if (ticketLink) { go(); return; }
   openSheet('Play this on the TV?', url, [{ label: 'Play on the TV', primary: true, full: true, run: go }]);
+}
+
+// "AB:CD:..." as 4 lines of 8 bytes, as easy to compare as Android's own display.
+function groupFingerprint(fp) {
+  const bytes = String(fp).split(':');
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += 8) lines.push(bytes.slice(i, i + 8).join(':'));
+  return lines.join('\n');
 }
 
 const isIphone = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
@@ -760,7 +770,10 @@ function runDemo(view) {
   if (view === 'pair') showPairing();
   if (view === 'sleep') $('power').click();
   if (view === 'timer') $('timer-button').click();
-  if (view === 'send' || view === 'sendkey') openSend();
+  if (view === 'send' || view === 'sendkey') {
+    onBox({ t: 'hello', v: PROTOCOL, paired: true, state: box, ca: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8' });
+    openSend();
+  }
   if (view === 'sendkey') onBox({ t: 'shortcutKey', token: 'demo-Qm9vc3RlZC1kZW1vLWtleS1ub3QtcmVhbA', url: 'http://tv.local/api/open' });
   if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
   if (view === 'lost') $('lost').hidden = false;

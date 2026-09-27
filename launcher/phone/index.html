@@ -184,6 +184,7 @@
       <ol class="steps">
         <li>Download the TV box’s certificate: <a class="button primary small-button" id="ca-download" href="/ca.crt" download="tv-box.crt">Download</a></li>
         <li>Android Settings › Security › More security settings › Encryption &amp; credentials › Install a certificate › <b>CA certificate</b> › Install anyway, and pick “tv-box.crt” (the names differ a little between phones).</li>
+        <li>Check it before going on: Encryption &amp; credentials › <b>Trusted credentials › User</b> › tap it. Its <b>SHA-256 fingerprint</b> must be the one the TV shows (Settings › Phone remote, card 2).<span id="ca-here" hidden> This page says:<code class="fingerprint" id="ca-fingerprint"></code></span> If it differs, remove it there and stop: something else answered for the TV box.</li>
         <li><a class="button primary small-button" id="secure-open" href="https://tv.local/">Open the secure remote</a> and pair it with the code on the TV.</li>
         <li>There: ⋮ › <b>Install app</b> (or Add to Home screen › Install).</li>
         <li>Then in any app: Share › <b>TV remote</b>.</li>

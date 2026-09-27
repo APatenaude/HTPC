@@ -12,6 +12,9 @@
 .phone-address { font-size: 26px; font-weight: 700; color: var(--accent); }
 .phone-how { font-size: 21px; line-height: 1.45; color: var(--text-2); }
 .phone-ip { color: var(--muted); }
+.phone-fingerprint { font-family: Consolas, 'Cascadia Mono', monospace; font-size: 19px; line-height: 1.5; white-space: pre; color: var(--text); }
+/* Every phone and Shortcut key is listed: the section scrolls (to the focus). */
+.spane main:has(.phone-cards) { min-height: 0; overflow-y: auto; scrollbar-width: none; padding-bottom: 24px; }
 .ssection { margin-top: 18px; font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .phone-row { min-height: 88px; gap: 24px; }
 .srow .caption.good { color: #7FD1AE; }

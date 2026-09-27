@@ -1,5 +1,6 @@
 using System.Formats.Asn1;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -12,57 +13,100 @@ interface IKeyStore
     /// <summary>The named ECDSA P-256 key, or null when there is none.</summary>
     ECDsa? Open(string name);
 
-    /// <summary>A new named key (an old one of that name is replaced). It never leaves the store.</summary>
-    ECDsa Create(string name);
+    /// <summary>A new named key (an old one of that name is replaced); in the TPM when asked and there is one. It never leaves the store.</summary>
+    ECDsa Create(string name, bool hardware = false);
+
+    /// <summary>Where the last key made went ("TPM", "software"), for the log.</summary>
+    string LastProvider { get; }
 }
 
 /// <summary>
-/// Windows' key store for the signed-in user (CNG, Microsoft Software Key Storage Provider): the
-/// keys are made non-exportable, so no program can copy them off the box; programs running as
-/// this user can still sign with them.
+/// Windows' key store for the signed-in user (CNG). Keys are non-exportable, so no program can
+/// copy them off the box (programs running as this user can still sign with them). Asked for
+/// hardware, the key goes into the TPM (Microsoft Platform Crypto Provider) when the box has one
+/// that does ECDSA P-256, else into the software provider.
 /// </summary>
 sealed class CngKeyStore(string prefix = "") : IKeyStore
 {
-    static readonly CngProvider Provider = CngProvider.MicrosoftSoftwareKeyStorageProvider;
+    static readonly CngProvider Software = CngProvider.MicrosoftSoftwareKeyStorageProvider;
+    static readonly CngProvider Platform = new("Microsoft Platform Crypto Provider");
 
-    public ECDsa? Open(string name) =>
-        CngKey.Exists(prefix + name, Provider) ? new ECDsaCng(CngKey.Open(prefix + name, Provider)) : null;
+    public string LastProvider { get; private set; } = "";
 
-    public ECDsa Create(string name) => new ECDsaCng(CngKey.Create(CngAlgorithm.ECDsaP256, prefix + name, new CngKeyCreationParameters
+    public ECDsa? Open(string name)
     {
-        Provider = Provider,
+        foreach (var provider in new[] { Platform, Software })
+        {
+            try { if (CngKey.Exists(prefix + name, provider)) return new ECDsaCng(CngKey.Open(prefix + name, provider)); }
+            catch (CryptographicException) { } // no TPM provider on this box
+        }
+        return null;
+    }
+
+    public ECDsa Create(string name, bool hardware = false)
+    {
+        Delete(name);
+        if (hardware)
+        {
+            try
+            {
+                var key = Make(name, Platform);
+                LastProvider = "TPM";
+                return key;
+            }
+            catch (CryptographicException) { } // no TPM, or one without ECDSA P-256
+        }
+        LastProvider = "software";
+        return Make(name, Software);
+    }
+
+    ECDsa Make(string name, CngProvider provider) => new ECDsaCng(CngKey.Create(CngAlgorithm.ECDsaP256, prefix + name, new CngKeyCreationParameters
+    {
+        Provider = provider,
         ExportPolicy = CngExportPolicies.None,
         KeyUsage = CngKeyUsages.Signing,
         KeyCreationOptions = CngKeyCreationOptions.OverwriteExistingKey,
     }));
 
-    /// <summary>Tests: removes a key they made.</summary>
+    /// <summary>Removes the named key, wherever it is.</summary>
     public void Delete(string name)
     {
-        if (CngKey.Exists(prefix + name, Provider)) CngKey.Open(prefix + name, Provider).Delete();
+        foreach (var provider in new[] { Platform, Software })
+        {
+            try { if (CngKey.Exists(prefix + name, provider)) CngKey.Open(prefix + name, provider).Delete(); }
+            catch (CryptographicException) { }
+        }
     }
 }
 
 /// <summary>
 /// HTTPS for the phone remote (SPEC N9: Android installs the remote as an app, and with it the
-/// Share target, only over HTTPS). The box is its own certificate authority: a CA made once
-/// (ECDSA P-256, 10 years) that Android phones trust after installing its certificate, and a
-/// server certificate it signs (1 year) for tv.local, the box's .local name and its private IPv4
-/// addresses, made again when an address changes (no DHCP reservation) or a month before it ends.
+/// Share target, only over HTTPS). The box is its own certificate authority, in two steps:
 ///
-/// The CA may only sign for those: its Name Constraints (critical) permit tv.local (and the
-/// box's own .local name) and the private IPv4 ranges, nothing else. So whoever got its key could
-/// pass off only a .local name or a home-network address (the router's page, say) to a phone that
-/// trusts it, never a public site. The key is non-exportable in the user's key store (CngKeyStore)
-/// and nothing about the certificates' keys is ever logged. Public certificates in
-/// %LOCALAPPDATA%\HTPC\certs (ca.cer, server.cer).
+/// - A root, which phones install (/ca.crt). Its key lives only in memory while it signs the
+///   intermediate, once, and is then gone: nothing can ever sign with the root again.
+/// - An intermediate CA (pathlen 0, server authentication only) with Name Constraints, critical:
+///   tv.local, the box's own .local name and the private IPv4 ranges; e-mail, URI and directory
+///   names only under placeholders that match nothing real (.invalid, O=HTPC TV box). Constraints
+///   on an intermediate are enforced by every verifier (on a root, some skip them). So whoever
+///   got the intermediate's key could pass off only a .local name or a home-network address to a
+///   phone that trusts the root, never a public site. Its key is non-exportable, in the TPM when
+///   the box has one (CngKeyStore).
+/// - The server certificate (1 year) for tv.local and the box's private IPv4 addresses, signed by
+///   the intermediate, made again at once when an address changes (no DHCP reservation) and a
+///   month before it ends; the TLS handshake sends it with the intermediate.
+///
+/// Root and intermediate end together after 10 years; then the box makes a new pair and each
+/// phone installs the new root once more (Settings › Phone remote, card 2). Nothing about the
+/// keys is ever logged. Public certificates in %LOCALAPPDATA%\HTPC\certs.
 /// </summary>
 sealed class PhoneCertificates
 {
-    public const string CaKeyName = "HTPC phone remote CA", ServerKeyName = "HTPC phone remote TLS";
+    public const string IntermediateKeyName = "HTPC phone remote intermediate", ServerKeyName = "HTPC phone remote TLS";
     public static readonly TimeSpan CaLife = TimeSpan.FromDays(3650), ServerLife = TimeSpan.FromDays(365), RenewBefore = TimeSpan.FromDays(30);
+    const string Organization = "HTPC TV box";
 
-    /// <summary>The private IPv4 ranges (RFC 1918) the CA may sign for.</summary>
+    /// <summary>The private IPv4 ranges (RFC 1918) the intermediate may sign for.</summary>
     public static readonly (IPAddress Network, IPAddress Mask)[] PrivateRanges =
     {
         (IPAddress.Parse("10.0.0.0"), IPAddress.Parse("255.0.0.0")),
@@ -77,8 +121,9 @@ sealed class PhoneCertificates
     readonly IKeyStore keys;
     readonly Func<DateTime> now;
     readonly object gate = new();
-    X509Certificate2? ca;
+    X509Certificate2? root, intermediate;
     volatile X509Certificate2? server;
+    volatile SslStreamCertificateContext? context;
 
     public PhoneCertificates(string folder, IKeyStore keys, Func<DateTime>? clock = null)
     {
@@ -87,13 +132,21 @@ sealed class PhoneCertificates
         now = clock ?? (() => DateTime.Now);
     }
 
-    /// <summary>The server certificate, with its key, for Kestrel (null until Ensure made one).</summary>
+    /// <summary>The server certificate, with its key (null until Ensure made one).</summary>
     public X509Certificate2? Current => server;
 
-    /// <summary>The CA's certificate (public), for phones to install; null until Ensure made one.</summary>
-    public X509Certificate2? Authority { get { lock (gate) return ca; } }
+    /// <summary>For the TLS handshake: the server certificate and the intermediate that goes with it.</summary>
+    public SslStreamCertificateContext? Context => context;
 
-    /// <summary>The DNS names the CA permits: tv.local and the box's .local name.</summary>
+    /// <summary>The root (public), for phones to install; null until Ensure made one.</summary>
+    public X509Certificate2? Authority { get { lock (gate) return root; } }
+
+    public X509Certificate2? Intermediate { get { lock (gate) return intermediate; } }
+
+    /// <summary>The root's SHA-256 fingerprint as Android shows it ("AB:CD:..."), to compare before trusting it.</summary>
+    public string? Fingerprint => Authority is { } ca ? Convert.ToHexString(SHA256.HashData(ca.RawData)).Chunk(2).Select(c => new string(c)).Aggregate((a, b) => a + ":" + b) : null;
+
+    /// <summary>The DNS names the intermediate permits: tv.local and the box's .local name.</summary>
     public static List<string> LocalNames()
     {
         var names = new List<string> { "tv.local" };
@@ -115,8 +168,8 @@ sealed class PhoneCertificates
     }
 
     /// <summary>
-    /// Makes sure there is a CA and a server certificate for these names and addresses (private
-    /// IPv4 only; others are left out). Returns true when the server certificate is new.
+    /// Makes sure there is a root, an intermediate and a server certificate for these names and
+    /// addresses (private IPv4 only; others are left out). True when the server certificate is new.
     /// </summary>
     public bool Ensure(IEnumerable<string> names, IEnumerable<IPAddress> addresses)
     {
@@ -124,55 +177,100 @@ sealed class PhoneCertificates
         {
             var dns = names.Select(n => n.ToLowerInvariant().TrimEnd('.')).Where(n => n.EndsWith(".local")).Distinct().ToList();
             var ips = addresses.Where(IsPrivate).Distinct().OrderBy(a => a.ToString()).ToList();
-            ca ??= LoadOrCreateAuthority(dns);
-            // Only what the CA permits (the box renamed since: its new .local name is left out).
-            var permitted = PermittedNames(ca);
+            if (root is null || intermediate is null) LoadOrCreateAuthorities(dns);
+            // Only what the intermediate permits (the box renamed since: its new .local name is left out).
+            var permitted = PermittedNames(intermediate!);
             dns = dns.Where(n => permitted.Contains(n)).ToList();
             var current = server ?? LoadServer();
-            if (current is not null && Covers(current, dns, ips) && current.NotAfter - now() > RenewBefore && current.Issuer == ca.Subject)
+            if (current is not null && Covers(current, dns, ips) && current.NotAfter - now() > RenewBefore && current.Issuer == intermediate!.Subject)
             {
-                server = current;
+                Use(current);
                 return false;
             }
-            server = IssueServer(dns, ips);
+            var issued = IssueServer(dns, ips);
             Directory.CreateDirectory(folder);
-            File.WriteAllBytes(Path.Combine(folder, "server.cer"), server.RawData);
-            Log.Info($"Phone remote: HTTPS certificate for {string.Join(", ", dns.Concat(ips.Select(i => i.ToString())))}, until {server.NotAfter:yyyy-MM-dd}");
+            File.WriteAllBytes(Path.Combine(folder, "server.cer"), issued.RawData);
+            Use(issued);
+            Log.Info($"Phone remote: HTTPS certificate for {string.Join(", ", dns.Concat(ips.Select(i => i.ToString())))}, until {issued.NotAfter:yyyy-MM-dd}");
             return true;
         }
     }
 
-    X509Certificate2 LoadOrCreateAuthority(List<string> dns)
+    void Use(X509Certificate2 cert)
     {
-        var file = Path.Combine(folder, "ca.cer");
-        if (File.Exists(file) && keys.Open(CaKeyName) is { } key)
+        server = cert;
+        context = SslStreamCertificateContext.Create(cert, new X509Certificate2Collection(intermediate!), offline: true);
+    }
+
+    void LoadOrCreateAuthorities(List<string> dns)
+    {
+        string rootFile = Path.Combine(folder, "root.cer"), interFile = Path.Combine(folder, "intermediate.cer");
+        if (File.Exists(rootFile) && File.Exists(interFile) && keys.Open(IntermediateKeyName) is { } key)
         {
             using (key)
             {
                 try
                 {
-                    var loaded = X509CertificateLoader.LoadCertificateFromFile(file);
-                    // Its key must be the one in the store, and it must not end within the server certificate's life.
-                    if (loaded.GetECDsaPublicKey()!.ExportSubjectPublicKeyInfo().SequenceEqual(key.ExportSubjectPublicKeyInfo())
-                        && loaded.NotAfter - now() > ServerLife)
-                        return loaded;
+                    var r = X509CertificateLoader.LoadCertificateFromFile(rootFile);
+                    var i = X509CertificateLoader.LoadCertificateFromFile(interFile);
+                    if (i.GetECDsaPublicKey()!.ExportSubjectPublicKeyInfo().SequenceEqual(key.ExportSubjectPublicKeyInfo())
+                        && i.Issuer == r.Subject && i.NotAfter - now() > ServerLife)
+                    {
+                        (root, intermediate) = (r, i);
+                        return;
+                    }
                 }
-                catch (CryptographicException e) { Log.Warn($"Phone remote: CA certificate unreadable, making a new one ({e.Message})"); }
+                catch (CryptographicException e) { Log.Warn($"Phone remote: CA certificates unreadable, making new ones ({e.Message})"); }
             }
         }
-        Log.Info("Phone remote: making the box's certificate authority (phones that installed the old one install the new one)");
-        using var caKey = keys.Create(CaKeyName);
-        var request = new CertificateRequest($"CN=TV box ({Environment.MachineName}) phone remote, O=HTPC", caKey, HashAlgorithmName.SHA256);
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
-        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
-        request.CertificateExtensions.Add(NameConstraints(dns));
-        var cert = request.CreateSelfSigned(now().AddDays(-1), now() + CaLife);
+        Log.Info("Phone remote: making the box's certificate authority (phones that installed an old one install the new one)");
+        var notBefore = now().AddDays(-1);
+        var notAfter = now() + CaLife;
+        notAfter = notAfter.AddTicks(-(notAfter.Ticks % TimeSpan.TicksPerSecond)); // certificates keep whole seconds
+
+        // The root: its key exists only here, for this one signature.
+        using var rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var rootRequest = new CertificateRequest($"CN=TV box ({Environment.MachineName}) phone remote root, O={Organization}", rootKey, HashAlgorithmName.SHA256);
+        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 1, true));
+        rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        rootRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(rootRequest.PublicKey, false));
+        using var rootWithKey = rootRequest.CreateSelfSigned(notBefore, notAfter);
+        var newRoot = X509CertificateLoader.LoadCertificate(rootWithKey.RawData);
+
+        using var interKey = keys.Create(IntermediateKeyName, hardware: true);
+        var interRequest = new CertificateRequest(Name($"TV box ({Environment.MachineName}) phone remote"), interKey, HashAlgorithmName.SHA256);
+        interRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        interRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        interRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
+        interRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(interRequest.PublicKey, false));
+        interRequest.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(newRoot, true, false));
+        interRequest.CertificateExtensions.Add(NameConstraints(dns));
+        var newIntermediate = interRequest.Create(rootWithKey, notBefore, notAfter, Serial());
+        Log.Info($"Phone remote: intermediate key in the {keys.LastProvider} key store");
+
         Directory.CreateDirectory(folder);
-        File.WriteAllBytes(file, cert.RawData);
+        File.WriteAllBytes(rootFile, newRoot.RawData);
+        File.WriteAllBytes(interFile, newIntermediate.RawData);
         File.Delete(Path.Combine(folder, "server.cer"));
         server = null;
-        return X509CertificateLoader.LoadCertificate(cert.RawData);
+        (root, intermediate) = (newRoot, X509CertificateLoader.LoadCertificate(newIntermediate.RawData));
+    }
+
+    // Every name below the intermediate starts with its O (its directoryName constraint): O first
+    // in the encoding. (The builder encodes its RDNs in reverse order: the CN is added first.)
+    static X500DistinguishedName Name(string commonName)
+    {
+        var b = new X500DistinguishedNameBuilder();
+        b.AddCommonName(commonName);
+        b.AddOrganizationName(Organization);
+        return b.Build();
+    }
+
+    static byte[] Serial()
+    {
+        var serial = RandomNumberGenerator.GetBytes(16);
+        serial[0] &= 0x7F;
+        return serial;
     }
 
     X509Certificate2? LoadServer()
@@ -190,26 +288,25 @@ sealed class PhoneCertificates
         catch (CryptographicException) { return null; }
     }
 
-    /// <summary>A server certificate for these names and addresses, signed by the CA (tests: any names, to check the constraints).</summary>
-    public X509Certificate2 IssueServer(IReadOnlyCollection<string> dns, IReadOnlyCollection<IPAddress> ips)
+    /// <summary>A server certificate for these names and addresses, signed by the intermediate (tests: any names, to check the constraints).</summary>
+    public X509Certificate2 IssueServer(IReadOnlyCollection<string> dns, IReadOnlyCollection<IPAddress> ips, string? commonName = null)
     {
-        var authority = ca ?? throw new InvalidOperationException("No certificate authority yet");
-        using var caKey = keys.Open(CaKeyName) ?? throw new InvalidOperationException("The CA's key is gone");
+        var issuer = intermediate ?? throw new InvalidOperationException("No certificate authority yet");
+        using var issuerKey = keys.Open(IntermediateKeyName) ?? throw new InvalidOperationException("The intermediate's key is gone");
         var serverKey = keys.Open(ServerKeyName) ?? keys.Create(ServerKeyName);
-        var request = new CertificateRequest($"CN={dns.FirstOrDefault() ?? "tv.local"}", serverKey, HashAlgorithmName.SHA256);
+        var request = new CertificateRequest(commonName is null ? Name(dns.FirstOrDefault() ?? "tv.local") : new X500DistinguishedName(commonName),
+            serverKey, HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
         request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
-        request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(authority, true, false));
+        request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(issuer, true, false));
         var san = new SubjectAlternativeNameBuilder();
         foreach (var name in dns) san.AddDnsName(name);
         foreach (var ip in ips) san.AddIpAddress(ip);
         request.CertificateExtensions.Add(san.Build(true));
-        var serial = RandomNumberGenerator.GetBytes(16);
-        serial[0] &= 0x7F;
-        var notAfter = now() + ServerLife < authority.NotAfter ? now() + ServerLife : authority.NotAfter.AddDays(-1);
-        var cert = request.Create(authority.SubjectName, X509SignatureGenerator.CreateForECDsa(caKey), now().AddDays(-1), notAfter, serial);
+        var notAfter = now() + ServerLife < issuer.NotAfter ? now() + ServerLife : issuer.NotAfter.AddDays(-1);
+        var cert = request.Create(issuer.SubjectName, X509SignatureGenerator.CreateForECDsa(issuerKey), now().AddDays(-1), notAfter, Serial());
         return cert.CopyWithPrivateKey(serverKey);
     }
 
@@ -223,9 +320,10 @@ sealed class PhoneCertificates
     }
 
     /// <summary>
-    /// Name Constraints (RFC 5280 4.2.1.10), critical: permitted subtrees only, dNSName for the
-    /// .local names and iPAddress for the private IPv4 ranges. (Not a bare "tv": as a DNS
-    /// constraint it would also permit every public name under the .tv domain.)
+    /// Name Constraints (RFC 5280 4.2.1.10), critical, permitted subtrees only: dNSName for the
+    /// .local names (not a bare "tv": as a DNS constraint that would permit every public name
+    /// under .tv), iPAddress for the private IPv4 ranges, and placeholders that match nothing
+    /// real for e-mail (.invalid), URI (.invalid) and directory names (O=HTPC TV box).
     /// </summary>
     static X509Extension NameConstraints(IEnumerable<string> dns)
     {
@@ -237,8 +335,19 @@ sealed class PhoneCertificates
                 using (w.PushSequence())                                    // GeneralSubtree { base dNSName }
                     w.WriteCharacterString(UniversalTagNumber.IA5String, name, new Asn1Tag(TagClass.ContextSpecific, 2));
             foreach (var (network, mask) in PrivateRanges)
-                using (w.PushSequence())                                    // GeneralSubtree { base iPAddress }
+                using (w.PushSequence())                                    // { iPAddress }
                     w.WriteOctetString(network.GetAddressBytes().Concat(mask.GetAddressBytes()).ToArray(), new Asn1Tag(TagClass.ContextSpecific, 7));
+            using (w.PushSequence())                                        // { rfc822Name }
+                w.WriteCharacterString(UniversalTagNumber.IA5String, ".invalid", new Asn1Tag(TagClass.ContextSpecific, 1));
+            using (w.PushSequence())                                        // { uniformResourceIdentifier }
+                w.WriteCharacterString(UniversalTagNumber.IA5String, ".invalid", new Asn1Tag(TagClass.ContextSpecific, 6));
+            using (w.PushSequence())                                        // { directoryName [4] EXPLICIT Name }
+            using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 4, true)))
+            {
+                var b = new X500DistinguishedNameBuilder();
+                b.AddOrganizationName(Organization);
+                w.WriteEncodedValue(b.Build().RawData);
+            }
         }
         return new X509Extension("2.5.29.30", w.Encode(), true);
     }
@@ -249,13 +358,11 @@ sealed class PhoneCertificates
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var ext = authority.Extensions["2.5.29.30"];
         if (ext is null) return result;
-        var outer = new AsnReader(ext.RawData, AsnEncodingRules.DER).ReadSequence();
-        var permitted = outer.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0));
+        var permitted = new AsnReader(ext.RawData, AsnEncodingRules.DER).ReadSequence().ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0));
         while (permitted.HasData)
         {
             var subtree = permitted.ReadSequence();
-            var tag = subtree.PeekTag();
-            if (tag.HasSameClassAndValue(new Asn1Tag(TagClass.ContextSpecific, 2)))
+            if (subtree.PeekTag().HasSameClassAndValue(new Asn1Tag(TagClass.ContextSpecific, 2)))
                 result.Add(subtree.ReadCharacterString(UniversalTagNumber.IA5String, new Asn1Tag(TagClass.ContextSpecific, 2)));
         }
         return result;

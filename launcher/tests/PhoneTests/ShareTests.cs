@@ -14,6 +14,8 @@ namespace Htpc.Launcher;
 sealed class MemoryKeyStore : IKeyStore
 {
     readonly Dictionary<string, byte[]> keys = new();
+    public IReadOnlyCollection<string> Names => keys.Keys;
+    public string LastProvider => "memory";
     public ECDsa? Open(string name)
     {
         if (!keys.TryGetValue(name, out var pkcs8)) return null;
@@ -21,7 +23,7 @@ sealed class MemoryKeyStore : IKeyStore
         key.ImportPkcs8PrivateKey(pkcs8, out _);
         return key;
     }
-    public ECDsa Create(string name)
+    public ECDsa Create(string name, bool hardware = false)
     {
         var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         keys[name] = key.ExportPkcs8PrivateKey();
@@ -36,29 +38,37 @@ static partial class Program
 
     static string TempFolder() => Path.Combine(Path.GetTempPath(), $"htpc-certs-test-{Guid.NewGuid():N}");
 
-    static X509ChainStatusFlags Chain(X509Certificate2 authority, X509Certificate2 leaf)
+    // As a phone that installed only the root: the intermediate comes from the server.
+    static X509ChainStatusFlags Chain(X509Certificate2 root, X509Certificate2? intermediate, X509Certificate2 leaf)
     {
         using var chain = new X509Chain();
         chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        chain.ChainPolicy.CustomTrustStore.Add(authority);
+        chain.ChainPolicy.CustomTrustStore.Add(root);
+        if (intermediate is not null) chain.ChainPolicy.ExtraStore.Add(intermediate);
         chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
         chain.Build(leaf);
         return chain.ChainStatus.Aggregate(X509ChainStatusFlags.NoError, (all, s) => all | s.Status);
     }
 
-    static List<string> IpConstraints(X509Certificate2 authority)
+    // The permitted subtrees' tags (context-specific numbers) and, for iPAddress, network/mask.
+    static (List<int> Tags, List<string> Ips) Constraints(X509Certificate2 ca)
     {
-        var list = new List<string>();
-        var permitted = new AsnReader(authority.Extensions["2.5.29.30"]!.RawData, AsnEncodingRules.DER).ReadSequence()
+        var tags = new List<int>();
+        var ips = new List<string>();
+        var permitted = new AsnReader(ca.Extensions["2.5.29.30"]!.RawData, AsnEncodingRules.DER).ReadSequence()
             .ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0));
         while (permitted.HasData)
         {
             var subtree = permitted.ReadSequence();
-            if (!subtree.PeekTag().HasSameClassAndValue(new Asn1Tag(TagClass.ContextSpecific, 7))) continue;
-            var b = subtree.ReadOctetString(new Asn1Tag(TagClass.ContextSpecific, 7));
-            list.Add($"{new IPAddress(b[..4])}/{new IPAddress(b[4..])}");
+            var tag = subtree.PeekTag();
+            tags.Add(tag.TagValue);
+            if (tag.TagValue == 7)
+            {
+                var b = subtree.ReadOctetString(new Asn1Tag(TagClass.ContextSpecific, 7));
+                ips.Add($"{new IPAddress(b[..4])}/{new IPAddress(b[4..])}");
+            }
         }
-        return list;
+        return (tags, ips);
     }
 
     static void CertificateTests()
@@ -68,44 +78,64 @@ static partial class Program
         var store = new MemoryKeyStore();
         var certs = new PhoneCertificates(folder, store, () => now);
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home, IPAddress.Parse("8.8.8.8"), IPAddress.Parse("fe80::1") }), "first Ensure makes a server certificate");
-        var ca = certs.Authority!;
-        var bc = ca.Extensions.OfType<X509BasicConstraintsExtension>().Single();
-        var ku = ca.Extensions.OfType<X509KeyUsageExtension>().Single();
-        Check(bc.CertificateAuthority && bc.HasPathLengthConstraint && bc.PathLengthConstraint == 0 && bc.Critical, "CA: a CA, no CA below it");
-        Check(ku.KeyUsages.HasFlag(X509KeyUsageFlags.KeyCertSign) && ku.Critical, "CA: signs certificates");
-        Check(ca.NotAfter - ca.NotBefore > TimeSpan.FromDays(3600), "CA: 10 years");
-        var nc = ca.Extensions["2.5.29.30"];
-        Check(nc is { Critical: true }, "CA: Name Constraints, critical");
-        var names = PhoneCertificates.PermittedNames(ca);
-        Check(names.SetEquals(PhoneCertificates.LocalNames()) && names.Contains("tv.local") && !names.Contains("tv"), $"CA permits only .local names ({string.Join(", ", names)}), not a bare \"tv\" (all of .tv)");
-        Check(IpConstraints(ca).SequenceEqual(new[] { "10.0.0.0/255.0.0.0", "172.16.0.0/255.240.0.0", "192.168.0.0/255.255.0.0" }), "CA permits only private IPv4 ranges");
-        Check(ca.Extensions["2.5.29.30"] is not null && !ca.HasPrivateKey, "CA certificate handed out without its key");
+        var root = certs.Authority!;
+        var inter = certs.Intermediate!;
+
+        // The root: a CA that signed the intermediate once; its key was never stored.
+        Check(store.Names.OrderBy(n => n).SequenceEqual(new[] { PhoneCertificates.IntermediateKeyName, PhoneCertificates.ServerKeyName }.OrderBy(n => n)),
+            "keys kept: the intermediate's and the server's only (the root's is gone)");
+        Check(root.Extensions.OfType<X509BasicConstraintsExtension>().Single() is { CertificateAuthority: true, Critical: true } && !root.HasPrivateKey,
+            "root: a CA, handed out without a key");
+        Check(inter.Issuer == root.Subject && Chain(root, null, inter) == X509ChainStatusFlags.NoError, "intermediate: signed by the root");
+        Check(root.NotAfter - root.NotBefore > TimeSpan.FromDays(3600) && inter.NotAfter == root.NotAfter, "root and intermediate: 10 years, ending together");
+
+        // The intermediate carries the constraints.
+        var bc = inter.Extensions.OfType<X509BasicConstraintsExtension>().Single();
+        Check(bc is { CertificateAuthority: true, HasPathLengthConstraint: true, PathLengthConstraint: 0, Critical: true }, "intermediate: a CA, no CA below it");
+        var eku = inter.Extensions.OfType<X509EnhancedKeyUsageExtension>().Single().EnhancedKeyUsages.Cast<Oid>().Select(o => o.Value).ToList();
+        Check(eku.SequenceEqual(new[] { "1.3.6.1.5.5.7.3.1" }), "intermediate: server authentication only");
+        Check(inter.Extensions["2.5.29.30"] is { Critical: true }, "intermediate: Name Constraints, critical");
+        var names = PhoneCertificates.PermittedNames(inter);
+        Check(names.SetEquals(PhoneCertificates.LocalNames()) && !names.Contains("tv"), $"permits only .local names ({string.Join(", ", names)}), not a bare \"tv\" (all of .tv)");
+        var (tags, ipRanges) = Constraints(inter);
+        Check(ipRanges.SequenceEqual(new[] { "10.0.0.0/255.0.0.0", "172.16.0.0/255.240.0.0", "192.168.0.0/255.255.0.0" }), "permits only private IPv4 ranges");
+        Check(tags.Contains(1) && tags.Contains(6) && tags.Contains(4), "e-mail, URI and directory names constrained too (placeholders)");
 
         var server = certs.Current!;
         var san = server.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single();
         Check(san.EnumerateDnsNames().Contains("tv.local") && san.EnumerateIPAddresses().SequenceEqual(new[] { Home }), "server: tv.local and the private address, not the public or IPv6 one");
-        Check(server.HasPrivateKey && server.Extensions.OfType<X509EnhancedKeyUsageExtension>().Single().EnhancedKeyUsages.Cast<Oid>().Any(o => o.Value == "1.3.6.1.5.5.7.3.1"), "server: key, server authentication");
-        Check(!server.Extensions.OfType<X509BasicConstraintsExtension>().Single().CertificateAuthority, "server: not a CA");
-        Check(Math.Abs((server.NotAfter - now).TotalDays - 365) < 1, "server: 1 year");
-        Check(Chain(ca, server) == X509ChainStatusFlags.NoError, "server certificate checks out against the CA");
+        Check(server.Issuer == inter.Subject && server.HasPrivateKey && Math.Abs((server.NotAfter - now).TotalDays - 365) < 1, "server: from the intermediate, 1 year, with its key");
+        Check(Chain(root, inter, server) == X509ChainStatusFlags.NoError, $"server certificate checks out: root > intermediate > server ({Chain(root, inter, server)}; {server.Subject})");
+        Check(certs.Context is not null, "handshake context (server certificate with the intermediate) ready");
 
-        // What a stolen CA key could not do: names and addresses outside the constraints fail.
-        foreach (var (dns, ip, what) in new[] { ("twitch.tv", (IPAddress?)null, "twitch.tv"), ("evil.com", null, "evil.com"), ("tv.local", IPAddress.Parse("8.8.8.8"), "a public address") })
+        // What a stolen intermediate key could not do.
+        foreach (var (dns, ip, cn, what) in new[]
         {
-            var bad = certs.IssueServer(new[] { dns }, ip is null ? Array.Empty<IPAddress>() : new[] { ip });
-            Check(Chain(ca, bad).HasFlag(X509ChainStatusFlags.HasNotPermittedNameConstraint), $"a certificate for {what} from this CA fails (name constraint)");
+            ("twitch.tv", (IPAddress?)null, (string?)null, "twitch.tv"), ("evil.com", null, null, "evil.com"),
+            ("tv.local", IPAddress.Parse("8.8.8.8"), null, "a public address"), ("tv.local", null, "CN=tv.local", "a subject outside O=HTPC TV box"),
+        })
+        {
+            var bad = certs.IssueServer(new[] { dns }, ip is null ? Array.Empty<IPAddress>() : new[] { ip }, cn);
+            Check(Chain(root, inter, bad).HasFlag(X509ChainStatusFlags.HasNotPermittedNameConstraint), $"a certificate for {what} from the intermediate fails (name constraint)");
         }
+        var fp = certs.Fingerprint!;
+        Check(fp.Length == 95 && fp.Split(':').Length == 32 && fp == Convert.ToHexString(SHA256.HashData(root.RawData)).Chunk(2).Select(c => new string(c)).Aggregate((a, b) => a + ":" + b),
+            "fingerprint: the root's SHA-256, AB:CD:... as Android shows it");
 
         certs = new PhoneCertificates(folder, store, () => now);
-        Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == ca.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
-            "after a restart: the same CA and certificate, none made");
-        Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }), "same names and address again: no new certificate");
+        Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
+            "after a restart: the same root, intermediate and certificate, none made");
         var moved = IPAddress.Parse("192.168.1.33");
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "the box got a new address: new certificate");
         Check(certs.Current!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateIPAddresses().SequenceEqual(new[] { moved })
-            && Chain(certs.Authority!, certs.Current!) == X509ChainStatusFlags.NoError && certs.Authority!.Thumbprint == ca.Thumbprint, "it names the new address, same CA (phones keep trusting it)");
+            && Chain(root, certs.Intermediate!, certs.Current!) == X509ChainStatusFlags.NoError && certs.Authority!.Thumbprint == root.Thumbprint,
+            "it names the new address, signed by the same intermediate (phones keep trusting the root)");
         now = now.AddDays(340);
-        Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a month before it ends: renewed");
+        Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a month before it ends: renewed by the intermediate alone");
+        now = now.AddDays(3650);
+        certs = new PhoneCertificates(folder, store, () => now);
+        certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved });
+        Check(certs.Authority!.Thumbprint != root.Thumbprint, "after 10 years: a new root (phones install it again)");
         Directory.Delete(folder, true);
     }
 
@@ -126,18 +156,21 @@ static partial class Program
             var httpPort = FreePort();
             var httpsPort = FreePort();
             Check(await server.StartAsync(new[] { httpPort }, httpsPort) == httpPort && server.SecurePort == httpsPort, "HTTP and HTTPS both start");
+            Console.WriteLine($"    info: the intermediate's key is in the {store.LastProvider} key store on this box");
 
-            using (var caKey = (ECDsaCng)store.Open(PhoneCertificates.CaKeyName)!)
+            using (var interKey = (ECDsaCng)store.Open(PhoneCertificates.IntermediateKeyName)!)
             {
-                Check(caKey.Key.ExportPolicy == CngExportPolicies.None, "CA key: non-exportable");
+                Check(interKey.Key.ExportPolicy == CngExportPolicies.None, "intermediate key: non-exportable");
                 var exported = true;
-                try { caKey.ExportParameters(true); } catch (CryptographicException) { exported = false; }
-                Check(!exported, "CA key: exporting it fails");
+                try { interKey.ExportParameters(true); } catch (CryptographicException) { exported = false; }
+                Check(!exported, "intermediate key: exporting it fails");
             }
 
             var ca = certs.Authority!;
+            var inter = certs.Intermediate!;
             SslPolicyErrors seen = SslPolicyErrors.None;
             X509ChainStatusFlags chainStatus = X509ChainStatusFlags.NoError;
+            var intermediateSent = false;
             var handler = new SocketsHttpHandler
             {
                 UseCookies = false,
@@ -149,22 +182,26 @@ static partial class Program
                 },
                 SslOptions = new SslClientAuthenticationOptions
                 {
-                    RemoteCertificateValidationCallback = (_, cert, _, errors) =>
+                    RemoteCertificateValidationCallback = (_, cert, chain, errors) =>
                     {
                         seen = errors;
-                        chainStatus = Chain(ca, X509CertificateLoader.LoadCertificate(cert!.GetRawCertData()));
-                        // As a phone that installed the CA: the name must match and the chain must end at our CA.
+                        // What the server sent with its certificate ends up in the chain's extra store.
+                        intermediateSent = chain!.ChainPolicy.ExtraStore.Cast<X509Certificate2>().Any(c => c.Thumbprint == inter.Thumbprint);
+                        var sent = chain.ChainPolicy.ExtraStore.Cast<X509Certificate2>().FirstOrDefault(c => c.Thumbprint == inter.Thumbprint);
+                        chainStatus = Chain(ca, sent, X509CertificateLoader.LoadCertificate(cert!.GetRawCertData()));
+                        // As a phone that installed the root: the name must match and the chain must end there.
                         return (errors & SslPolicyErrors.RemoteCertificateNameMismatch) == 0 && chainStatus == X509ChainStatusFlags.NoError;
                     },
                 },
             };
             using var https = new HttpClient(handler) { BaseAddress = new Uri("https://tv.local") };
             var page = await https.GetAsync("/");
-            Check(page.StatusCode == HttpStatusCode.OK && (seen & SslPolicyErrors.RemoteCertificateNameMismatch) == 0 && chainStatus == X509ChainStatusFlags.NoError,
-                "HTTPS at tv.local: the page, the certificate names tv.local and checks out against the CA");
+            Check(page.StatusCode == HttpStatusCode.OK && (seen & SslPolicyErrors.RemoteCertificateNameMismatch) == 0, "HTTPS at tv.local: the page, the certificate names tv.local");
+            Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, "the handshake sends the intermediate; the chain ends at the root");
             var crt = await https.GetByteArrayAsync("/ca.crt");
-            Check(crt.SequenceEqual(ca.RawData), "/ca.crt is the CA certificate (public)");
-            Check(!Encoding.ASCII.GetString(crt).Contains("PRIVATE"), "no private key in it");
+            Check(crt.SequenceEqual(ca.RawData), "/ca.crt is the root (public)");
+            Check(page.Headers.TryGetValues("Content-Security-Policy", out var csp) && csp.First().Contains("wss://tv.local ") && !csp.First().Contains(" ws: ") && !csp.First().Contains(" wss: "),
+                "CSP: WebSockets only to the page's own name");
 
             async Task<int> Wss(string origin)
             {
@@ -180,9 +217,9 @@ static partial class Program
         }
         finally
         {
-            store.Delete(PhoneCertificates.CaKeyName);
+            store.Delete(PhoneCertificates.IntermediateKeyName);
             store.Delete(PhoneCertificates.ServerKeyName);
-            Check(store.Open(PhoneCertificates.CaKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null, "test keys deleted from the key store");
+            Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null, "test keys deleted from the key store");
             if (Directory.Exists(folder)) Directory.Delete(folder, true);
             File.Delete(file);
         }
@@ -197,6 +234,8 @@ static partial class Program
         Check(PhoneLinks.FindLink("no link here") is null && PhoneLinks.FindLink(null) is null && PhoneLinks.FindLink("file:///C:/x") is null, "no link: nothing");
         Check(P("{\"t\":\"open\",\"url\":\"https://a.b\",\"share\":true}") is OpenCommand { Shared: true } && P("{\"t\":\"open\",\"url\":\"https://a.b\"}") is OpenCommand { Shared: false }, "open: shared flag");
         Check(P("{\"t\":\"shortcutKey\"}") is ShortcutKeyCommand, "shortcutKey command");
+        var manifest = File.ReadAllText(Path.Combine(FindUp(Path.Combine("launcher", "phone"))!, "manifest.webmanifest"));
+        Check(manifest.Contains("\"method\": \"POST\"") && manifest.Contains("application/x-www-form-urlencoded"), "manifest: the Share target posts");
 
         var root = FindUp(Path.Combine("launcher", "phone"))!;
         var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
@@ -215,34 +254,57 @@ static partial class Program
         });
         var cookie = paired.Headers.GetValues("Set-Cookie").First().Split(';')[0];
 
-        // Android's Share target: a ticket only when the phone itself opened /share.
-        async Task<string?> ShareTicket(string? site)
+        // Android's Share target: a ticket only for a POST the phone itself made, carrying that link.
+        async Task<(string? Ticket, bool Deleted)> Share(HttpMethod method, string? site, string link = "https://vimeo.com/1")
         {
-            var m = new HttpRequestMessage(HttpMethod.Get, "/share?url=https%3A%2F%2Fvimeo.com%2F1");
+            var m = new HttpRequestMessage(method, method == HttpMethod.Get ? "/share?url=" + Uri.EscapeDataString(link) : "/share");
+            if (method == HttpMethod.Post) m.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["title"] = "A video", ["text"] = "Look: " + link });
             if (site is not null) m.Headers.Add("Sec-Fetch-Site", site);
             var r = await http.SendAsync(m);
-            Check(r.StatusCode == HttpStatusCode.OK && (await r.Content.ReadAsStringAsync()).Contains("phone.js"), $"/share is the page ({site ?? "no Sec-Fetch-Site"})");
-            return r.Headers.TryGetValues("Set-Cookie", out var c) ? c.FirstOrDefault(v => v.StartsWith("htpc_share="))?.Split(';')[0] : null;
+            var cookies = r.Headers.TryGetValues("Set-Cookie", out var c) ? c.Where(v => v.StartsWith("htpc_share=")).ToList() : new List<string>();
+            var ok = r.StatusCode == HttpStatusCode.OK && (await r.Content.ReadAsStringAsync()).Contains("phone.js");
+            if (!ok) Check(false, $"/share {method} is the page");
+            var ticket = cookies.FirstOrDefault(v => !v.Contains("expires=Thu, 01 Jan 1970"))?.Split(';')[0];
+            return (ticket is "htpc_share=" ? null : ticket, cookies.Any(v => v.Contains("expires=Thu, 01 Jan 1970")));
         }
-        var ticket = await ShareTicket("none");
-        Check(ticket is not null && (await ShareTicket("cross-site")) is null && (await ShareTicket("same-origin")) is null && (await ShareTicket(null)) is null,
-            "ticket only for Sec-Fetch-Site: none (the Share sheet), not from a page");
-        async Task<bool?> HelloShare(string cookies)
+        var (ticket, _) = await Share(HttpMethod.Post, "none");
+        Check(ticket is not null, "POST /share from the phone itself (Sec-Fetch-Site: none): a ticket");
+        var getNone = await Share(HttpMethod.Get, "none");
+        var postCross = await Share(HttpMethod.Post, "cross-site");
+        var postSame = await Share(HttpMethod.Post, "same-origin");
+        Check(getNone.Ticket is null && getNone.Deleted, "GET /share (a link in a message, a QR code): no ticket, the old cookie deleted; the page asks");
+        Check(postCross.Ticket is null && postCross.Deleted && postSame.Ticket is null && postSame.Deleted, "POST from a web page: no ticket, cookie deleted");
+        Check((await Share(HttpMethod.Post, null)).Ticket is null, "POST without Sec-Fetch-Site: no ticket");
+        async Task<string?> HelloShare(string cookies)
         {
             var (ws, _) = await Ws(port, origin, cookies);
-            if (ws is null) return null;
+            if (ws is null) return "(refused)";
             var hello = await Receive(ws);
             ws.Abort();
-            return hello?.GetProperty("share").GetBoolean();
+            return hello?.GetProperty("share").ValueKind == JsonValueKind.String ? hello?.GetProperty("share").GetString() : null;
         }
-        Check(await HelloShare($"{cookie}; {ticket}") == true, "straight from the Share sheet: hello says play at once");
-        Check(await HelloShare($"{cookie}; {ticket}") == false, "the ticket works once");
-        var late = await ShareTicket("none");
+        Check(await HelloShare($"{cookie}; {ticket}") == "https://vimeo.com/1", "the ticket hands back exactly the shared link: the page plays it at once");
+        Check(await HelloShare($"{cookie}; {ticket}") is null, "the ticket works once");
+        var (other, _) = await Share(HttpMethod.Post, "none", "https://vimeo.com/2");
+        Check(await HelloShare($"{cookie}; {other}") == "https://vimeo.com/2", "each ticket is bound to its own link");
+        var (late, _) = await Share(HttpMethod.Post, "none");
         now = now.AddSeconds(61);
-        Check(await HelloShare($"{cookie}; {late}") == false, "the ticket lasts 60 s");
+        Check(await HelloShare($"{cookie}; {late}") is null, "the ticket lasts 60 s");
+        for (var i = 0; i < 20; i++) await Share(HttpMethod.Post, "none", $"https://vimeo.com/{i}");
+        Check(server.ShareTicketCount <= 16, $"at most 16 tickets waiting ({server.ShareTicketCount})");
         Check((await Raw(port, $"GET /send HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 200"), "/send is the page");
+        var home = await http.GetAsync("/");
+        Check(home.Headers.GetValues("Content-Security-Policy").First().Contains($"ws://127.0.0.1:{port} "), "CSP: the WebSocket to the page's own address");
 
-        // The Shortcut key: asked for by a paired phone, shown once.
+        // Shortcut keys: only for a phone that paired.
+        pairing.RequireCode = false;
+        var (stranger, _) = await Ws(port, origin, null);
+        await Receive(stranger!);
+        await SendText(stranger!, "{\"t\":\"shortcutKey\"}");
+        var refused = await Receive(stranger!);
+        Check(refused?.GetProperty("t").GetString() == "toast" && !pairing.Phones.Any(p => p.Shortcut), "codes off, not paired: no Shortcut key");
+        stranger!.Abort();
+        pairing.RequireCode = true;
         var (phone, _) = await Ws(port, origin, cookie);
         await Receive(phone!);
         await SendText(phone!, "{\"t\":\"shortcutKey\"}");
@@ -254,34 +316,50 @@ static partial class Program
         Check(pairing.Find(token) is null && pairing.FindShortcut(cookie.Split('=', 2)[1]) is null, "a Shortcut key is no remote cookie, and the other way round");
         phone!.Abort();
 
-        async Task<HttpResponseMessage> Open(string? auth, string body, string? host2 = null)
+        // /api/open from 127.0.0.1, and from 127.0.0.2 (another device).
+        HttpClient From(string address) => new(new SocketsHttpHandler
+        {
+            UseCookies = false,
+            ConnectCallback = async (_, ct) =>
+            {
+                var s = new Socket(SocketType.Stream, ProtocolType.Tcp);
+                s.Bind(new IPEndPoint(IPAddress.Parse(address), 0));
+                await s.ConnectAsync(IPAddress.Loopback, port, ct);
+                return new NetworkStream(s, true);
+            },
+        }) { BaseAddress = new Uri(origin) };
+        using var other2 = From("127.0.0.2");
+        async Task<HttpStatusCode> Open(HttpClient client, string? auth, string body, string? host2 = null)
         {
             var m = new HttpRequestMessage(HttpMethod.Post, "/api/open") { Content = new StringContent(body, Encoding.UTF8, "application/json") };
             if (auth is not null) m.Headers.TryAddWithoutValidation("Authorization", auth);
             if (host2 is not null) m.Headers.Host = host2;
-            return await http.SendAsync(m);
+            return (await client.SendAsync(m)).StatusCode;
         }
-        Check((await Open(null, "{\"url\":\"https://vimeo.com/1\"}")).StatusCode == HttpStatusCode.Unauthorized, "/api/open without a key: 401");
-        Check((await Open("Bearer " + new string('x', 43), "{\"url\":\"https://vimeo.com/1\"}")).StatusCode == HttpStatusCode.Unauthorized, "wrong key: 401");
-        Check((await Open("Bearer " + cookie.Split('=', 2)[1], "{\"url\":\"https://vimeo.com/1\"}")).StatusCode == HttpStatusCode.Unauthorized, "a remote's cookie as the key: 401");
-        var ok = await Open("Bearer " + token, "{\"url\":\"Look: https://vimeo.com/2\"}");
-        Check(ok.StatusCode == HttpStatusCode.OK && await WaitFor(host, "shared https://vimeo.com/2"), "right key, no Origin: the link opens");
-        Check((await Open("Bearer " + token, "{\"url\":\"nothing\"}")).StatusCode == HttpStatusCode.BadRequest && (await Open("Bearer " + token, "not json")).StatusCode == HttpStatusCode.BadRequest, "no link: 400");
-        Check((await Open("Bearer " + token, "{\"url\":\"" + new string('a', 5000) + "\"}")).StatusCode is HttpStatusCode.RequestEntityTooLarge or HttpStatusCode.BadRequest, "over 4 KB: refused");
-        Check((await Open("Bearer " + token, "{\"url\":\"https://vimeo.com/3\"}", "evil.com")).StatusCode == HttpStatusCode.MisdirectedRequest, "foreign Host: 421");
+        Check(await Open(http, null, "{\"url\":\"https://vimeo.com/1\"}") == HttpStatusCode.Unauthorized, "/api/open without a key: 401");
+        Check(await Open(http, "Bearer " + new string('x', 43), "{\"url\":\"https://vimeo.com/1\"}") == HttpStatusCode.Unauthorized, "wrong key: 401");
+        Check(await Open(http, "Bearer " + cookie.Split('=', 2)[1], "{\"url\":\"https://vimeo.com/1\"}") == HttpStatusCode.Unauthorized, "a remote's cookie as the key: 401");
+        Check(await Open(http, "Bearer " + token, "{\"url\":\"Look: https://vimeo.com/2\"}") == HttpStatusCode.OK && await WaitFor(host, "shared https://vimeo.com/2"), "right key, no Origin: the link opens");
+        Check(await Open(http, "Bearer " + token, "{\"url\":\"nothing\"}") == HttpStatusCode.BadRequest && await Open(http, "Bearer " + token, "not json") == HttpStatusCode.BadRequest, "no link: 400");
+        Check(await Open(http, "Bearer " + token, "{\"url\":\"" + new string('a', 5000) + "\"}") is HttpStatusCode.RequestEntityTooLarge or HttpStatusCode.BadRequest, "over 4 KB: refused");
+        Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/3\"}", "evil.com") == HttpStatusCode.MisdirectedRequest, "foreign Host: 421");
         Check((await http.GetAsync("/api/open")).StatusCode == HttpStatusCode.MethodNotAllowed, "GET: 405");
 
         now = now.AddMinutes(2);
+        for (var i = 0; i < 30; i++) await Open(other2, null, "{}");
         var codes = new List<HttpStatusCode>();
-        for (var i = 0; i < 21; i++) codes.Add((await Open("Bearer " + token, "{\"url\":\"https://vimeo.com/4\"}")).StatusCode);
-        Check(codes.Take(20).All(c => c == HttpStatusCode.OK) && codes[20] == HttpStatusCode.TooManyRequests, "20 links a minute, then 429");
+        for (var i = 0; i < 21; i++) codes.Add(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/4\"}"));
+        Check(codes.Take(20).All(c => c == HttpStatusCode.OK) && codes[20] == HttpStatusCode.TooManyRequests, "20 links a minute per key (keyless requests elsewhere do not count), then 429");
+        var second = pairing.NewShortcut("iPhone")!;
+        Check(await Open(http, "Bearer " + second, "{\"url\":\"https://vimeo.com/5\"}") == HttpStatusCode.OK, "another key is not held up by the first one's limit");
         now = now.AddMinutes(2);
-        for (var i = 0; i < 10; i++) await Open("Bearer wrong", "{}");
-        Check((await Open("Bearer " + token, "{\"url\":\"https://vimeo.com/5\"}")).StatusCode == HttpStatusCode.TooManyRequests, "10 wrong keys in a minute: closed, even for the right key");
+        for (var i = 0; i < 10; i++) await Open(other2, "Bearer wrong", "{}");
+        Check(await Open(other2, "Bearer " + token, "{\"url\":\"https://vimeo.com/6\"}") == HttpStatusCode.TooManyRequests, "10 wrong keys from one device: that device is shut out for a minute");
+        Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/7\"}") == HttpStatusCode.OK, "other devices are not");
         now = now.AddMinutes(2);
-        Check((await Open("Bearer " + token, "{\"url\":\"https://vimeo.com/6\"}")).StatusCode == HttpStatusCode.OK, "open again a minute later");
+        Check(await Open(other2, "Bearer " + token, "{\"url\":\"https://vimeo.com/8\"}") == HttpStatusCode.OK, "a minute later it is let in again");
         pairing.Forget(pairing.FindShortcut(token)!.Id);
-        Check((await Open("Bearer " + token, "{\"url\":\"https://vimeo.com/7\"}")).StatusCode == HttpStatusCode.Unauthorized, "removed in Settings: 401");
+        Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/9\"}") == HttpStatusCode.Unauthorized, "removed in Settings: 401");
         for (var i = 0; i < PhonePairing.MaxShortcuts; i++) pairing.NewShortcut("iPhone");
         Check(pairing.NewShortcut("iPhone") is null, "at most 10 Shortcut keys");
 

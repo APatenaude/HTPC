@@ -52,9 +52,10 @@ function renderPhoneSection() {
         `<span class="phone-address">${esc(p.address || 'tv.local')}</span><span class="phone-how">${how}</span></div></div>` +
       `<div class="phone-card"><div class="phone-qr${sendOk ? '' : ' wait'}">${sendOk ? sendQr.svg : icon('share', 72, 1.5)}</div>` +
         '<div class="phone-card-text"><span class="phone-card-title">2 · Share to TV</span>' +
-        '<span class="phone-how">iPhone: shows how to make the “Send to TV” Shortcut.<br>' +
-        (p.secure ? 'Android: installs this box’s certificate once, so the remote installs as an app and shows up in Share.'
-          : 'Android needs HTTPS, which isn’t running (the launcher log says why).') + '</span></div></div>' +
+        '<span class="phone-how">iPhone: the “Send to TV” Shortcut. Android: this box’s certificate' +
+        (p.secure && p.fingerprint ? '; its SHA-256 fingerprint on the phone must read:</span>' +
+            `<span class="phone-fingerprint">${esc(fingerprintLines(p.fingerprint))}</span>`
+          : ', once HTTPS runs (it isn’t: the launcher log says why).</span>') + '</div></div>' +
     '</div>';
   const problem = !p.listening ? ['The remote isn’t running', 'Another program has its port. The launcher log says which ports it tried.'] : PHONE_REACH[p.reach];
   if (problem) {
@@ -63,7 +64,8 @@ function renderPhoneSection() {
   }
   body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'The first time a phone connects, a 4-digit code shows on the TV', toggle(p.requireCode));
   body += '<span class="ssection">Phones</span>';
-  const shown = p.phones.slice(0, problem ? 1 : 2); // what fits on the screen
+  const shown = p.phones.filter((ph) => !ph.shortcut);
+  const shortcuts = p.phones.filter((ph) => ph.shortcut);
   if (!shown.length && !p.unpaired) {
     body += '<div class="srow"><div class="text"><span class="label">No phones yet</span>' +
       '<span class="caption">Scan the code above with your phone.</span></div></div>';
@@ -71,13 +73,34 @@ function renderPhoneSection() {
   for (const ph of shown) {
     body += `<div class="srow phone-row" data-nav data-id="phone-${esc(ph.id)}" data-act="phone-forget" data-arg="${esc(ph.id)}">` +
       `${icon('phone', 34)}<div class="text"><span class="label">${esc(ph.name)}</span>` +
-      `<span class="caption${ph.connected ? ' good' : ''}">${ph.shortcut ? 'Share-sheet Shortcut · ' : ''}${ph.connected ? 'Connected now' : 'Last used ' + esc(phoneDate(ph.lastSeen))}</span></div>` +
+      `<span class="caption${ph.connected ? ' good' : ''}">${ph.connected ? 'Connected now' : 'Last used ' + esc(phoneDate(ph.lastSeen))}</span></div>` +
       '<span class="phone-forget">Forget</span></div>';
   }
-  if (p.phones.length > shown.length) body += `<p class="phone-more">And ${p.phones.length - shown.length} more</p>`;
   if (p.unpaired) body += `<p class="phone-more">${p.unpaired} connected without a code</p>`;
+  if (shortcuts.length) {
+    body += '<span class="ssection">Share-sheet Shortcut keys</span>';
+    for (const k of shortcuts) {
+      body += `<div class="srow phone-row" data-nav data-id="phone-${esc(k.id)}" data-act="phone-forget" data-arg="${esc(k.id)}">` +
+        `${icon('share', 34)}<div class="text"><span class="label">${esc(k.name)}</span>` +
+        `<span class="caption">Last used ${esc(phoneDate(k.lastSeen))}</span></div><span class="phone-forget">Forget</span></div>`;
+    }
+  }
   return body;
 }
+
+// "AB:CD:..." as 4 lines of 8 bytes (Android shows it the same way, colons and all).
+function fingerprintLines(fp) {
+  const bytes = String(fp).split(':');
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += 8) lines.push(bytes.slice(i, i + 8).join(':'));
+  return lines.join('\n');
+}
+
+// The section can be taller than the screen (every phone and key is listed): keep the focus in view.
+new MutationObserver(() => {
+  const el = document.querySelector('#settings .spane .srow.focused');
+  if (el && state.section === 'phone') el.scrollIntoView({ block: 'nearest' });
+}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
 
 // Settings rows with keys "phone.*" (app.js's changeSetting hands them here).
 function phoneSetting(key) {
@@ -114,6 +137,7 @@ settingsSection('phone', {
   demo() {
     EXT.host['phone.settings']({ type: 'phone.settings', phone: {
       listening: true, address: 'tv.local', ip: '192.168.1.20', requireCode: true, reach: 'ok', unpaired: 0, secure: true,
+      fingerprint: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8',
       qr: 'http://192.168.1.20/?k=Qm9vc3RlZC1kZW1vLWtleQ',
       sendQr: 'http://192.168.1.20/send?k=U2VuZC1kZW1vLWtleS1vbmx5',
       phones: [

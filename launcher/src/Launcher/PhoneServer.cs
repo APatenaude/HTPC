@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Security;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -118,8 +120,8 @@ sealed class PhoneClient
 /// Every request must name the box in its Host header (tv.local, its name or one of its
 /// addresses); the WebSocket and the pairing calls must also come from our own page (Origin).
 /// One exception: /api/open, for the iPhone's Share-sheet Shortcut, which sends no Origin; it
-/// needs a Shortcut key instead (Settings › Phone remote can remove it), 4 KB at most, and
-/// takes 20 links a minute; 10 wrong keys in a minute close it for a minute.
+/// needs a Shortcut key instead (Settings › Phone remote can remove it), 4 KB at most, 20 links
+/// a minute per key; a device sending 10 wrong keys in a minute is shut out for a minute.
 /// Messages are at most 4 KB; a phone that sends nothing for 15 s (it sends a heartbeat every
 /// 5 s) is dropped; at most 8 phones at once.
 /// </summary>
@@ -147,9 +149,15 @@ sealed class PhoneServer
         [".png"] = "image/png", [".svg"] = "image/svg+xml", [".woff2"] = "font/woff2",
     };
 
-    // Our page loads only its own files; it may probe tv.local from the IP address it was opened on.
-    const string Policy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-        "font-src 'self'; connect-src 'self' ws: wss: http://tv.local:* https://tv.local:*; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+    // Our page loads only its own files; its WebSocket goes to the name it came from (the Host
+    // header, already checked against the allowlist); from the box's IP it may probe tv.local.
+    static string Policy(HttpContext ctx)
+    {
+        var host = ctx.Request.Host.Value;
+        return "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+            $"connect-src 'self' ws://{host} wss://{host} http://tv.local:* https://tv.local:*; manifest-src 'self'; " +
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+    }
 
     readonly IPhoneHost host;
     readonly string root;
@@ -158,9 +166,7 @@ sealed class PhoneServer
     readonly List<PhoneClient> clients = new();
     readonly PhoneCertificates? certificates;
     readonly Func<DateTime> now;
-    readonly Dictionary<string, DateTime> shareTickets = new();   // hashed, until when
-    readonly Queue<DateTime> opens = new(), wrongKeys = new();   // /api/open, the last minute
-    DateTime openClosedUntil;
+    readonly Dictionary<string, (string LinkHash, string Link, DateTime Until)> shareTickets = new();   // by the ticket's hash
     System.Threading.Timer? renewTimer;
     WebApplication? app, secureApp;
     byte[] stateJson = "{}"u8.ToArray();
@@ -175,6 +181,9 @@ sealed class PhoneServer
 
     /// <summary>The CA's certificate for phones to install (null without HTTPS).</summary>
     public X509Certificate2? Authority => certificates?.Authority;
+
+    /// <summary>The root's SHA-256 fingerprint ("AB:CD:..."), for the TV to show (null without HTTPS).</summary>
+    public string? Fingerprint => SecurePort != 0 ? certificates?.Fingerprint : null;
 
     /// <param name="root">The web app's folder (launcher\phone next to the exe).</param>
     /// <param name="bindTo">Tests: listen on this address only. Null: every address.</param>
@@ -302,7 +311,14 @@ sealed class PhoneServer
             k.Limits.MaxConcurrentConnections = 64;
             k.Limits.MaxConcurrentUpgradedConnections = MaxPhones + 2;
             k.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(10);
-            void Https(ListenOptions o) { if (secure) o.UseHttps(h => h.ServerCertificateSelector = (_, _) => certificates!.Current); }
+            // The server certificate and the intermediate (phones hold only the root), taken at each handshake: a new one works at once.
+            void Https(ListenOptions o)
+            {
+                if (secure) o.UseHttps(new TlsHandshakeCallbackOptions
+                {
+                    OnConnection = _ => ValueTask.FromResult(new SslServerAuthenticationOptions { ServerCertificateContext = certificates!.Context }),
+                });
+            }
             if (bindTo is null) k.ListenAnyIP(port, Https); else k.Listen(bindTo, port, Https);
         });
         builder.Services.AddLogging();
@@ -340,6 +356,7 @@ sealed class PhoneServer
                 case "/art": await Art(ctx); break;
                 case "/ca.crt": await ServeAuthority(ctx); break;
                 case "/api/open": await OpenShared(ctx); break;
+                case "/share": await Share(ctx); break;
                 default: await StaticFile(ctx); break;
             }
         }
@@ -362,15 +379,14 @@ sealed class PhoneServer
         return ctx.Response.WriteAsync(JsonSerializer.Serialize(body, Json));
     }
 
-    async Task StaticFile(HttpContext ctx)
+    /// <param name="page">The page for another path (/share, which a POST may open too).</param>
+    async Task StaticFile(HttpContext ctx, string? page = null)
     {
         var request = ctx.Request;
-        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)) { ctx.Response.StatusCode = 405; return; }
-        var path = request.Path.Value ?? "/";
-        // The page answers at / and at /send (how to send links from other apps) and /share
-        // (Android's Share target); a share straight from the Share sheet gets a ticket.
-        if (path is "/share") IssueShareTicket(ctx);
-        if (path is "/" or "/send" or "/share") path = "/index.html";
+        if (page is null && !HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)) { ctx.Response.StatusCode = 405; return; }
+        var path = page ?? request.Path.Value ?? "/";
+        // The page answers at / and at /send (how to send links from other apps); /share: Share().
+        if (path is "/" or "/send") path = "/index.html";
         // Only plain paths inside the folder: no "..", backslashes, drive letters or hidden files.
         if (path.Length > 100 || path.Contains("..") || path.Contains('\\') || path.Contains(':') || path.Contains("//") || path.Contains("/."))
         {
@@ -388,9 +404,9 @@ sealed class PhoneServer
         response.ContentType = type;
         // The page and its code are always checked for changes (a new launcher version); fonts and icons may be kept a day.
         response.Headers.CacheControl = type is "font/woff2" or "image/png" ? "public, max-age=86400" : "no-cache";
-        if (type.StartsWith("text/html")) response.Headers.ContentSecurityPolicy = Policy;
+        if (type.StartsWith("text/html")) response.Headers.ContentSecurityPolicy = Policy(ctx);
         response.ContentLength = bytes.Length;
-        if (HttpMethods.IsGet(request.Method)) await response.Body.WriteAsync(bytes);
+        if (!HttpMethods.IsHead(request.Method)) await response.Body.WriteAsync(bytes);
     }
 
     async Task Art(HttpContext ctx)
@@ -483,18 +499,42 @@ sealed class PhoneServer
     }
 
     /// <summary>
-    /// /share opened by the phone itself (Share sheet, typed, bookmark: Sec-Fetch-Site "none"),
-    /// not by a link on some web page: a one-time ticket (60 s, in a cookie) lets the page play the
-    /// shared link without asking. Opened from anywhere else, the page asks first.
+    /// Android's Share target: the installed app's Share sheet POSTs the shared text and link to
+    /// /share (links in messages, mail or QR codes can only GET it). Posted by the phone itself
+    /// (Sec-Fetch-Site "none"), with a link in it, the POST gets a one-time ticket (60 s, in a
+    /// cookie) that carries that link: the page's WebSocket hello hands it back and the page plays
+    /// it at once. Anything else (a GET, a post from some web page) gets no ticket, any old ticket
+    /// cookie is deleted, and the page asks before playing a link from its address.
     /// </summary>
-    void IssueShareTicket(HttpContext ctx)
+    async Task Share(HttpContext ctx)
     {
-        if (ctx.Request.Headers["Sec-Fetch-Site"] != "none") return;
+        var fromPhone = ctx.Request.Headers["Sec-Fetch-Site"] == "none";
+        if (HttpMethods.IsPost(ctx.Request.Method) && fromPhone && ctx.Request.HasFormContentType)
+        {
+            try
+            {
+                var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
+                var link = new[] { "url", "text", "title" }.Select(k => PhoneLinks.FindLink(form[k].ToString())).FirstOrDefault(l => l is not null);
+                if (link is not null) IssueShareTicket(ctx, link);
+            }
+            catch (Exception e) when (e is InvalidDataException or IOException or Microsoft.AspNetCore.Http.BadHttpRequestException) { } // over 4 KB, malformed
+        }
+        else ctx.Response.Cookies.Delete(ShareCookie, new CookieOptions { Path = "/", SameSite = SameSiteMode.Strict, HttpOnly = true });
+        await StaticFile(ctx, "/index.html");
+    }
+
+    const int MaxShareTickets = 16;
+
+    void IssueShareTicket(HttpContext ctx, string link)
+    {
         var ticket = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         lock (shareTickets)
         {
-            foreach (var old in shareTickets.Where(s => s.Value <= now()).Select(s => s.Key).ToList()) shareTickets.Remove(old);
-            shareTickets[Hash(ticket)] = now() + ShareTicketLife;
+            foreach (var old in shareTickets.Where(s => s.Value.Until <= now()).Select(s => s.Key).ToList()) shareTickets.Remove(old);
+            // At most 16 waiting: the oldest go first.
+            foreach (var old in shareTickets.OrderBy(s => s.Value.Until).Take(Math.Max(0, shareTickets.Count - MaxShareTickets + 1)).Select(s => s.Key).ToList())
+                shareTickets.Remove(old);
+            shareTickets[Hash(ticket)] = (Hash(link), link, now() + ShareTicketLife);
         }
         ctx.Response.Cookies.Append(ShareCookie, ticket, new CookieOptions
         {
@@ -502,17 +542,27 @@ sealed class PhoneServer
         });
     }
 
-    bool TakeShareTicket(HttpContext ctx)
+    /// <summary>The link a ticket carries (used once, within 60 s, and only if it is still the link it was issued for).</summary>
+    string? TakeShareTicket(HttpContext ctx)
     {
-        if (ctx.Request.Cookies[ShareCookie] is not { Length: > 0 and <= 64 } ticket) return false;
-        lock (shareTickets) return shareTickets.Remove(Hash(ticket), out var until) && until > now();
+        if (ctx.Request.Cookies[ShareCookie] is not { Length: > 0 and <= 64 } ticket) return null;
+        lock (shareTickets)
+            return shareTickets.Remove(Hash(ticket), out var t) && t.Until > now() && Hash(t.Link) == t.LinkHash ? t.Link : null;
     }
+
+    public int ShareTicketCount { get { lock (shareTickets) return shareTickets.Count; } }
 
     static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     /// <summary>A paired phone asks for a Shortcut key (iPhone: Share › Send to TV). Shown once, on that phone.</summary>
     void NewShortcutKey(PhoneClient client)
     {
+        // Only a phone that paired (code or QR key): with codes off anyone else could connect, and a key outlives the visit.
+        if (client.Phone is null)
+        {
+            Send(client, new { t = "toast", text = "Pair this phone first: scan the code in Settings › Phone remote on the TV", kind = "warn" });
+            return;
+        }
         if (pairing.NewShortcut(client.Name) is not { } token)
         {
             Send(client, new { t = "toast", text = "Ten Shortcut keys already: remove one in Settings › Phone remote on the TV", kind = "warn" });
@@ -526,30 +576,38 @@ sealed class PhoneServer
     /// <summary>
     /// POST /api/open, for the iPhone's Shortcut: {"url": "..."} (or text with a link in it) and
     /// "Authorization: Bearer <key>". No Origin (a Shortcut sends none): the key is what counts.
+    /// Each key opens at most 20 links a minute (only requests with that key count). A device
+    /// sending 10 wrong keys in a minute is shut out for a minute; nobody else is.
     /// </summary>
     async Task OpenShared(HttpContext ctx)
     {
         if (!HttpMethods.IsPost(ctx.Request.Method)) { ctx.Response.StatusCode = 405; return; }
-        lock (opens)
+        var from = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+        var t = now();
+        lock (limits)
         {
-            var t = now();
-            while (opens.Count > 0 && t - opens.Peek() > TimeSpan.FromMinutes(1)) opens.Dequeue();
-            while (wrongKeys.Count > 0 && t - wrongKeys.Peek() > TimeSpan.FromMinutes(1)) wrongKeys.Dequeue();
-            if (t < openClosedUntil || opens.Count >= OpenPerMinute) { ctx.Response.StatusCode = 429; return; }
-            opens.Enqueue(t);
+            Prune(t);
+            if (limits.TryGetValue("ip " + from, out var ipLimit) && t < ipLimit.ClosedUntil) { ctx.Response.StatusCode = 429; return; }
         }
         var auth = ctx.Request.Headers.Authorization.ToString();
         var key = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : "";
         if (pairing.FindShortcut(key) is not { } shortcut)
         {
-            lock (opens)
+            lock (limits)
             {
-                wrongKeys.Enqueue(now());
-                if (wrongKeys.Count >= WrongKeysPerMinute) { openClosedUntil = now().AddMinutes(1); Log.Warn("Phone remote: wrong Shortcut keys, /api/open closed for a minute"); }
+                var l = Limit("ip " + from);
+                l.Times.Enqueue(t);
+                if (l.Times.Count >= WrongKeysPerMinute) { l.ClosedUntil = t.AddMinutes(1); l.Times.Clear(); Log.Warn("Phone remote: 10 wrong Shortcut keys from one device, shut out for a minute"); }
             }
             ctx.Response.Headers.WWWAuthenticate = "Bearer";
             await Reply(ctx, 401, new { error = "key" });
             return;
+        }
+        lock (limits)
+        {
+            var l = Limit("key " + shortcut.Id);
+            if (l.Times.Count >= OpenPerMinute) { ctx.Response.StatusCode = 429; return; }
+            l.Times.Enqueue(t);
         }
         string? text = null;
         try
@@ -564,6 +622,30 @@ sealed class PhoneServer
         pairing.Seen(shortcut);
         host.OpenShared(url);
         await Reply(ctx, 200, new { ok = true });
+    }
+
+    sealed class RateLimit
+    {
+        public readonly Queue<DateTime> Times = new();
+        public DateTime ClosedUntil;
+    }
+
+    readonly Dictionary<string, RateLimit> limits = new();   // "key <id>": links opened; "ip <address>": wrong keys
+
+    RateLimit Limit(string name)
+    {
+        if (!limits.TryGetValue(name, out var l)) limits[name] = l = new RateLimit();
+        return l;
+    }
+
+    // Forgets what is more than a minute old (and devices and keys with nothing left).
+    void Prune(DateTime t)
+    {
+        foreach (var (name, l) in limits.ToList())
+        {
+            while (l.Times.Count > 0 && t - l.Times.Peek() > TimeSpan.FromMinutes(1)) l.Times.Dequeue();
+            if (l.Times.Count == 0 && t >= l.ClosedUntil) limits.Remove(name);
+        }
     }
 
     static void SetCookie(HttpContext ctx, string token) =>
@@ -585,8 +667,14 @@ sealed class PhoneServer
         using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
         var client = new PhoneClient(socket, phone, PhonePairing.NameFrom(ctx.Request.Headers.UserAgent));
         // Straight from the Share sheet (a ticket from /share): the page may play the shared link at once.
-        var shared = allowed && TakeShareTicket(ctx);
-        await client.Send(Serialize(new { t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = allowed ? RawState() : (JsonElement?)null, share = shared }));
+        // share: the link a ticket from the Share sheet carries (the page plays it at once); ca: the
+        // root's fingerprint, for the Send page (the TV shows it too: that one is to be trusted).
+        var shared = allowed ? TakeShareTicket(ctx) : null;
+        await client.Send(Serialize(new
+        {
+            t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = allowed ? RawState() : (JsonElement?)null,
+            share = shared, ca = allowed ? certificates?.Fingerprint : null,
+        }));
         if (!allowed)
         {
             // Not paired: the page shows the pairing screen and connects again once paired.

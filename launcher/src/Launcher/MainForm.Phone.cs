@@ -482,6 +482,8 @@ partial class MainForm
                 // Card 2 (Share to TV): the same, on the page that says how (certificate, Shortcut).
                 sendQr = qr && port != 0 ? $"{PhoneUrl()}/send?k={pairing.NewKey()}" : null,
                 secure = phones.SecurePort != 0,
+                // The root's fingerprint: Android shows the installed one; they must match (card 2).
+                fingerprint = phones.Fingerprint,
                 requireCode = pairing.RequireCode,
                 reach = phoneReach,
                 unpaired = phones.Clients.Count(c => c.Phone is null),
