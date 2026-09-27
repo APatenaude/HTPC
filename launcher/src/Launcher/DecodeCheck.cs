@@ -6,7 +6,7 @@ namespace Htpc.Launcher;
 /// <summary>
 /// The hardware video decoding check from Settings › Display (SPEC N5): runs
 /// setup\tools\Test-HwDecode.ps1 -Json in the background and keeps its report in
-/// C:\ProgramData\HTPC\hwdecode-last.json (About shows the last one).
+/// C:\ProgramData\HTPC\logs\hwdecode-last.json (About shows the last one).
 ///
 /// Driver only (-NoPlayback) for now: it asks the GPU driver which codecs it decodes in 4K.
 /// The playback half needs mpv, which comes with the link player; ffmpeg or mpv found on a
@@ -14,8 +14,10 @@ namespace Htpc.Launcher;
 /// </summary>
 sealed class DecodeCheck
 {
+    // In logs\: the one ProgramData\HTPC folder the launcher (standard rights) may write to once
+    // setup's Library step has locked the rest; Save logs to USB copies it with the logs.
     static readonly string ResultPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "hwdecode-last.json");
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "logs", "hwdecode-last.json");
     static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
 
     public bool Running { get; private set; }

@@ -66,9 +66,7 @@ static class SystemInfo
         var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
         var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC");
         var files = new[] { Path.Combine(data, "logs"), Path.Combine(local, "logs") }
-            .Where(Directory.Exists).SelectMany(d => Directory.GetFiles(d))
-            .Append(Path.Combine(data, "hwdecode-last.json"))
-            .Where(File.Exists);
+            .Where(Directory.Exists).SelectMany(d => Directory.GetFiles(d)); // logs\ has the decode report too
         var count = 0;
         foreach (var file in files)
         {
