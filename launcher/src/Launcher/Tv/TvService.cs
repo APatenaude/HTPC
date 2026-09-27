@@ -137,7 +137,6 @@ sealed class TvService
         Log.Info($"Screen {Screen?.Key ?? "unknown"}{(Screen?.Port > 0 ? $" on HDMI {Screen.Port}" : "")}; TVs found: " +
                  string.Join(", ", Found.Select(t => $"{t.Name} ({t.Method}, {t.Model}{(t.Locked ? ", locked" : "")}, {t.State.Raw})")));
         if (Profile is { } profile && Current is { } current) Contact(profile, current);
-        BindByEvidence();
         CheckBinding();
         lastPower = Current?.State.Power is TvPower.On or TvPower.Off ? Current.State.Power : null;
         lastInput = Current?.State.Input ?? 0;
@@ -194,13 +193,13 @@ sealed class TvService
         cache.Seen(tv, clock.Now);
         var added = tv.Macs.Where(m => !p.Macs.Contains(m)).ToList();
         if (added.Count == 0) return;
-        p.Macs.AddRange(added);
+        p.Macs = p.Macs.Concat(added).ToList(); // a new list: the old one may be in use elsewhere
         parts.SaveProfiles();
     }
 
     // --- Binding a TV to the screen ---------------------------------------------------------------
 
-    /// <summary>The TV settings (setup's TV steps, Settings › TV) are on screen: search often, and bind on evidence.</summary>
+    /// <summary>The TV settings (setup's TV steps, Settings › TV) are on screen: search often (TVs showing the box's input are marked).</summary>
     public void UiShowing(bool showing)
     {
         uiShowing = showing;
@@ -217,20 +216,13 @@ sealed class TvService
 
     static string Normalize(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
-    bool HasTwin(TvDevice tv) => Found.Count(t => t.Method == tv.Method && Normalize(t.Model) == Normalize(tv.Model)) > 1;
+    /// <summary>Another TV of the same model is on the network (the UI says so: the user must tell them apart by name).</summary>
+    public bool HasTwin(TvDevice tv) => Found.Count(t => t.Method == tv.Method && Normalize(t.Model) == Normalize(tv.Model)) > 1;
 
-    /// <summary>
-    /// With the TV settings on screen the box's picture is on the TV the user looks at: if exactly
-    /// one TV says it shows the box's input, that is this screen's TV. Two identical TVs: the user picks.
-    /// </summary>
-    void BindByEvidence()
-    {
-        if (!uiShowing || Profile is not null || Screen is not { IsReal: true }) return;
-        var showing = ShowingBox().ToList();
-        if (showing.Count != 1 || HasTwin(showing[0])) return;
-        Log.Info($"TV profile made: {showing[0].Name} ({showing[0].Model}) shows HDMI {Screen.Port}, the box's input");
-        Bind(showing[0]);
-    }
+    // No TV is ever bound without the user's pick: a TV "showing the box's input" is only marked
+    // Detected. Evidence can point at the wrong TV (the box's own TV asleep, silent or in Roku's
+    // Limited mode, another TV on HDMI 1 showing its own source), and the other TV must never
+    // get a key.
 
     /// <summary>The user picked this TV for the screen (Settings, setup). Keeps the other settings.</summary>
     public void Choose(string key)
@@ -251,8 +243,10 @@ sealed class TvService
         profile.DeviceId = tv.Id;
         profile.Name = tv.Name;
         profile.Model = tv.Model;
-        if (!same) profile.Macs.Clear();
-        foreach (var m in tv.Macs) if (!profile.Macs.Contains(m)) profile.Macs.Add(m);
+        // The MACs are the ones this TV itself reported (its reads are checked to be this TV):
+        // never kept from another TV the profile pointed at before.
+        if (tv.Macs.Count > 0) profile.Macs = tv.Macs.ToList();
+        else if (!same) profile.Macs.Clear();
         // The input the EDID names is the TV's own word for where the box is; else what it shows.
         if (Screen!.Port > 0) profile.Input = Screen.Port;
         else if (tv.State.Input > 0) profile.Input = tv.State.Input;
@@ -370,7 +364,8 @@ sealed class TvService
 
     async Task Wake(TvProfile p, ITvDriver d)
     {
-        if (CanWake(p, d)) await parts.Net.WakeOnLan(p.Macs);
+        // A copy: a read on another thread may add a MAC to the profile meanwhile.
+        if (CanWake(p, d)) await parts.Net.WakeOnLan(p.Macs.ToList());
     }
 
     public async Task TurnOff()

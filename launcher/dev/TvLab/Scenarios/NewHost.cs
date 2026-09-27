@@ -29,7 +29,7 @@ sealed class NewHost : IRokuHost, IDisposable
         trace = world.Trace;
         Net = new FakeNet(world.Trace, world.Fakes);
         Notices = new FakeNotices(world.Trace);
-        Tv = new TvService(new TvParts(Profiles, () => ProfileSaves++, drivers ?? new ITvDriver[] { new RokuDriver(Net) }, Net, world.Clock,
+        Tv = new TvService(new TvParts(Profiles, () => ProfileSaves++, drivers ?? new ITvDriver[] { new RokuDriver(Net, clock: world.Clock) }, Net, world.Clock,
             new TvFiles(FilesDir), () => Screen, Notices))
         {
             HandsOff = handsOff,

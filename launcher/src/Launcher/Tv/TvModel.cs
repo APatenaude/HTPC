@@ -21,7 +21,8 @@ sealed class TvProfile
     /// The TV's network MACs, for Wake-on-LAN: captured whenever the TV tells them, so the box can
     /// still wake it after a restart that finds it asleep and silent.
     /// </summary>
-    public List<string> Macs { get; set; } = new();
+    public List<string> Macs { get => macs; set => macs = value ?? new(); } // "macs": null in the file reads as none
+    List<string> macs = new();
     /// <summary>
     /// Why the box stopped controlling this TV (it doubts this is the TV it is plugged into), or
     /// null. Nothing is sent until the user picks the TV again.
@@ -52,6 +53,11 @@ sealed record TvDevice
     public TvState State { get; init; } = TvState.Unknown;
     /// <summary>Control is switched off on the TV (Roku "Control by mobile apps" Limited or Disabled).</summary>
     public bool Locked { get; init; }
+    /// <summary>
+    /// It answers but never tells its power (some Samsungs): on by Wake-on-LAN only. Not the same
+    /// as a TV not read yet (remembered from an earlier run), whose power is merely unknown for now.
+    /// </summary>
+    public bool PowerUnreported { get; init; }
     /// <summary>The same TV also answered these methods (merged by address; this one is preferred).</summary>
     public IReadOnlyList<string> AlsoVia { get; init; } = Array.Empty<string>();
 

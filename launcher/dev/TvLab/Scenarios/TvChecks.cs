@@ -114,20 +114,91 @@ static class TvChecks
             h.Dispose(); w.Dispose();
         }
 
-        // Binding on evidence: only with the TV settings on screen, only the TV showing the box's input.
+        // Evidence only marks a TV (Detected); binding is the user's pick, which takes the EDID's input.
         {
             var (w, h) = await Start();
             var tv = w.AddRoku("roku", "X00000000001");
             tv.On = true; tv.Input = 2;
-            await h.Tv.Discover();
-            Check.That(h.Tv.Profile is null, "evidence: no binding while the settings are not on screen");
             h.Tv.UiShowing(true);
             await h.Tv.Discover();
-            Check.That(h.Tv.Profile is null, "evidence: not bound while the TV shows HDMI 2 (the box is on HDMI 1)");
+            Check.That(!h.Tv.ShowingBox().Any(), "evidence: not marked while the TV shows HDMI 2 (the box is on HDMI 1)");
             tv.RemoteInput(1);
             await h.Tv.Discover();
-            Check.Equal("X00000000001", h.Tv.Profile?.DeviceId, "evidence: bound when it shows HDMI 1");
-            Check.Equal(1, h.Tv.Profile?.Input, "evidence: input from the EDID");
+            Check.That(h.Tv.ShowingBox().Any(t => t.Id == "X00000000001"), "evidence: marked Detected when it shows HDMI 1");
+            await w.RunFor(30);
+            Check.That(h.Tv.Profile is null, "evidence: never bound without the user's pick");
+            h.Tv.Choose("roku:X00000000001");
+            Check.Equal(1, h.Tv.Profile?.Input, "the user's pick: input from the EDID");
+            h.Dispose(); w.Dispose();
+        }
+
+        // The other TV must never get anything (review of 27 Sept 2026):
+        // 1) after a DHCP change the kept address (and the cache's) answers as the Bedroom TV;
+        // 2) the living-room TV silent or Limited, the Bedroom TV on HDMI 1 showing its own source;
+        // 3) a brand picked with one Bedroom TV of that brand on the network.
+        const string Bedroom = "X0000000000B";
+        string[] bedroomMacs = { "02:00:00:00:00:b1", "02:00:00:00:00:b2" };
+        bool BedroomTouched(RokuWorld w, NewHost h, string label) =>
+            w.Trace.Lines.Any(l => l.Contains($"{label} POST ")) || bedroomMacs.Any(m => w.Trace.Lines.Any(l => l.Contains($"wol {m}")));
+        void BecomeBedroom(FakeRoku f)
+        {
+            f.Serial = Bedroom; f.Name = "Bedroom TV"; f.Model = "43S425-CA";
+            f.WifiMac = bedroomMacs[0]; f.EthernetMac = bedroomMacs[1];
+            f.On = true; f.Input = 1;
+        }
+        {
+            var (w, h) = await Start();
+            var shared = w.AddRoku("shared-ip", "X00000000001");
+            shared.On = true; shared.Input = 1;
+            h.Bind(shared, 1, RokuWorld.EdidKey);
+            await h.Boot(TimeSpan.FromMinutes(30)); // learns the living-room TV's MACs
+            var livingMacs = h.Profiles[RokuWorld.EdidKey].Macs.ToList();
+            BecomeBedroom(shared);                  // the living-room TV's old address is the Bedroom TV's now
+            var mark = w.Trace.Lines.Count;
+            await w.RunFor(90);
+            await h.Sleep(); await h.Wake(); await h.Test(); await h.SleepS3(); await h.Resume();
+            await w.RunFor(30);
+            Check.That(!w.Trace.Lines.Skip(mark).Any(l => l.Contains("shared-ip POST ")), "stale IP: no key to the Bedroom TV at the kept address");
+            Check.That(!bedroomMacs.Any(m => w.Trace.Lines.Any(l => l.Contains($"wol {m}"))), "stale IP: no Wake-on-LAN to the Bedroom TV");
+            Check.That(h.Profiles[RokuWorld.EdidKey].Macs.SequenceEqual(livingMacs), "stale IP: the profile keeps the living-room TV's MACs only");
+            Check.Equal("X00000000001", h.Profiles[RokuWorld.EdidKey].DeviceId, "stale IP: the profile still names the living-room TV");
+            // A restart with the cache's last address now the Bedroom TV's.
+            var files = h.FilesDir + "-restart";
+            Directory.CreateDirectory(files);
+            foreach (var f in Directory.GetFiles(h.FilesDir)) File.Copy(f, Path.Combine(files, Path.GetFileName(f)), true);
+            var mark2 = w.Trace.Lines.Count;
+            var again = new NewHost(w, filesDir: files);
+            foreach (var kv in h.Profiles) again.Profiles[kv.Key] = kv.Value;
+            w.Host = again;
+            await again.Boot(TimeSpan.FromMinutes(2));
+            await w.RunFor(30);
+            Check.That(!w.Trace.Lines.Skip(mark2).Any(l => l.Contains("shared-ip POST ")) && !BedroomTouched(w, again, "shared-ip"),
+                "stale IP after a restart (cache): nothing to the Bedroom TV");
+            again.Dispose(); h.Dispose(); w.Dispose();
+        }
+        foreach (var livingLimited in new[] { false, true })
+        {
+            var (w, h) = await Start();
+            var living = w.AddRoku("living", "X00000000001");
+            if (livingLimited) { living.EcpMode = "limited"; living.On = false; } else living.NetworkAsleep = true;
+            var bedroom = w.AddRoku("bedroom", Bedroom);
+            BecomeBedroom(bedroom);
+            h.Tv.UiShowing(true);
+            await h.Tv.Discover();
+            await w.RunFor(60);
+            Check.That(h.Tv.Profile is null && !BedroomTouched(w, h, "bedroom") && h.Net.WakePackets == 0,
+                $"living-room TV {(livingLimited ? "Limited" : "silent")}, Bedroom TV on HDMI 1: no binding, nothing sent");
+            h.Dispose(); w.Dispose();
+        }
+        {
+            var (w, h) = await Start();
+            var bedroom = w.AddRoku("bedroom", Bedroom);
+            BecomeBedroom(bedroom);
+            h.Tv.UiShowing(true);
+            await h.Tv.Discover(); // what picking "Roku TV" as the brand does now: search again, nothing else
+            await w.RunFor(60);
+            Check.That(h.Tv.Profile is null && !BedroomTouched(w, h, "bedroom") && h.Net.WakePackets == 0,
+                "brand picked, one Bedroom TV of it on the network: no binding, nothing sent");
             h.Dispose(); w.Dispose();
         }
 

@@ -27,7 +27,7 @@ static class TvUiState
         var current = p is null ? null : tv.Found.FirstOrDefault(t => t.Method == p.Method && t.Id == p.DeviceId);
         var caps = driver?.Info.Caps ?? TvCaps.None;
         // A TV that never tells its power (some Samsungs): on by Wake-on-LAN only; no off, no following it.
-        var powerKnown = caps.HasFlag(TvCaps.ReadPower) && current?.State.Power != TvPower.Unknown;
+        var powerKnown = caps.HasFlag(TvCaps.ReadPower) && current?.PowerUnreported != true;
         var status = p is null ? "unbound"
             : p.Method == "none" ? "none"
             : p.Paused is not null ? "paused"

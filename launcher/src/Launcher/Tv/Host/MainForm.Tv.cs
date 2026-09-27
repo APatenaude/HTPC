@@ -27,8 +27,10 @@ sealed partial class MainForm
 
     /// <summary>
     /// SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
-    /// launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is,
-    /// and so does one the watchdog restarted (--restarted).
+    /// launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
+    /// "--restarted" is for the watchdog, which does not exist yet: it will pass it when it
+    /// restarts the launcher after a crash, so a crash soon after a boot does not turn the TV on
+    /// again. Nothing passes it today.
     /// </summary>
     Task StartTv() => tv.Startup(TimeSpan.FromMilliseconds(Environment.TickCount64), Environment.GetCommandLineArgs().Contains("--restarted"));
 

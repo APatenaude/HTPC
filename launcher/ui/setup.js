@@ -171,7 +171,7 @@ function tvView() {
       `<div class="su-row" data-nav data-id="tv-other">${icon('pencil', 34)}` +
         `${p && p.method === 'none' ? 'No TV control (its own remote). Change?' : 'Not listed? Pick your TV’s brand, or skip TV control'}</div>` +
       `<div class="su-row" data-nav data-id="tv-refresh">${icon('restart', 34)}Search again</div>` +
-      (tv.caps && tv.caps.test ? `<div class="su-btn" data-nav data-id="tv-test" style="align-self:flex-start;margin-top:12px">Test: turn the TV off, then back on</div>` : '') +
+      (tv.caps && tv.caps.test && p ? `<div class="su-btn" data-nav data-id="tv-test" style="align-self:flex-start;margin-top:12px">Test: turn the TV off, then back on</div>` : '') +
       (showStatus ? `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` : '') +
       '</div>' +
       (p && p.method === 'none' ? '' : TvUi.checklistHtml(tv, side)) +
@@ -317,11 +317,11 @@ function activate(id) {
   else if (id.startsWith('tvpick:')) { send({ type: 'tv.choose', id: id.slice(7) }); state.tvHint = null; closeDialog(); }
   else if (id === 'tvbrand:none') { send({ type: 'tv.none' }); state.tvHint = null; closeDialog(); }
   else if (id.startsWith('tvbrand:')) {
-    const method = id.slice(8);
-    state.tvHint = method;
-    const found = state.tv.found.filter((t) => t.method === method);
-    if (found.length === 1) send({ type: 'tv.choose', id: found[0].id });
-    else { toast('Searching for TVs…'); send({ type: 'tv.refresh' }); }
+    // A brand only shows what to turn on and searches again: the user then picks the TV by its
+    // name (the only TV of that brand found can be someone else's).
+    state.tvHint = id.slice(8);
+    toast('Searching for TVs…');
+    send({ type: 'tv.refresh' });
     closeDialog();
   }
   else if (id.startsWith('tvin:')) {
@@ -399,7 +399,7 @@ function onHost(m) {
     case 'tv.state':
       state.tv = m.tv;
       // The input step goes when the TV turned out not to be controllable ("No TV control").
-      if (!steps().includes(state.step)) state.step = 'tv';
+      if (!steps().includes(state.step)) { goStep('tv'); break; } // through goStep: stops the input step's reads
       if (state.step === 'tv' || state.step === 'input' || state.step === 'done') render();
       break;
     case 'tv.read': state.read = { power: m.power, input: m.input }; if (state.step === 'input') render(); break;

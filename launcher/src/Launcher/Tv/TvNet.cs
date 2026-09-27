@@ -90,10 +90,13 @@ sealed class TvNet : ITvNet
                     await Task.Delay(200, cancel);
                 }
                 var until = DateTime.UtcNow + wait;
-                while (DateTime.UtcNow < until)
+                while (true)
                 {
+                    // Computed once and never negative (Task.Delay throws on a negative span, which lost the search).
+                    var left = until - DateTime.UtcNow;
+                    if (left <= TimeSpan.Zero) break;
                     var receive = udp.ReceiveAsync(cancel).AsTask();
-                    if (await Task.WhenAny(receive, Task.Delay(until - DateTime.UtcNow, cancel)) != receive) break;
+                    if (await Task.WhenAny(receive, Task.Delay(left, cancel)) != receive) break;
                     var result = receive.Result;
                     if (ParseSsdp(result.RemoteEndPoint.Address, Encoding.ASCII.GetString(result.Buffer)) is { } reply)
                         lock (replies) replies.Add(reply);
@@ -173,7 +176,16 @@ sealed class TvNet : ITvNet
 /// TVs' self-signed or expired certificates accepted (there is no one to vouch for a TV on the LAN).</summary>
 static class TvHttp
 {
-    public static HttpClient Create(TimeSpan timeout) => new(Handler()) { Timeout = timeout };
+    /// <summary>TV answers are small (device-info is a few KB): anything past this is not a TV worth reading.</summary>
+    public static HttpClient Create(TimeSpan timeout) => new(Handler()) { Timeout = timeout, MaxResponseContentBufferSize = 256 * 1024 };
+
+    /// <summary>XML from a TV, without DTDs (no entity expansion from whatever answers on the LAN).</summary>
+    public static System.Xml.Linq.XDocument Xml(string text)
+    {
+        using var reader = System.Xml.XmlReader.Create(new StringReader(text),
+            new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Prohibit, XmlResolver = null });
+        return System.Xml.Linq.XDocument.Load(reader);
+    }
 
     public static SocketsHttpHandler Handler() => new()
     {

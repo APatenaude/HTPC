@@ -102,7 +102,7 @@ const TvUi = {
     if (s === 'paused') return { kind: 'warn', text: `Paused: ${p.paused}. Pick your TV again to go on.` };
     if (s === 'none') return { kind: 'info', text: 'The box leaves this TV to its own remote.' };
     if (s === 'unavailable') return { kind: 'warn', text: 'This control method is turned off on this box.' };
-    return { kind: 'info', text: 'Which TV is this box plugged into? Pick it below.' };
+    return { kind: 'info', text: 'Which TV is this box plugged into? Pick it under “How the box controls it”.' };
   },
 
   /** Sample TV states for screenshots (setup.html#tv?demo=..., index.html#settings/tv?demo=...). */
@@ -178,7 +178,7 @@ if (typeof settingsSection === 'function') (() => {
     if (hint && (!p || p.method !== hint)) right += TvUi.checklistHtml(tv, hint, 'tv-side inline');
     right += `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` +
       '<div class="sbuttons">' +
-        (tv.caps.test ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: off and on</div>' : '') +
+        (tv.caps.test && p ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: off and on</div>' : '') +
         '<div class="sbutton" data-nav data-id="tv-refresh" data-act="tv-refresh">Find it again</div>' +
       '</div>';
     return '<header><h1>TV</h1><p>The box recognises which TV it’s plugged into and uses that TV’s settings.</p></header>' +
@@ -208,7 +208,8 @@ if (typeof settingsSection === 'function') (() => {
       return false;
     },
     shown() { send({ type: 'tv.showing', on: true }); },
-    left() { send({ type: 'tv.showing', on: false }); hint = null; },
+    // The method dialog over Settings is still the TV screen: the list keeps refreshing under it.
+    left() { if (state.view === 'tvmethod') return; send({ type: 'tv.showing', on: false }); hint = null; },
     demo() { state.tv = TvUi.demo(new URLSearchParams(location.hash.split('?')[1] || '').get('demo') || 'roku'); },
   });
 
@@ -231,11 +232,12 @@ if (typeof settingsSection === 'function') (() => {
 
   onAction('tv-method', () => go('tvmethod'));
   onAction('tv-pick', (el, id) => { send({ type: 'tv.choose', id }); hint = null; back(); });
+  // A brand only shows what to turn on and searches again: the user then picks the TV by its
+  // name (the only TV of that brand found can be someone else's).
   onAction('tv-brand', (el, id) => {
     hint = id;
-    const found = state.tv.found.filter((t) => t.method === id);
-    if (found.length === 1) send({ type: 'tv.choose', id: found[0].id });
-    else { toast('Searching for TVs…'); send({ type: 'tv.refresh' }); }
+    toast('Searching for TVs…');
+    send({ type: 'tv.refresh' });
     back();
   });
   onAction('tv-none', () => ask({
