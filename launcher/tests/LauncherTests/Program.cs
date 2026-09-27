@@ -415,5 +415,48 @@ Console.WriteLine("== Alerts overlay");
     Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>(), null), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
 }
 
+// ---------------------------------------------------------------- Core Audio (reads only)
+Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
+{
+    // The box on 27 Sept: "Specified cast is not valid" reading the volume and listing outputs.
+    // Windows' device enumerator is one object per process; a [ComImport] wrapper of it made
+    // elsewhere and still alive must not break the launcher's reads, on the UI thread (STA) or
+    // the pool (MTA).
+    void On(ApartmentState apartment, Action a)
+    {
+        var t = new Thread(() => a());
+        t.SetApartmentState(apartment);
+        t.Start();
+        t.Join();
+    }
+    object? held = null;
+    On(ApartmentState.STA, () => held = new OtherEnumeratorClass());
+    int before;
+    lock (Log.Lines) before = Log.Lines.Count;
+    var audio = new AudioVolume();
+    int? volume = null, again = null;
+    SoundLevel? level = null;
+    List<AudioOutputs.Output> outputs = new();
+    List<AudioEndpoint> endpoints = new();
+    On(ApartmentState.STA, () => volume = audio.Get());
+    On(ApartmentState.MTA, () => outputs = AudioOutputs.List());
+    On(ApartmentState.MTA, () => endpoints = AudioEndpoints.List());
+    On(ApartmentState.STA, () => level = CoreAudio.TryLevel(null));
+    On(ApartmentState.MTA, () => again = audio.Get());
+    GC.KeepAlive(held);
+    List<string> casts;
+    lock (Log.Lines) casts = Log.Lines.Skip(before).Where(l => l.Contains("cast", StringComparison.OrdinalIgnoreCase)).ToList();
+    Console.WriteLine($"  {outputs.Count} outputs, volume {volume?.ToString() ?? "none"}, level {level?.ToString() ?? "none"}");
+    Check(casts.Count == 0, "no cast failures with another wrapper of the enumerator alive: " + string.Join(" | ", casts));
+    var hasAudio = outputs.Count > 0;
+    Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread");
+    Check(!hasAudio || outputs.Count(o => o.IsDefault) == 1, "one default output");
+    Check(!hasAudio || endpoints.Where(e => e.IsDefault).All(e => e.Level == level), "the listed default output's level is the default's level");
+}
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
+
+/// <summary>Windows' device enumerator through a [ComImport] class of its own, as the launcher's files each had one.</summary>
+[System.Runtime.InteropServices.ComImport, System.Runtime.InteropServices.Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+class OtherEnumeratorClass { }

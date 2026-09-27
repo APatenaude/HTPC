@@ -6,8 +6,9 @@ namespace Htpc.Launcher;
 /// A sound output as Windows lists it, with what tells a Bluetooth one: its container id (the
 /// physical device's, the same as the paired Bluetooth device's) and its form factor (a
 /// Hands-Free "headset" endpoint is the phone-call profile, low quality: never switched to).
+/// Level: its own volume and mute (null when unreadable).
 /// </summary>
-sealed record AudioEndpoint(string Id, string Name, Guid? ContainerId, int FormFactor, bool IsDefault)
+sealed record AudioEndpoint(string Id, string Name, Guid? ContainerId, int FormFactor, bool IsDefault, SoundLevel? Level = null)
 {
     public const int FormHeadset = 5; // EndpointFormFactor.Headset
     public bool HandsFree => FormFactor == FormHeadset || Name.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase);
@@ -18,15 +19,23 @@ sealed record AudioEndpoint(string Id, string Name, Guid? ContainerId, int FormF
 /// output becomes its stereo endpoint; when it goes, the output the box had before comes back.
 /// The alerts come from what the default actually became, whoever changed it. Pure: fed a
 /// list of endpoints every couple of seconds; checked in launcher\tests\AlertsTests.
+///
+/// The volume follows too (AudioOutputs says why): the output sound moves to gets the level of
+/// the one it leaves (as last seen, when that one is gone). Set before the switch when this
+/// makes it; after, when Windows switched by itself (headphones it made the default as they
+/// connected, or the output it picked when they went). A switch made in Settings carried the
+/// level already and is left alone, so a change made since is not undone.
 /// </summary>
 sealed class SoundSwitcher
 {
     HashSet<string> seen = new();   // Bluetooth endpoints present at the last look
+    Dictionary<string, SoundLevel> levels = new();   // every output's level at the last look
     string? lastDefault;
     string? returnTo;               // the non-Bluetooth output to go back to
     bool first = true;
 
-    public sealed record Step(string? SwitchTo, string? Announce, bool Bluetooth);
+    /// <param name="Carry">The level to give an output (before switching to it, if SwitchTo).</param>
+    public sealed record Step(string? SwitchTo, string? Announce, bool Bluetooth, (string Id, SoundLevel Level)? Carry = null);
 
     /// <param name="endpoints">The active outputs now.</param>
     /// <param name="bluetooth">Container ids of the paired Bluetooth devices.</param>
@@ -61,18 +70,30 @@ sealed class SoundSwitcher
             else if (wasBtDefault) announce = $"Sound is back on {nowDefault.Name}";
         }
 
+        // The level moves with the sound: when this switches, or when Windows did (headphones
+        // that arrived as the default, or the output it picked when the ones in use went).
+        (string Id, SoundLevel Level)? carry = null;
+        if (!first && nowDefault is not null && lastDefault is not null && nowDefault.Id != lastDefault)
+        {
+            var leaving = endpoints.FirstOrDefault(e => e.Id == lastDefault);
+            var byWindows = arrived.Any(e => e.IsDefault && e.Id == nowDefault.Id) || leaving is null;
+            SoundLevel? left = leaving is not null ? leaving.Level : levels.TryGetValue(lastDefault, out var seenLevel) ? seenLevel : null;
+            if ((switchTo is not null || byWindows) && left is { } level && nowDefault.Level != level)
+                carry = (nowDefault.Id, level);
+        }
+
         seen = bt.Select(e => e.Id).ToHashSet();
+        foreach (var e in endpoints) if (e.Level is { } l) levels[e.Id] = l;
+        if (carry is { } c) levels[c.Id] = c.Level;
         lastDefault = nowDefault?.Id;
         first = false;
-        return new Step(switchTo, announce, nowBt);
+        return new Step(switchTo, announce, nowBt, carry);
     }
 }
 
-/// <summary>The active sound outputs with their container id and form factor (Core Audio).</summary>
+/// <summary>The active sound outputs with their container id, form factor and level (Core Audio).</summary>
 static class AudioEndpoints
 {
-    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator { }
-
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IMMDeviceEnumerator
     {
@@ -127,7 +148,7 @@ static class AudioEndpoints
         IMMDeviceCollection? devices = null;
         try
         {
-            enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            enumerator = (IMMDeviceEnumerator)CoreAudio.NewEnumerator();
             string? defaultId = null;
             if (enumerator.GetDefaultAudioEndpoint(eRender, 1, out var d) == 0) { d.GetId(out defaultId); Marshal.ReleaseComObject(d); }
             if (enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, out devices) != 0) return list;
@@ -151,7 +172,7 @@ static class AudioEndpoints
                 else LastProblem = $"container 0x{got:X8}";
                 key = FormFactor;
                 if (store.GetValue(ref key, out v) == 0) { if (v.Type == VT_UI4) form = (int)v.UInt; PropVariantClear(ref v); }
-                list.Add(new AudioEndpoint(id, name, container, form, id == defaultId));
+                list.Add(new AudioEndpoint(id, name, container, form, id == defaultId, CoreAudio.LevelOfDevice(device)));
                 }
                 finally { Marshal.ReleaseComObject(store); }
                 }

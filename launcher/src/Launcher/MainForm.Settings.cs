@@ -51,11 +51,12 @@ sealed partial class MainForm
             case "sound.outputs": _ = PostAudio(); break;
             case "sound.output":
                 var id = m.GetProperty("id").GetString() ?? "";
-                _ = Task.Run(() => AudioOutputs.SetDefault(id)).ContinueWith(t => BeginInvoke(() =>
+                // At the level the box is at (AudioOutputs): the slider then reads the new output.
+                _ = Task.Run(() => AudioOutputs.SwitchKeepingLevel(id)).ContinueWith(t => BeginInvoke(() =>
                 {
                     if (!t.Result) Post(new { type = "toast", text = "Windows did not switch the sound output", kind = "warn" });
                     _ = PostAudio(switchFailed: !t.Result);
-                    PushState(); // the new output has its own volume
+                    PushState();
                 }));
                 break;
             case "sound.test": TestSound.Play(); break;

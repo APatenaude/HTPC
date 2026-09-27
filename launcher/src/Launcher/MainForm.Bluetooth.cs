@@ -56,12 +56,16 @@ sealed partial class MainForm
             {
                 var endpoints = AudioEndpoints.List();
                 var step = soundSwitcher.Update(endpoints, audio);
-                if (step.SwitchTo is { } id && !AudioOutputs.SetDefault(id)) Log.Warn("Bluetooth: Windows did not switch the sound output");
-                if (step.Announce is { } text)
+                // The level goes with the sound (SoundSwitcher): onto the output before switching
+                // to it, or onto the one Windows switched to by itself.
+                if (step.SwitchTo is { } id) { if (!AudioOutputs.SetDefault(id, step.Carry?.Level)) Log.Warn("Bluetooth: Windows did not switch the sound output"); }
+                else if (step.Carry is { } carry) AudioOutputs.SetLevel(carry.Id, carry.Level);
+                if (step.Announce is not null || step.Carry is not null)
                     OnUiQueued(() =>
                     {
-                        alerts.Raise(new AlertSpec { Id = "sound", Title = text, Glyph = step.Bluetooth ? "headphones" : "speaker", Urgent = true, Duration = TimeSpan.FromSeconds(5) });
-                        PushState();   // each output has its own volume
+                        if (step.Announce is { } text)
+                            alerts.Raise(new AlertSpec { Id = "sound", Title = text, Glyph = step.Bluetooth ? "headphones" : "speaker", Urgent = true, Duration = TimeSpan.FromSeconds(5) });
+                        PushState();   // the slider reads the output now in use
                         if (btWanted) PostBluetooth();
                     });
             }
