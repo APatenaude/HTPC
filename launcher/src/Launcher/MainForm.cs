@@ -147,6 +147,22 @@ sealed partial class MainForm : Form
         }
     }
 
+    // Not a cover for apps under the Home menu. Chromium (Edge's site apps such as Twitch,
+    // VacuumTube) stops drawing a window that an opaque window covers, and draws page and video
+    // again once uncovered: the flash when the Home menu opened and closed over it, and the
+    // grey VacuumTube of 26 Sept. Its occlusion check skips tool windows. WS_EX_APPWINDOW keeps
+    // the launcher on the taskbar and in Alt+Tab (desktop mode), as a normal window.
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            const int WS_EX_TOOLWINDOW = 0x80, WS_EX_APPWINDOW = 0x40000;
+            var p = base.CreateParams;
+            p.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_APPWINDOW;
+            return p;
+        }
+    }
+
     // As the shell it starts in front; in dev it also pushes past the windows already open.
     protected override void OnShown(EventArgs e)
     {
@@ -566,11 +582,11 @@ sealed partial class MainForm : Form
             if (!apps.IsRunning(id)) { AppDidntOpen(id, $"{name} didn’t open", "It closed while starting.", retry: true); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
-            if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
-            Native.ForceForeground(window);
-            StepAside();
+            var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
+            var how = Native.ForceForeground(window);
+            StepAside(id);
             Post(new { type = "opened", id, ok = true });
-            Log.Info($"{id} window up after {waited + 250} ms");
+            Log.Info($"{id} window up after {waited + 250} ms (foreground {how}{(filled ? ", made to fill the screen" : "")})");
             ShowAppHint(id); // MainForm.Alerts.cs: its buttons, for 4 s
             return;
         }
@@ -582,31 +598,44 @@ sealed partial class MainForm : Form
         if (id == DesktopMode.Id) { ShowDesktop(); return; } // B in the menu opened over the desktop
         var window = apps.MainWindow(id);
         if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
-        if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
-        Native.ForceForeground(window);
-        StepAside();
+        // Back to the app (B or its row in the Home menu): one change on screen, the app raised
+        // and activated over the launcher. Its window is not otherwise touched (FillScreen only
+        // when it does not fill the screen already), and the launcher hides behind it later.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
+        var how = Native.ForceForeground(window);
+        Log.Info($"Back to {id}: foreground {how}{(filled ? ", made to fill the screen" : "")} ({clock.ElapsedMilliseconds} ms)");
+        StepAside(id);
     }
 
-    // While an app is in front the launcher hides: Chromium-based apps (VacuumTube, Edge) stop
-    // drawing when another window covers them, which left VacuumTube grey. Home brings it back.
-    // It blanks itself first (behind the app, unseen), so its next appearance starts dark
-    // instead of flashing the screen it last showed.
-    async void StepAside()
+    // While an app is in front the launcher hides (Home brings it back): hidden, it costs
+    // nothing and covers nothing. It blanks itself first (behind the app, unseen), so its next
+    // appearance starts dark instead of flashing the screen it last showed.
+    async void StepAside(string id)
     {
         Post(new { type = "blank" });
         await Task.Delay(150);
-        if (!LauncherActive) Hide();
+        if (LauncherActive) return;
+        Hide();
+        Log.Info($"Launcher hidden behind {id}");
     }
 
+    // The launcher over an app (the Home menu) or the desktop: one change on screen, the
+    // launcher shown on top and activated (Show alone may leave it behind the app in front:
+    // no foreground rights yet). The app's window is not touched. The pointer is parked only
+    // then, over the launcher: the app does not see it move, nor move back (CursorHider).
     void Reveal()
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         mapper.Map = null; // at once, not at the next UpdateMapper: the launcher takes the controller
         CloseKeyboard("launcher");
-        cursor.Hide();
-        if (!Visible) Show();
+        var shown = !Visible;
+        if (shown) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-        Native.ForceForeground(Handle);
+        var how = Native.ForceForeground(Handle);
+        cursor.Hide();
         web.Focus();
+        if (shown || how != "already") Log.Info($"Launcher up ({(shown ? "shown, " : "")}foreground {how}, {clock.ElapsedMilliseconds} ms)");
     }
 
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>

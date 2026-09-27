@@ -140,7 +140,10 @@ sealed class DisplayPower
 /// <summary>
 /// Hides the mouse pointer while the controller is in use and shows it again when a real mouse
 /// moves: every system cursor is swapped for a blank one (SetSystemCursor), and the pointer is
-/// parked at the right edge so no hover effects linger. Showing reloads the standard cursors.
+/// parked at the right edge so no hover effects linger. Showing reloads the standard cursors
+/// and puts the pointer back where it was: coming back from the Home menu to an app on the
+/// Mouse preset, a jump to the middle of the screen woke the player's controls over the video
+/// (Twitch) each time.
 /// </summary>
 sealed class CursorHider
 {
@@ -154,6 +157,7 @@ sealed class CursorHider
     static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32640, 32641, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
 
     Point parkedAt;
+    Point? hiddenAt;   // where the pointer was when hidden
     public bool Hidden { get; private set; }
 
     public CursorHider() => Restore(); // a previous crash may have left the cursors blank
@@ -161,6 +165,7 @@ sealed class CursorHider
     public void Hide()
     {
         if (Hidden) return;
+        hiddenAt = GetCursorPos(out var at) ? at : null;
         var blankAnd = Enumerable.Repeat((byte)0xFF, 32 * 4).ToArray();
         var blankXor = new byte[32 * 4];
         foreach (var id in CursorIds) SetSystemCursor(CreateCursor(IntPtr.Zero, 0, 0, 32, 32, blankAnd, blankXor), id);
@@ -170,14 +175,18 @@ sealed class CursorHider
         Hidden = true;
     }
 
-    /// <summary>Shows the pointer again, in the middle of the screen (it was parked at the edge).</summary>
+    /// <summary>Shows the pointer again where it was (it was parked at the edge).</summary>
     public void Show()
     {
         if (!Hidden) return;
         Restore();
-        var screen = Screen.PrimaryScreen!.Bounds;
-        SetCursorPos(screen.X + screen.Width / 2, screen.Y + screen.Height / 2);
+        var at = ComeBackTo(hiddenAt, Screen.PrimaryScreen!.Bounds, parkedAt);
+        SetCursorPos(at.X, at.Y);
     }
+
+    /// <summary>Where the pointer shows again: where it was when hidden, else the middle of the screen.</summary>
+    public static Point ComeBackTo(Point? hiddenAt, Rectangle screen, Point parkedAt) =>
+        hiddenAt is { } p && screen.Contains(p) && p != parkedAt ? p : new Point(screen.X + screen.Width / 2, screen.Y + screen.Height / 2);
 
     /// <summary>Call regularly: shows the pointer again once the mouse has moved.</summary>
     public void Check()

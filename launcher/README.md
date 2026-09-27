@@ -33,6 +33,12 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
 dimmed behind it, and the app keeps running underneath. B or the app's row returns to it.
+One change on screen each way, the app's window otherwise untouched: the launcher is shown
+and activated over the app; going back, the app is activated over the launcher, which then
+hides behind it. The launcher is a tool window (with WS_EX_APPWINDOW), which Chromium's
+occlusion check skips: Edge site apps and VacuumTube keep drawing under the menu instead of
+redrawing page and video when it closes. Each step is logged (`Launcher up`, `Back to <app>`,
+`Launcher hidden behind <app>`).
 
 ## Phone remote
 

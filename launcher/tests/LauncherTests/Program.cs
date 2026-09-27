@@ -454,6 +454,26 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     Check(!hasAudio || endpoints.Where(e => e.IsDefault).All(e => e.Level == level), "the listed default output's level is the default's level");
 }
 
+// ---------------------------------------------------------------- Over an app: what is left alone
+Console.WriteLine("== Home menu over an app: the app's window and the pointer");
+{
+    var screen = new Rectangle(0, 0, 3840, 2160);
+    Native.Rect R(int l, int t, int r, int b) => new() { Left = l, Top = t, Right = r, Bottom = b };
+    const long Popup = 0x80000000L, Visible = 0x10000000L, Maximized = 0x01000000L, Caption = 0x00C00000L, SizingBorder = 0x00040000L, SysMenu = 0x00080000L, MinMax = 0x00030000L;
+    Check(Native.FillsScreen(Popup | Visible, R(0, 0, 3840, 2160), screen), "frameless and covering the screen: left alone");
+    Check(Native.FillsScreen(Popup | Visible | Maximized | SysMenu | MinMax, R(0, 0, 3840, 2160), screen), "maximized frameless (Stremio's own full screen), system menu bits: left alone, not restored");
+    Check(!Native.FillsScreen(Visible | Caption | SizingBorder | SysMenu | MinMax, R(0, 0, 3840, 2160), screen), "a title bar showing: filled");
+    Check(!Native.FillsScreen(Visible | SizingBorder, R(0, 0, 3840, 2160), screen), "a sizing border: filled");
+    Check(!Native.FillsScreen(Popup | Visible, R(0, 0, 1920, 1080), screen), "frameless, not the whole screen: filled");
+    Check(!Native.FillsScreen(Popup | Visible | Maximized, R(0, 0, 3840, 2100), screen), "maximized to the work area (a taskbar): filled");
+
+    var parked = new Point(3839, 1080);
+    Check(CursorHider.ComeBackTo(new Point(1200, 700), screen, parked) == new Point(1200, 700), "the pointer comes back where it was, not over the middle of the video");
+    Check(CursorHider.ComeBackTo(null, screen, parked) == new Point(1920, 1080), "position unknown: the middle");
+    Check(CursorHider.ComeBackTo(parked, screen, parked) == new Point(1920, 1080), "it was at the parking spot: the middle");
+    Check(CursorHider.ComeBackTo(new Point(5000, 10), screen, parked) == new Point(1920, 1080), "off the screen now: the middle");
+}
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 
