@@ -40,6 +40,13 @@ sealed partial class MainForm
     /// <summary>Every second (the clock).</summary>
     void CheckSleepTimer() => sleepTimer.Tick();
 
+    /// <summary>timer.extend: +15 min (the phone, or the UI during the warning).</summary>
+    [UiMessages("timer.")]
+    void OnTimerMessage(string type, JsonElement m)
+    {
+        if (type == "timer.extend") sleepTimer.Extend();
+    }
+
     /// <summary>
     /// Which tile a media session belongs to. Win32 players are known by their program
     /// ("VacuumTube.exe"); Edge's sessions all say "MSEdge", whichever window: the one Edge

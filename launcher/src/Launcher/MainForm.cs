@@ -89,6 +89,7 @@ sealed partial class MainForm : Form
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
         Directory.CreateDirectory(captureDir);
+        RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
         InitSettings(); // MainForm.Settings.cs
     }
 
@@ -200,7 +201,7 @@ sealed partial class MainForm : Form
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
                 Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
-                PostSettingsInit();
+                RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "tvChoose": tv.Choose(Str("id")!); break;
@@ -236,7 +237,9 @@ sealed partial class MainForm : Form
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
             case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
-            default: HandleSettingsMessage(Str("type"), m); break;
+            default:
+                if (!DispatchUiMessage(Str("type"), m)) Log.Warn($"UI message {Str("type")} not handled");
+                break;
         }
     }
 
