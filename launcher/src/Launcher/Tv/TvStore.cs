@@ -146,6 +146,8 @@ sealed class TvCredentials
         public byte[]? Pfx { get; set; }
         /// <summary>LG: "wss" or "ws", the scheme the key was paired over (the key never goes over another).</summary>
         public string? Scheme { get; set; }
+        /// <summary>The TV's TLS key hash (SHA-256 of its public key), for connections that must reach that TV only (Samsung).</summary>
+        public string? Pin { get; set; }
     }
 
     readonly string path;

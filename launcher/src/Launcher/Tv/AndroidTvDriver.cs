@@ -55,6 +55,8 @@ sealed class AndroidTvDriver : ITvDriver, ITvPairing
         How: "Over your network. Type the code the TV shows, once.");
 
     public void UseCredentials(TvCredentials c) => credentials = c;
+    public int CodeLength => 6;
+    public event Action<TvDevice>? PairingLost { add { } remove { } } // a different key means another TV, not a lost pairing
 
     string? Pin(TvDevice tv) => credentials?.Get(tv.Key)?.Value;
     public bool IsPaired(TvDevice tv) => Pin(tv) is { Length: > 0 };

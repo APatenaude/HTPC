@@ -53,6 +53,8 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
         How: "Over your network. Say yes to the prompt on the TV once.");
 
     public void UseCredentials(TvCredentials c) => credentials = c;
+    public int CodeLength => 0;
+    public event Action<TvDevice>? PairingLost;
 
     string? Key(TvDevice tv) => credentials?.Get(tv.Key)?.Value;
     public bool IsPaired(TvDevice tv) => Key(tv) is { Length: > 0 };
@@ -147,7 +149,7 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
             if (registered is null)
             {
                 session.Dispose();
-                if (!pairing) Log.Warn($"LG at {tv.Address.Host} did not take this box's key: another TV, or pairing was undone on it (pair again in Settings › TV)");
+                if (!pairing) { Log.Warn($"LG at {tv.Address.Host} did not take this box's key: pairing was undone on it (pair again in Settings › TV)"); PairingLost?.Invoke(tv); }
                 return null;
             }
             if (pairing) credentials?.Set(tv.Key, new TvCredentials.Secret { Value = registered, Scheme = session.Scheme });

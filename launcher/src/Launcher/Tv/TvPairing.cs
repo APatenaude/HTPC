@@ -9,6 +9,9 @@ interface ITvPairing
 {
     void UseCredentials(TvCredentials credentials);
 
+    /// <summary>Characters of the code the TV shows (0: it asks to say yes on it instead).</summary>
+    int CodeLength { get; }
+
     bool IsPaired(TvDevice tv);
 
     /// <summary>
@@ -18,6 +21,9 @@ interface ITvPairing
     Task<bool> Pair(TvDevice tv, Action<string, string> step, Func<CancellationToken, Task<string?>> nextCode, CancellationToken cancel);
 
     void Forget(TvDevice tv);
+
+    /// <summary>The paired TV refused the stored key (pairing undone on it, or expired).</summary>
+    event Action<TvDevice>? PairingLost;
 }
 
 /// <summary>What setup and Settings show while pairing: the TV, the step ("prompt", "code", "working", "done", "failed") and why.</summary>

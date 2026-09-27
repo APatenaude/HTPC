@@ -67,8 +67,13 @@ sealed class TvService
         clock = parts.Clock;
         cache = TvCache.Load(parts.Files);
         Credentials = TvCredentials.Load(parts.Files);
-        foreach (var pairing in parts.Drivers.OfType<ITvPairing>()) pairing.UseCredentials(Credentials);
         notices = new TvNoticeRules(parts.Notices, clock);
+        foreach (var pairing in parts.Drivers.OfType<ITvPairing>())
+        {
+            pairing.UseCredentials(Credentials);
+            // The TV no longer takes this box's key (a Sony cookie expired, an LG or Samsung reset): say so.
+            pairing.PairingLost += tv => notices.PairAgain(tv.Name);
+        }
         driversOff = parts.Files.DriversOff();
         if (driversOff.Count > 0) Log.Info($"TV control methods turned off on this box: {string.Join(", ", driversOff)}");
     }
@@ -256,7 +261,7 @@ sealed class TvService
         CancelPairing();
         var cancel = pairCancel = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var channel = codes = System.Threading.Channels.Channel.CreateUnbounded<string>();
-        Pairing = new TvPairState(tv.Key, tv.Name, "working", $"Connecting to {tv.Name}…", 6);
+        Pairing = new TvPairState(tv.Key, tv.Name, "working", $"Connecting to {tv.Name}…", pairs.CodeLength);
         Changed?.Invoke();
         _ = Task.Run(async () =>
         {
@@ -265,20 +270,25 @@ sealed class TvService
             {
                 ok = await pairs.Pair(tv, (stage, message) =>
                 {
-                    Pairing = new TvPairState(tv.Key, tv.Name, stage, message, 6);
+                    Pairing = new TvPairState(tv.Key, tv.Name, stage, message, pairs.CodeLength);
                     Changed?.Invoke();
                 }, async c => { try { return await channel.Reader.ReadAsync(c); } catch (Exception) { return null; } }, cancel.Token);
             }
             catch (Exception e) { Log.Warn($"TV pairing with {tv.Name}: {e.GetType().Name}"); }
             Log.Info($"TV pairing with {tv.Name} ({tv.Method}): {(ok ? "paired" : "not paired")}");
             // Its MACs go only to the profile of that very TV (the screen may have changed during a 60 s prompt).
-            if (ok && Profile is { } profile && profile.Method == tv.Method && profile.DeviceId == tv.Id &&
-                await DriverFor(tv.Method)!.Refresh(tv, false, CancellationToken.None) is { } now)
+            try
             {
-                Found = Found.Select(t => t.Key == now.Key ? now : t).ToList();
-                Contact(profile, now); // its MACs, from the paired connection
+                if (ok) notices.PairedAgain(tv.Name);
+                if (ok && Profile is { } profile && profile.Method == tv.Method && profile.DeviceId == tv.Id &&
+                    await DriverFor(tv.Method)!.Refresh(tv, false, CancellationToken.None) is { } now)
+                {
+                    Found = Found.Select(t => t.Key == now.Key ? now : t).ToList();
+                    Contact(profile, now); // its MACs, from the paired connection
+                }
             }
-            if (!ok && Pairing?.Stage != "failed") Pairing = new TvPairState(tv.Key, tv.Name, "failed", "Not paired. Try again.", 6);
+            catch (Exception e) { Log.Warn($"TV after pairing with {tv.Name}: {e.GetType().Name}"); }
+            if (!ok && Pairing?.Stage != "failed") Pairing = new TvPairState(tv.Key, tv.Name, "failed", "Not paired. Try again.", pairs.CodeLength);
             Changed?.Invoke();
         });
     }
