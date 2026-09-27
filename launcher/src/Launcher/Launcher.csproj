@@ -13,12 +13,14 @@
     <AssemblyName>HtpcLauncher</AssemblyName>
     <RootNamespace>Htpc.Launcher</RootNamespace>
     <!-- The version is in Directory.Build.props (one number for the whole release). -->
-    <!-- Published for win-x64 only: named here so packages.lock.json covers that restore too. -->
+    <!-- Published for win-x64 only: named here so the lock file covers that restore too. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <!-- NuGet packages pinned by packages.lock.json for the published build (Release: what
-         Publish-Setup makes; the release restores it in locked mode). Debug builds leave it alone:
-         publishing self-contained adds packages a plain build does not. -->
+    <!-- NuGet packages pinned for the published build (Release: what Publish-Setup makes; the
+         release restores in locked mode). Its own file name: NuGet updates any packages.lock.json
+         it finds, and a Debug build (publishing self-contained adds a package it does not) would
+         keep rewriting it. -->
     <RestorePackagesWithLockFile Condition="'$(Configuration)' == 'Release'">true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath Condition="'$(Configuration)' == 'Release'">packages.release.lock.json</NuGetLockFilePath>
     <!-- The WebView2 package also carries its WPF control, whose WindowsBase reference
          conflicts with WinForms' copy. Harmless: the WPF control is not used. -->
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
