@@ -14,6 +14,8 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `src/Launcher/Tv.cs` | TV control (Roku ECP): found by SSDP, matched by EDID, one profile per TV; off/on with the box, follows the TV's own remote. |
 | `src/Launcher/KeyboardForm.cs`, `TextFieldWatcher.cs`, `ui/keyboard.*` | On-screen keyboard (SPEC N11): a band over the app that never takes the focus, so its keys (SendInput) land in the app's text field. Pops up when a text field gets the focus in an app on the Mouse or Keyboard preset (UI Automation focus events, only listened to while such an app is in front), R3 opens it anywhere but Moonlight. A type, X delete, Y space, LT shift, LB/RB move the cursor, Start Enter, Select shows a password, B closes (and it stays closed for that field). |
 | `src/Launcher/SetupRunner.cs`, `ui/setup.*` | Setup mode, "TV Box Setup" (`--setup`, or "setup" in the exe's name; design: First-run setup): welcome, controller check (each button once; Hold Home skips), find the TV, pick apps (they become the home tiles), install (setup\setup.ps1 with one Windows permission prompt, live progress from `setup-progress.json`), done; then the installed launcher takes over. |
+| `src/Launcher/SleepTimer.cs`, `MediaWatcher.cs`, `MainForm.Timer.cs` | Sleep timer (SPEC N14): a countdown or "when this video ends", warning 1 minute before (Home = +15 min). MediaWatcher reads Windows' media sessions only while needed (the timer, standby, the phone): what plays, its app, title, timeline; play/pause/next/seek; pauses anything that starts playing in standby. VideoEndDetector decides when "this video" has ended (autoplay moving on counts; a pause after 5 min; an ad does not; 3 h cap). `dev/Show-MediaSessions.ps1` lists what apps report (read-only). |
+| `src/Launcher/AlertsForm.cs`, `ui/alerts.*` | Alerts over apps (design: Alerts): cards at the top right in a window that never takes the focus, cut to the cards' shapes, above the brightness layer, hidden in standby. `Show(id, title, body, glyph, tone, key, action, timeout)`, `Hide(id)`. |
 | `src/Launcher/ButtonMap.cs`, `PadMapper.cs`, `Input.cs` | Button presets (SPEC N13): Mouse (Edge, Twitch, Stremio, websites; also any window that is not a catalog app) and Keyboard. Applied to the app in front on the controller thread, sent with SendInput. Controller preset = the app reads the pad itself. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
@@ -37,5 +39,5 @@ Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 ## Not built yet
 
 The button map editor (per-app changes to a preset), typing from the phone, the phone remote
-(and its setup step), "when this video ends", tile editing, the library (installing apps later),
-running as the shell with a watchdog, updates from GitHub releases.
+(and its setup step), tile editing, the library (installing apps later), running as the shell
+with a watchdog, updates from GitHub releases.
