@@ -216,6 +216,7 @@ settingsSection('sound', {
     return `<header><h1>Sound</h1><p>${esc(current ? `Sound plays through ${current.name}.` : 'Windows volume, for every app.')}</p></header>` +
       output +
       sliderRow('volume', 'Volume', 'Windows volume. Set the TV’s own volume once and leave it there.') +
+      soundsRow() +   // Interface sounds: Off, Low, Medium (sounds.js)
       '<div class="sbuttons"><div class="sbutton" data-nav data-id="snd-test" data-act="test-sound">Play a test sound</div></div>';
   },
   press(button, el) {

@@ -119,6 +119,13 @@ Console.WriteLine("== ButtonMapStore");
     var text = JsonSerializer.Serialize(withMaps, opts);
     var back = JsonSerializer.Deserialize<LauncherSettings>(text, opts)!;
     Check(JsonSerializer.Serialize(back.ButtonMaps) == JsonSerializer.Serialize(json), "LauncherSettings round trip keeps buttonMaps");
+
+    // Interface sounds (ui\sounds.js): Low unless set, also in a settings file from before them.
+    // (Set is not called here: it saves to the box's own settings.json.)
+    Check(new LauncherSettings().InterfaceSounds == "low", "interface sounds: Low by default");
+    Check(JsonSerializer.Deserialize<LauncherSettings>("{\"idleMinutes\": 15}", opts)!.InterfaceSounds == "low", "interface sounds: an older settings file gets Low");
+    Check(JsonSerializer.Deserialize<LauncherSettings>("{\"interfaceSounds\": \"off\"}", opts)!.InterfaceSounds == "off", "interface sounds: Off is kept");
+    Check(JsonSerializer.Serialize(new LauncherSettings { InterfaceSounds = "medium" }, opts).Contains("\"interfaceSounds\":\"medium\""), "interface sounds: reach the page as prefs.interfaceSounds");
 }
 
 // ---------------------------------------------------------------- PadMapper

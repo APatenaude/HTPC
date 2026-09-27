@@ -785,6 +785,7 @@ function back() {
 
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
+  if (typeof soundsHear === 'function') soundsHear(button);   // interface sounds (sounds.js): what this press does picks one
   const el = focusedEl();
   // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
   if (state.moving && EXT.actions['tile-move'] && EXT.actions['tile-move'](el, button)) return;
