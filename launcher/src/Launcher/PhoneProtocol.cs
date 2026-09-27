@@ -43,7 +43,10 @@ sealed record TimerCommand(int Minutes, bool UntilVideoEnds, bool Extend) : Phon
 sealed record PowerCommand(bool Sleep) : PhoneCommand;
 
 /// <summary>A pasted link (checked again by PhoneLinks before anything opens it).</summary>
-sealed record OpenCommand(string Url) : PhoneCommand;
+sealed record OpenCommand(string Url, bool Shared = false) : PhoneCommand;
+
+/// <summary>A paired phone asks for a Shortcut key (the server answers it itself).</summary>
+sealed record ShortcutKeyCommand : PhoneCommand;
 
 /// <summary>
 /// The phone remote's messages (JSON over the WebSocket; launcher\phone\phone.js is the other
@@ -107,7 +110,8 @@ static class PhoneProtocol
                 "timerExtend" => new TimerCommand(15, false, true),
                 "sleep" => new PowerCommand(true),
                 "wake" => new PowerCommand(false),
-                "open" => Str(m, "url") is { Length: > 0 and <= MaxUrl } url ? new OpenCommand(url) : null,
+                "open" => Str(m, "url") is { Length: > 0 and <= MaxUrl } url ? new OpenCommand(url, Bool(m, "share") == true) : null,
+                "shortcutKey" => new ShortcutKeyCommand(),
                 _ => null,
             };
         }

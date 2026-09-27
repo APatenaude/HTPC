@@ -51,6 +51,20 @@ static class PhoneLinks
         return new LinkTarget(LinkKind.Browser, uri);
     }
 
+    static readonly Regex LinkInText = new(@"https?://[^\s<>""]+", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The link in something shared: the text itself when it is one, else the first http(s) link
+    /// in it ("Look at this https://..." from an app's Share sheet), without trailing punctuation.
+    /// Null when there is none; Route still checks it.
+    /// </summary>
+    public static string? FindLink(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > PhoneProtocol.MaxUrl * 2) return null;
+        if (Route(text) is not null) return text.Trim();
+        var m = LinkInText.Match(text);
+        return m.Success ? m.Value.TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '\'', '"') : null;
+    }
     // youtu.be/ID, /watch?v=ID, /shorts/ID, /live/ID, /embed/ID, /v/ID.
     static string? FindVideoId(Uri uri, string host)
     {

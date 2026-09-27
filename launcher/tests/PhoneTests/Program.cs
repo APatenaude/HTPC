@@ -36,9 +36,10 @@ sealed class FakeHost : IPhoneHost
     public void HidePairingCode(bool paired) { Code = null; Events.Enqueue($"hide paired={paired}"); }
     public void PhonesChanged() { }
     public (byte[] Data, string ContentType)? Artwork() => Art;
+    public void OpenShared(string url) => Events.Enqueue("shared " + url);
 }
 
-static class Program
+static partial class Program
 {
     static int passed, failed;
 
@@ -61,6 +62,9 @@ static class Program
         Console.WriteLine("Pairing"); PairingTests();
         Console.WriteLine("Host and Origin"); HostTests();
         Console.WriteLine("Server"); await ServerTests();
+        Console.WriteLine("Certificates"); CertificateTests();
+        Console.WriteLine("HTTPS (a key in the user's key store for the test, deleted after)"); await HttpsTests();
+        Console.WriteLine("Share and the Shortcut"); await ShareTests();
         Console.WriteLine($"\n{passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;
     }

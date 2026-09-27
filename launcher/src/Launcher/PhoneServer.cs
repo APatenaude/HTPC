@@ -1,12 +1,15 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -35,6 +38,9 @@ interface IPhoneHost
 
     /// <summary>The current video's artwork, if there is one.</summary>
     (byte[] Data, string ContentType)? Artwork();
+
+    /// <summary>A link shared from a phone's Share sheet (the iPhone Shortcut): opened like a pasted one, waking the box. Any thread.</summary>
+    void OpenShared(string url);
 }
 
 /// <summary>One phone's open WebSocket.</summary>
@@ -105,8 +111,15 @@ sealed class PhoneClient
 /// for this run only. It listens on every address (IPv4 and IPv6); setup's
 /// firewall rule lets in the home network only (Private, local subnet).
 ///
+/// HTTPS (SPEC N9, for Android's installed app and Share target) on 443 as well, with the box's
+/// own certificates (PhoneCertificates); the same rules apply there. The CA's certificate is at
+/// /ca.crt for phones to install.
+///
 /// Every request must name the box in its Host header (tv.local, its name or one of its
 /// addresses); the WebSocket and the pairing calls must also come from our own page (Origin).
+/// One exception: /api/open, for the iPhone's Share-sheet Shortcut, which sends no Origin; it
+/// needs a Shortcut key instead (Settings › Phone remote can remove it), 4 KB at most, and
+/// takes 20 links a minute; 10 wrong keys in a minute close it for a minute.
 /// Messages are at most 4 KB; a phone that sends nothing for 15 s (it sends a heartbeat every
 /// 5 s) is dropped; at most 8 phones at once.
 /// </summary>
@@ -115,8 +128,14 @@ sealed class PhoneServer
     /// <summary>The ports tried, in order. Setup's firewall rule opens both.</summary>
     public static readonly int[] Ports = { 80, 8765 };
 
+    /// <summary>HTTPS (setup's firewall rule opens it too).</summary>
+    public const int HttpsPort = 443;
+
     public const int MaxPhones = 8;
     public const string CookieName = "htpc_phone";
+    const string ShareCookie = "htpc_share";
+    static readonly TimeSpan ShareTicketLife = TimeSpan.FromSeconds(60);
+    const int OpenPerMinute = 20, WrongKeysPerMinute = 10;
     static readonly TimeSpan Silence = TimeSpan.FromSeconds(15);
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     static readonly Regex Code = new(@"^[0-9]{4}\z");
@@ -130,14 +149,20 @@ sealed class PhoneServer
 
     // Our page loads only its own files; it may probe tv.local from the IP address it was opened on.
     const string Policy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-        "font-src 'self'; connect-src 'self' ws: http://tv.local:*; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+        "font-src 'self'; connect-src 'self' ws: wss: http://tv.local:* https://tv.local:*; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
     readonly IPhoneHost host;
     readonly string root;
     readonly PhonePairing pairing;
     readonly IPAddress? bindTo;
     readonly List<PhoneClient> clients = new();
-    WebApplication? app;
+    readonly PhoneCertificates? certificates;
+    readonly Func<DateTime> now;
+    readonly Dictionary<string, DateTime> shareTickets = new();   // hashed, until when
+    readonly Queue<DateTime> opens = new(), wrongKeys = new();   // /api/open, the last minute
+    DateTime openClosedUntil;
+    System.Threading.Timer? renewTimer;
+    WebApplication? app, secureApp;
     byte[] stateJson = "{}"u8.ToArray();
 
     public HostAllowlist Allowed { get; }
@@ -145,11 +170,21 @@ sealed class PhoneServer
     /// <summary>The port it listens on; 0 before it started (or when no port was free).</summary>
     public int Port { get; private set; }
 
+    /// <summary>The HTTPS port it listens on; 0 without HTTPS (no certificate, or the port taken).</summary>
+    public int SecurePort { get; private set; }
+
+    /// <summary>The CA's certificate for phones to install (null without HTTPS).</summary>
+    public X509Certificate2? Authority => certificates?.Authority;
+
     /// <param name="root">The web app's folder (launcher\phone next to the exe).</param>
     /// <param name="bindTo">Tests: listen on this address only. Null: every address.</param>
-    public PhoneServer(IPhoneHost host, string root, PhonePairing pairing, IPAddress? bindTo = null, IEnumerable<string>? extraNames = null)
+    /// <param name="certificates">HTTPS; null: HTTP only.</param>
+    public PhoneServer(IPhoneHost host, string root, PhonePairing pairing, IPAddress? bindTo = null, IEnumerable<string>? extraNames = null,
+        PhoneCertificates? certificates = null, Func<DateTime>? clock = null)
     {
         this.host = host;
+        this.certificates = certificates;
+        now = clock ?? (() => DateTime.Now);
         this.root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         this.pairing = pairing;
         this.bindTo = bindTo;
@@ -166,7 +201,15 @@ sealed class PhoneServer
     /// start tries 80 again, so the remote is back at plain http://tv.local as soon as it can be.
     /// </summary>
     /// <param name="ports">Tests: these ports, once each.</param>
-    public async Task<int> StartAsync(IReadOnlyList<int>? ports = null)
+    /// <param name="securePort">Tests: the HTTPS port.</param>
+    public async Task<int> StartAsync(IReadOnlyList<int>? ports = null, int securePort = HttpsPort)
+    {
+        var port = await StartHttp(ports);
+        if (port != 0 && certificates is not null) await StartHttps(securePort);
+        return port;
+    }
+
+    async Task<int> StartHttp(IReadOnlyList<int>? ports)
     {
         var order = ports ?? Ports;
         foreach (var port in order)
@@ -198,16 +241,54 @@ sealed class PhoneServer
         Log.Error($"Phone remote: none of the ports {string.Join(", ", order)} could be used");
         return 0;
     }
+    /// <summary>HTTPS beside HTTP; when it cannot start (no certificate, port taken), HTTP carries on alone.</summary>
+    async Task StartHttps(int port)
+    {
+        try
+        {
+            RenewCertificate();
+            if (certificates!.Current is null) return;
+            var candidate = Build(port, secure: true);
+            await candidate.StartAsync();
+            secureApp = candidate;
+            SecurePort = port;
+            Allowed.SecurePort = port;
+            // A month before it ends, the server certificate is made again (addresses changing do it at once).
+            renewTimer = new System.Threading.Timer(_ => RenewCertificate(), null, TimeSpan.FromHours(6), TimeSpan.FromHours(6));
+            Log.Info($"Phone remote: HTTPS on port {port}");
+        }
+        catch (Exception e) { Log.Warn($"Phone remote: no HTTPS ({(e.InnerException ?? e).Message})"); }
+    }
+
+    /// <summary>Tests: the addresses the certificate names (else the box's own private addresses).</summary>
+    public Func<IEnumerable<IPAddress>> Addresses { get; set; } = PhoneNetwork.LocalAddresses;
+
+    /// <summary>A server certificate for the box's names and its private addresses as they are now.</summary>
+    public void RenewCertificate()
+    {
+        if (certificates is null) return;
+        try { certificates.Ensure(PhoneCertificates.LocalNames(), Addresses()); }
+        catch (Exception e) { Log.Error("Phone remote: HTTPS certificate", e); }
+    }
+
     public async Task StopAsync()
     {
         NetworkChange.NetworkAddressChanged -= OnAddressChanged;
+        renewTimer?.Dispose();
         foreach (var c in Clients) c.Abort();
-        if (app is not null) { await app.StopAsync(); await app.DisposeAsync(); app = null; }
+        foreach (var web in new[] { app, secureApp })
+            if (web is not null) { await web.StopAsync(); await web.DisposeAsync(); }
+        app = secureApp = null;
     }
 
-    void OnAddressChanged(object? sender, EventArgs e) => Allowed.Rebuild();
+    void OnAddressChanged(object? sender, EventArgs e)
+    {
+        Allowed.Rebuild();
+        // The box got a new address (no DHCP reservation): a certificate that names it, at once.
+        if (SecurePort != 0) Task.Run(RenewCertificate);
+    }
 
-    WebApplication Build(int port)
+    WebApplication Build(int port, bool secure = false)
     {
         // The bare minimum: no configuration sources (so ASPNETCORE_URLS and the like are
         // ignored), no logging providers (the launcher's own log says what matters), no routing.
@@ -221,7 +302,8 @@ sealed class PhoneServer
             k.Limits.MaxConcurrentConnections = 64;
             k.Limits.MaxConcurrentUpgradedConnections = MaxPhones + 2;
             k.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(10);
-            if (bindTo is null) k.ListenAnyIP(port); else k.Listen(bindTo, port);
+            void Https(ListenOptions o) { if (secure) o.UseHttps(h => h.ServerCertificateSelector = (_, _) => certificates!.Current); }
+            if (bindTo is null) k.ListenAnyIP(port, Https); else k.Listen(bindTo, port, Https);
         });
         builder.Services.AddLogging();
         builder.Logging.ClearProviders();
@@ -256,6 +338,8 @@ sealed class PhoneServer
                 case "/api/pair/start": await PairStart(ctx); break;
                 case "/api/pair": await Pair(ctx); break;
                 case "/art": await Art(ctx); break;
+                case "/ca.crt": await ServeAuthority(ctx); break;
+                case "/api/open": await OpenShared(ctx); break;
                 default: await StaticFile(ctx); break;
             }
         }
@@ -283,7 +367,10 @@ sealed class PhoneServer
         var request = ctx.Request;
         if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)) { ctx.Response.StatusCode = 405; return; }
         var path = request.Path.Value ?? "/";
-        if (path == "/") path = "/index.html";
+        // The page answers at / and at /send (how to send links from other apps) and /share
+        // (Android's Share target); a share straight from the Share sheet gets a ticket.
+        if (path is "/share") IssueShareTicket(ctx);
+        if (path is "/" or "/send" or "/share") path = "/index.html";
         // Only plain paths inside the folder: no "..", backslashes, drive letters or hidden files.
         if (path.Length > 100 || path.Contains("..") || path.Contains('\\') || path.Contains(':') || path.Contains("//") || path.Contains("/."))
         {
@@ -382,6 +469,103 @@ sealed class PhoneServer
         }
     }
 
+    // --- HTTPS, Share ----------------------------------------------------------------------------
+
+    /// <summary>The CA's certificate (public), for Android: Settings › Encryption & credentials › Install a certificate.</summary>
+    async Task ServeAuthority(HttpContext ctx)
+    {
+        if (Authority is not { } ca) { ctx.Response.StatusCode = 404; return; }
+        if (!HttpMethods.IsGet(ctx.Request.Method)) { ctx.Response.StatusCode = 405; return; }
+        ctx.Response.ContentType = "application/x-x509-ca-cert";
+        ctx.Response.Headers.ContentDisposition = "attachment; filename=\"tv-box.crt\"";
+        ctx.Response.Headers.CacheControl = "no-cache";
+        await ctx.Response.Body.WriteAsync(ca.RawData);
+    }
+
+    /// <summary>
+    /// /share opened by the phone itself (Share sheet, typed, bookmark: Sec-Fetch-Site "none"),
+    /// not by a link on some web page: a one-time ticket (60 s, in a cookie) lets the page play the
+    /// shared link without asking. Opened from anywhere else, the page asks first.
+    /// </summary>
+    void IssueShareTicket(HttpContext ctx)
+    {
+        if (ctx.Request.Headers["Sec-Fetch-Site"] != "none") return;
+        var ticket = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        lock (shareTickets)
+        {
+            foreach (var old in shareTickets.Where(s => s.Value <= now()).Select(s => s.Key).ToList()) shareTickets.Remove(old);
+            shareTickets[Hash(ticket)] = now() + ShareTicketLife;
+        }
+        ctx.Response.Cookies.Append(ShareCookie, ticket, new CookieOptions
+        {
+            HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/", MaxAge = ShareTicketLife, IsEssential = true,
+        });
+    }
+
+    bool TakeShareTicket(HttpContext ctx)
+    {
+        if (ctx.Request.Cookies[ShareCookie] is not { Length: > 0 and <= 64 } ticket) return false;
+        lock (shareTickets) return shareTickets.Remove(Hash(ticket), out var until) && until > now();
+    }
+
+    static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    /// <summary>A paired phone asks for a Shortcut key (iPhone: Share › Send to TV). Shown once, on that phone.</summary>
+    void NewShortcutKey(PhoneClient client)
+    {
+        if (pairing.NewShortcut(client.Name) is not { } token)
+        {
+            Send(client, new { t = "toast", text = "Ten Shortcut keys already: remove one in Settings › Phone remote on the TV", kind = "warn" });
+            return;
+        }
+        var suffix = Port is 0 or 80 ? "" : $":{Port}";
+        Send(client, new { t = "shortcutKey", token, url = $"http://tv.local{suffix}/api/open" });
+        host.PhonesChanged();
+    }
+
+    /// <summary>
+    /// POST /api/open, for the iPhone's Shortcut: {"url": "..."} (or text with a link in it) and
+    /// "Authorization: Bearer <key>". No Origin (a Shortcut sends none): the key is what counts.
+    /// </summary>
+    async Task OpenShared(HttpContext ctx)
+    {
+        if (!HttpMethods.IsPost(ctx.Request.Method)) { ctx.Response.StatusCode = 405; return; }
+        lock (opens)
+        {
+            var t = now();
+            while (opens.Count > 0 && t - opens.Peek() > TimeSpan.FromMinutes(1)) opens.Dequeue();
+            while (wrongKeys.Count > 0 && t - wrongKeys.Peek() > TimeSpan.FromMinutes(1)) wrongKeys.Dequeue();
+            if (t < openClosedUntil || opens.Count >= OpenPerMinute) { ctx.Response.StatusCode = 429; return; }
+            opens.Enqueue(t);
+        }
+        var auth = ctx.Request.Headers.Authorization.ToString();
+        var key = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : "";
+        if (pairing.FindShortcut(key) is not { } shortcut)
+        {
+            lock (opens)
+            {
+                wrongKeys.Enqueue(now());
+                if (wrongKeys.Count >= WrongKeysPerMinute) { openClosedUntil = now().AddMinutes(1); Log.Warn("Phone remote: wrong Shortcut keys, /api/open closed for a minute"); }
+            }
+            ctx.Response.Headers.WWWAuthenticate = "Bearer";
+            await Reply(ctx, 401, new { error = "key" });
+            return;
+        }
+        string? text = null;
+        try
+        {
+            using var doc = await JsonDocument.ParseAsync(ctx.Request.Body, default, ctx.RequestAborted);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String)
+                text = u.GetString();
+        }
+        catch (JsonException) { }
+        catch (Microsoft.AspNetCore.Http.BadHttpRequestException) { ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge; return; } // over 4 KB
+        if (PhoneLinks.FindLink(text) is not { } url) { await Reply(ctx, 400, new { error = "url" }); return; }
+        pairing.Seen(shortcut);
+        host.OpenShared(url);
+        await Reply(ctx, 200, new { ok = true });
+    }
+
     static void SetCookie(HttpContext ctx, string token) =>
         ctx.Response.Cookies.Append(CookieName, token, new CookieOptions
         {
@@ -400,7 +584,9 @@ sealed class PhoneServer
 
         using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
         var client = new PhoneClient(socket, phone, PhonePairing.NameFrom(ctx.Request.Headers.UserAgent));
-        await client.Send(Serialize(new { t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = allowed ? RawState() : (JsonElement?)null }));
+        // Straight from the Share sheet (a ticket from /share): the page may play the shared link at once.
+        var shared = allowed && TakeShareTicket(ctx);
+        await client.Send(Serialize(new { t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = allowed ? RawState() : (JsonElement?)null, share = shared }));
         if (!allowed)
         {
             // Not paired: the page shows the pairing screen and connects again once paired.
@@ -452,6 +638,7 @@ sealed class PhoneServer
                 if (result.MessageType != WebSocketMessageType.Text) continue;
                 // A message that does not check out is dropped (and never logged: it may be typed text).
                 if (PhoneProtocol.Parse(buffer.AsMemory(0, count)) is not { } command) continue;
+                if (command is ShortcutKeyCommand) { NewShortcutKey(client); continue; }
                 try { host.OnCommand(client, command); }
                 catch (Exception e) { Log.Error($"Phone remote: handling {command.GetType().Name}", e); }
             }

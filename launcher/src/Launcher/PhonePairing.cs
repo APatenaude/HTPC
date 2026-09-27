@@ -12,6 +12,9 @@ sealed class PairedPhone
     public string TokenHash { get; set; } = "";
     public DateTime Paired { get; set; }
     public DateTime LastSeen { get; set; }
+
+    /// <summary>A Shortcut key (iPhone: Share › Send to TV, /api/open), not a phone's remote cookie: the two never stand in for each other.</summary>
+    public bool Shortcut { get; set; }
 }
 
 enum PairOutcome { Paired, Wrong, NoCode, Locked }
@@ -199,7 +202,19 @@ sealed class PhonePairing
         }
     }
 
-    (string Token, PairedPhone Phone) Add(string name)
+    public const int MaxShortcuts = 10;
+
+    /// <summary>A new Shortcut key for a paired phone (null: 10 already, Settings removes them). Its token shows once.</summary>
+    public string? NewShortcut(string phoneName)
+    {
+        lock (gate)
+        {
+            if (data.Phones.Count(p => p.Shortcut) >= MaxShortcuts) return null;
+            return Add($"{phoneName} Shortcut", shortcut: true).Token;
+        }
+    }
+
+    (string Token, PairedPhone Phone) Add(string name, bool shortcut = false)
     {
         var token = Base64Url(RandomNumberGenerator.GetBytes(32));
         var taken = data.Phones.Select(p => p.Name).ToHashSet();
@@ -208,23 +223,31 @@ sealed class PhonePairing
         var phone = new PairedPhone
         {
             Id = Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-            Name = unique, TokenHash = Hash(token), Paired = now(), LastSeen = now(),
+            Name = unique, TokenHash = Hash(token), Paired = now(), LastSeen = now(), Shortcut = shortcut,
         };
         data.Phones.Add(phone);
-        wrong = 0;
-        lockout = FirstLockout;
+        if (!shortcut) { wrong = 0; lockout = FirstLockout; }
         Save();
         Log.Info($"Phone paired: {phone.Name} ({phone.Id})");
         return (token, phone);
     }
 
     /// <summary>The paired phone with this token (from its cookie), if any.</summary>
-    public PairedPhone? Find(string? token)
+    public PairedPhone? Find(string? token) => Find(token, shortcut: false);
+
+    /// <summary>The Shortcut key with this token (from /api/open's Authorization header), if any.</summary>
+    public PairedPhone? FindShortcut(string? token) => Find(token, shortcut: true);
+
+    // Compared hash by hash, every one in constant time.
+    PairedPhone? Find(string? token, bool shortcut)
     {
         if (string.IsNullOrEmpty(token) || token.Length > 100) return null;
-        var hash = Hash(token);
-        lock (gate) return data.Phones.FirstOrDefault(p => CryptographicOperations.FixedTimeEquals(
-            Encoding.ASCII.GetBytes(p.TokenHash), Encoding.ASCII.GetBytes(hash)));
+        var hash = Encoding.ASCII.GetBytes(Hash(token));
+        PairedPhone? found = null;
+        lock (gate)
+            foreach (var p in data.Phones)
+                if (CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(p.TokenHash), hash) && p.Shortcut == shortcut) found = p;
+        return found;
     }
 
     /// <summary>The phone connected: "last used" in Settings (saved at most once an hour per phone).</summary>

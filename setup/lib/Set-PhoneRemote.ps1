@@ -6,7 +6,7 @@
 .DESCRIPTION
     Windows Firewall rules (group "HTPC"), one per program and network type:
       - the launcher (the phone remote at http://tv.local): TCP 80 and 8765 (its fallback
-        port), allowed from the local subnet on Private networks;
+        port), and 443 (HTTPS, for Android's installed app and Share), allowed from the local subnet on Private networks;
       - the programs in catalog.json's install.allowInbound (VacuumTube: the YouTube app's cast
         button finds it over SSDP and talks to it on a port it picks), allowed the same way on
         any port.
@@ -33,7 +33,7 @@ param(
 Assert-Admin
 
 $Group = 'HTPC'
-$RemotePorts = @('80', '8765')   # PhoneServer.Ports in the launcher
+$RemotePorts = @('80', '8765', '443')   # PhoneServer.Ports and HttpsPort in the launcher
 $Installed = Join-Path $env:ProgramFiles 'HTPC\Launcher\HtpcLauncher.exe'
 
 # One inbound rule, made or brought in line with what is wanted (compared field by field).

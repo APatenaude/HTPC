@@ -31,6 +31,7 @@ const ICONS = {
   wifi: 'M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h0',
   bluetooth: 'M7 7l10 10-5 4V3l5 4L7 17',
   phone: 'M7 2h10v20H7zM11 18.5h2',
+  share: 'M12 3v12M8 7l4-4 4 4M5 11v9h14v-9',
   chevleft: 'M15 5l-7 7 7 7',
   chevright: 'M9 5l7 7-7 7',
   move: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3',
