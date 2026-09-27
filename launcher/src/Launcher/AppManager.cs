@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Htpc.Launcher;
 
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
-    string Glyph, string Color, string? Exe, string? Args, bool Installable, bool AsUser);
+    string Glyph, string Color, string? Exe, string? Args, bool Installable, bool AsUser, bool Fill);
 
 /// <summary>
 /// The catalog's apps: starts them, tracks the ones running, finds their windows and closes them.
@@ -46,7 +46,8 @@ sealed class AppManager
                 launch.ValueKind == JsonValueKind.Object ? Str(launch, "exe") : null,
                 launch.ValueKind == JsonValueKind.Object ? Str(launch, "args") : null,
                 install.ValueKind == JsonValueKind.Object,
-                install.ValueKind == JsonValueKind.Object && install.TryGetProperty("asUser", out var u) && u.ValueKind == JsonValueKind.True));
+                install.ValueKind == JsonValueKind.Object && install.TryGetProperty("asUser", out var u) && u.ValueKind == JsonValueKind.True,
+                launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("fill", out var fill) && fill.ValueKind == JsonValueKind.True));
         }
         byId = apps.ToDictionary(a => a.Id);
         All = apps;

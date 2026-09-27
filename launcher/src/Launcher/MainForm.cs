@@ -61,6 +61,11 @@ sealed class MainForm : Form
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
+        closeSoon.Tick += (_, _) =>
+        {
+            closeSoon.Stop();
+            if (keyboard.Visible && keyboardAuto) CloseKeyboard("the text field lost the focus");
+        };
         textFields.FocusChanged += field => BeginInvoke(() => OnTextField(field));
         controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
         controller.StatusChanged += (connected, _) => BeginInvoke(() =>
@@ -357,21 +362,29 @@ sealed class MainForm : Form
 
     // --- On-screen keyboard --------------------------------------------------------------------
 
+    readonly System.Windows.Forms.Timer closeSoon = new() { Interval = 500 };
+
+    static bool SameField(TextField? a, TextField? b) =>
+        a is not null && b is not null && a.ProcessId == b.ProcessId && a.Name == b.Name && a.IsPassword == b.IsPassword;
+
     void OnTextField(TextField? field)
     {
         if (field is null)
         {
             dismissedField = null;
-            if (keyboard.Visible && keyboardAuto) CloseKeyboard("the text field lost the focus");
+            // Not at once: a suggestion list (Edge's address bar, a site's search box) or a page
+            // update takes the focus for an instant and gives it back, and the keyboard flickered.
+            if (keyboard.Visible && keyboardAuto) closeSoon.Start();
             return;
         }
+        closeSoon.Stop();
         lastField = field;
         if (dismissedField is { } d && d.ProcessId == field.ProcessId && d.Name == field.Name) return;
         if (standby.Active || LauncherActive || !textFields.Enabled) return;
         // Someone typing on a real keyboard needs no keyboard on screen: it pops up by itself
         // only while the controller is in use. (R3 still opens it.)
         if (DateTime.Now - controller.LastActivity > TimeSpan.FromMinutes(1)) return;
-        if (keyboard.Visible && keyboardField == field) return;
+        if (keyboard.Visible && SameField(keyboardField, field)) return; // still typing there
         OpenKeyboard(field, auto: true);
     }
 
@@ -386,6 +399,7 @@ sealed class MainForm : Form
 
     void CloseKeyboard(string reason)
     {
+        closeSoon.Stop();
         keyboard.Dismiss(reason);
         keyboardAuto = false;
     }
@@ -517,6 +531,7 @@ sealed class MainForm : Form
             if (!apps.IsRunning(id)) { Post(new { type = "opened", id, ok = false, text = $"{name} closed right away" }); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
+            if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
             Native.ForceForeground(window);
             StepAside();
             Post(new { type = "opened", id, ok = true });
@@ -530,6 +545,7 @@ sealed class MainForm : Form
     {
         var window = apps.MainWindow(id);
         if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
+        if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
         Native.ForceForeground(window);
         StepAside();
     }

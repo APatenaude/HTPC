@@ -29,6 +29,34 @@ static class Native
     /// button pressed while an app has focus). Windows refuses plain SetForegroundWindow then,
     /// so borrow the foreground thread's input state, and fall back to a synthetic Alt tap.
     /// </summary>
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>
+    /// Makes another program's window cover its whole screen without a frame or title bar
+    /// ("borderless full screen"), for apps that cannot be told to start full screen (Stremio).
+    /// Windows then treats it as a full-screen app: the taskbar stays out of the way.
+    /// </summary>
+    public static void FillScreen(IntPtr hWnd)
+    {
+        const int GWL_STYLE = -16, SW_RESTORE = 9;
+        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_SYSMENU = 0x00080000,
+            WS_MINIMIZEBOX = 0x00020000, WS_MAXIMIZEBOX = 0x00010000;
+        const uint SWP_NOZORDER = 0x4, SWP_NOOWNERZORDER = 0x200, SWP_FRAMECHANGED = 0x20;
+        var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+        var frameless = style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+        var screen = Screen.FromHandle(hWnd).Bounds;
+        if (frameless == style && GetWindowRect(hWnd, out var r) && r.Left == screen.Left && r.Top == screen.Top
+            && r.Right == screen.Right && r.Bottom == screen.Bottom) return; // already
+        if (IsIconic(hWnd) || (style & 0x01000000) != 0) ShowWindow(hWnd, SW_RESTORE); // minimized or maximized: normal first
+        SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)frameless);
+        SetWindowPos(hWnd, IntPtr.Zero, screen.X, screen.Y, screen.Width, screen.Height, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+
     public static void ForceForeground(IntPtr hWnd)
     {
         if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE); else ShowWindow(hWnd, SW_SHOW);

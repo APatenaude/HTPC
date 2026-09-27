@@ -34,7 +34,7 @@
       "default": true,
       "preset": "mouse",
       "icon": { "glyph": "film", "color": "#7C8CFF" },
-      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe" },
+      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe", "fill": true },
       "install": { "source": "winget", "id": "Stremio.Stremio.Beta", "blockInbound": [ "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-runtime.exe" ] }
     },
     {
@@ -66,7 +66,7 @@
       "icon": { "glyph": "globe", "color": "#3CCB9A" },
       "launch": {
         "exe": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
-        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-maximized --no-first-run --no-default-browser-check"
+        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-fullscreen --no-first-run --no-default-browser-check"
       },
       "install": { "source": "builtin" }
     },
