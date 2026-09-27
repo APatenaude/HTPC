@@ -16,7 +16,7 @@ const out = [];
 let failed = 0;
 function check(ok, what) { if (!ok) failed++; out.push(`${ok ? 'PASS' : 'FAIL'}  ${what}`); }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const { diff, typeMessages, graphemes, Gestures, clock } = PhoneLogic;
+const { diff, typeMessages, graphemes, Gestures, clock, timeline } = PhoneLogic;
 
 // Live typing.
 check(same(diff('', 'hello'), { back: 0, text: 'hello' }), 'typing at the end');
@@ -79,6 +79,13 @@ check(same(g.up(1, 400), []), 'a slow tap (400 ms) is no click');
 
 check(clock(65) === '1:05' && clock(3725) === '1:02:05' && clock(NaN) === '0:00', 'clock');
 
+// Playing: live streams show LIVE, no bar, no seeking.
+check(same(timeline({ duration: 3062, canSeek: true }), { live: false, bar: true, seek: true }), 'a video: the bar, seekable');
+check(same(timeline({ duration: 3062, canSeek: false }), { live: false, bar: true, seek: false }), 'a video the app will not seek: the bar only');
+check(same(timeline({ duration: 0, live: true, canSeek: true }), { live: true, bar: false, seek: false }), 'live (the box says so): LIVE, no bar, no seeking');
+check(same(timeline({ duration: 14400, live: true, canSeek: true }), { live: true, bar: false, seek: false }), 'live with a growing length: still no bar');
+check(same(timeline({ duration: 0 }), { live: true, bar: false, seek: false }), 'no length known: treated as live');
+check(same(timeline(null), { live: false, bar: true, seek: false }), 'nothing playing: the empty bar, no badge');
 out.push(failed ? `${failed} FAILED` : 'ALL PASSED');
 document.getElementById('results').textContent = out.join('\n');
 </script>

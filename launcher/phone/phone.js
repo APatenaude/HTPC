@@ -4,7 +4,7 @@
 // one WebSocket; the launcher decides where each button goes (the TV's own screens, the
 // on-screen keyboard or the app in front). Messages: PhoneProtocol.cs.
 //
-// ?demo=remote|arrows|type|playing|pair|asleep|sleep|timer shows a screen with made-up data and
+// ?demo=remote|link|arrows|type|playing|live|pair|asleep|sleep|timer shows a screen with made-up data and
 // no box (screenshots). It sends nothing.
 
 const PROTOCOL = 1;
@@ -252,9 +252,14 @@ function renderPlaying() {
   const m = state.box.media;
   $('media-title').textContent = m ? (m.title || 'Playing') : 'Nothing playing';
   $('media-sub').textContent = m ? (m.subtitle || '') : 'Buttons still work: they reach whatever plays on the TV.';
-  const duration = m && m.duration > 0 ? m.duration : 0;
+  // A live stream (or one of unknown length): a LIVE badge instead of the timeline, no seeking.
+  const line = PhoneLogic.timeline(m);
+  $('seek-wrap').hidden = !line.bar;
+  $('live').hidden = !line.live;
+  $('back10').disabled = $('fwd10').disabled = line.live;
+  const duration = m && line.bar ? m.duration : 0;
   const seek = $('seek');
-  seek.disabled = !m || !m.canSeek || !duration;
+  seek.disabled = !line.seek;
   if (!sliderBusy('seek')) {
     seek.max = String(Math.max(1, Math.round(duration)));
     seek.value = String(Math.round(mediaPosition(m)));
@@ -494,14 +499,44 @@ pressable($('tab'), () => { syncText(); key('tab'); startOver(); });
 pressable($('shift-tab'), () => { syncText(); key('shiftTab'); startOver(); });
 $('kbd-space').addEventListener('click', () => text.focus());
 
-$('link-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const url = $('link').value.trim();
-  if (!url) { $('link').focus(); return; }
-  send({ t: 'open', url: url.slice(0, 2048) });
-  $('link').value = '';
-  $('link').blur();
+// ---- Send a link (Remote tab) -------------------------------------------------------------------
+// A field and Paste; once it holds something, Send (one tap). The box finds the link in what was
+// pasted and opens it where it belongs. Reading the clipboard takes HTTPS (Android's secure
+// remote); over plain HTTP (iPhone) Paste puts the cursor in the field, where the phone's own
+// Paste is one more tap.
+const linkNote = 'YouTube opens in YouTube, Twitch in Twitch, anything else in the Browser.';
+function syncLinkbar() {
+  const has = $('linkbar-url').value.trim() !== '';
+  $('linkbar-paste').hidden = has;
+  $('linkbar-send').hidden = !has;
+  if (has) $('linkbar-note').textContent = linkNote;
+}
+$('linkbar-url').addEventListener('input', syncLinkbar);
+$('linkbar-paste').addEventListener('click', async () => {
+  const field = $('linkbar-url');
+  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      const pasted = (await navigator.clipboard.readText()).trim();
+      if (pasted) { field.value = pasted.slice(0, 2048); syncLinkbar(); $('linkbar-send').focus(); return; }
+      toast('Nothing to paste: copy a link first');
+      return;
+    } catch (e) { /* not allowed: the phone's own Paste below */ }
+  }
+  field.focus();
+  $('linkbar-note').textContent = 'Now tap the field and choose Paste.';
 });
+$('linkbar').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const field = $('linkbar-url');
+  const url = field.value.trim();
+  if (!url) { field.focus(); return; }
+  send({ t: 'open', url: url.slice(0, 2048) });
+  toast('Sent to the TV');
+  field.value = '';
+  field.blur();
+  syncLinkbar();
+});
+$('linkbar-more').addEventListener('click', () => openSend());
 
 // ---- Playing ------------------------------------------------------------------------------------------
 
@@ -765,6 +800,12 @@ function runDemo(view) {
   state.pad = view === 'arrows' ? 'arrows' : 'touchpad';
   state.tab = { type: 'type', playing: 'playing', timer: 'playing' }[view] || 'remote';
   if (view === 'playing' || view === 'timer') box.timer = { label: '30 min', endsAt: Date.now() + 24 * 60000, left: 24 * 60 };
+  if (view === 'live') {
+    state.tab = 'playing';
+    box.app = 'Twitch';
+    box.media = { app: 'Twitch', title: 'Speedrunning the classics, day 3', subtitle: 'streamer_name', playing: true, position: 0, duration: 0, live: true, art: 0, canSeek: false, canNext: false, canPrevious: false };
+  }
+  if (view === 'link') $('linkbar-url').value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
   if (view === 'type') text.value = 'severance';
   if (view === 'asleep') box.standby = true;
   state.receivedAt = Date.now();
@@ -779,6 +820,7 @@ function runDemo(view) {
   if (view === 'sendkey') onBox({ t: 'shortcutKey', token: 'demo-Qm9vc3RlZC1kZW1vLWtleS1ub3QtcmVhbA', url: 'http://tv.local/api/open' });
   if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
   if (view === 'lost') $('lost').hidden = false;
+  syncLinkbar();
 }
 
 boot();

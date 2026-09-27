@@ -132,13 +132,17 @@ sealed class PhoneCertificates
     volatile X509Certificate2? server;
     volatile SslStreamCertificateContext? context;
 
-    /// <param name="name">The start of the CAs' names: "TV box (TV)"; tests: their own, to find and remove what they made.</param>
-    public PhoneCertificates(string folder, IKeyStore keys, Func<DateTime>? clock = null, string? name = null)
+    /// <summary>The start of this box's CA names, "TV box (TV)": the launcher's only.</summary>
+    public static string BoxName => $"TV box ({Environment.MachineName})";
+
+    /// <param name="name">The start of the CAs' names: <see cref="BoxName"/>; tests pass their own (never the box's, whose
+    /// intermediates Windows keeps in its CA stores), to find and remove what they made.</param>
+    public PhoneCertificates(string folder, IKeyStore keys, string name, Func<DateTime>? clock = null)
     {
         this.folder = folder;
         this.keys = keys;
+        this.name = name;
         now = clock ?? (() => DateTime.Now);
-        this.name = name ?? $"TV box ({Environment.MachineName})";
     }
 
     /// <summary>The server certificate, with its key (null until Ensure made one).</summary>
@@ -186,6 +190,7 @@ sealed class PhoneCertificates
         {
             var dns = names.Select(n => n.ToLowerInvariant().TrimEnd('.')).Where(n => n.EndsWith(".local")).Distinct().ToList();
             var ips = addresses.Where(IsPrivate).Distinct().OrderBy(a => a.ToString()).ToList();
+            // The first Ensure of every start: load (or make) the pair, then clear what older ones left.
             if (root is null || intermediate is null)
             {
                 LoadOrCreateAuthorities(dns);
@@ -286,45 +291,71 @@ sealed class PhoneCertificates
             }
             var oldCert = Path.Combine(folder, "ca.cer");
             if (File.Exists(oldCert)) File.Delete(oldCert);
-            var removed = RemoveIntermediates(name, intermediate?.Thumbprint);
-            if (removed > 0) Log.Info($"Phone remote: {removed} older intermediate certificate(s) of this box removed from the CA store");
+            if (intermediate is not null) RemoveIntermediates(name, intermediate.Thumbprint);
         }
         catch (Exception e) { Log.Warn($"Phone remote: cleaning up older certificates: {e.Message}"); }
     }
 
     /// <summary>
-    /// Removes this box's intermediates (CN "&lt;name&gt; phone remote", O=HTPC TV box) but the one to
-    /// keep from the user's CA store, and from the machine's where allowed. Returns how many went.
+    /// Removes this box's intermediates (CN "&lt;name&gt; phone remote" and O=HTPC TV box, in either
+    /// order) but the one to keep. The user's CA store also lists the machine's entries (Windows
+    /// merges them in); those can only go from the machine's store, which takes administrator
+    /// rights. Without them (the launcher as installed; machine: false acts so) they stay, and the
+    /// log says how many: test runs as administrator left some on the box. Logs what went where.
     /// </summary>
-    public static int RemoveIntermediates(string name, string? keep)
+    public static (int Removed, int Stuck) RemoveIntermediates(string name, string? keep, bool machine = true)
     {
-        var removed = 0;
-        foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+        bool Old(X509Certificate2 c) => c.Thumbprint != keep && IsOurs(c, $"{name} phone remote");
+        var inMachine = new HashSet<string>();
+        try
         {
+            using var read = new X509Store(StoreName.CertificateAuthority, StoreLocation.LocalMachine);
+            read.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+            foreach (var c in read.Certificates) if (Old(c)) inMachine.Add(c.Thumbprint);
+        }
+        catch (CryptographicException) { }
+        var removed = 0;
+        foreach (var location in machine ? new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine } : new[] { StoreLocation.CurrentUser })
+        {
+            var here = 0;
             try
             {
                 using var store = new X509Store(StoreName.CertificateAuthority, location);
                 store.Open(OpenFlags.ReadWrite);
                 foreach (var cert in store.Certificates)
                 {
-                    if (cert.Thumbprint == keep || !IsOurs(cert, $"{name} phone remote")) continue;
-                    try { store.Remove(cert); removed++; }
-                    catch (CryptographicException) { } // in the machine's store, and we are no admin
+                    if (!Old(cert) || (location == StoreLocation.CurrentUser && inMachine.Contains(cert.Thumbprint))) continue;
+                    try
+                    {
+                        store.Remove(cert);
+                        here++;
+                        inMachine.Remove(cert.Thumbprint);
+                    }
+                    catch (CryptographicException) { }
                 }
             }
-            catch (CryptographicException) { } // the machine's store is read-only without admin rights
+            catch (CryptographicException) { } // the machine's store: read-only without administrator rights
+            if (here > 0) Log.Info($"Phone remote: {here} older intermediate certificate(s) of this box removed from {location}\\CA");
+            removed += here;
         }
-        return removed;
+        if (inMachine.Count > 0)
+            Log.Warn($"Phone remote: {inMachine.Count} older intermediate certificate(s) of this box are in the machine's CA store; only an administrator can remove them (certlm.msc, Intermediate Certification Authorities)");
+        return (removed, inMachine.Count);
     }
 
     static bool IsOurs(X509Certificate2 cert, string commonName)
     {
         string? cn = null, o = null;
-        foreach (var rdn in cert.SubjectName.EnumerateRelativeDistinguishedNames())
+        try
         {
-            if (rdn.GetSingleElementType().Value == "2.5.4.3") cn = rdn.GetSingleElementValue();
-            if (rdn.GetSingleElementType().Value == "2.5.4.10") o = rdn.GetSingleElementValue();
+            foreach (var rdn in cert.SubjectName.EnumerateRelativeDistinguishedNames())
+            {
+                if (rdn.HasMultipleElements) return false; // not a subject this launcher makes
+                if (rdn.GetSingleElementType().Value == "2.5.4.3") cn = rdn.GetSingleElementValue();
+                if (rdn.GetSingleElementType().Value == "2.5.4.10") o = rdn.GetSingleElementValue();
+            }
         }
+        catch (CryptographicException) { return false; } // a subject .NET cannot read: not ours either
         return cn == commonName && o == Organization;
     }
 

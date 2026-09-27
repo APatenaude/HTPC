@@ -125,7 +125,15 @@ const PhoneLogic = (() => {
     return h ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
   }
 
-  return { graphemes, diff, typeMessages, Gestures, clock };
+  // The Playing tab's timeline. A live stream (the box says so, or no length is known): a LIVE
+  // badge, no bar, no seeking. Otherwise the bar, seekable when the app allows it.
+  function timeline(m) {
+    if (!m) return { live: false, bar: true, seek: false };
+    const live = !!m.live || !(m.duration > 0);
+    return { live, bar: !live, seek: !live && !!m.canSeek };
+  }
+
+  return { graphemes, diff, typeMessages, Gestures, clock, timeline };
 })();
 
 if (typeof module !== 'undefined') module.exports = PhoneLogic;

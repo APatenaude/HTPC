@@ -52,9 +52,9 @@ to tv.local by itself where the phone can open it (some Android phones cannot).
 
 | Tab | Controls |
 |---|---|
-| Remote | Touchpad (drag = pointer with acceleration, tap = click, two-finger tap = right-click, two-finger drag = scroll, press and hold then drag = drag) or Arrows (D-pad, OK). Back, Home (hold = Power), Options. Volume −/mute/+ (steps of 2), brightness. Power button: sleep (asks first); wake while asleep. |
-| Type | Live typing into the focused field on the TV (Backspaces for what changed, then the text), Enter, Delete, Clear, Tab, Shift+Tab. Paste a link: YouTube videos open in the YouTube tile (VacuumTube, started with the link; see below), Twitch in the Twitch tile, anything else in a new tab of the browser tile. |
-| Playing | What plays, ±10 s, play/pause, previous/next, seek bar, volume, sleep timer (the 1-minute warning reaches the phone, with +15 min). |
+| Remote | Send a link to the TV, first on the screen: a field with Paste (reading the clipboard takes HTTPS; over HTTP, Paste puts the cursor in the field for the phone's own Paste), then Send; YouTube videos open in the YouTube tile (VacuumTube, started with the link; see below), Twitch in the Twitch tile, anything else in a new tab of the browser tile ("From other apps" opens the Share-sheet setup). Touchpad (drag = pointer with acceleration, tap = click, two-finger tap = right-click, two-finger drag = scroll, press and hold then drag = drag) or Arrows (D-pad, OK). Back, Home (hold = Power), Options. Volume −/mute/+ (steps of 2), brightness. Power button: sleep (asks first); wake while asleep. |
+| Type | Live typing into the focused field on the TV (Backspaces for what changed, then the text), Enter, Delete, Clear, Tab, Shift+Tab. |
+| Playing | What plays, ±10 s, play/pause, previous/next, seek bar, volume; a live stream (no timeline, an endless one, or one that grows as it plays, as Twitch channels report: `LiveGuess` in MediaWatcher.cs) shows LIVE instead, with no bar and no seeking; sleep timer (the 1-minute warning reaches the phone, with +15 min). |
 
 Where input goes (`PhoneRouting.cs`, like the controller's `MainForm.OnPad`): over the
 launcher's own screens, the D-pad and OK are controller buttons and the touchpad moves the focus
@@ -87,7 +87,7 @@ must be http(s) with nothing that could become a command-line switch, and apps g
 separate arguments after `--` (VacuumTube only the checked video id). The remote at
 http://tv.local is not encrypted on the home network (SPEC: HTTPS only for Android's Share).
 
-Send to TV from other apps (SPEC N9; the phone's Type tab › Send to TV from other apps, or the
+Send to TV from other apps (SPEC N9; the phone's Remote tab › From other apps, or the
 second QR code in Settings › Phone remote, which opens /send and pairs):
 - **Android:** the Share target of the installed web app, over HTTPS. The box is its own
   certificate authority (`PhoneCertificates.cs`), in two steps: a root, which phones install,
@@ -102,9 +102,11 @@ second QR code in Settings › Phone remote, which opens /send and pairs):
   it ends; the handshake sends it with the intermediate (for that, Windows adds the intermediate
   to the "Intermediate Certification Authorities" store: the user's, or the machine's when the
   launcher runs as administrator). Root and intermediate end together after 10 years: then the box
-  makes a new pair and each phone installs the new root once more; making a pair removes this
-  box's older intermediates from those stores (matched by name, the new one kept) and an earlier
-  build's single CA ("HTPC phone remote CA" key, ca.cer). Public certificates in
+  makes a new pair and each phone installs the new root once more. At every start the launcher
+  removes this box's older intermediates from those stores (matched by the subject's CN and O,
+  in either order; the current one kept; logged). The user's store also lists the machine's entries;
+  those take an administrator to remove (the launcher logs how many are left: test runs as
+  administrator made them; tests now name their CAs themselves). An earlier build's single CA ("HTPC phone remote CA" key, ca.cer) goes too. Public certificates in
   `%LOCALAPPDATA%\HTPC\certs`; nothing about the keys is logged. Kestrel adds port
   443 (a failure leaves HTTP running).
   The phone downloads the root from /ca.crt over plain HTTP, so it checks what it got: card 2 on

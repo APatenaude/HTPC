@@ -28,11 +28,12 @@ interface IPhoneTimer
 
 /// <summary>
 /// What plays (Windows' media session of the app in front, or the one playing): for the Playing
-/// tab. Position is at PositionAt; the phone moves it on by itself while Playing.
+/// tab. Position is at PositionAt; the phone moves it on by itself while Playing. Live: a live
+/// stream (LiveGuess), shown with no timeline and no seeking.
 /// </summary>
 sealed record PhoneMediaSnapshot(
     string? App, string Title, string? Subtitle, bool Playing, double Position, double Duration, DateTime PositionAt,
-    int ArtVersion, bool CanSeek, bool CanNext, bool CanPrevious);
+    int ArtVersion, bool CanSeek, bool CanNext, bool CanPrevious, bool Live = false);
 
 interface IPhoneMedia
 {
