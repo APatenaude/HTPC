@@ -145,7 +145,18 @@ hostMessage('phone.settings', (msg) => {
   if (state.view === 'settings' && state.section === 'phone') render();
 });
 
-onAction('phone-forget', (el, id) => send({ type: 'phone.forget', id }));
+// Forget asks first (the dialog's focus starts on Cancel).
+onAction('phone-forget', (el, id) => {
+  const p = (state.phoneSettings.phones || []).find((x) => x.id === id);
+  if (!p) return;
+  ask({
+    title: `Forget ${p.name}?`,
+    text: p.shortcut ? 'The Shortcut that uses this key stops working. The phone can make a new key.'
+      : 'To be a remote again, it has to pair again: scan the code on this screen.',
+    yes: 'Forget',
+    onYes: () => send({ type: 'phone.forget', id }),
+  });
+});
 
 settingsSection('phone', {
   render: renderPhoneSection,
