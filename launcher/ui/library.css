@@ -61,7 +61,8 @@
 .lc-top { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .lc-name { min-width: 0; font-family: var(--display); font-weight: 600; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* long names: one line */
 .lc-name.grow { flex-grow: 1; }
-.lc-desc { flex-grow: 1; font-size: 19px; line-height: 1.35; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.lc-desc { font-size: 19px; line-height: 1.35; max-height: 2.7em; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.lc-app .lc-status { margin-top: auto; }   /* at the bottom of the card, however long the description */
 .lc-status { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 700; }
 /* Installing (or waiting to): a dashed blue edge (as its home tile), the app's icon dimmed, a
    spinner and a bar along the bottom. Did not install: a dashed amber edge. */
