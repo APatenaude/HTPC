@@ -50,6 +50,7 @@ sealed class MainForm : Form
     {
         this.options = options;
         Text = "TV";
+        Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); // the exe's icon (app.ico), not WinForms' default
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         BackColor = Color.FromArgb(13, 14, 17);

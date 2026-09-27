@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- TV box launcher icon: the launcher's accent blue as a tile, a TV with a play mark. -->
+  <rect x="8" y="8" width="240" height="240" rx="60" fill="#8CC2FF"/>
+  <rect x="44" y="62" width="168" height="112" rx="22" fill="none" stroke="#0D0E11" stroke-width="16"/>
+  <path d="M100 206h56" stroke="#0D0E11" stroke-width="16" stroke-linecap="round"/>
+  <path d="M114 96 L152 118 L114 140 Z" fill="#0D0E11" stroke="#0D0E11" stroke-width="10" stroke-linejoin="round"/>
+</svg>

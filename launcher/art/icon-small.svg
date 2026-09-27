@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- The same icon for 16-32 px: thicker lines, no stand, bigger play mark. -->
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="#8CC2FF"/>
+  <rect x="34" y="54" width="188" height="148" rx="26" fill="none" stroke="#0D0E11" stroke-width="28"/>
+  <path d="M106 94 L166 128 L106 162 Z" fill="#0D0E11" stroke="#0D0E11" stroke-width="12" stroke-linejoin="round"/>
+</svg>
