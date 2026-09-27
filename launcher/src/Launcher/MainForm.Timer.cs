@@ -4,12 +4,15 @@ namespace Htpc.Launcher;
 
 /// <summary>
 /// The sleep timer (SPEC N14) and its warning over apps, media sessions, alerts, and volume
-/// from the controller or the keyboard. MainForm.cs calls in through a few hooks.
+/// from the controller (its map's buttons, Start + D-pad) or the keyboard, with the volume
+/// indicator over everything. MainForm.cs calls in through a few hooks.
 /// </summary>
 sealed partial class MainForm
 {
     readonly MediaWatcher media = new();
     readonly AlertsForm overlay = new();   // what the alerts paint on, over apps
+    readonly VolumeOsd volumeOsd = new();  // the volume indicator, over everything
+    readonly VolumeWatch volumeWatch = new();
     SleepTimer sleepTimer = null!;
 
     void InitTimer()
@@ -17,6 +20,12 @@ sealed partial class MainForm
         overlay.IconsFile = Path.Combine(options.UiDir, "icons.js");
         overlay.Avoid = () => keyboard.Visible ? keyboard.Bounds : Rectangle.Empty;
         keyboard.VisibleChanged += (_, _) => overlay.Relayout();
+        volumeOsd.IconsFile = overlay.IconsFile;
+        volumeOsd.Avoid = overlay.Avoid;
+        // Any change of the volume or mute, whoever made it; the output changing (checked each second).
+        volumeWatch.Changed += (level, output) => OnUiQueued(() => ShowVolume(level, output));
+        clock.Tick += (_, _) => { if (!setupMode && standby is { Active: false }) volumeWatch.Poll(); };
+        controller.Chord += (command, repeat) => OnUiQueued(() => OnChord(command, repeat));
         sleepTimer = new SleepTimer(() => media.Sessions, on => media.Want("timer", on));
         sleepTimer.Changed += () =>
         {
@@ -77,26 +86,47 @@ sealed partial class MainForm
         return null;
     }
 
-    /// <summary>volumeUp, volumeDown, mute: Windows volume in steps of 5, shown as an alert (no Windows flyout).</summary>
-    void Volume(string command)
+    /// <summary>
+    /// volumeUp, volumeDown, mute: Windows volume in steps of 5 (2 from Start + D-pad, which
+    /// repeats), shown by the volume indicator (no Windows flyout).
+    /// </summary>
+    void Volume(string command, int step = 5)
     {
         switch (command)
         {
             case "volumeUp":
             case "volumeDown":
-                if (audio.Step(command == "volumeUp" ? 5 : -5) is { } level) VolumeAlert($"Volume {level}");
+                audio.Step(command == "volumeUp" ? step : -step);
                 break;
             case "mute":
-                var muted = !(audio.Muted ?? false);
-                audio.Muted = muted;
-                VolumeAlert(muted ? "Sound off" : "Sound on");
+                audio.Muted = !(audio.Muted ?? false);
                 break;
         }
-        PushState();
+        // At once, without waiting for Windows' call back (VolumeWatch), which shows the same.
+        if (CoreAudio.TryLevel(null) is { } level) ShowVolume(level, null);
+        // The launcher's slider, when it is up (hidden behind an app, the next Home brings the
+        // state): Start + D-pad repeats about nine times a second.
+        if (Visible) PushState();
     }
 
-    void VolumeAlert(string title) => alerts.Raise(new AlertSpec
+    /// <summary>
+    /// Start + D-pad (StartChord): the volume over any app, the launcher included. Not in
+    /// standby, nor in Moonlight, whose buttons all belong to the game PC (its Home tap too).
+    /// Apps on the Controller preset (VacuumTube, Jellyfin, Kodi...) read the controller
+    /// themselves: they see Start and the D-pad as well, which the launcher cannot hold back.
+    /// </summary>
+    void OnChord(string command, bool repeat)
     {
-        Id = "volume", Title = title, Glyph = "speaker", Duration = TimeSpan.FromSeconds(1.5), Urgent = true,
-    });
+        if (setupMode || standby.Active) return;
+        if (!LauncherActive && foregroundApp?.Id == "moonlight") return;
+        if (!repeat) Log.Info($"Start + D-pad: {command}");
+        Volume(command, step: 2);
+    }
+
+    /// <summary>The volume indicator, over whatever is on screen (not in setup or standby).</summary>
+    void ShowVolume(SoundLevel level, string? output)
+    {
+        if (setupMode || standby is null || standby.Active) return;
+        volumeOsd.Show(level, output);
+    }
 }

@@ -106,6 +106,9 @@ static class AudioOutputs
         return list;
     }
 
+    /// <summary>The output's name as Windows shows it; null if it is not active.</summary>
+    public static string? NameOf(string id) => List().FirstOrDefault(o => o.Id == id)?.Name;
+
     static string? NameOf(IMMDevice device)
     {
         if (device.OpenPropertyStore(STGM_READ, out var store) != 0) return null;
@@ -205,13 +208,21 @@ static class CoreAudio
     interface IMMDevice
     {
         [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object endpoint);
+        [PreserveSig] int OpenPropertyStore(int access, out IntPtr properties);
+        [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+    }
+
+    [ComImport, Guid("657804FA-D6AD-4496-8A60-352752AF4F89"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IAudioEndpointVolumeCallback
+    {
+        [PreserveSig] int OnNotify(IntPtr data);
     }
 
     [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IAudioEndpointVolume
     {
-        [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
-        [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int RegisterControlChangeNotify(IAudioEndpointVolumeCallback notify);
+        [PreserveSig] int UnregisterControlChangeNotify(IAudioEndpointVolumeCallback notify);
         [PreserveSig] int GetChannelCount(out uint count);
         [PreserveSig] int SetMasterVolumeLevel(float levelDb, ref Guid context);
         [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid context);
@@ -297,6 +308,89 @@ static class CoreAudio
         return new SoundLevel((int)Math.Round(level * 100), muted);
     }
 
+    /// <summary>The default output's id; null when there is none (the TV off on an HDMI-only box).</summary>
+    public static string? DefaultId()
+    {
+        object? enumerator = null, device = null;
+        try
+        {
+            enumerator = NewEnumerator();
+            if (((IMMDeviceEnumerator)enumerator).GetDefaultAudioEndpoint(eRender, eMultimedia, out var d) != 0) return null;
+            device = d;
+            return d.GetId(out var id) == 0 ? id : null;
+        }
+        catch (Exception) { return null; }
+        finally
+        {
+            Release(device);
+            Release(enumerator);
+        }
+    }
+
+    /// <summary>
+    /// Calls back with the output's level each time its volume or mute changes, whoever changes
+    /// it; on a thread of Windows' own. Dispose to stop.
+    /// </summary>
+    public static IDisposable Watch(string id, Action<SoundLevel> changed)
+    {
+        object? enumerator = null, device = null, endpoint = null;
+        try
+        {
+            enumerator = NewEnumerator();
+            Marshal.ThrowExceptionForHR(((IMMDeviceEnumerator)enumerator).GetDevice(id, out var d));
+            device = d;
+            var iid = typeof(IAudioEndpointVolume).GUID;
+            Marshal.ThrowExceptionForHR(d.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out endpoint));
+            var watch = new Watcher((IAudioEndpointVolume)endpoint, changed);
+            endpoint = null; // the watcher keeps it
+            return watch;
+        }
+        finally
+        {
+            Release(endpoint);
+            Release(device);
+            Release(enumerator);
+        }
+    }
+
+    // AUDIO_VOLUME_NOTIFICATION_DATA: the event's GUID, then bMuted and fMasterVolume.
+    [ComVisible(true)]
+    sealed class Watcher : IAudioEndpointVolumeCallback, IDisposable
+    {
+        readonly IAudioEndpointVolume endpoint;
+        readonly Action<SoundLevel> changed;
+        bool registered;
+
+        public Watcher(IAudioEndpointVolume endpoint, Action<SoundLevel> changed)
+        {
+            this.endpoint = endpoint;
+            this.changed = changed;
+            Marshal.ThrowExceptionForHR(endpoint.RegisterControlChangeNotify(this));
+            registered = true;
+        }
+
+        public int OnNotify(IntPtr data)
+        {
+            try
+            {
+                var muted = Marshal.ReadInt32(data, 16) != 0;
+                var level = BitConverter.Int32BitsToSingle(Marshal.ReadInt32(data, 20));
+                changed(new SoundLevel((int)Math.Round(level * 100), muted));
+            }
+            catch (Exception e) { Log.Warn($"Volume change: {e.Message}"); }
+            return 0;
+        }
+
+        public void Dispose()
+        {
+            if (!registered) return;
+            registered = false;
+            try { endpoint.UnregisterControlChangeNotify(this); }
+            catch (Exception) { } // the output is gone
+            Release(endpoint);
+        }
+    }
+
     // The output's IAudioEndpointVolume for one use; every COM object released after.
     static T WithVolume<T>(string? id, Func<IAudioEndpointVolume, T> use)
     {
@@ -318,4 +412,38 @@ static class CoreAudio
             Release(enumerator);
         }
     }
+}
+
+/// <summary>
+/// The default output's volume and mute as anyone changes them (the controller, the phone, a
+/// keyboard's volume keys, Settings, another app): Windows calls back on a thread of its own.
+/// And the default output itself changing: Poll, each second and right after the launcher
+/// switched it, moves the watch to the new one. For the volume indicator (VolumeOsd).
+/// </summary>
+sealed class VolumeWatch : IDisposable
+{
+    /// <summary>The level now, and the output's name when it has just become the default. Any thread.</summary>
+    public event Action<SoundLevel, string?>? Changed;
+
+    string? watching;
+    IDisposable? watch;
+    bool started;
+
+    /// <summary>UI thread. The first look only starts watching: nothing changed yet.</summary>
+    public void Poll()
+    {
+        var id = CoreAudio.DefaultId();
+        if (started && id == watching) return;
+        var first = !started;
+        started = true;
+        watch?.Dispose();
+        watch = null;
+        watching = id;
+        if (id is null) return;
+        try { watch = CoreAudio.Watch(id, level => Changed?.Invoke(level, null)); }
+        catch (Exception e) { Log.Warn($"Watching the volume: {e.Message}"); }
+        if (!first && CoreAudio.TryLevel(id) is { } now) Changed?.Invoke(now, AudioOutputs.NameOf(id));
+    }
+
+    public void Dispose() => watch?.Dispose();
 }
