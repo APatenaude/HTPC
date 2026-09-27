@@ -125,6 +125,13 @@
     { "id": "disneyplus", "name": "Disney+", "type": "website", "url": "https://www.disneyplus.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#4D8DFF" } },
     { "id": "primevideo", "name": "Prime Video", "type": "website", "url": "https://www.primevideo.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#2BB0F5" } },
     { "id": "crunchyroll", "name": "Crunchyroll", "type": "website", "url": "https://www.crunchyroll.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#FF8A2B" } },
-    { "id": "hbomax", "name": "HBO Max", "type": "website", "url": "https://play.hbomax.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#8A7BFF" } }
+    { "id": "hbomax", "name": "HBO Max", "type": "website", "url": "https://play.hbomax.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#8A7BFF" } },
+    { "id": "appletv", "name": "Apple TV+", "type": "website", "url": "https://tv.apple.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#D9D8D4" } },
+    { "id": "paramountplus", "name": "Paramount+", "type": "website", "url": "https://www.paramountplus.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#3D8BFF" } },
+    { "id": "tubi", "name": "Tubi", "type": "website", "url": "https://tubitv.com", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#FFD43B" } },
+    { "id": "plutotv", "name": "Pluto TV", "type": "website", "url": "https://pluto.tv", "default": false, "preset": "mouse", "icon": { "glyph": "tv", "color": "#F5E642" } },
+    { "id": "kick", "name": "Kick", "type": "website", "url": "https://kick.com", "default": false, "preset": "mouse", "icon": { "glyph": "chat", "color": "#53FC18" } },
+    { "id": "crave", "name": "Crave", "type": "website", "url": "https://www.crave.ca", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#3FA9F5" } },
+    { "id": "cbcgem", "name": "CBC Gem", "type": "website", "url": "https://gem.cbc.ca", "default": false, "preset": "mouse", "icon": { "glyph": "play", "color": "#FF4B4B" } }
   ]
 }
