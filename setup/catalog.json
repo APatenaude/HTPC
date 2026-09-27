@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog, App library). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = glyph and colour shown until the app's own logo is cached (the launcher takes it from the installed program or the website: AppLogos). desc = one line on the library card. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window. install.scope = how the launcher installs it from the TV: machine (through the elevated \\HTPC\\Jobs task) or user (the launcher runs winget without elevation). install.wingetScope = the --scope handed to winget when it differs from install.scope (Kodi ships only a user-scoped installer but writes to Program Files, so it is installed as machine with --scope user). install.elevated = false marks an app that refuses to install elevated (Spotify): setup's Apps step skips it and it is offered only from the library, never in the setup pick list.",
+  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog, App library). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = glyph and colour shown until the app's own logo is cached (the launcher takes it from the installed program or the website: AppLogos). desc = one line on the library card. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window. Every app opens filling the screen: through its own switch where it has one (args), else launch.fill = the launcher makes its window cover the screen without a frame, and again whenever it stops doing so while in front. install.scope = how the launcher installs it from the TV: machine (through the elevated \\HTPC\\Jobs task) or user (the launcher runs winget without elevation). install.wingetScope = the --scope handed to winget when it differs from install.scope (Kodi ships only a user-scoped installer but writes to Program Files, so it is installed as machine with --scope user). install.elevated = false marks an app that refuses to install elevated (Spotify): setup's Apps step skips it and it is offered only from the library, never in the setup pick list.",
   "apps": [
     {
       "id": "youtube",
@@ -55,7 +55,7 @@
       "preset": "controller",
       "desc": "Your Jellyfin library, TV layout",
       "icon": { "glyph": "library", "color": "#3DC0F0" },
-      "launch": { "exe": "%ProgramFiles%\\Jellyfin\\Jellyfin Media Player\\JellyfinMediaPlayer.exe", "args": "--tv" },
+      "launch": { "exe": "%ProgramFiles%\\Jellyfin\\Jellyfin Media Player\\JellyfinMediaPlayer.exe", "args": "--tv --fullscreen" },
       "phoneKeys": { "back": "esc", "backspace": "afterTyping" },
       "install": { "source": "winget", "scope": "machine", "id": "Jellyfin.JellyfinMediaPlayer" }
     },
@@ -67,7 +67,7 @@
       "preset": "controller",
       "desc": "Play games streamed from your PC",
       "icon": { "glyph": "moon", "color": "#F5D16B" },
-      "launch": { "exe": "%ProgramFiles%\\Moonlight Game Streaming\\Moonlight.exe" },
+      "launch": { "exe": "%ProgramFiles%\\Moonlight Game Streaming\\Moonlight.exe", "fill": true },
       "phoneKeys": { "typing": false },
       "install": { "source": "winget", "scope": "machine", "id": "MoonlightGameStreamingProject.Moonlight" }
     },
@@ -93,7 +93,7 @@
       "preset": "controller",
       "desc": "Media center for files on your network",
       "icon": { "glyph": "play", "color": "#5AB0FF" },
-      "launch": { "exe": "%ProgramFiles%\\Kodi\\kodi.exe" },
+      "launch": { "exe": "%ProgramFiles%\\Kodi\\kodi.exe", "args": "-fs" },
       "install": { "source": "winget", "scope": "machine", "wingetScope": "user", "id": "XBMCFoundation.Kodi" }
     },
     {
@@ -104,7 +104,7 @@
       "preset": "mouse",
       "desc": "Plays almost any video or audio file",
       "icon": { "glyph": "play", "color": "#FF8A1F" },
-      "launch": { "exe": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" },
+      "launch": { "exe": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe", "args": "--fullscreen --no-video-title-show --no-qt-video-autoresize", "fill": true },
       "install": {
         "source": "winget", "scope": "machine", "id": "VideoLAN.VLC",
         "firstRun": [ { "file": "%APPDATA%\\vlc\\vlcrc", "text": "[qt]\nqt-privacy-ask=0\nqt-updates-notif=0\n" } ]
@@ -118,7 +118,7 @@
       "preset": "controller",
       "desc": "Plex's app made for TVs",
       "icon": { "glyph": "play", "color": "#F5B82E" },
-      "launch": { "exe": "%ProgramFiles%\\Plex\\Plex HTPC\\Plex HTPC.exe" },
+      "launch": { "exe": "%ProgramFiles%\\Plex\\Plex HTPC\\Plex HTPC.exe", "fill": true },
       "install": { "source": "winget", "scope": "machine", "id": "Plex.PlexHTPC" }
     },
     {
@@ -129,7 +129,7 @@
       "preset": "mouse",
       "desc": "Music streaming",
       "icon": { "glyph": "music", "color": "#1ED760" },
-      "launch": { "exe": "%APPDATA%\\Spotify\\Spotify.exe" },
+      "launch": { "exe": "%APPDATA%\\Spotify\\Spotify.exe", "fill": true },
       "install": { "source": "winget", "scope": "user", "elevated": false, "id": "Spotify.Spotify" }
     },
     {
@@ -140,7 +140,7 @@
       "preset": "mouse",
       "desc": "Music from your Navidrome server",
       "icon": { "glyph": "music", "color": "#FF7AB6" },
-      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\feishin\\Feishin.exe" },
+      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\feishin\\Feishin.exe", "fill": true },
       "install": { "source": "winget", "scope": "user", "id": "jeffvli.Feishin" }
     },
     { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com", "default": false, "preset": "mouse", "desc": "Films and series", "icon": { "glyph": "play", "color": "#FF4B55" } },

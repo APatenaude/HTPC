@@ -612,6 +612,31 @@ Console.WriteLine("== Home menu over an app: the app's window and the pointer");
     Check(CursorHider.ComeBackTo(new Point(5000, 10), screen, parked) == new Point(1920, 1080), "off the screen now: the middle");
 }
 
+// ---------------------------------------------------------------- Every catalog app opens filling the screen
+Console.WriteLine("== Catalog: every app opens filling the screen");
+{
+    var root = new DirectoryInfo(AppContext.BaseDirectory);
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
+    var catalog = Path.Combine(root!.FullName, "setup", "catalog.json");
+    using var doc = JsonDocument.Parse(File.ReadAllText(catalog));
+    string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen" };
+    foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
+    {
+        var id = a.GetProperty("id").GetString();
+        if (a.GetProperty("type").GetString() == "website") continue; // Edge app window, --start-fullscreen (AppManager)
+        var launch = a.GetProperty("launch");
+        var switches = AppManagerArgs(launch);
+        var fill = launch.TryGetProperty("fill", out var f) && f.ValueKind == JsonValueKind.True;
+        Check(fill || switches.Any(ownSwitch.Contains), $"{id}: its own full-screen switch or fill (args: {string.Join(' ', switches)})");
+    }
+    var vlc = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "vlc").GetProperty("launch");
+    Check(AppManagerArgs(vlc).SequenceEqual(new[] { "--fullscreen", "--no-video-title-show", "--no-qt-video-autoresize" }) && vlc.GetProperty("fill").GetBoolean(),
+        "VLC: videos full screen, no title over them, its window not shrunk to the video, and the window itself filled");
+
+    static string[] AppManagerArgs(JsonElement launch) =>
+        launch.TryGetProperty("args", out var v) ? v.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries) : Array.Empty<string>();
+}
+
 // ---------------------------------------------------------------- Logos (LogoTests.cs)
 LogoTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
 

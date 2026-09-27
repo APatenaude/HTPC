@@ -30,8 +30,9 @@ static class Native
 
     /// <summary>
     /// Makes another program's window cover its whole screen without a frame or title bar
-    /// ("borderless full screen"), for apps that cannot be told to start full screen (Stremio).
-    /// Windows then treats it as a full-screen app: the taskbar stays out of the way.
+    /// ("borderless full screen"), for apps that cannot be told to start full screen (Stremio,
+    /// VLC's own window, Moonlight's, Spotify, Feishin: "fill" in the catalog). Windows then
+    /// treats it as a full-screen app: the taskbar stays out of the way.
     /// </summary>
     /// <returns>False when it already filled the screen and was left untouched.</returns>
     public static bool FillScreen(IntPtr hWnd)
@@ -40,14 +41,18 @@ static class Native
         const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_SYSMENU = 0x00080000,
             WS_MINIMIZEBOX = 0x00020000, WS_MAXIMIZEBOX = 0x00010000;
         const uint SWP_NOZORDER = 0x4, SWP_NOOWNERZORDER = 0x200, SWP_FRAMECHANGED = 0x20;
+        if (Fills(hWnd)) return false; // already
         var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
         var screen = Screen.FromHandle(hWnd).Bounds;
-        if (!IsIconic(hWnd) && GetWindowRect(hWnd, out var r) && FillsScreen(style, r, screen)) return false; // already
         if (IsIconic(hWnd) || (style & 0x01000000) != 0) ShowWindow(hWnd, SW_RESTORE); // minimized or maximized: normal first
         SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)(style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)));
         SetWindowPos(hWnd, IntPtr.Zero, screen.X, screen.Y, screen.Width, screen.Height, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
         return true;
     }
+
+    /// <summary>Whether the window covers its screen with no frame showing (FillsScreen), minimized not.</summary>
+    public static bool Fills(IntPtr hWnd) =>
+        !IsIconic(hWnd) && GetWindowRect(hWnd, out var r) && FillsScreen((long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */), r, Screen.FromHandle(hWnd).Bounds);
 
     /// <summary>
     /// A window that covers the screen exactly with nothing of a frame showing (no caption, no

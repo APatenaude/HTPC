@@ -83,6 +83,7 @@ sealed partial class MainForm : Form
         clock.Tick += async (_, _) =>
         {
             CheckSleepTimer();
+            KeepFilled();
             // Every 5 s: the idle check (not during setup), and the TV's power state (its own remote).
             if (++ticks % 5 != 0) return;
             if (!setupMode) await standby.Tick();
@@ -613,6 +614,25 @@ sealed partial class MainForm : Form
         var how = Native.ForceForeground(window);
         Log.Info($"Back to {id}: foreground {how}{(filled ? ", made to fill the screen" : "")} ({clock.ElapsedMilliseconds} ms)");
         StepAside(id);
+    }
+
+    int unfilledFor; // seconds the app in front (a "fill" one) has not filled the screen
+
+    /// <summary>
+    /// Each second: a "fill" app in front whose own window no longer fills the screen (VLC once
+    /// a video leaves its full screen: Qt puts the title bar back; a splash was filled, then the
+    /// real window came) is filled again after 2 s. Only the app's main window, and only while
+    /// it is the one in front: never a dialog of it, never under the Home menu or in desktop mode.
+    /// </summary>
+    void KeepFilled()
+    {
+        var app = foregroundApp;
+        if (setupMode || standby is not { Active: false } || desktop.Active || LauncherActive || app is not { Fill: true }) { unfilledFor = 0; return; }
+        var window = apps.MainWindow(app.Id);
+        if (window == IntPtr.Zero || window != Native.GetForegroundWindow() || Native.Fills(window)) { unfilledFor = 0; return; }
+        if (++unfilledFor < 2) return;
+        unfilledFor = 0;
+        if (Native.FillScreen(window)) Log.Info($"{app.Id} no longer filled the screen: filled again");
     }
 
     // While an app is in front the launcher hides (Home brings it back): hidden, it costs
