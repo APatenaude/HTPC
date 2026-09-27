@@ -13,7 +13,10 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# TLS 1.2, and 1.3 where this .NET knows it (never the older ones).
+$tls = [Net.SecurityProtocolType]::Tls12
+try { $tls = $tls -bor [Net.SecurityProtocolType]'Tls13' } catch { }
+[Net.ServicePointManager]::SecurityProtocol = $tls
 
 # --- Where updates come from ------------------------------------------------------------------
 
@@ -207,7 +210,7 @@ function Save-ReleaseAsset {
         $r.Response.Close()
     }
     $actual = (Get-FileHash -LiteralPath $OutFile -Algorithm SHA256).Hash
-    if ($actual -ne $Sha256.ToUpperInvariant()) {
+    if ($actual -cne $Sha256.ToUpperInvariant()) {
         Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
         throw (New-UpdateError 'refused' "$Name does not match the release's SHA-256")
     }
@@ -409,6 +412,15 @@ function Move-WriteThrough([string]$From, [string]$To, [switch]$Replace) {
     }
 }
 
+# Every data block of the files under $Path on the disk, before anything relies on them (the journal saying "staged", a folder swap)
+# (a copy is otherwise in the cache only, and a power cut could leave an empty file in place).
+function Sync-FileTree([string]$Path) {
+    $files = if (Test-Path -LiteralPath $Path -PathType Leaf) { @(Get-Item -LiteralPath $Path) } else { @(Get-ChildItem -LiteralPath $Path -Recurse -File) }
+    foreach ($f in $files) {
+        $fs = [IO.File]::Open($f.FullName, 'Open', 'ReadWrite', 'Read')
+        try { $fs.Flush($true) } finally { $fs.Dispose() }
+    }
+}
 # Writes a small file so it is either complete or not there: a temporary name, then a rename.
 function Write-AtomicText([string]$Path, [string]$Text) {
     $tmp = "$Path.tmp-$PID"

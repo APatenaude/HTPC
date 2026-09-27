@@ -72,6 +72,13 @@ try {
     # --- setup.zip --------------------------------------------------------------------------------
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $setup = Join-Path $repoRoot 'setup'
+    # Every script it ships must parse: a box runs its jobs (and its own rollback) with them.
+    foreach ($f in Get-ChildItem -LiteralPath $setup -Recurse -File -Filter '*.ps1') {
+        if ($f.FullName.Substring($setup.Length + 1) -match '^(dev|test|autounattend)\\') { continue }
+        $tokens = $null; $errors = $null
+        [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
+        if ($errors) { throw "$($f.FullName): $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))" }
+    }
     $zip = Join-Path $Out 'setup.zip'
     $archive = [IO.Compression.ZipFile]::Open($zip, 'Create')
     try {

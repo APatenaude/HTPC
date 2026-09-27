@@ -64,4 +64,21 @@ if (Test-Path (Join-Path $from 'jobs')) { Copy-Item (Join-Path $from 'jobs\*') $
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
 Write-Change "job runner and trusted catalog in $installDir"
 
+# Setup replaces whatever a launcher update left: its journal (so nothing ever "rolls back" to
+# the launcher before that update) and the copies it kept (.prev, .new, .bad, set aside .old-*).
+$journal = Join-Path $HtpcData 'state\launcher-update.json'
+if (Test-Path -LiteralPath $journal) { Remove-Item -LiteralPath $journal -Force; Write-Change 'launcher update journal cleared' }
+$leftovers = @(foreach ($base in (Join-Path $installDir 'HtpcLauncher'), (Join-Path $installDir 'HtpcWatchdog'), (Join-Path $installDir 'catalog')) {
+        $ext = if ($base.EndsWith('catalog')) { '.json' } else { '.exe' }
+        foreach ($kind in 'prev', 'new', 'bad') { "$base.$kind$ext" }
+    }) + @(foreach ($dir in (Join-Path $installDir 'lib'), (Join-Path $installDir 'jobs'), (Join-Path $HtpcData 'setup')) {
+        foreach ($kind in 'prev', 'new', 'bad') { "$dir.$kind" }
+    }) + @(Get-ChildItem -LiteralPath $installDir -Filter '*.old-*' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+foreach ($item in $leftovers) {
+    if (-not (Test-Path -LiteralPath $item)) { continue }
+    # A program still running from one (an old watchdog) stays until the next setup or update.
+    try { Remove-Item -LiteralPath $item -Recurse -Force; Write-Change "removed $item (left by a launcher update)" }
+    catch { Write-Attention "$item is in use; left for later" }
+}
+
 Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' 'HTPC launcher' "`"$target`"" -Type String

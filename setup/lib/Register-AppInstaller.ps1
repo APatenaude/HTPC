@@ -20,7 +20,7 @@
          later reads or runs them (ProgramData is world-writable by default).
       2. The \HTPC\Jobs task runs as SYSTEM, one instance at a time, with a 4-hour limit (Windows
          updates install one at a time from the TV and a cumulative update alone can take close to
-         an hour on the N97; app jobs stop themselves long before, after 10 minutes without
+         an hour on the N97; the launcher stops an app job long before, after 10 minutes without
          progress); its security is set so the TV user may run it but not change it. Its only
          trigger is Windows starting, with no token: that run finishes or undoes a launcher
          update a power cut interrupted (jobs\reconcile.ps1).

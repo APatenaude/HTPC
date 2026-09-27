@@ -192,10 +192,63 @@ function Get-DirVersion([string]$Dir) {
     if (Test-Path -LiteralPath $f -PathType Leaf) { ([IO.File]::ReadAllText($f)).Trim() } else { $null }
 }
 
+# Removes a file or folder under a trusted root. A program still running from it (the old
+# watchdog keeps running from HtpcWatchdog.prev.exe until the next sign-in) cannot be deleted
+# but can be renamed: it is set aside as <name>.old-<random> and removed later (Remove-SetAside).
 function Remove-TrustedItem([string]$Path, [string]$Root) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
     Assert-TrustedPath $Path $Root
-    Remove-Item -LiteralPath $Path -Recurse -Force
+    try { Remove-Item -LiteralPath $Path -Recurse -Force }
+    catch {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw }
+        $aside = "$Path.old-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+        Move-WriteThrough $Path $aside
+        Write-Host "  $Path is in use: set aside as $(Split-Path $aside -Leaf)"
+    }
+}
+
+# What Remove-TrustedItem set aside, once nothing runs from it any more (at reconcile).
+function Remove-SetAside($Paths) {
+    foreach ($f in Get-ChildItem -LiteralPath $Paths.LauncherDir -Filter '*.old-*' -File -ErrorAction SilentlyContinue) {
+        try { Assert-TrustedPath $f.FullName $Paths.InstallRoot; Remove-Item -LiteralPath $f.FullName -Force } catch { }
+    }
+}
+
+
+function Get-JournalList($Journal, [string]$Name) {
+    if ($Journal.PSObject.Properties[$Name]) { @($Journal.$Name) } else { @() }
+}
+
+# Someone is signed in at the box (the TV account signs in by itself after a boot): a launcher
+# should then be running, started by the watchdog.
+function Test-UserSignedIn {
+    try { [bool](Get-CimInstance Win32_ComputerSystem).UserName } catch { $false }
+}
+
+# The watchdog runs from the launcher's folder: it is what starts the new launcher after the
+# swap (this job never does), so no update without it.
+function Test-WatchdogRunning($Paths) {
+    $exe = Join-Path $Paths.LauncherDir 'HtpcWatchdog.exe'
+    [bool](Get-CimInstance Win32_Process -Filter "Name = 'HtpcWatchdog.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $exe, [StringComparison]::OrdinalIgnoreCase) })
+}
+
+# The new release's job runner must load: this update's own rollback, and every later job, run
+# from it. Every script parses, and "reconcile" passes the runner's dry run. $null when fine.
+function Test-NewJobRunner($Paths) {
+    $lib = Join-Path $Paths.LauncherDir 'lib'
+    $jobs = Join-Path $Paths.LauncherDir 'jobs'
+    foreach ($f in @(Get-ChildItem -LiteralPath $lib, $jobs -Filter '*.ps1' -File -ErrorAction SilentlyContinue)) {
+        $tokens = $null; $errors = $null
+        [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
+        if ($errors) { return "$($f.Name): $($errors[0].Message)" }
+    }
+    $runner = Join-Path $lib 'Invoke-AppJob.ps1'
+    if (-not (Test-Path -LiteralPath $runner)) { return 'lib\Invoke-AppJob.ps1 is missing' }
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $out = & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Job reconcile -DryRun 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { return "the job runner's dry run failed: $($out.Trim())" }
+    $null
 }
 
 # The slots an update touched, from the journal's keys.
@@ -220,10 +273,13 @@ function Invoke-LauncherUpdate {
     $installed = Get-FileSemVer $Paths.Exe
     if (-not $installed) { throw (New-UpdateError 'failed' "No launcher at $($Paths.Exe)") }
     if ($target -le $installed) { throw (New-UpdateError 'refused' "The launcher is already $(Format-SemVer $installed); $Version is not newer") }
+    if (-not (Test-WatchdogRunning $Paths)) { throw (New-UpdateError 'refused' 'The watchdog is not running, so nothing would start the new launcher. Run setup again.') }
+    Remove-SetAside $Paths
 
     $journal = [pscustomobject][ordered]@{
         schema = $LauncherJournalSchema; op = 'update'; from = (Format-SemVer $installed); to = $Version
-        step = ''; message = ''; roles = @(); fromSha256 = (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash; toSha256 = ''
+        step = ''; message = ''; roles = @(); created = @(); noneCount = 0
+        fromSha256 = (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash; toSha256 = ''
         jobPid = $PID; startedUtc = [DateTime]::UtcNow.ToString('o'); updatedUtc = ''
     }
     Save-LauncherJournal $Paths $journal 'download'
@@ -258,6 +314,9 @@ function Invoke-LauncherUpdate {
             if (Test-Path -LiteralPath $slot.Current) {
                 Remove-TrustedItem $names.Prev $slot.Root
                 Move-WriteThrough $slot.Current $names.Prev
+            } else {
+                # New in this release (the first watchdog): a rollback removes it again.
+                $journal.created = @(Get-JournalList $journal 'created') + $key
             }
             Save-LauncherJournal $Paths $journal "moved-$key"
             Move-WriteThrough $names.New $slot.Current
@@ -333,6 +392,7 @@ function Save-LauncherRelease($Source, $Paths, $Journal, [Version]$Installed, [s
         Remove-TrustedItem $names.New $slot.Root
         if ($slot.Kind -eq 'file') { Copy-Item -LiteralPath $from $names.New } else { Copy-Item -LiteralPath $from $names.New -Recurse }
         Assert-TrustedPath $names.New $slot.Root
+        Sync-FileTree $names.New
         $keys += Get-SlotKey $slot
     }
     $newExe = (Get-SlotNames ($Paths.Slots | Where-Object Role -eq 'launcher')).New
@@ -343,12 +403,27 @@ function Save-LauncherRelease($Source, $Paths, $Journal, [Version]$Installed, [s
 
 # The last part of an update (also resumed by reconcile): done, or back to the old launcher.
 # -Quick (a reconcile inside another job) rolls back only on a crash loop, never on a short wait.
+# 'none' (no launcher at all) counts as a failure when someone is signed in (the watchdog should
+# have started it), or the second time: a journal must not stay at "verifying" for ever.
 function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait, [switch]$Quick) {
+    $broken = Test-NewJobRunner $Paths
+    if ($broken) {
+        Restore-PreviousLauncher $Paths $Journal "Version $($Journal.to) came with a job runner that does not work ($broken)"
+        return
+    }
     $result = Wait-LauncherHealthy $Paths $Journal.to $Wait
     if ($result -eq 'healthy') {
         Save-LauncherJournal $Paths $Journal 'done' "Updated to $($Journal.to)"
         Write-UpdateProgress 'done' 100 "The launcher is now version $($Journal.to)"
         return
+    }
+    if ($result -eq 'none') {
+        $nones = [int](Get-JournalList $Journal 'noneCount' | Select-Object -First 1)
+        if ((Test-UserSignedIn) -or $nones -ge 1) { $result = 'crashing' }
+        else {
+            if ($Journal.PSObject.Properties['noneCount']) { $Journal.noneCount = $nones + 1 } else { $Journal | Add-Member noneCount 1 }
+            Save-LauncherJournal $Paths $Journal 'verifying'
+        }
     }
     if ($result -eq 'crashing' -or ($result -eq 'unhealthy' -and -not $Quick)) {
         Restore-PreviousLauncher $Paths $Journal "Version $($Journal.to) did not start properly"
@@ -362,27 +437,46 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
 
 # Puts every slot of the journal back to its .prev (the one before the update), whatever state
 # the files are in: works for a finished swap, a half-done one and a check that failed.
+# Everything is checked before anything is stopped or moved: a rollback that cannot finish must
+# not start.
 function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
     Write-Host "  rolling back: $Reason"
+    $created = Get-JournalList $Journal 'created'
+    $plan = foreach ($slot in Get-JournalSlots $Paths $Journal) {
+        $names = Get-SlotNames $slot
+        $key = Get-SlotKey $slot
+        $state = Get-SlotState $slot
+        $isNew = $created -contains $key
+        switch ($state) {
+            'untouched' { }
+            'moved' { if (-not (Test-Path -LiteralPath $names.Prev)) { throw (New-UpdateError 'failed' "No previous $key to go back to") } }
+            'placed' {
+                if (-not $isNew) {
+                    if (-not (Test-Path -LiteralPath $names.Prev)) { throw (New-UpdateError 'failed' "No previous $key to go back to") }
+                    if ($slot.Role -eq 'launcher' -and (Get-FileHash -LiteralPath $names.Prev -Algorithm SHA256).Hash -ne $Journal.fromSha256) {
+                        throw (New-UpdateError 'refused' 'HtpcLauncher.prev.exe is not the launcher this update replaced')
+                    }
+                }
+            }
+            'missing' { if (-not $isNew) { throw (New-UpdateError 'failed' "$key is missing, and there is no previous one") } }
+            default { throw (New-UpdateError 'failed' "Cannot tell what state $key is in ($state)") }
+        }
+        [pscustomobject]@{ Slot = $slot; Names = $names; State = $state; IsNew = $isNew }
+    }
+
     Set-WatchdogPause $Paths
     foreach ($p in Get-LauncherProcesses $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
-    foreach ($slot in Get-JournalSlots $Paths $Journal) {
-        $names = Get-SlotNames $slot
-        $state = Get-SlotState $slot
-        switch ($state) {
-            'untouched' { }
+    foreach ($step in @($plan)) {
+        $slot = $step.Slot; $names = $step.Names
+        switch ($step.State) {
             'moved' { Move-WriteThrough $names.Prev $slot.Current }
             'placed' {
-                if (-not (Test-Path -LiteralPath $names.Prev)) { throw (New-UpdateError 'failed' "No previous $(Get-SlotKey $slot) to go back to") }
-                if ($slot.Role -eq 'launcher' -and (Get-FileHash -LiteralPath $names.Prev -Algorithm SHA256).Hash -ne $Journal.fromSha256) {
-                    throw (New-UpdateError 'refused' 'HtpcLauncher.prev.exe is not the launcher this update replaced')
-                }
                 Remove-TrustedItem $names.Bad $slot.Root
                 Move-WriteThrough $slot.Current $names.Bad
-                Move-WriteThrough $names.Prev $slot.Current
+                # A part this release added had nothing before it: it just goes (to .bad).
+                if (-not $step.IsNew) { Move-WriteThrough $names.Prev $slot.Current }
             }
-            default { throw (New-UpdateError 'failed' "Cannot tell what state $(Get-SlotKey $slot) is in ($state)") }
         }
         Remove-TrustedItem $names.New $slot.Root
     }
@@ -401,7 +495,12 @@ function Get-SlotState($Slot) {
     $hasCurrent = Test-Path -LiteralPath $Slot.Current
     $hasNew = Test-Path -LiteralPath $names.New
     $hasPrev = Test-Path -LiteralPath $names.Prev
-    if (-not $hasCurrent) { if ($hasPrev) { return 'moved' } else { return 'missing' } }
+    if (-not $hasCurrent) {
+        if ($hasPrev) { return 'moved' }
+        # A part new in this release, not moved in yet: nothing to undo.
+        if ($hasNew) { return 'untouched' }
+        return 'missing'
+    }
     if ($hasNew) { return 'untouched' }
     'placed'
 }
@@ -413,6 +512,9 @@ function Invoke-LauncherRollback {
     if (-not $journal -or $journal.op -ne 'update' -or $journal.step -notin 'done', 'verifying') {
         throw (New-UpdateError 'refused' 'There is no launcher update to undo')
     }
+    if ((Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash -ne $journal.toSha256) {
+        throw (New-UpdateError 'refused' 'The launcher was replaced since that update (setup ran again); nothing to undo')
+    }
     Restore-PreviousLauncher $Paths $journal 'Rolled back on request'
 }
 
@@ -423,15 +525,28 @@ function Invoke-LauncherRollback {
 function Invoke-LauncherReconcile {
     param($Paths = (Get-LauncherPaths), [switch]$Quick)
     if (-not (Test-Path -LiteralPath $Paths.StateRoot)) { return }
+    Remove-SetAside $Paths
     $journal = Read-LauncherJournal $Paths
-    if (-not $journal -or $journal.step -in 'done', 'rolledback', 'aborted', '') {
+    if (-not $journal -or $journal.step -in 'done', 'rolledback', 'aborted', 'superseded', '') {
         Clear-WatchdogPause $Paths -OnlyStale
         return
     }
-    # A journal of another job still running (the launcher's own update waiting on it) is its own.
-    if ($journal.jobPid -and [int]$journal.jobPid -ne $PID -and (Get-Process -Id ([int]$journal.jobPid) -ErrorAction SilentlyContinue)) {
+    # A journal of another job still running (the launcher's own update waiting on it) is its own:
+    # the same pid, a PowerShell, started before the update did (not a later process given the pid).
+    if ($journal.jobPid -and [int]$journal.jobPid -ne $PID) {
         $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$journal.jobPid)" -ErrorAction SilentlyContinue
-        if ($proc -and $proc.Name -eq 'powershell.exe') { throw (New-UpdateError 'busy' 'Another launcher update is running') }
+        $started = try { [DateTime]::Parse($journal.startedUtc, $null, 'RoundtripKind').ToUniversalTime() } catch { [DateTime]::MinValue }
+        if ($proc -and $proc.Name -eq 'powershell.exe' -and $proc.CreationDate.ToUniversalTime() -le $started) {
+            throw (New-UpdateError 'busy' 'Another launcher update is running')
+        }
+    }
+    # After the swap, a launcher that is not this update's means someone replaced it since (setup
+    # ran again): this journal is over, and its .prev must never be "restored" over that.
+    if ($journal.step -in 'swapped', 'verifying' -and (Test-Path -LiteralPath $Paths.Exe) -and
+        (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash -ne $journal.toSha256) {
+        Save-LauncherJournal $Paths $journal 'superseded' 'The launcher was replaced since (setup ran again)'
+        Clear-WatchdogPause $Paths -OnlyStale
+        return
     }
     Write-Host "  reconcile: launcher update $($journal.from) -> $($journal.to) stopped at '$($journal.step)'"
     switch -Regex ($journal.step) {

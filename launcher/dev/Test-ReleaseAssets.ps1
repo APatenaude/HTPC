@@ -31,7 +31,7 @@ $text = Get-PinnedText $source "$($source.BaseUrl)/$Repo/releases/download/$([Ur
 $manifest = ConvertFrom-ReleaseManifest $text $Tag
 if ($Expected) {
     $built = [IO.File]::ReadAllText((Join-Path $Expected 'update.json'))
-    if ($built -ne $text) { throw 'The published update.json is not the one built' }
+    if ($built -cne $text) { throw 'The published update.json is not the one built' }
 }
 $dir = Join-Path $env:TEMP "htpc-release-check-$PID"
 New-Item -ItemType Directory -Force $dir | Out-Null

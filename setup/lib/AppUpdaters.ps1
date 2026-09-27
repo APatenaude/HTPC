@@ -56,6 +56,12 @@ function Update-GithubApp {
     $dir = Join-Path $ProgramFilesDir $i.installDir
     $exe = Join-Path $dir $i.exe
     Assert-TrustedPath $dir $ProgramFilesDir
+    # An earlier update cut off between its two renames: the old folder goes back first.
+    if (-not (Test-Path -LiteralPath $dir) -and (Test-Path -LiteralPath "$dir.old")) {
+        Assert-TrustedPath "$dir.old" $ProgramFilesDir
+        Move-WriteThrough "$dir.old" $dir
+        Write-Host "  $($App.name): the folder an interrupted update left as .old is back"
+    }
 
     Write-UpdateProgress 'download' 2 "Looking for a new $($App.name)"
     $repoSource = Get-RepoSource $Source $i.repo
@@ -97,6 +103,7 @@ function Update-GithubApp {
         $old = "$dir.old"
         foreach ($p in $new, $old) { if (Test-Path -LiteralPath $p) { Assert-TrustedPath $p $ProgramFilesDir; Remove-Item -LiteralPath $p -Recurse -Force } }
         Copy-Item -LiteralPath $from $new -Recurse
+        Sync-FileTree $new
 
         Write-UpdateProgress 'install' 90 "Installing $($App.name) $tag"
         Stop-AppFromFolder $dir

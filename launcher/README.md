@@ -150,9 +150,11 @@ with the size and SHA-256 that release's `update.json` gives, and it rolls back 
 previous copy. That protects against the network and against files swapped on the way, but not
 against the repository itself: **anyone who can publish a release in APatenaude/HTPC (the owner,
 a collaborator with write access, a stolen GitHub session or token, or a workflow change pushed
-to it) can ship code that runs as SYSTEM on every box at its next update.** Two-factor sign-in on
-the GitHub account is the one cheap protection (the user said not now to 2FA, immutable releases
-and tag protection rules). `update.json` keeps a `signature` field (null) so a later release can
+to it) can ship code that runs as SYSTEM on every box at its next update.** Three settings on
+GitHub narrow that, each a few clicks, recommended for the user to turn on (not yet, by the
+user's choice): two-factor sign-in on the account; immutable releases (Settings > General >
+Releases), so a published release's files and tag can never be swapped afterwards; and a tag
+ruleset for `v*` (Settings > Rules) so only the owner can create, move or delete release tags. `update.json` keeps a `signature` field (null) so a later release can
 add a signing key without changing the format. The files are not code-signed: a browser download
 of `TV-Box-Setup.exe` gets SmartScreen's "Windows protected your PC" (More info, Run anyway);
 updates the box downloads itself do not.

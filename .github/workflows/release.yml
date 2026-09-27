@@ -31,7 +31,7 @@ jobs:
 
       # checkout leaves a lightweight copy of the tag; the annotated tag carries the notes.
       - name: Release notes from the tag
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: powershell
         env:
           TAG: ${{ github.ref_name }}
@@ -46,7 +46,7 @@ jobs:
       - name: Build
         shell: powershell
         env:
-          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          TAG: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name || '' }}
           DOTNET_CLI_TELEMETRY_OPTOUT: '1'
         run: |
           $build = @{ Out = "$env:GITHUB_WORKSPACE\release" }
@@ -62,7 +62,8 @@ jobs:
 
   publish:
     needs: build
-    if: github.ref_type == 'tag'
+    # Only a pushed tag publishes; a run by hand is a dry run, even on a tag.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: windows-2025
     permissions:
       contents: write

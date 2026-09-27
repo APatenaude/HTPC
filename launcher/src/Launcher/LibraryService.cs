@@ -266,11 +266,19 @@ sealed class LibraryService
         if (task is null)
             return (false, "Installing from the TV isn't set up yet. Run setup once more to finish it.");
 
+        // One run at a time (IgnoreNew): a Run while it is busy (the reconcile it does when Windows
+        // starts, a firewall job not waited for) would be dropped silently. Wait for it instead.
+        dynamic t = task;
+        var waitSince = DateTime.Now;
+        while (TaskRunning(t))
+        {
+            if (DateTime.Now - waitSince > app.Stall) return (false, $"{app.Name}: the job runner stayed busy; try again");
+            Thread.Sleep(1000);
+        }
         var startedAt = DateTime.Now;
         if (waitForProgress) ClearProgress(MachineProgress);
         try
         {
-            dynamic t = task;
             t.Run(token);   // the token becomes $(Arg0) in the task's action
             Log.Info($"Library: started \\HTPC\\Jobs with {token}");
         }
@@ -279,7 +287,13 @@ sealed class LibraryService
             Log.Error($"Library: could not start the install task for {token}", e);
             return (false, $"{app.Name} could not be started");
         }
-        return waitForProgress ? Follow(app, startedAt, MachineProgress, process: null) : (true, "");
+        return waitForProgress ? Follow(app, token, startedAt, MachineProgress, process: null) : (true, "");
+    }
+
+    static bool TaskRunning(dynamic task)
+    {
+        try { return (int)task.State == 4; }   // TASK_STATE_RUNNING
+        catch (Exception) { return false; }
     }
 
     object? GetTask()
@@ -320,7 +334,7 @@ sealed class LibraryService
         lock (gate) userProcess = process;
         // A per-user install must never pop a Windows permission prompt: the job script watches for
         // consent.exe and fails, but end it here too so a stuck prompt cannot hold the queue.
-        var (ok, message) = Follow(app, startedAt, UserProgress, process, watchConsent: true);
+        var (ok, message) = Follow(app, job.Token, startedAt, UserProgress, process, watchConsent: true);
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception) { }
         lock (gate) userProcess = null;
         return (ok, message);
@@ -328,7 +342,7 @@ sealed class LibraryService
 
     // --- Following a job's progress file ------------------------------------------------------
 
-    (bool, string) Follow(JobName app, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false)
+    (bool, string) Follow(JobName app, string token, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false)
     {
         var lastChange = DateTime.Now;
         string lastSeen = "";
@@ -346,10 +360,10 @@ sealed class LibraryService
             if (text is not null && text != lastSeen)
             {
                 lastSeen = text;
-                lastChange = DateTime.Now;
-                var p = ParseProgress(text, app);
+                var p = ParseProgress(text, app, token);
                 if (p is not null)
                 {
+                    lastChange = DateTime.Now;
                     Report(p);
                     if (p.Phase == "done") return (true, app.Box ? p.Message ?? "" : $"{app.Name} is ready");
                     if (p.Phase == "failed") return (false, p.Message ?? $"{app.Name} could not be installed");
@@ -359,13 +373,15 @@ sealed class LibraryService
             {
                 // The winget process ended without a done/failed line: read once more, then judge.
                 var tail = ReadProgress(progressPath, startedAt);
-                var p = tail is null ? null : ParseProgress(tail, app);
+                var p = tail is null ? null : ParseProgress(tail, app, token);
                 if (p?.Phase == "done") { Report(p); return (true, app.Box ? p.Message ?? "" : $"{app.Name} is ready"); }
                 return (false, p?.Message ?? $"{app.Name} did not finish installing");
             }
             if (DateTime.Now - lastChange > app.Stall)
             {
                 Log.Warn($"Library: {app.Id} made no progress for {app.Stall.TotalMinutes} min; giving up");
+                // A task job would otherwise hold the runner until the task's own limit (4 hours).
+                if (process is null) { try { ((dynamic)GetTask()!).Stop(0); } catch (Exception e) { Log.Warn($"Library: stopping the task: {e.Message}"); } }
                 return (false, $"{app.Name} is taking too long");
             }
             Thread.Sleep(500);
@@ -387,13 +403,16 @@ sealed class LibraryService
         try { if (File.Exists(progressPath)) File.Delete(progressPath); } catch (Exception) { }
     }
 
-    static JobProgress? ParseProgress(string text, JobName app)
+    // Only this job's progress: the file is shared by every job the runner runs (a run of the task
+    // that was not this one's, like the reconcile at Windows start, writes there too).
+    static JobProgress? ParseProgress(string text, JobName app, string token)
     {
         try
         {
             using var doc = JsonDocument.Parse(text);
             var r = doc.RootElement;
             string? S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            if (S("jobId") != token) return null;
             var phase = S("phase") ?? "install";
             var percent = r.TryGetProperty("percent", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : 0;
             return new JobProgress(app.Id, app.Name, S("action") ?? "install", phase, Math.Clamp(percent, 0, 100), S("message"));

@@ -102,15 +102,15 @@ sealed class UpdateService
     }
 
     /// <summary>
-    /// The setup folder with the update scripts: the kept one next to the catalog (the box), or
-    /// the one shipped with this build (a dev build).
+    /// The setup folder with the app check (tools\Get-AppUpdates.ps1 and the lib\ it uses): on the
+    /// box the one Install-Launcher keeps in ProgramData\HTPC\setup (admin-write; the job runner
+    /// in Program Files has no tools\), in a dev build the one it ships with.
     /// </summary>
     public static string FindScriptsDir(string catalogPath)
     {
         var candidates = new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "setup"),
-            Path.GetDirectoryName(Path.GetFullPath(catalogPath)) ?? "",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "setup"),
             Path.Combine(AppContext.BaseDirectory, "setup"),
         };
         return candidates.FirstOrDefault(d => File.Exists(Path.Combine(d, "tools", "Get-AppUpdates.ps1"))) ?? candidates[^1];
