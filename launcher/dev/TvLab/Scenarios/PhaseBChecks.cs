@@ -12,13 +12,13 @@ namespace Htpc.TvLab;
 /// </summary>
 static class PhaseBChecks
 {
-    const int LgPort = 43001;
+    const int LgPort = 43001, LgPlainPort = 43000;
     static readonly IPAddress LgIp = IPAddress.Parse("127.0.0.21"), AtvIp = IPAddress.Parse("127.0.0.31"), StreamerIp = IPAddress.Parse("127.0.0.32");
     static readonly Edid LgScreen = new("GSM-C001-00000000-LG TV SSCR2", "GSM", "LG TV SSCR2", 1);
 
     static NewHost Host(RokuWorld w, bool handsOff = false)
     {
-        var h = new NewHost(w, handsOff, (net, clock) => new ITvDriver[] { new RokuDriver(net, clock: clock), new WebOsDriver(net, clock, LgPort), new AndroidTvDriver(net, clock) });
+        var h = new NewHost(w, handsOff, (net, clock) => new ITvDriver[] { new RokuDriver(net, clock: clock), new WebOsDriver(net, clock, LgPort, LgPlainPort), new AndroidTvDriver(net, clock) });
         w.Host = h;
         return h;
     }
@@ -38,8 +38,95 @@ static class PhaseBChecks
         await Lg();
         Console.WriteLine("Google TV / Android TV (beta)");
         await Atv();
+        Console.WriteLine("Review of 98c5d91");
+        await Review();
         Console.WriteLine("Protocol pieces");
         Units();
+    }
+
+    /// <summary>
+    /// 1) a Bedroom Google TV at the remembered address, or two TVs sharing a name, never show a
+    /// pairing code; 2) an LG key never goes over the plain port; 3) a key forgotten mid-way never
+    /// gives an unpinned connection, and re-pairing never reuses the old one.
+    /// </summary>
+    static async Task Review()
+    {
+        {
+            using var w = new RokuWorld();
+            var h = Host(w);
+            var living = new FakeAtv("living-atv", AtvIp, w.Trace);
+            h.Net.MdnsResponders.Add(s => living.Mdns(s));
+            await h.Tv.Discover();
+            living.Dispose();
+            await Task.Delay(200);
+            using var bedroom = new FakeAtv("bedroom-atv", AtvIp, w.Trace) { Name = "Bedroom TV", Bt = "02:00:00:00:2b:99" };
+            h.Net.MdnsResponders.Clear();
+            h.Net.MdnsResponders.Add(bedroom.Mdns);
+            h.Tv.Choose("androidtv:bt-020000002b01"); // the living-room TV, remembered at its old address
+            await Eventually(() => h.Tv.Pairing?.Stage == "failed", 5);
+            Check.That(bedroom.Connections == 0 && bedroom.Code is null, "Google TV: the Bedroom TV at the remembered address shows no pairing code");
+
+            var twinA = new FakeAtv("twin-a", IPAddress.Parse("127.0.0.34"), w.Trace) { Bt = "", Name = "Google TV" };
+            var twinB = new FakeAtv("twin-b", IPAddress.Parse("127.0.0.35"), w.Trace) { Bt = "", Name = "Google TV" };
+            h.Net.MdnsResponders.Clear();
+            h.Net.MdnsResponders.Add(twinA.Mdns);
+            h.Net.MdnsResponders.Add(twinB.Mdns);
+            await h.Tv.Discover();
+            h.Tv.Choose("androidtv:google tv");
+            await Eventually(() => h.Tv.Pairing?.Stage == "failed", 5);
+            Check.That(twinA.Connections + twinB.Connections == 0 && h.Tv.Pairing?.Message.Contains("Two TVs") == true,
+                "Google TV: two TVs with the same name (no Bluetooth id): no pairing with either");
+            twinA.Dispose(); twinB.Dispose(); h.Dispose();
+        }
+        {
+            using var w = new RokuWorld();
+            var h = Host(w);
+            h.Screen = LgScreen;
+            using var lg = new FakeLg("lg", LgIp, LgPort, "udn-living", w.Trace);
+            lg.ListenPlain(LgPlainPort);
+            h.Net.Responders.Add(lg.Ssdp);
+            await h.Tv.Discover();
+            h.Tv.Choose("webos:udn-living");
+            await Eventually(() => h.Tv.Pairing?.Stage == "done");
+            Check.That(h.Tv.Credentials.Get("webos:udn-living")?.Scheme == "wss", "LG: the key kept with the scheme it was paired over (wss)");
+            await h.Tv.Poll();
+            await Task.Delay(300);
+            lg.StopTls(); // its TLS port refuses from now on; it still answers searches
+            h.Tv.Found.Clear();
+            await h.Tv.Discover();
+            await w.RunFor(30); await h.Sleep(); await h.Wake(); await w.RunFor(30);
+            Check.Equal(0, lg.PlainConnections, "LG: with a key, never the plain port (no fallback when TLS fails)");
+            h.Dispose();
+        }
+        {
+            using var w = new RokuWorld();
+            var h = Host(w);
+            using var atv = new FakeAtv("atv", AtvIp, w.Trace);
+            h.Net.MdnsResponders.Add(atv.Mdns);
+            await h.Tv.Discover();
+            var key = "androidtv:bt-020000002b01";
+            h.Tv.Choose(key);
+            await Eventually(() => h.Tv.Pairing?.Stage == "code" && atv.Code is not null);
+            h.Tv.PairCode(atv.Code!);
+            await Eventually(() => h.Tv.Pairing?.Stage == "done");
+            await h.Tv.Poll();
+            var before = atv.Connections;
+            h.Tv.StartPairing(); // pairing again: the old connection is dropped, not reused
+            await Eventually(() => h.Tv.Pairing?.Stage == "code" && atv.Code is not null);
+            h.Tv.PairCode(atv.Code!);
+            await Eventually(() => h.Tv.Pairing?.Stage == "done");
+            await h.Tv.Poll();
+            Check.That(atv.Connections >= before + 2, $"Google TV: after pairing again, a new pinned connection ({atv.Connections - before} new)");
+            h.Tv.Credentials.Forget(key); // a Forget between reads
+            atv.Dispose();
+            await Task.Delay(200);
+            using var other = new FakeAtv("other-atv", AtvIp, w.Trace);
+            other.BecomeAnotherTv();
+            await w.RunFor(30);
+            await h.Sleep(); await h.Wake();
+            Check.That(other.Connections == 0 && other.Keys.Count == 0, "Google TV: a forgotten key never gives an unpinned connection");
+            h.Dispose();
+        }
     }
 
     static async Task Lg()

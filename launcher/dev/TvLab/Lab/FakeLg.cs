@@ -37,6 +37,29 @@ sealed class FakeLg : IDisposable
     public string WiredMac { get; set; } = "02:00:00:00:1a:01";
     public string WifiMac { get; set; } = "02:00:00:00:1a:02";
 
+    /// <summary>Connections to its plain ws port (a key must never come in clear there).</summary>
+    public int PlainConnections;
+    System.Net.Sockets.TcpListener? plain;
+
+    /// <summary>Listens on the plain ws port too, only counting (and dropping) connections.</summary>
+    public void ListenPlain(int port)
+    {
+        plain = new System.Net.Sockets.TcpListener(Ip, port);
+        plain.Server.SetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket, System.Net.Sockets.SocketOptionName.ReuseAddress, true);
+        plain.Start();
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                try { using var c = await plain.AcceptTcpClientAsync(); Interlocked.Increment(ref PlainConnections); trace.Add($"{Label} plain connection"); }
+                catch (Exception) { return; }
+            }
+        });
+    }
+
+    /// <summary>Its TLS port stops listening (connections refused), while it still answers searches.</summary>
+    public void StopTls() => tls.Stop();
+
     public FakeLg(string label, IPAddress ip, int port, string udn, Trace trace)
     {
         Label = label; Ip = ip; Udn = udn; this.trace = trace;
@@ -170,6 +193,7 @@ sealed class FakeLg : IDisposable
     {
         CloseAll();
         tls.Stop();
+        plain?.Stop();
         description.Dispose();
     }
 }

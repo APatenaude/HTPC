@@ -107,9 +107,13 @@ sealed class AndroidTvDriver : ITvDriver, ITvPairing
     static string PinOf(X509Certificate cert) =>
         Convert.ToBase64String(SHA256.HashData(new X509Certificate2(cert).PublicKey.ExportSubjectPublicKeyInfo()));
 
-    /// <summary>TLS to the TV with the box's certificate; with a pin, only to the TV with that key.</summary>
-    async Task<(SslStream Stream, X509Certificate2 Server)?> Tls(string host, int port, string? pin, CancellationToken cancel)
+    /// <summary>
+    /// TLS to the TV with the box's certificate. Pinned: only to the TV with that key, and never
+    /// without a pin (an empty one refuses outright). Unpinned only for pairing.
+    /// </summary>
+    async Task<(SslStream Stream, X509Certificate2 Server)?> Tls(string host, int port, string? pin, bool pinned, CancellationToken cancel)
     {
+        if (pinned && string.IsNullOrEmpty(pin)) return null;
         var tcp = new TcpClient();
         try
         {
@@ -126,14 +130,14 @@ sealed class AndroidTvDriver : ITvDriver, ITvPairing
                 {
                     if (cert is null) return false;
                     server = new X509Certificate2(cert);
-                    return pin is null || PinOf(cert) == pin; // another TV at this address: the handshake stops here
+                    return !pinned || PinOf(cert) == pin; // another TV at this address: the handshake stops here
                 },
             }, timeout.Token);
             return (ssl, server!);
         }
         catch (Exception e)
         {
-            if (pin is not null && e is AuthenticationException) Log.Warn($"Android TV at {host} is not the paired TV (its key differs); nothing sent to it");
+            if (pinned && e is AuthenticationException) Log.Warn($"Android TV at {host} is not the paired TV (its key differs); nothing sent to it");
             tcp.Dispose();
             return null;
         }
@@ -142,9 +146,10 @@ sealed class AndroidTvDriver : ITvDriver, ITvPairing
     public async Task<TvDevice?> Refresh(TvDevice tv, bool passive, CancellationToken cancel)
     {
         if (sessions.TryGetValue(tv.Key, out var live) && live.Open) return tv with { State = live.State };
-        if (passive || !IsPaired(tv)) return tv with { State = TvState.Unknown };
+        var pin = Pin(tv); // read once: a Forget meanwhile must not leave a check against nothing
+        if (passive || string.IsNullOrEmpty(pin)) return tv with { State = TvState.Unknown };
         if (failedAt.TryGetValue(tv.Key, out var failed) && clock.Now - failed >= TimeSpan.Zero && clock.Now - failed < Retry) return null;
-        var tls = await Tls(tv.Address.Host, tv.Address.Port, Pin(tv), cancel);
+        var tls = await Tls(tv.Address.Host, tv.Address.Port, pin, pinned: true, cancel);
         if (tls is null) { failedAt[tv.Key] = clock.Now; return null; }
         var session = new AtvSession(tls.Value.Stream);
         if (sessions.TryRemove(tv.Key, out var old)) old.Dispose();
@@ -157,7 +162,20 @@ sealed class AndroidTvDriver : ITvDriver, ITvPairing
     public async Task<bool> Pair(TvDevice tv, Action<string, string> step, Func<CancellationToken, Task<string?>> nextCode, CancellationToken cancel)
     {
         step("working", $"Connecting to {tv.Name}…");
-        var tls = await Tls(tv.Address.Host, pairingPort, null, cancel);
+        if (sessions.TryRemove(tv.Key, out var old)) old.Dispose(); // nothing from before this pairing is used after it
+        // The pairing connection is not pinned (there is no key yet), so the TV must be the one
+        // picked, there, now: a fresh search must find exactly this id answering from that address
+        // (an address remembered from before can be another TV's since; a name shared by two TVs
+        // without a Bluetooth id cannot tell them apart). Else no TV shows a code.
+        var now = (await Find(cancel)).Where(t => t.Id == tv.Id).ToList();
+        if (now.Count != 1 || now[0].Address.Host != tv.Address.Host)
+        {
+            step("failed", now.Count > 1
+                ? $"Two TVs are called “{tv.Name}”: rename one on the TV (Settings › System › About › Device name), then try again."
+                : $"{tv.Name} is not answering where it was. Search again, then pick it.");
+            return false;
+        }
+        var tls = await Tls(tv.Address.Host, pairingPort, null, pinned: false, cancel);
         if (tls is null) { step("failed", $"{tv.Name} did not answer. Is it on, and on the same network?"); return false; }
         using var ssl = tls.Value.Stream;
         var server = tls.Value.Server;

@@ -26,18 +26,19 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
 
     readonly ITvNet net;
     readonly ITvClock clock;
-    readonly int port;
+    readonly int port, plainPort;
     readonly HttpClient http = TvHttp.Create(TimeSpan.FromSeconds(3));
     readonly ConcurrentDictionary<string, (string Id, DateTime At)> seen = new();   // host -> UDN it answered with
     readonly ConcurrentDictionary<string, WebOsSession> sessions = new();           // device key -> live connection
     readonly ConcurrentDictionary<string, DateTime> failedAt = new();
     TvCredentials? credentials;
 
-    public WebOsDriver(ITvNet net, ITvClock? clock = null, int port = 3001)
+    public WebOsDriver(ITvNet net, ITvClock? clock = null, int port = 3001, int plainPort = 3000)
     {
         this.net = net;
         this.clock = clock ?? SystemTvClock.Instance;
         this.port = port;
+        this.plainPort = plainPort;
     }
 
     public TvMethodInfo Info { get; } = new(
@@ -64,7 +65,7 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
 
     public Task<IReadOnlyList<TvDevice>> Find(CancellationToken cancel) => Search(TimeSpan.FromSeconds(2), cancel);
 
-    async Task<IReadOnlyList<TvDevice>> Search(TimeSpan wait, CancellationToken cancel)
+    async Task<IReadOnlyList<TvDevice>> Search(TimeSpan wait, CancellationToken cancel, bool describe = true)
     {
         var list = new List<TvDevice>();
         foreach (var reply in await net.Ssdp(new[] { SearchTarget }, wait, cancel))
@@ -73,7 +74,8 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
             if (described.Host != reply.From.ToString()) continue; // an answer speaks only for its sender
             seen[reply.From.ToString()] = (id, clock.Now);
             if (list.Any(t => t.Id == id)) continue;
-            var (name, model) = await Describe(described, cancel);
+            // The identity check needs only the UDN: no description read of every LG TV every few seconds.
+            var (name, model) = describe ? await Describe(described, cancel) : ("LG TV", "");
             list.Add(new TvDevice
             {
                 Method = "webos", Id = id, Name = name, Model = model, Maker = "LG",
@@ -108,7 +110,7 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
     {
         bool Fresh() => seen.TryGetValue(tv.Address.Host, out var s) && s.Id == tv.Id && clock.Now - s.At >= TimeSpan.Zero && clock.Now - s.At < Vouch;
         if (Fresh()) return true;
-        await Search(TimeSpan.FromSeconds(1), cancel);
+        await Search(TimeSpan.FromSeconds(1), cancel, describe: false);
         return Fresh();
     }
 
@@ -129,18 +131,29 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
     async Task<WebOsSession?> Connect(TvDevice tv, bool pairing, Action<string, string>? step, CancellationToken cancel)
     {
         if (!await Vouched(tv, cancel)) return null;
-        var session = await WebOsSession.Connect(tv.Address, cancel);
+        var stored = credentials?.Get(tv.Key);
+        var key = pairing ? null : stored?.Value;
+        if (!pairing && string.IsNullOrEmpty(key)) return null;
+        // Once a key exists the scheme is the one it was paired over (TLS unless the TV had only
+        // the plain port): a key never goes out in clear because TLS failed once. Pairing (no key
+        // yet) tries the plain port only when the TLS port refuses outright (a TV too old for it).
+        var plain = new UriBuilder(tv.Address) { Scheme = "ws", Port = plainPort }.Uri;
+        var (session, refused) = await WebOsSession.Connect(!pairing && stored?.Scheme == "ws" ? plain : tv.Address, cancel);
+        if (session is null && pairing && refused) (session, _) = await WebOsSession.Connect(plain, cancel);
         if (session is null) return null;
-        var key = pairing ? null : Key(tv);
-        var registered = await session.Register(key, () => step?.Invoke("prompt", $"Say yes on {tv.Name}: a prompt asks to allow “TV Box”."), pairing, cancel);
-        if (registered is null)
+        try
         {
-            session.Dispose();
-            if (!pairing) Log.Warn($"LG at {tv.Address.Host} did not take this box's key: another TV, or pairing was undone on it (pair again in Settings › TV)");
-            return null;
+            var registered = await session.Register(key, () => step?.Invoke("prompt", $"Say yes on {tv.Name}: a prompt asks to allow “TV Box”."), pairing, cancel);
+            if (registered is null)
+            {
+                session.Dispose();
+                if (!pairing) Log.Warn($"LG at {tv.Address.Host} did not take this box's key: another TV, or pairing was undone on it (pair again in Settings › TV)");
+                return null;
+            }
+            if (pairing) credentials?.Set(tv.Key, new TvCredentials.Secret { Value = registered, Scheme = session.Scheme });
+            await session.Start(cancel);
         }
-        if (pairing) credentials?.Set(tv.Key, new TvCredentials.Secret { Value = registered });
-        await session.Start(cancel);
+        catch (Exception) { session.Dispose(); return null; } // dropped mid-handshake: silent, nothing left open
         if (sessions.TryRemove(tv.Key, out var old)) old.Dispose();
         sessions[tv.Key] = session;
         failedAt.TryRemove(tv.Key, out _);
@@ -196,27 +209,35 @@ sealed class WebOsSession : IDisposable
         _ => new TvState(TvPower.Unknown, 0, power.Length > 0 ? power : "unknown"),
     };
 
-    public static async Task<WebOsSession?> Connect(Uri address, CancellationToken cancel)
+    /// <summary>"wss" or "ws": what this connection is over (kept with the key at pairing).</summary>
+    public string Scheme { get; private set; } = "wss";
+
+    /// <summary>A connection to exactly this URI; Refused when the TV turned the TCP connection down (nothing listens there).</summary>
+    public static async Task<(WebOsSession? Session, bool Refused)> Connect(Uri uri, CancellationToken cancel)
     {
-        foreach (var uri in new[] { address, new UriBuilder(address) { Scheme = "ws", Port = 3000 }.Uri }.Distinct())
+        var socket = new ClientWebSocket();
+        socket.Options.RemoteCertificateValidationCallback = delegate { return true; }; // LG's own CA; the UDN and key check who it is
+        socket.Options.Proxy = null;
+        try
         {
-            if (uri.Scheme == "ws" && address.Port != 3001) continue; // the plain port only beside the real one
-            var socket = new ClientWebSocket();
-            socket.Options.RemoteCertificateValidationCallback = delegate { return true; }; // LG's own CA; the UDN and key check who it is
-            socket.Options.Proxy = null;
-            try
-            {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-                timeout.CancelAfter(TimeSpan.FromSeconds(4));
-                await socket.ConnectAsync(uri, timeout.Token);
-                var session = new WebOsSession(socket);
-                _ = session.ReceiveLoop();
-                return session;
-            }
-            catch (Exception) { socket.Dispose(); }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            timeout.CancelAfter(TimeSpan.FromSeconds(4));
+            await socket.ConnectAsync(uri, timeout.Token);
+            var session = new WebOsSession(socket) { Scheme = uri.Scheme };
+            _ = session.ReceiveLoop();
+            return (session, false);
         }
-        return null;
+        catch (Exception e)
+        {
+            socket.Dispose();
+            for (var x = (Exception?)e; x is not null; x = x.InnerException)
+                if (x is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused }) return (null, true);
+            return (null, false);
+        }
     }
+
+    /// <summary>A string field, or null for anything else (a TV's odd message must not end the connection).</summary>
+    static string? Str(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     /// <summary>
     /// Registers with the stored key (or none, to pair): the new key, or null when refused. Without
@@ -249,19 +270,19 @@ sealed class WebOsSession : IDisposable
     {
         await Subscribe("ssap://com.webos.service.tvpower/power/getPowerState", p =>
         {
-            var state = p?["state"]?.GetValue<string>();
-            var processing = p?["processing"]?.GetValue<string>() ?? "";
+            var state = Str(p?["state"]);
+            var processing = Str(p?["processing"]) ?? "";
             // On its way to standby counts as off already; no state at all is unknown.
             power = state is null ? "" : processing is "Request Power Off" or "Request Suspend" ? "Suspend" : state;
         }, cancel);
         await Subscribe("ssap://com.webos.applicationManager/getForegroundAppInfo", p =>
         {
-            var app = p?["appId"]?.GetValue<string>() ?? "";
+            var app = Str(p?["appId"]) ?? "";
             input = app.StartsWith("com.webos.app.hdmi") && int.TryParse(app["com.webos.app.hdmi".Length..], out var n) ? n : 0;
         }, cancel);
         if (await Request("ssap://com.webos.service.connectionmanager/getinfo", null, cancel) is { } info)
             Macs = new[] { info["wiredInfo"]?["macAddress"], info["wifiInfo"]?["macAddress"] }
-                .Select(m => TvNet.NormalizeMac(m?.GetValue<string>())).Where(m => m is not null).Select(m => m!).ToList();
+                .Select(m => TvNet.NormalizeMac(Str(m))).Where(m => m is not null).Select(m => m!).ToList();
     }
 
     readonly ConcurrentDictionary<string, Action<JsonNode?>> subscriptions = new();
@@ -314,7 +335,7 @@ sealed class WebOsSession : IDisposable
                     message.Write(buffer, 0, result.Count);
                     if (message.Length > MaxMessage) return; // nothing a TV says is this big
                 } while (!result.EndOfMessage);
-                Handle(message.ToArray());
+                try { Handle(message.ToArray()); } catch (Exception) { } // one odd message is not the end of the connection
             }
         }
         catch (Exception) { }
@@ -330,13 +351,13 @@ sealed class WebOsSession : IDisposable
     {
         JsonNode? m;
         try { m = JsonNode.Parse(data); } catch (JsonException) { return; }
-        var type = m?["type"]?.GetValue<string>();
-        var id = m?["id"]?.GetValue<string>() ?? "";
+        var type = Str(m?["type"]);
+        var id = Str(m?["id"]) ?? "";
         var payload = m?["payload"];
         if (id == "register_0")
         {
-            if (type == "registered") registration?.TrySetResult(payload?["client-key"]?.GetValue<string>());
-            else if (type == "response" && payload?["pairingType"]?.GetValue<string>() == "PROMPT") prompted?.Invoke();
+            if (type == "registered") registration?.TrySetResult(Str(payload?["client-key"]));
+            else if (type == "response" && Str(payload?["pairingType"]) == "PROMPT") prompted?.Invoke();
             else if (type == "error") registration?.TrySetResult(null);
             return;
         }

@@ -47,7 +47,7 @@ sealed class FakeAtv : IDisposable
 
     public IEnumerable<MdnsService> Mdns(string service) => !Reachable ? Array.Empty<MdnsService>() : service switch
     {
-        AndroidTvDriver.Service => new[] { new MdnsService(Name, Ip, 6466, new Dictionary<string, string> { ["bt"] = Bt }) },
+        AndroidTvDriver.Service => new[] { new MdnsService(Name, Ip, 6466, Bt.Length > 0 ? new Dictionary<string, string> { ["bt"] = Bt } : new Dictionary<string, string>()) },
         "_googlecast._tcp.local" => new[] { new MdnsService(Name, Ip, 8009, new Dictionary<string, string> { ["md"] = Model, ["fn"] = Name }) },
         _ => Array.Empty<MdnsService>(),
     };

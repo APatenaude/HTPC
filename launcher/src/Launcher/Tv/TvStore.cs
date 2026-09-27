@@ -144,6 +144,8 @@ sealed class TvCredentials
         public string? Value { get; set; }
         /// <summary>A client certificate with its private key (PFX), for TLS pairing (Google TV).</summary>
         public byte[]? Pfx { get; set; }
+        /// <summary>LG: "wss" or "ws", the scheme the key was paired over (the key never goes over another).</summary>
+        public string? Scheme { get; set; }
     }
 
     readonly string path;
@@ -167,11 +169,14 @@ sealed class TvCredentials
         return new TvCredentials(files.Credentials, new Content());
     }
 
-    public Secret? Get(string deviceKey) => content.Items.TryGetValue(deviceKey, out var s) ? s : null;
+    // The pairing task writes while the poll reads: one lock, and Save writes under it (temp file then move).
+    readonly object gate = new();
 
-    public void Set(string deviceKey, Secret secret) { content.Items[deviceKey] = secret; Save(); }
+    public Secret? Get(string deviceKey) { lock (gate) return content.Items.TryGetValue(deviceKey, out var s) ? s : null; }
 
-    public void Forget(string deviceKey) { if (content.Items.Remove(deviceKey)) Save(); }
+    public void Set(string deviceKey, Secret secret) { lock (gate) { content.Items[deviceKey] = secret; Save(); } }
+
+    public void Forget(string deviceKey) { lock (gate) { if (content.Items.Remove(deviceKey)) Save(); } }
 
     void Save()
     {

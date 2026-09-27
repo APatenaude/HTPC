@@ -92,6 +92,8 @@ const TvUi = {
     return tv.port > 0 ? `The TV told the box it is on HDMI ${tv.port} (through the HDMI cable).` : 'The TV did not say which input the box is on: pick it.';
   },
 
+  // statusLine and inputStatus give plain text (TV names in it): esc() where it is drawn.
+
   /** The code typed so far on the pairing keypad (Google TV). */
   code: '',
 

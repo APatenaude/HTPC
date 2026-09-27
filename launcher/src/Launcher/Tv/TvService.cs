@@ -271,7 +271,9 @@ sealed class TvService
             }
             catch (Exception e) { Log.Warn($"TV pairing with {tv.Name}: {e.GetType().Name}"); }
             Log.Info($"TV pairing with {tv.Name} ({tv.Method}): {(ok ? "paired" : "not paired")}");
-            if (ok && Profile is { } profile && await DriverFor(tv.Method)!.Refresh(tv, false, CancellationToken.None) is { } now)
+            // Its MACs go only to the profile of that very TV (the screen may have changed during a 60 s prompt).
+            if (ok && Profile is { } profile && profile.Method == tv.Method && profile.DeviceId == tv.Id &&
+                await DriverFor(tv.Method)!.Refresh(tv, false, CancellationToken.None) is { } now)
             {
                 Found = Found.Select(t => t.Key == now.Key ? now : t).ToList();
                 Contact(profile, now); // its MACs, from the paired connection
