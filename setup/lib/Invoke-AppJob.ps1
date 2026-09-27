@@ -26,7 +26,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$Job,
+    [AllowEmptyString()][string]$Job = '',
     [switch]$DryRun,
     [string]$Catalog
 )
@@ -37,6 +37,10 @@ $root = Split-Path $here -Parent            # ...\HTPC\Launcher
 . "$here\Common.ps1"
 . "$here\AppCore.ps1"
 . "$here\Job-Common.ps1"
+
+# The task's start with Windows passes no token ("$(Arg0)" stays empty, or literal on some
+# builds): that run puts an interrupted launcher update right (jobs\reconcile.ps1).
+if ($Job -eq '' -or $Job -ceq '$(Arg0)') { $Job = 'reconcile' }
 
 # <verb> is lower-case letters and hyphens; the optional <arg> is one safe token (ids, or a version
 # like 1.2.3 for the updates agent). No spaces, slashes, or anything that could start a new command.
@@ -68,7 +72,7 @@ try {
     $temp = New-AdminTemp
     Write-JobProgress 'start' 0 "Starting $verb"
     . $verbScript -Arg $arg
-    Write-JobProgress 'done' 100 'Done'
+    Write-JobProgress 'done' 100 $(if ($script:LastPhase -eq 'done' -and $script:LastMessage) { $script:LastMessage } else { 'Done' })
 } catch {
     Write-JobProgress 'failed' 0 $_.Exception.Message
     Write-Host "Job $Job failed: $($_.Exception.Message)"

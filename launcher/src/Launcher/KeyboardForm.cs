@@ -15,7 +15,7 @@ sealed class KeyboardForm : Form
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     const int WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
 
-    readonly WebView2 web = new() { Dock = DockStyle.Fill };
+    WebView2 web = new() { Dock = DockStyle.Fill };   // replaced by ReleaseWebView
     bool ready;
     object? pending;   // an "open" posted before the page was ready
 
@@ -53,7 +53,22 @@ sealed class KeyboardForm : Form
         base.WndProc(ref m);
     }
 
-    /// <summary>Loads the keyboard page in the launcher's WebView2 environment (once, at start).</summary>
+    /// <summary>
+    /// Closes its WebView2 so the launcher can move to a newer WebView2 runtime (in standby);
+    /// Init loads the page again in the new environment.
+    /// </summary>
+    public void ReleaseWebView()
+    {
+        ready = false;
+        pending = null;
+        Hide();
+        Controls.Remove(web);
+        web.Dispose();
+        web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
+        Controls.Add(web);
+    }
+
+    /// <summary>Loads the keyboard page in the launcher's WebView2 environment (at start, and after ReleaseWebView).</summary>
     public async Task Init(CoreWebView2Environment environment, string uiDir)
     {
         _ = Handle; // WebView2 needs the window to exist; it stays hidden until opened

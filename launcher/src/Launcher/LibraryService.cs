@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Htpc.Launcher;
 
@@ -8,7 +9,21 @@ namespace Htpc.Launcher;
 sealed record LibraryJob(string Id, string Action, bool AddToHome)
 {
     /// <summary>The string handed to the job runner ("install:vlc"), always catalog-validated first.</summary>
-    public string Token => $"{Action}:{Id}";
+    public string Token => BoxJob && Id.Length == 0 ? Action : $"{Action}:{Id}";
+
+    /// <summary>
+    /// A job of the box rather than of a catalog app (the updates: "launcher-update:0.2.0",
+    /// "windows-install", "restorepoint", "winget-update"): Action is the runner's verb, Id its
+    /// argument or empty, Label what the screen says. Not kept across a launcher restart.
+    /// </summary>
+    public bool BoxJob { get; init; }
+    public string? Label { get; init; }
+    /// <summary>A box job run as the signed-in user (winget itself), not through the task.</summary>
+    public bool AsUser { get; init; }
+    /// <summary>Held at the head of the queue until this says go (the launcher's own update waits for Home or standby).</summary>
+    [JsonIgnore] public Func<bool>? WaitUntil { get; init; }
+    /// <summary>No progress for this long = stuck (default 10 min; Windows installs are quiet for long stretches).</summary>
+    [JsonIgnore] public TimeSpan? Stall { get; init; }
 }
 
 /// <summary>What the UI shows for the job running now (or the last one that finished).</summary>
@@ -58,11 +73,22 @@ sealed class LibraryService
 
     LibraryJob? current;
     JobProgress? last;
+    Process? userProcess;      // the running user-scope job, for Cancel
+    bool cancelled;
+    volatile bool taskStarted;   // the current job's Run went to \HTPC\Jobs (only then may Cancel stop the task)
 
     /// <summary>The queue changed or a job made progress. Args: the job now running (or null) and the waiting ids.</summary>
     public event Action? Changed;
     /// <summary>A job finished. Args: the job, whether it succeeded, and a line to show.</summary>
     public event Action<LibraryJob, bool, string>? Finished;
+    /// <summary>The running job's progress, each time it changes (the updates watch for "ready"). Any thread.</summary>
+    public event Action<LibraryJob, JobProgress>? Progress;
+
+    /// <summary>The job running now, if any.</summary>
+    public LibraryJob? Current { get { lock (gate) return current; } }
+
+    /// <summary>Whether anything is running or waiting (the box must not go into real sleep then).</summary>
+    public bool Busy { get { lock (gate) return current is not null || pending.Count > 0; } }
 
     public LibraryService(AppManager apps, LauncherSettings settings, string catalogPath)
     {
@@ -121,18 +147,72 @@ sealed class LibraryService
         return true;
     }
 
+    /// <summary>
+    /// Queues a box job (LibraryJob.BoxJob: the updates) behind whatever runs, in the same one lane.
+    /// The token's grammar is checked again by the runner (lib\Invoke-AppJob.ps1, jobs\*.ps1).
+    /// </summary>
+    public bool EnqueueBoxJob(LibraryJob job, out string error)
+    {
+        error = "";
+        if (!job.BoxJob || !System.Text.RegularExpressions.Regex.IsMatch(job.Token, @"\A[a-z][a-z-]{1,29}(:[A-Za-z0-9][A-Za-z0-9._-]{0,60})?\z"))
+        { error = "Unknown job"; return false; }
+        lock (gate)
+        {
+            if (current?.Token == job.Token || pending.Any(j => j.Token == job.Token)) { error = "Already in the queue"; return false; }
+            pending.Add(job);
+        }
+        queue.Add(job);
+        Changed?.Invoke();
+        Log.Info($"Library: queued {job.Token}");
+        return true;
+    }
+
+    /// <summary>
+    /// Drops a job that waits, or stops the running one: a task job through Task Scheduler (the
+    /// TV user may run and stop it), a user job by ending its process.
+    /// </summary>
+    public bool Cancel(string token)
+    {
+        LibraryJob? running;
+        lock (gate)
+        {
+            var waiting = pending.FirstOrDefault(j => j.Token == token);
+            if (waiting is not null) { pending.Remove(waiting); SavePending(); Changed?.Invoke(); return true; }
+            if (current?.Token != token) return false;
+            cancelled = true;
+            running = current;
+        }
+        Log.Info($"Library: cancelling {token}");
+        try
+        {
+            if (userProcess is { HasExited: false } p) p.Kill(entireProcessTree: true);
+            else if (taskStarted && !running.AsUser && (running.BoxJob || apps.Get(running.Id)?.Scope != "user")) ((dynamic)GetTask()!).Stop(0);
+            // Not started yet (still waiting for the task to be free): the wait sees cancelled and stops.
+            return true;
+        }
+        catch (Exception e) { Log.Warn($"Library: could not stop {token}: {e.Message}"); return false; }
+    }
+
     void Run()
     {
         foreach (var job in queue.GetConsumingEnumerable())
         {
-            lock (gate) { current = job; pending.Remove(job); SavePending(); }
+            lock (gate)
+            {
+                if (!pending.Contains(job)) continue;   // cancelled while it waited
+                current = job; pending.Remove(job); SavePending(); cancelled = false; taskStarted = false;
+            }
             Changed?.Invoke();
+            // The launcher's own update waits here, at the head of the lane, until Home or standby.
+            while (job.WaitUntil is not null && !SafeCheck(job.WaitUntil)) { lock (gate) if (cancelled) break; Thread.Sleep(1000); }
             bool ok;
             string message;
-            try { (ok, message) = RunJob(job); }
+            bool stop;
+            lock (gate) stop = cancelled;
+            try { (ok, message) = stop ? (false, "Cancelled") : job.BoxJob ? RunBoxJob(job) : RunJob(job); }
             catch (Exception e) { Log.Error($"Library job {job.Token}", e); ok = false; message = "Something went wrong"; }
             lock (gate) { current = null; SavePending(); }
-            if (ok) AfterSuccess(job);
+            if (ok && !job.BoxJob) AfterSuccess(job);
             Finished?.Invoke(job, ok, message);
             Changed?.Invoke();
         }
@@ -157,9 +237,30 @@ sealed class LibraryService
         return (ok, message);
     }
 
+    // A box job: the task (as SYSTEM) or, for AsUser, the runner without elevation. The job's own
+    // last words are the result ("The launcher is now version 0.2.0", "3 installed").
+    (bool, string) RunBoxJob(LibraryJob job)
+    {
+        var who = new JobName(job.Token, job.Label ?? job.Token, Box: true, job.Stall ?? Watchdog);
+        Report(new JobProgress(job.Token, who.Name, job.Action, "start", 0, null));
+        return job.AsUser ? RunAsUser(job, who) : RunThroughTask(job.Token, who, waitForProgress: true);
+    }
+
+    /// <summary>Who a job's messages are about, and how long it may go without progress.</summary>
+    sealed record JobName(string Id, string Name, bool Box, TimeSpan Stall);
+
+    static JobName NameOf(CatalogApp app) => new(app.Id, app.Name, Box: false, Watchdog);
+
+    bool SafeCheck(Func<bool> check)
+    {
+        try { return check(); } catch (Exception e) { Log.Warn($"Library: waiting check: {e.Message}"); return false; }
+    }
+
     // --- Machine scope: the elevated \HTPC\Jobs task -----------------------------------------
 
-    (bool, string) RunThroughTask(string token, CatalogApp app, bool waitForProgress)
+    (bool, string) RunThroughTask(string token, CatalogApp app, bool waitForProgress) => RunThroughTask(token, NameOf(app), waitForProgress);
+
+    (bool, string) RunThroughTask(string token, JobName app, bool waitForProgress)
     {
         object? task = null;
         try { task = GetTask(); }
@@ -167,12 +268,23 @@ sealed class LibraryService
         if (task is null)
             return (false, "Installing from the TV isn't set up yet. Run setup once more to finish it.");
 
+        // One run at a time (IgnoreNew): a Run while it is busy (the reconcile it does when Windows
+        // starts, a firewall job not waited for) would be dropped silently. Wait for it instead.
+        dynamic t = task;
+        var waitSince = DateTime.Now;
+        while (TaskRunning(t))
+        {
+            lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
+            if (DateTime.Now - waitSince > app.Stall) return (false, $"{app.Name}: the job runner stayed busy; try again");
+            Thread.Sleep(1000);
+        }
+        lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
         var startedAt = DateTime.Now;
         if (waitForProgress) ClearProgress(MachineProgress);
         try
         {
-            dynamic t = task;
             t.Run(token);   // the token becomes $(Arg0) in the task's action
+            taskStarted = true;
             Log.Info($"Library: started \\HTPC\\Jobs with {token}");
         }
         catch (Exception e)
@@ -180,7 +292,13 @@ sealed class LibraryService
             Log.Error($"Library: could not start the install task for {token}", e);
             return (false, $"{app.Name} could not be started");
         }
-        return waitForProgress ? Follow(app, startedAt, MachineProgress, process: null) : (true, "");
+        return waitForProgress ? Follow(app, token, startedAt, MachineProgress, process: null) : (true, "");
+    }
+
+    static bool TaskRunning(dynamic task)
+    {
+        try { return (int)task.State == 4; }   // TASK_STATE_RUNNING
+        catch (Exception) { return false; }
     }
 
     object? GetTask()
@@ -200,7 +318,9 @@ sealed class LibraryService
 
     // --- User scope: winget without elevation, run by the launcher ----------------------------
 
-    (bool, string) RunAsUser(LibraryJob job, CatalogApp app)
+    (bool, string) RunAsUser(LibraryJob job, CatalogApp app) => RunAsUser(job, NameOf(app));
+
+    (bool, string) RunAsUser(LibraryJob job, JobName app)
     {
         ClearProgress(UserProgress);
         var startedAt = DateTime.Now;
@@ -216,21 +336,24 @@ sealed class LibraryService
         Process process;
         try { process = Process.Start(psi)!; }
         catch (Exception e) { Log.Error($"Library: could not start winget for {job.Token}", e); return (false, $"{app.Name} could not be started"); }
+        lock (gate) userProcess = process;
         // A per-user install must never pop a Windows permission prompt: the job script watches for
         // consent.exe and fails, but end it here too so a stuck prompt cannot hold the queue.
-        var (ok, message) = Follow(app, startedAt, UserProgress, process, watchConsent: true);
+        var (ok, message) = Follow(app, job.Token, startedAt, UserProgress, process, watchConsent: true);
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception) { }
+        lock (gate) userProcess = null;
         return (ok, message);
     }
 
     // --- Following a job's progress file ------------------------------------------------------
 
-    (bool, string) Follow(CatalogApp app, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false)
+    (bool, string) Follow(JobName app, string token, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false)
     {
         var lastChange = DateTime.Now;
         string lastSeen = "";
         while (true)
         {
+            lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");   // Cancel stopped it (or the task)
             // A per-user install must not raise a Windows permission prompt on the TV. If one
             // appears (consent.exe), stop the job at once rather than leave it stuck behind a
             // prompt the user cannot answer with the controller.
@@ -243,12 +366,12 @@ sealed class LibraryService
             if (text is not null && text != lastSeen)
             {
                 lastSeen = text;
-                lastChange = DateTime.Now;
-                var p = ParseProgress(text, app);
+                var p = ParseProgress(text, app, token);
                 if (p is not null)
                 {
+                    lastChange = DateTime.Now;
                     Report(p);
-                    if (p.Phase == "done") return (true, $"{app.Name} is ready");
+                    if (p.Phase == "done") return (true, app.Box ? p.Message ?? "" : $"{app.Name} is ready");
                     if (p.Phase == "failed") return (false, p.Message ?? $"{app.Name} could not be installed");
                 }
             }
@@ -256,13 +379,15 @@ sealed class LibraryService
             {
                 // The winget process ended without a done/failed line: read once more, then judge.
                 var tail = ReadProgress(progressPath, startedAt);
-                var p = tail is null ? null : ParseProgress(tail, app);
-                if (p?.Phase == "done") { Report(p); return (true, $"{app.Name} is ready"); }
+                var p = tail is null ? null : ParseProgress(tail, app, token);
+                if (p?.Phase == "done") { Report(p); return (true, app.Box ? p.Message ?? "" : $"{app.Name} is ready"); }
                 return (false, p?.Message ?? $"{app.Name} did not finish installing");
             }
-            if (DateTime.Now - lastChange > Watchdog)
+            if (DateTime.Now - lastChange > app.Stall)
             {
-                Log.Warn($"Library: {app.Id} made no progress for {Watchdog.TotalMinutes} min; giving up");
+                Log.Warn($"Library: {app.Id} made no progress for {app.Stall.TotalMinutes} min; giving up");
+                // A task job would otherwise hold the runner until the task's own limit (4 hours).
+                if (process is null) { try { ((dynamic)GetTask()!).Stop(0); } catch (Exception e) { Log.Warn($"Library: stopping the task: {e.Message}"); } }
                 return (false, $"{app.Name} is taking too long");
             }
             Thread.Sleep(500);
@@ -284,13 +409,16 @@ sealed class LibraryService
         try { if (File.Exists(progressPath)) File.Delete(progressPath); } catch (Exception) { }
     }
 
-    static JobProgress? ParseProgress(string text, CatalogApp app)
+    // Only this job's progress: the file is shared by every job the runner runs (a run of the task
+    // that was not this one's, like the reconcile at Windows start, writes there too).
+    static JobProgress? ParseProgress(string text, JobName app, string token)
     {
         try
         {
             using var doc = JsonDocument.Parse(text);
             var r = doc.RootElement;
             string? S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            if (S("jobId") != token) return null;
             var phase = S("phase") ?? "install";
             var percent = r.TryGetProperty("percent", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : 0;
             return new JobProgress(app.Id, app.Name, S("action") ?? "install", phase, Math.Clamp(percent, 0, 100), S("message"));
@@ -300,7 +428,9 @@ sealed class LibraryService
 
     void Report(JobProgress p)
     {
-        lock (gate) last = p;
+        LibraryJob? job;
+        lock (gate) { last = p; job = current; }
+        if (job is not null) Progress?.Invoke(job, p);
         Changed?.Invoke();
     }
 
@@ -388,7 +518,8 @@ sealed class LibraryService
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(QueueFile)!);
-            var open = (current is null ? Enumerable.Empty<LibraryJob>() : new[] { current }).Concat(pending).ToList();
+            // Box jobs (updates) are not kept: after a restart the Updates screen asks again.
+            var open = (current is null ? Enumerable.Empty<LibraryJob>() : new[] { current }).Concat(pending).Where(j => !j.BoxJob).ToList();
             File.WriteAllText(QueueFile, JsonSerializer.Serialize(open, Json));
         }
         catch (Exception e) { Log.Warn($"Library: saving the queue: {e.Message}"); }

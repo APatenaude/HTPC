@@ -3,9 +3,12 @@ namespace Htpc.Launcher;
 /// <summary>
 /// Command line: --dev (dev tools, F5 reload), --windowed, --ui DIR, --catalog FILE,
 /// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV),
-/// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe").
+/// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"),
+/// --version (prints the version and ends; see Program.Main),
+/// --restarted (started again by the watchdog after the last one ended: the TV is left as it is),
+/// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one).
 /// </summary>
-sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv, bool Setup)
+sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv, bool Setup, bool Restarted, bool BackToTv)
 {
     public static Options Parse(string[] args)
     {
@@ -21,7 +24,9 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath,
             Value("--ui", Path.Combine(baseDir, "ui")),
             Value("--catalog", FindCatalog(baseDir)),
             args.Contains("--no-tv"),
-            args.Contains("--setup") || Path.GetFileName(Environment.ProcessPath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase));
+            args.Contains("--setup") || Path.GetFileName(Environment.ProcessPath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase),
+            args.Contains("--restarted"),
+            args.Contains("--tv"));
     }
 
     // The trusted catalog sits next to the exe: for the installed launcher that is
@@ -43,13 +48,40 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath,
 
 static class Program
 {
+    /// <summary>
+    /// This build's release version, major.minor.patch (Directory.Build.props), the number the
+    /// updater compares; assembly versions carry a fourth part that is always 0.
+    /// </summary>
+    public static string Version
+    {
+        get
+        {
+            var v = typeof(Program).Assembly.GetName().Version ?? new System.Version(0, 0, 0);
+            return $"{v.Major}.{v.Minor}.{Math.Max(v.Build, 0)}";
+        }
+    }
+
     [STAThread]
     static void Main(string[] args)
     {
+        // --version: prints the version and ends, before anything else (no window, no single-instance
+        // lock, and above all not setup mode's "replace the running launcher": the release build
+        // runs "TV-Box-Setup.exe --version" to check what it built).
+        if (args.Contains("--version"))
+        {
+            Console.Out.WriteLine(Version);
+            Console.Out.Flush();
+            return;
+        }
         var options = Options.Parse(args);
+        // Back to TV with a launcher running: it is told, this copy is not needed. Without one,
+        // this becomes the launcher (and closes the desktop once its UI is up).
+        if (options.BackToTv && !options.Setup && DesktopMode.SignalRunningLauncher()) return;
         // Setup replaces a launcher that is already running (setup run again on a finished box).
+        // The watchdog must not start it again meanwhile.
         if (options.Setup)
         {
+            WatchdogPause.Set(TimeSpan.FromMinutes(15));
             var self = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
             foreach (var other in System.Diagnostics.Process.GetProcessesByName("HtpcLauncher").Concat(System.Diagnostics.Process.GetProcessesByName(self)))
                 if (other.Id != Environment.ProcessId) { try { other.Kill(); other.WaitForExit(3000); } catch (Exception) { } }

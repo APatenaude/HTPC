@@ -463,7 +463,14 @@ static class Program
         var id = pairing.Find(cookie.Split('=', 2)[1])!.Id;
         pairing.Forget(id);
         server.Disconnect(id);
-        Check((await Receive(ws!))?.GetProperty("t").GetString() == "bye", "forgotten phone told bye");
+        // Other messages (a state push, a heartbeat answer) may come first on a busy machine: up to "bye".
+        string? last = null;
+        for (var i = 0; i < 10 && last != "bye"; i++)
+        {
+            if (await Receive(ws!) is not { } m) break;
+            last = m.TryGetProperty("t", out var t) ? t.GetString() : null;
+        }
+        Check(last == "bye", "forgotten phone told bye");
         await Task.Delay(300);
         var (again, _) = await Ws(port, origin, cookie);
         Check(again is not null && (await Receive(again))?.GetProperty("paired").GetBoolean() == false, "its cookie no longer works");

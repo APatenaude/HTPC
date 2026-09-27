@@ -25,12 +25,13 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
-| Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
+| Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual (from the TV: now or tonight), no driver swaps, no Windows update notifications or restart warnings over the TV, Store apps on demand; Edge and WebView2 update themselves |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network (and every network joined later, a SYSTEM task), automatic time zone, location for the launcher's Wi-Fi list, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
-| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; started at sign-in |
-| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\` and `user\` stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 30-min limit, the TV user may run it) |
+| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell |
+| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\`, `user\` and `tv\` (the TV address cache) stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
 | PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80 and 8765) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
+| Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
 `catalog.json` is the one app list for setup and the launcher's library.
@@ -41,8 +42,7 @@ The launcher runs at standard rights (the TV account is an Administrator, but it
 medium integrity). To install or uninstall a machine-wide app it hands the `\HTPC\Jobs` task one
 token, `install:<id>` / `uninstall:<id>` / `upgrade:<id>` / `firewall:<id>`. The task runs
 `lib/Invoke-AppJob.ps1` as SYSTEM, which dispatches to `jobs/<verb>.ps1` (a table other parts of
-the box add to: launcher and Windows updates later). Nothing but that one catalog id reaches a
-command:
+the box add to: the updates' verbs below). Nothing but that one catalog id reaches a command:
 
 - the token must match `^(verb)(:[A-Za-z0-9][A-Za-z0-9._-]{0,60})?$`, the verb must be a known
   `jobs/<verb>.ps1`, and the id must be in the trusted catalog in Program Files (case-sensitive);
@@ -57,12 +57,72 @@ elevation, run by the launcher itself; their firewall Block rules still need ele
 `%LOCALAPPDATA%` points at the real user, not SYSTEM). `Invoke-AppJob.ps1 -DryRun -Catalog <path>`
 validates a token and prints what it would do without installing anything (for tests).
 
+The updates add these verbs (Settings > Updates; launcher/README.md, "Updates"): all but the last
+run as SYSTEM, take no argument unless shown, and first put right an interrupted launcher update.
+
+| Token | Job |
+|---|---|
+| `launcher-update:<x.y.z>` | release v<x.y.z> of APatenaude/HTPC replaces the launcher, `lib\`, `jobs\`, `catalog.json` and the kept setup (`lib/LauncherUpdate.ps1`) |
+| `launcher-rollback` | back to the launcher before the last update (support only: the update rolls back by itself) |
+| `reconcile` | finishes or undoes an interrupted launcher update, from its journal (`state\launcher-update.json`) and the files |
+| `windows-scan` | the waiting Windows updates, into `state\windows-updates.json` (`lib/WindowsUpdate.ps1`, `lib/WuaChild.ps1`) |
+| `windows-install` | a restore point (checked), then those updates one at a time |
+| `restorepoint` | a restore point, checked with `Get-ComputerRestorePoint` (before "Update all") |
+| `upgrade:<id>` | also GitHub-zip apps (VacuumTube: `lib/AppUpdaters.ps1`) |
+| `winget-update` | winget itself, as the signed-in user (not the task) |
+
 On a box that runs a dev build of the launcher (launcher\dev\Start-Launcher.ps1), the phone
 remote's rule must name that exe too, before the build first runs (else Windows asks over the TV):
 
     powershell -ExecutionPolicy Bypass -File setup\lib\Set-PhoneRemote.ps1 -Program "C:\Program Files\HTPC\Launcher\HtpcLauncher.exe","<repo>\launcher\src\Launcher\bin\Debug\net10.0-windows10.0.19041.0\HtpcLauncher.exe"
 
 (as admin; setup.ps1 -Only PhoneRemote does the installed exe only).
+
+## The launcher as the shell
+
+SPEC N1: the box signs in straight to the TV home screen, no desktop, taskbar or Start menu.
+The Shell step sets this account's "Custom User Interface" policy value
+(`HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System\Shell`, what gpedit's User
+Configuration > Administrative Templates > System > Custom User Interface writes) to
+`"C:\Program Files\HTPC\Launcher\HtpcWatchdog.exe" --shell`. Windows then starts the watchdog
+instead of Explorer for this account only; the machine-wide shell and other accounts keep
+Explorer. Tested in the VM on 26100 (27 Sept 2026, TV Box Setup from the desktop, then Restart
+now): sign-in to the home screen in about 9 s, no Explorer; a killed launcher back in 3 s, a
+hung one ended after 60 s, the WebView2 browser killed: back in 3 s; a killed watchdog started
+again by the launcher within 30 s; a crash loop restarted the box once, the next one gave the
+desktop with the message and a new try after 30 s; desktop mode: taskbar in 2 s, Home over it,
+Back to TV closes it (full work area again, nothing comes back); a folder window an app opens
+stays; sign-out and restart: no restarts meanwhile; RunOnce runs only with desktop mode;
+setup.ps1 -Only Launcher replaces both programs while they run; -Undo gives the desktop back.
+Why not Shell Launcher (IoT Enterprise's kiosk feature): it restarts the shell whatever
+happens, so a launcher failing at start would loop on a black screen; it needs its optional
+feature and SYSTEM-context WMI (MDM bridge); and every planned exit (setup handing over, an
+update) would trigger its exit action. It does two things this setup does not: Run/RunOnce
+programs, and Settings and other packaged apps from the custom shell (see below). If those are
+ever needed, it is the fallback, with the watchdog as its shell.
+
+The watchdog (`launcher\src\Watchdog`, built for the .NET Framework in Windows, a few MB, idle)
+starts the launcher and starts it again after a crash, a kill, or 60 s without its window
+answering; not while Windows signs out or restarts, not while a pause is set
+(`HKCU\Software\HTPC\WatchdogPauseUntil`, or `C:\ProgramData\HTPC\state\watchdog-pause` from
+SYSTEM jobs), and not for exit code 75 (a planned exit). Three exits within a minute of starting
+in a row: the box restarts once (at most every 6 hours), then the Windows desktop with "The TV
+launcher keeps closing. Back to TV to try again.", with new tries after 30 s, 2 min and 10 min.
+Log: `C:\ProgramData\HTPC\logs\watchdog.log`.
+
+Desktop mode (Power menu, one confirmation) starts Explorer: desktop, taskbar, Start menu. The
+launcher stays behind it; Home still opens the menu over the desktop. Back to TV (Power menu,
+or the "Back to TV" shortcut on the desktop and in Start) closes Explorer and its windows.
+
+Without Explorer: no tray icons or notifications; the Win key and Win+ shortcuts do nothing;
+programs in Run/RunOnce and the Startup folder do not start (desktop mode runs them); Settings
+(`ms-settings:`) and other packaged apps do not open. Ctrl+Alt+Del (sign out, Task Manager),
+Ctrl+Shift+Esc and Alt+Tab work: from Task Manager, Run new task > `explorer.exe` gives the
+desktop back.
+
+Undo (back to Explorer, the watchdog started from Run as before; next sign-in):
+
+    powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\lib\Set-Shell.ps1 -Undo
 
 `tools/Test-HwDecode.ps1` also runs on its own (`-Json` for the launcher): it lists the
 driver's decoders and, when mpv or ffmpeg is present, plays the 4K clips in

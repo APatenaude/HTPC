@@ -41,7 +41,7 @@ sealed partial class MainForm
         apps.Exited += e => OnUiQueued(() => OnAppExit(e));
         apps.RunningChanged += (id, started) => { if (started) alertCenter.Clear("app:" + id); };
         tv.TurnOnResult += ok => OnUiQueued(() => OnTvTurnOn(ok));
-        tv.TvStateChanged += (on, _) => { if (on) OnUiQueued(() => { alertCenter.Clear("tv"); alertCenter.ScreenOn(); }); };
+        tv.TvStateChanged += (on, _) => { if (on) OnUiQueued(alertCenter.ScreenOn); };
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.
@@ -186,20 +186,11 @@ sealed partial class MainForm
         }
     }
 
+    // The TV came on after a wake: the cards held back can show. ("Can't reach the TV" is the TV
+    // service's own notice, TvNotices, raised and cleared there.)
     void OnTvTurnOn(bool ok)
     {
-        if (ok)
-        {
-            alertCenter.Clear("tv");
-            alertCenter.ScreenOn();
-            return;
-        }
-        // Only when turning it on failed (the user's rule): a pill until it answers again.
-        alertCenter.Raise(new AlertSpec
-        {
-            Id = "tv", Title = "Can’t reach the TV", Body = "Is it on the network? Settings › TV can find it again.",
-            Glyph = "tv", Tone = AlertTone.Bad, Action = "TV settings", Pill = "TV not responding",
-        }, () => ShowSettingsSection("tv"));
+        if (ok) alertCenter.ScreenOn();
     }
 
     void OnAppExit(AppExit e)

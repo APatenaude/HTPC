@@ -29,6 +29,9 @@ function Set-JobContext([string]$JobId, [string]$Action) {
 # the writer's pid so a stale file from an earlier run is easy to tell apart.
 function Write-JobProgress([string]$Phase, $Percent, [string]$Message) {
     $script:Seq++
+    # The runner's own closing line keeps a verb's final words (the update jobs say what happened).
+    $script:LastPhase = $Phase
+    $script:LastMessage = $Message
     $obj = [ordered]@{
         jobId = $script:JobId; seq = $script:Seq; pid = $PID; action = $script:Action;
         phase = $Phase; percent = [int]($Percent); message = $Message; at = (Get-Date).ToString('s')

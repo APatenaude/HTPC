@@ -19,7 +19,11 @@
         "asset": "^VacuumTube-x64-Portable\\.zip$",
         "installDir": "VacuumTube",
         "exe": "VacuumTube.exe",
-        "allowInbound": [ "%ProgramFiles%\\VacuumTube\\VacuumTube.exe" ]
+        "allowInbound": [ "%ProgramFiles%\\VacuumTube\\VacuumTube.exe" ],
+        "selfUpdate": {
+          "removeFiles": [ "resources\\app-update.yml" ],
+          "userDirs": [ "%LOCALAPPDATA%\\vacuumtube-updater" ]
+        }
       }
     },
     {

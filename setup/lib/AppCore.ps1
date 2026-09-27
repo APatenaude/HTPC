@@ -177,6 +177,25 @@ function Remove-StartMenuShortcut([string]$Name) {
     if (Test-Path $link) { Remove-Item $link -Force; Write-Change "removed Start-menu shortcut $Name" }
 }
 
+# "Nothing updates unless asked" (SPEC N10): the files that make an app update itself, removed
+# from its unpacked copy before it goes in place (install and the Updates screen's upgrade use
+# this same function). The catalog lists them: install.selfUpdate.removeFiles, relative to the
+# app's folder. VacuumTube: resources\app-update.yml, without which electron-updater has no feed
+# and never downloads its 216 MB installer (which would try to run when the app quits).
+# (install.selfUpdate.userDirs are per-user leftovers; the launcher deletes those as the user.)
+function Disable-AppSelfUpdate($App, [string]$Dir) {
+    $su = $App.install.PSObject.Properties['selfUpdate']
+    if (-not $su) { return }
+    foreach ($relative in @($su.Value.removeFiles | Where-Object { $_ })) {
+        if ($relative -match '(^|\\|/)\.\.(\\|/|$)' -or [IO.Path]::IsPathRooted($relative)) { throw "selfUpdate.removeFiles must stay inside the app folder: $relative" }
+        $path = Join-Path $Dir $relative
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force
+            Write-Change "$($App.name): removed $relative (the app's own updater)"
+        }
+    }
+}
+
 # GitHub entries: a zip unpacked into Program Files\<installDir> (VacuumTube), or an installer run
 # silently. installDir must be a single safe path segment. $Staging must be an admin-only folder.
 function Install-AppGithub($App, $Report, $WorkDir) {
@@ -196,6 +215,7 @@ function Install-AppGithub($App, $Report, $WorkDir) {
         $top = @(Get-ChildItem $staging)
         $source = if ($top.Count -eq 1 -and $top[0].PSIsContainer) { $top[0].FullName } else { $staging }
         if (-not (Test-Path (Join-Path $source $i.exe))) { throw "$($i.exe) is not in $(Split-Path $download.File -Leaf)" }
+        Disable-AppSelfUpdate $App $source
 
         New-Item -ItemType Directory -Force $dir | Out-Null
         Copy-Item (Join-Path $source '*') $dir -Recurse -Force

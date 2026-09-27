@@ -39,7 +39,8 @@ const ICONS = {
   backspace: 'M9 5h12v14H9l-6-7zM12 9l6 6M18 9l-6 6',
   shift: 'M12 4l8 8h-4v8H8v-8H4z',
   enter: 'M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4',
-  keyboard: 'M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10'
+  keyboard: 'M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10',
+  pencil: 'M4 20h4L19.5 8.5a2.1 2.1 0 0 0-4-4L4 16zM13.5 6.5l4 4'
 };
 
 function icon(name, size, weight) {

@@ -1,11 +1,17 @@
+// BASELINE: launcher/src/Launcher/Tv.cs as of commit 0e5db69 (before the TV driver refactor), kept
+// only to record the golden Roku traces (TvLab roku --record-baseline). Changes from the original
+// are seams, nothing else: namespace; Task.Delay(ms) and DateTime.Now through the virtual clock;
+// Roku.FindAll and Edid.Current through Seams; LauncherSettings and Log are TvLab stand-ins.
+
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml.Linq;
+using Log = Htpc.Launcher.Log;
 
-namespace Htpc.Launcher;
+namespace Htpc.TvLab.Baseline;
 
 /// <summary>One TV's settings (SPEC N7), keyed by the HDMI identity (EDID) of the TV it is.</summary>
 sealed class TvProfile
@@ -91,7 +97,6 @@ static class Roku
         {
             var info = XDocument.Parse(await Http.GetStringAsync(new Uri(baseUrl, "query/device-info"))).Root!;
             string V(string n) => info.Element(n)?.Value ?? "";
-            if (!SameTv(id, V("serial-number"), baseUrl)) return null; // another Roku has this address now
             var input = 0;
             if (V("power-mode") == "PowerOn")
             {
@@ -110,27 +115,8 @@ static class Roku
         catch (Exception) { return null; }
     }
 
-    /// <summary>
-    /// False when the Roku answering at this address is another one (its serial number is not
-    /// the one looked for): an address kept from an earlier search can belong to another TV
-    /// since (DHCP). Nothing is ever sent to it.
-    /// </summary>
-    static bool SameTv(string id, string serial, Uri baseUrl)
+    public static async Task<bool> Key(Uri baseUrl, string key)
     {
-        if (serial.Length == 0 || string.Equals(serial, id, StringComparison.OrdinalIgnoreCase)) return true;
-        Log.Warn($"Roku at {baseUrl.Host} is another TV now; nothing sent to it");
-        return false;
-    }
-
-    /// <summary>A key press, only once the Roku at that address has been checked to be this TV (id).</summary>
-    public static async Task<bool> Key(string id, Uri baseUrl, string key)
-    {
-        try
-        {
-            var info = XDocument.Parse(await Http.GetStringAsync(new Uri(baseUrl, "query/device-info"))).Root!;
-            if (!SameTv(id, info.Element("serial-number")?.Value ?? "", baseUrl)) return false;
-        }
-        catch (Exception e) { Log.Warn($"Roku {key}: not sent, no answer at {baseUrl.Host} ({e.Message})"); return false; }
         try
         {
             using var response = await Http.PostAsync(new Uri(baseUrl, $"keypress/{key}"), null);
@@ -212,7 +198,7 @@ sealed class TvService
     // After the box itself turns the TV on or off, the TV takes seconds to get there; its
     // state meanwhile is not the remote. (A wake read "still off" and put the box back to sleep.)
     DateTime quietUntil;
-    void Quiet() => quietUntil = DateTime.Now.AddSeconds(20);
+    void Quiet() => quietUntil = Seams.Clock.Now.AddSeconds(20);
     public Edid? Screen { get; private set; }
     public List<RokuTv> Found { get; private set; } = new();
 
@@ -223,13 +209,6 @@ sealed class TvService
     public event Action<bool, bool>? TvStateChanged;
     /// <summary>Found TVs or the profile changed: refresh Settings.</summary>
     public event Action? Changed;
-
-    /// <summary>
-    /// After the box asked the TV to come on (TurnOn): true when it reports on, false when it
-    /// did not answer or stayed off (the "TV not responding" alert). Not raised when nothing
-    /// was sent (no profile, a locked TV, --no-tv).
-    /// </summary>
-    public event Action<bool>? TurnOnResult;
 
     public TvService(LauncherSettings settings) => this.settings = settings;
 
@@ -255,8 +234,8 @@ sealed class TvService
     {
         // While the TV is off, Windows may report a placeholder monitor (maker MS_, no name):
         // keep the last real one.
-        if (Edid.Current() is { Name.Length: > 0 } edid) Screen = edid;
-        var found = await Roku.FindAll(TimeSpan.FromSeconds(3));
+        if (Seams.Screen() is { Name.Length: > 0 } edid) Screen = edid;
+        var found = await Seams.Find();
         // The profile's TV missing from one search (the network blinked, as when a Hyper-V
         // switch comes up) is kept at its last address: it is most likely still there.
         if (Current is { } known && found.All(t => t.Id != known.Id)) found.Add(known);
@@ -298,7 +277,7 @@ sealed class TvService
         if (Profile is not { OffWithBox: true } || Current is not { } tv || tv.Locked || Refuse("off")) return;
         lastPower = "off"; // our own key: the next poll must not read it as the remote
         Quiet();
-        if (await Roku.Key(tv.Id, tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
+        if (await Roku.Key(tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
     }
 
     int turningOn;
@@ -323,34 +302,33 @@ sealed class TvService
             lastInput = p.Input;
             Quiet();
             var tv = await Roku.Describe(known.Id, known.BaseUrl);
-            if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) { TurnOnResult?.Invoke(true); return; }
+            if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) return;
             if (tv is not { IsOn: true })
             {
-                if (!await Roku.Key(known.Id, known.BaseUrl, "PowerOn")) { TurnOnResult?.Invoke(false); return; }
+                if (!await Roku.Key(known.BaseUrl, "PowerOn")) return;
                 Log.Info($"TV {known.Name}: on sent");
                 // A TV in deeper standby can miss the first PowerOn: check, and send it once more.
                 for (var i = 0; i < 8 && tv is not { IsOn: true }; i++)
                 {
-                    await Task.Delay(1000);
+                    await Seams.Clock.Delay(TimeSpan.FromMilliseconds(1000));
                     tv = await Roku.Describe(known.Id, known.BaseUrl);
                     if (i == 4 && tv is not { IsOn: true })
                     {
                         Log.Info($"TV {known.Name} still {tv?.PowerMode ?? "silent"}: on sent again");
-                        await Roku.Key(known.Id, known.BaseUrl, "PowerOn");
+                        await Roku.Key(known.BaseUrl, "PowerOn");
                     }
                 }
                 Log.Info($"TV {known.Name}: {tv?.PowerMode ?? "no answer"}");
             }
-            TurnOnResult?.Invoke(tv is { IsOn: true });
             if (p.Input == 0) return;
             for (var i = 0; i < 6; i++)
             {
                 if (tv is { IsOn: true } && tv.ActiveInput == p.Input) return;
-                await Task.Delay(1000);
+                await Seams.Clock.Delay(TimeSpan.FromMilliseconds(1000));
                 tv = await Roku.Describe(known.Id, known.BaseUrl);
             }
             Log.Info($"TV not on HDMI {p.Input}: switching");
-            await Roku.Key(known.Id, known.BaseUrl, $"InputHDMI{p.Input}");
+            await Roku.Key(known.BaseUrl, $"InputHDMI{p.Input}");
         }
         finally { turningOn = 0; }
     }
@@ -361,8 +339,8 @@ sealed class TvService
         if (Profile is not { } p || Current is not { } tv || tv.Locked || Refuse("test")) return false;
         lastPower = "off";
         Quiet();
-        if (!await Roku.Key(tv.Id, tv.BaseUrl, "PowerOff")) return false;
-        await Task.Delay(5000);
+        if (!await Roku.Key(tv.BaseUrl, "PowerOff")) return false;
+        await Seams.Clock.Delay(TimeSpan.FromMilliseconds(5000));
         await BringUp(p, tv);
         return (await Roku.Describe(tv.Id, tv.BaseUrl))?.IsOn == true;
     }
@@ -378,13 +356,13 @@ sealed class TvService
         {
             // Not answering, or never found (network down, TV unplugged, moved to another IP):
             // search again, once a minute at most.
-            if (DateTime.Now < nextSearch) return;
-            nextSearch = DateTime.Now.AddMinutes(1);
+            if (Seams.Clock.Now < nextSearch) return;
+            nextSearch = Seams.Clock.Now.AddMinutes(1);
             await Discover();
             return;
         }
         Found = Found.Select(t => t.Id == tv.Id ? tv : t).ToList();
-        if (DateTime.Now < quietUntil) { lastPower = tv.PowerMode; lastInput = tv.ActiveInput; return; }
+        if (Seams.Clock.Now < quietUntil) { lastPower = tv.PowerMode; lastInput = tv.ActiveInput; return; }
         var on = tv.IsOn;
         var was = lastPower == "PowerOn";
         var changed = lastPower is not null && (on != was || (on && tv.ActiveInput != lastInput));

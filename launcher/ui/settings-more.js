@@ -1,5 +1,5 @@
 'use strict';
-// Settings sections Controller, Sound, Display, Updates and About (design: Settings screens),
+// Settings sections Controller, Sound, Display and About (design: Settings screens),
 // added through app.js's settingsSection(). Loaded after app.js.
 //
 //   To the host:   {type:'controller.test', on} {type:'controller.rumble'} {type:'sound.outputs'}
@@ -293,30 +293,7 @@ hostMessage('display.decode', (m) => {
   if (state.view === 'settings') render();
 });
 
-// ---- Updates ---------------------------------------------------------------------------------
-
-function versionCard(glyph, color, name, version, wide) {
-  return `<div class="fact${wide ? ' wide' : ''}"><span class="fact-head"><span style="display:flex;color:${esc(color)}">${icon(glyph, 30)}</span>${esc(name)}</span>` +
-    `<span class="fact-value">${esc(version || '—')}</span></div>`;
-}
-
-settingsSection('updates', {
-  render() {
-    const s = more.system;
-    const cards = !s ? '<p class="snote">Reading versions…</p>' :
-      '<div class="facts">' +
-        versionCard('app', '#8CC2FF', 'TV launcher', s.launcher) +
-        versionCard('desktop', '#B3B5BC', 'Windows', s.windows, true) +
-        versionCard('globe', '#3CCB9A', 'Microsoft Edge', s.edge) +
-        versionCard('globe', '#B3B5BC', 'WebView2 (this screen)', s.webview) +
-        s.apps.map((a) => versionCard(a.glyph, a.color, a.name, a.version)).join('') +
-      '</div>';
-    return '<header><h1>Updates</h1><p>Nothing updates by itself. What is installed:</p></header>' + cards +
-      '<p class="snote">Edge and WebView2 update themselves. App, launcher and Windows updates will start from here in a later version.</p>';
-  },
-  shown() { send({ type: 'system.info' }); },
-  demo: systemDemo,
-});
+// Settings › Updates is updates.js's (versions, updates of apps, the launcher and Windows).
 
 hostMessage('system.info', (m) => { more.system = m; if (state.view === 'settings') render(); });
 

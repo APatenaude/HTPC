@@ -4,7 +4,8 @@
     Dev: builds the launcher and starts it on the TV, outside the Claude desktop app.
 
 .DESCRIPTION
-    Stops a running launcher, builds (Debug), then starts it through a one-shot scheduled task
+    Stops a running launcher (pausing the installed watchdog, HtpcWatchdog.exe, so it does not
+    start the installed one again), builds (Debug), then starts it through a one-shot scheduled task
     as the signed-in user without admin rights, the way it runs on the finished box. (Started
     from the Claude app it would inherit that app's redirected AppData.) The UI is served
     straight from launcher\ui, so UI edits only need a restart or F5 (with -Dev).
@@ -27,6 +28,11 @@ $project = Join-Path $root 'src\Launcher\Launcher.csproj'
 $exe = Join-Path $root 'src\Launcher\bin\Debug\net10.0-windows10.0.19041.0\HtpcLauncher.exe'
 $task = 'HTPC launcher (dev)'
 
+# The installed watchdog (if any) must not start the installed launcher again meanwhile; it
+# resumes once this build holds the launcher's mutex, or after 15 minutes.
+$pause = 'HKCU:\Software\HTPC'
+if (-not (Test-Path $pause)) { New-Item -Path $pause -Force | Out-Null }
+Set-ItemProperty -Path $pause -Name WatchdogPauseUntil -Value ((Get-Date).ToUniversalTime().AddMinutes(15).ToString('yyyy-MM-ddTHH:mm:ssZ'))
 Get-Process HtpcLauncher -ErrorAction SilentlyContinue | Stop-Process -Force
 if (-not $NoBuild) {
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'

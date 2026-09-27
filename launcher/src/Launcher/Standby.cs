@@ -175,6 +175,13 @@ sealed class Standby
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
 
+    /// <summary>
+    /// True while something must not be cut off by a real sleep or hibernate (an update being
+    /// installed): Sleep then goes to standby instead, and the "sleep after hours of standby"
+    /// waits. Standby itself is fine: the box keeps running.
+    /// </summary>
+    public Func<bool>? HoldOffRealSleep { get; set; }
+
     public Standby(ControllerService controller, LauncherSettings settings, MediaWatcher media)
     {
         this.controller = controller;
@@ -190,6 +197,7 @@ sealed class Standby
     public void Sleep(string reason)
     {
         var (s3, s4) = Capabilities();
+        if (HoldOffRealSleep?.Invoke() == true) { s3 = false; s4 = false; }
         switch (settings.SleepMode)
         {
             case "sleep" when s3: RealSleep(false, reason); break;
@@ -269,7 +277,7 @@ sealed class Standby
         if (Active)
         {
             WarnIdle(false);
-            if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep &&
+            if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep && HoldOffRealSleep?.Invoke() != true &&
                 DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
             {
                 RealSleep(false, $"after {settings.SleepAfterStandbyHours} h in standby");
