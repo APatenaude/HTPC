@@ -37,6 +37,7 @@ $root = Split-Path $here -Parent            # ...\HTPC\Launcher
 . "$here\Common.ps1"
 . "$here\AppCore.ps1"
 . "$here\Job-Common.ps1"
+. "$here\AppAutostart.ps1"
 
 # The task's start with Windows passes no token ("$(Arg0)" stays empty, or literal on some
 # builds): that run puts an interrupted launcher update right (jobs\reconcile.ps1).

@@ -8,7 +8,7 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `ui/` | The web UI: Home, Home menu, Power, Sleep timer, Settings, Button maps. Laid out at 1920x1080 and scaled to the screen. Opened in a normal browser it runs on demo data with the keyboard as the controller (arrows, Enter = A, Esc = B, X, H = Home, P = hold Home). |
 | `src/Launcher/MainForm.cs` | Full-screen window hosting the UI; routes the controller, apps, power, volume, brightness and the sleep timer. |
 | `src/Launcher/ControllerService.cs` | XInput polling, Home button included (XInputGetStateEx); Home tap and 1 s hold (Power; in Moonlight, our menu). Start + D-pad is the volume in every app (`StartChord`): Start + Up / Down up or down by 2, repeating while held; Start + Left mute. Start's own action then comes as it is let go, and only without a direction; the D-pad alone is unchanged. Not in Moonlight (the game PC's buttons). Controller-preset apps read the pad themselves and see Start and the D-pad too. |
-| `src/Launcher/AppManager.cs` | Starts the catalog's apps (`setup/catalog.json`), tracks them, finds their windows, closes them. Websites get their own Edge app window and profile (`EdgeSiteApp.cs`): full screen in Chromium's app mode (`--force-app-mode`, not Edge's InPrivate kiosk), so no "press and hold Esc to exit full screen" when they open, and Esc or F11 cannot take them out of it; a page's own full screen (a video player's) still says "Press Esc" for a moment. Every app opens filling the screen: its own switch where it has one (VacuumTube, Jellyfin `--tv --fullscreen`, Kodi `-fs`, Edge), else `fill` (Stremio, VLC, Moonlight, Plex HTPC, Spotify, Feishin): the launcher makes its main window cover the screen without a frame (`Native.FillScreen`), and again when it stops doing so for 2 s while in front (`KeepFilled`: VLC after a video leaves its own full screen). VLC also gets `--fullscreen --no-video-title-show --no-qt-video-autoresize` (videos full screen, no title over them, its window never shrunk to the video). |
+| `src/Launcher/AppManager.cs` | Starts the catalog's apps (`setup/catalog.json`), tracks them, finds their windows, closes them. Websites get their own Edge app window and profile (`EdgeSiteApp.cs`): full screen in Chromium's app mode (`--force-app-mode`, not Edge's InPrivate kiosk), so no "press and hold Esc to exit full screen" when they open, and Esc or F11 cannot take them out of it; a page's own full screen (a video player's) still says "Press Esc" for a moment. Every app opens filling the screen: its own switch where it has one (VacuumTube, Jellyfin `--tv --fullscreen`, Kodi `-fs`, Edge), else `fill` (Stremio, VLC, Moonlight, Plex HTPC, Spotify, Feishin): the launcher makes its main window cover the screen without a frame (`Native.FillScreen`), and again when it stops doing so for 2 s while in front (`KeepFilled`: VLC after a video leaves its own full screen). VLC also gets `--fullscreen --no-video-title-show --no-qt-video-autoresize` (videos full screen, no title over them, its window never shrunk to the video). `launch.env` variables go to the app's process (Feishin: `DISABLE_AUTO_UPDATES=1`). |
 | `src/Launcher/AppLogos.cs`, `LogoSources.cs`, `MainForm.Logos.cs` | The apps' real logos, taken from the apps themselves (none ship): a program's own icon at 256 px (the Shell's image factory, not the 32 px one), a website's own icon (its manifest's largest, then apple-touch-icon, then the largest favicon; https only, 512 KB at most, only real images of 64 px or more, drawn again as PNG; dark ones on a light plate). Cached in `%LOCALAPPDATA%\HTPC\logos\<id>.png` (the UI reads `https://logos.htpc/`), found in the background: when the UI is up, a tile is added, an app installed, and every 10 minutes for the missing ones (a site out of reach: 10 minutes; one with no usable icon: a day). Tiles, library cards, the Home menu's rows and Button maps show them; the glyph stays without one, or when the user chose one (Change icon › Logo brings it back). Demo: `index.html#home?logos=1` reads `ui\logos\<id>.png` (not in the repo). |
 | `src/Launcher/SystemControls.cs` | Master volume (Core Audio), brightness dimmer layer. |
 | `src/Launcher/ScreenCapture.cs` | The Home menu's backdrop over an app: the screen through Desktop Duplication, halved on the GPU to 1920 wide, a JPEG, off the UI thread (GDI as the fallback); started at Home's press. The launcher's layers over apps (brightness, alerts, volume) are left out of it (WDA_EXCLUDEFROMCAPTURE). |
@@ -158,8 +158,11 @@ is to be checked on the box. Twitch links reopen the Twitch window on that page.
 Tests: `tests\PhoneTests` (`dotnet run --project launcher\tests\PhoneTests`: protocol, links,
 routing, pointer, pairing and its locks, Host/Origin, the server on 127.0.0.1 with a fake
 launcher, the root and the constrained intermediate, HTTPS with a test key made in the user's key
-store and deleted after, the Share target's ticket, the Shortcut's /api/open and its limits), `dev\phone-test.html` (typing differences, gestures; open it, or headless
-`--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
+store and deleted after, the Share target's ticket, the Shortcut's /api/open and its limits), `dev\phone-test.html` (typing differences, gestures, the Playing timeline; then a layout audit: every
+screen of the page's `?demo=` views in frames of 375x560, 390x664, 430x740, 360x640 and 664x390, checking
+44 px targets, overlaps, controls and text inside the screen or a scrolling area, text inside its box,
+no sideways scrolling, a Remote tab that never scrolls, no dev text; `?grid=<screen>` shows one screen
+at all five sizes for screenshots; open it, or headless `--allow-file-access-from-files --dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
 field; its own requests never cross the inbound rule, so the real test is a phone),
 `dev\New-PhoneIcons.ps1` (the app icons).
 
@@ -191,8 +194,16 @@ Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm
   `install.selfUpdate`: `resources\app-update.yml` removed at install and update, its download
   folder deleted) and Stremio's (launch.args `--autoupdater-endpoint=http://127.0.0.1:9/`, a port
   where nothing answers: checked in the VM with Stremio 5.0.24, whose "A new version of Stremio is
-  available" banner shows without it and not with it; the add-ons' catalogs still load). Plex HTPC
-  and Spotify: no setting found (Spotify has none).
+  available" banner shows without it and not with it; the add-ons' catalogs still load), Plex
+  HTPC's (catalog `autostart.prefs`: `plex.ini` `[debug] disableUpdater=true`, set by the
+  autostart guard; from Plex's forum, not tried yet) and Feishin's (catalog `launch.env`: started
+  with `DISABLE_AUTO_UPDATES=1`, which its source checks). Spotify: no setting found (Spotify has
+  none). Jellyfin Media Player and Moonlight only show a notice.
+- **Apps that start by themselves** (setup/README.md, "Apps that start by themselves"):
+  `AutostartGuard.cs` / `MainForm.Autostart.cs` remove the catalog apps' HKCU Run and RunOnce
+  values (Spotify's, Edge's startup boost) at start, a few seconds after each app ends and after
+  an install or update, and set their `autostart.prefs` while they are not running; the SYSTEM
+  jobs do HKLM, Startup folders, tasks and services.
 
 Checks: `setup\test\Test-Updates.ps1` (elevated; `-Only Core,Download,Swap,Faults,Planting,Wua`)
 runs the update jobs against fakes under `%TEMP%\htpc-updtest`: a fake GitHub on 127.0.0.1
@@ -247,7 +258,7 @@ redirect chain and every file with the box's own code.
 
 Checks that need no box, controller or TV (`dotnet run` in each folder; exit code 0 = all passed):
 `launcher\tests\LauncherTests` (button maps, PadMapper, video end, sleep timer, decode-check
-parser, alerts overlay), `launcher\tests\TileTests` (website addresses and tile edits),
+parser, alerts overlay, the autostart guard on a fake registry), `launcher\tests\TileTests` (website addresses and tile edits),
 `launcher\tests\PhoneTests` (the phone remote, its server on 127.0.0.1), `launcher\tests\AlertsTests`
 (alerts, app exits, internet rules, Wi-Fi profiles and passwords). The page's own checks:
 `launcher\dev\Test-Ui.ps1 -SelfTest`; screenshots: `-Shots alerts,settings/wifi,"?wifi=password#settings/wifi"`.

@@ -17,3 +17,7 @@ Install-App $app $report $work
 Stop-StartedByInstaller $app $before
 # install.firstRun files are written by the launcher after this finishes (as the user; SYSTEM would
 # expand %APPDATA% to its own profile).
+
+# Nothing it set up starts by itself (catalog "autostart", lib\AppAutostart.ps1): as SYSTEM the
+# machine's places and the signed-in user's, as the user (per-user apps) that user's and its prefs.
+[void](Invoke-AppAutostartGuard -Apps $app -Context "install:$($app.id)")

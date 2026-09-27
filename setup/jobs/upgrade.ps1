@@ -15,6 +15,7 @@ if ($app.install.source -eq 'github' -and $app.install.installDir) {
     . "$PSScriptRoot\..\lib\AppUpdaters.ps1"
     Enter-UpdateJob
     Update-GithubApp -App $app
+    [void](Invoke-AppAutostartGuard -Apps $app -Context "upgrade:$($app.id)")
     return
 }
 if ($app.install.source -ne 'winget') { throw "Updating $($app.name) from the TV is not supported" }
@@ -27,3 +28,5 @@ $code = Invoke-Program $winget @('upgrade', '--id', $app.install.id, '--exact', 
     '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--scope', $scope)
 if ($code -ne 0 -and $code -ne $WingetNoUpgrade -and $code -ne $WingetNoApplicable) { throw "winget upgrade $($app.install.id) failed with exit code $code" }
 Write-Change "$($app.name) updated"
+# An update may put back what the install's pass took away (lib\AppAutostart.ps1).
+[void](Invoke-AppAutostartGuard -Apps $app -Context "upgrade:$($app.id)")
