@@ -89,6 +89,9 @@ namespace Htpc.Watchdog
         {
             asShell = Array.IndexOf(args, "--shell") >= 0;
             var relaunched = Array.IndexOf(args, "--relaunched") >= 0;
+            // Started again by setup (Install-Launcher): the launcher it starts is a restart too,
+            // so it leaves the TV as it is (it would otherwise turn it on within 10 min of boot).
+            sawExit = Array.IndexOf(args, "--restarted") >= 0;
 
             // Elevated (started from an admin window) or inside an app package (started from the
             // Claude desktop app): the launcher would inherit that. Start again as the signed-in

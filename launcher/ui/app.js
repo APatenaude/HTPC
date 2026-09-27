@@ -110,7 +110,7 @@ function updateHomeHints() {
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
   const list = isAdd
     ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
-    : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu']];
+    : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
   $('home-hints').innerHTML = hints(list);
 }
 

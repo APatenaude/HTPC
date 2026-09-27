@@ -131,8 +131,8 @@ if ($restartWatchdog) {
     # For the signed-in user and not elevated, as at sign-in (the watchdog would refuse to run
     # elevated anyway). No time limit, normal priority.
     $task = 'HTPC watchdog'
-    $action = if ($watchdogArgs) { New-ScheduledTaskAction -Execute $watchdog -Argument $watchdogArgs -WorkingDirectory $installDir }
-              else { New-ScheduledTaskAction -Execute $watchdog -WorkingDirectory $installDir }
+    # --restarted: the launcher this watchdog starts leaves the TV as it is (setup is running on it).
+    $action = New-ScheduledTaskAction -Execute $watchdog -Argument ("--restarted $watchdogArgs".Trim()) -WorkingDirectory $installDir
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Priority 4
     Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force | Out-Null
