@@ -530,6 +530,9 @@ function activate(el) {
     case 'power-action':
       if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
         text: 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.' });
+      // One wrong press of A must not switch the box off: the controller cannot turn it back on.
+      else if (arg === 'shutdown') ask({ title: 'Shut down the box?', yes: 'Shut down', onYes: () => send({ type: 'power', action: 'shutdown' }),
+        text: 'It turns off completely: the controller can’t turn it back on. Use the box’s power button to start it again.' });
       else send({ type: 'power', action: arg });
       break;
     case 'timer': {
