@@ -20,6 +20,8 @@ const state = {
   memory: {},              // last focused item per view
   stack: [],               // views to go back to
   backdrop: null,
+  moving: null,            // id of the tile being moved (Tile options > Move)
+  libraryAvailable: true,  // whether installing from the TV is set up (the host reports it)
   section: 'sleep',        // Settings section shown
   prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true },
   power: { sleep: true, hibernate: true },  // sleep states this PC has (from the host)
@@ -82,21 +84,34 @@ function renderStatus() {
 // replay on every refresh.
 let tilesHtml = '';
 function renderTiles() {
-  const html = state.tiles.map((t) =>
-    `<div class="tile" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
+  const tiles = state.tiles.map((t) =>
+    `<div class="tile${state.moving === t.id ? ' moving' : ''}" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
       (t.running ? '<span class="badge">Running</span>' : '') +
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
       `<span class="name">${esc(t.name)}</span>` +
     '</div>').join('');
+  // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen.
+  const add = state.moving ? '' :
+    '<div class="tile add" data-nav data-id="tile:+add" data-act="addtile" aria-label="Add tile">' +
+      `<span style="display:flex">${icon('plus', 80, 2)}</span><span class="name">Add tile</span></div>`;
+  const html = tiles + add;
   if (html !== tilesHtml) { $('tiles').innerHTML = html; tilesHtml = html; }
   updateHomeHints();
 }
 
-// "X Close app" only while the focused tile's app is running.
+// Hints change with the focused tile and with move mode.
 function updateHomeHints() {
+  if (state.moving) {
+    $('home-hints').innerHTML = hints([['←→↑↓', 'Move'], ['A', 'Place here'], ['B', 'Cancel']]);
+    return;
+  }
   const f = $('home').querySelector('.tile.focused');
+  const isAdd = f && f.dataset.act === 'addtile';
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
-  $('home-hints').innerHTML = hints([['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Home', 'Menu'], ['Hold Home', 'Power']]);
+  const list = isAdd
+    ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu']];
+  $('home-hints').innerHTML = hints(list);
 }
 
 function renderMenu() {
@@ -594,6 +609,8 @@ function back() {
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
   const el = focusedEl();
+  // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
+  if (state.moving && EXT.actions['tile-move'] && EXT.actions['tile-move'](el, button)) return;
   // Added views and Settings sections first (their own buttons), then the usual.
   const view = EXT.views[state.view];
   if (view && view.press && view.press(button, el)) return;
@@ -629,11 +646,15 @@ function press(button) {
       else back();
       break;
     case 'homeHold': if (state.view !== 'power') go('power'); break;
+    case 'start':
+      // Home screen: options for the focused tile (Move, Rename, Change icon, Remove).
+      if (state.view === 'home' && el && el.dataset.arg && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
+      break;
   }
 }
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
-  Escape: 'b', Backspace: 'b', x: 'x', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb' };
+  Escape: 'b', Backspace: 'b', x: 'x', y: 'y', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb', o: 'start' };
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }
@@ -653,8 +674,10 @@ function onHost(msg) {
       if (msg.prefs) Object.assign(state.prefs, msg.prefs);
       if (msg.power) state.power = msg.power;
       if (msg.tv) state.tv = msg.tv;
+      if ('libraryAvailable' in msg) state.libraryAvailable = msg.libraryAvailable;
       render();
       break;
+    case 'tiles': state.tiles = msg.tiles; render(); break;
     case 'blank': $('stage').classList.add('blank'); break;
     case 'tv': state.tv = msg.tv; if (state.view === 'settings') render(); break;
     case 'opened':

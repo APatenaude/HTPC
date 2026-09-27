@@ -18,6 +18,8 @@ sealed partial class MainForm : Form
     readonly Options options;
     readonly WebView2 web = new() { Dock = DockStyle.Fill };
     readonly AppManager apps;
+    LibraryService library = null!;   // created in the constructor, after apps
+    List<InstalledProgram> lastScan = new();
     readonly ControllerService controller = new();
     readonly AudioVolume audio = new();
     readonly Dimmer dimmer = new();
@@ -55,8 +57,13 @@ sealed partial class MainForm : Form
         Controls.Add(web);
 
         setupMode = options.Setup;
-        apps = new AppManager(options.CatalogPath, settings.Tiles);
+        apps = new AppManager(options.CatalogPath);
+        apps.SetCustom(settings.CustomTiles, settings.TileEdits);   // added websites and programs, tile edits
+        if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        library = new LibraryService(apps, settings, options.CatalogPath);
+        library.Changed += () => OnUi(PushLibraryProgress);
+        library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
         closeSoon.Tick += (_, _) =>
@@ -250,12 +257,14 @@ sealed partial class MainForm : Form
         }
     }
 
+    void OnUi(Action a) { if (IsHandleCreated && !IsDisposed) BeginInvoke(a); }
+
     void Post(object message)
     {
         if (uiReady) web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, Json));
     }
 
-    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id) }).ToList();
+    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id), custom = t.Custom }).ToList();
 
     object StateObject() => new
     {
@@ -461,9 +470,9 @@ sealed partial class MainForm : Form
 
     void PostSetupInit()
     {
-        // Apps setup can install (Spotify must be installed without admin rights: later, from
-        // the library) and websites (nothing to install, just a tile).
-        var list = apps.All.Where(a => (a.Installable && !a.AsUser) || a.Type == "website")
+        // Apps setup can install (Spotify refuses to install elevated: later, from the library) and
+        // websites (nothing to install, just a tile).
+        var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated) || a.IsWebsite)
             // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
             .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
         Post(new { type = "init", apps = list, tv = tv.Describe(), controller = controller.Connected, battery = controller.BatteryLevel,
@@ -474,9 +483,11 @@ sealed partial class MainForm : Form
     {
         var picked = m.GetProperty("apps").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
         var tiles = m.GetProperty("tiles").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
-        settings.Tiles = tiles;
+        // Keep any custom tiles (added websites, programs) when setup is re-run from Settings.
+        var customIds = settings.CustomTiles.Select(c => c.Id).Where(id => !tiles.Contains(id));
+        settings.Tiles = tiles.Concat(customIds).ToList();
         settings.Save();
-        apps.SetTiles(tiles);
+        apps.SetTiles(settings.Tiles);
         Log.Info($"Setup: install {string.Join(", ", picked)}; tiles {string.Join(", ", tiles)}");
 
         var dir = SetupRunner.FindSetupDir();
