@@ -41,7 +41,7 @@ sealed partial class MainForm
         apps.Exited += e => OnUiQueued(() => OnAppExit(e));
         apps.RunningChanged += (id, started) => { if (started) alertCenter.Clear("app:" + id); };
         tv.TurnOnResult += ok => OnUiQueued(() => OnTvTurnOn(ok));
-        tv.TvStateChanged += (on, _) => { if (on) OnUiQueued(() => { alertCenter.Clear("tv"); alertCenter.ScreenOn(); }); };
+        tv.TvStateChanged += (on, _) => { if (on) OnUiQueued(alertCenter.ScreenOn); };
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.

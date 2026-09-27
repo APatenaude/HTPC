@@ -451,7 +451,8 @@ function hostMessage(type, fn) { EXT.host[type] = fn; }
 // shown / left for the Settings section in view (none while Settings is not).
 let sectionInView = null;
 function sectionHooks() {
-  const now = state.view === 'settings' ? state.section : null;
+  // The TV method dialog over Settings is still the TV section (its list keeps refreshing).
+  const now = state.view === 'settings' || state.view === 'tvmethod' ? state.section : null;
   if (now === sectionInView) return;
   const was = EXT.sections[sectionInView];
   sectionInView = now;

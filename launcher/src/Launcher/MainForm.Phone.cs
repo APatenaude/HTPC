@@ -252,10 +252,12 @@ partial class MainForm
         if (c.Standby) return;
         // The launcher's own fields (the Wi-Fi password): posted to its page, not typed through
         // Windows (MainForm.Alerts.cs, TypeText); the page ignores it when no field has the focus.
+        // Posted straight to the page: TypeKey/TypeText would fall back to Windows input if an app
+        // came in front meanwhile, and 256 Backspaces must never reach an app (or Moonlight).
         if (c.LauncherFront)
         {
-            for (var i = 0; i < Math.Min(t.Back, 256); i++) TypeKey("backspace");
-            if (t.Text.Length > 0) TypeText(t.Text);
+            for (var i = 0; i < Math.Min(t.Back, 256); i++) Post(new { type = "text.key", key = "backspace" });
+            if (t.Text.Length > 0) Post(new { type = "text.insert", text = t.Text });
             return;
         }
         // In Moonlight the keys would go to the game PC.

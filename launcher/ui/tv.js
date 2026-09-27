@@ -208,8 +208,8 @@ if (typeof settingsSection === 'function') (() => {
       return false;
     },
     shown() { send({ type: 'tv.showing', on: true }); },
-    // The method dialog over Settings is still the TV screen: the list keeps refreshing under it.
-    left() { if (state.view === 'tvmethod') return; send({ type: 'tv.showing', on: false }); hint = null; },
+    // (The method dialog over Settings counts as the TV section: app.js's sectionHooks.)
+    left() { send({ type: 'tv.showing', on: false }); hint = null; },
     demo() { state.tv = TvUi.demo(new URLSearchParams(location.hash.split('?')[1] || '').get('demo') || 'roku'); },
   });
 
