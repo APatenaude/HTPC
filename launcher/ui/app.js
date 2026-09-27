@@ -432,7 +432,8 @@ function nearest(cur, dir, list = items(), across = false) {
 function move(dir) {
   const cur = focusedEl();
   if (!cur) { restoreFocus(); return; }
-  const best = nearest(cur, dir) || wrapTarget(cur, dir);
+  const view = EXT.views[state.view];
+  const best = nearest(cur, dir) || (view && view.wrap === false ? null : wrapTarget(cur, dir));
   if (best) setFocus(best);
 }
 
@@ -563,7 +564,8 @@ function scrollIntoBox(el, box, room) {
 //   })
 //   addView('maps', { render(), press(button, el) -> handled, focus(items) -> element,
 //                     overlay (drawn over the view it opened from), demo(arg),
-//                     layout() (once it is on screen, to place things by their size) })
+//                     layout() (once it is on screen, to place things by their size),
+//                     wrap: false (moving past an end stays there, as in Settings) })
 //                                    a <section id="maps" class="view"> of its own; go('maps')
 //   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
 //   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")

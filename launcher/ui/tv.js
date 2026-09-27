@@ -304,6 +304,8 @@ if (typeof settingsSection === 'function') (() => {
   // "How should the box control this TV?": the TVs found, the brands, no control.
   addView('tvmethod', {
     overlay: true,
+    wrap: false,   // a list, from Settings: it stops at its ends
+
     render() {
       const tv = state.tv;
       const found = TvUi.foundRows(tv, 'tv-mrow');

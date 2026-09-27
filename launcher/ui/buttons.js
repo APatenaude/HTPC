@@ -16,6 +16,7 @@ const maps = {
   cat: 'keys',       // category shown in the side panel
   combo: null,       // { mods: [], key } while building a key combination
   row: 'b-a',        // the row to come back to after picking
+  choosingPreset: false,   // the preset's choice is open in the side panel
 };
 
 // Rows of the editor, two columns, pairs side by side: [control, badge]. Home is last, fixed.
@@ -96,10 +97,11 @@ function settingsNavStatic(active) {
 
 function changesText(app) {
   const n = Object.keys(app.map.changes).length;
-  return n ? `${n} change${n > 1 ? 's' : ''}` : '';
+  return n ? `${n} button${n > 1 ? 's' : ''} changed` : '';
 }
 
 addView('maps', {
+  wrap: false,   // up on the first app, down on the last: stays there
   render() {
     const apps = maps.data ? maps.data.apps : [];
     const rows = apps.map((a) =>
@@ -116,9 +118,9 @@ addView('maps', {
       `</main><footer class="hints">${hints([['A', 'Edit'], ['B', 'Back']])}</footer></div>`, '.mlist', 'maps');
     setTimeout(() => keepInView('maps', '.mlist'), 0);
   },
-  press(button) {
+  press(button, el) {
     if (button !== 'up' && button !== 'down') return false;
-    move(button);
+    stepFocus(el, button);
     keepInView('maps', '.mlist');
     return true;
   },
@@ -138,6 +140,7 @@ function openEditor(id) {
   maps.id = id;
   maps.picking = null;
   maps.combo = null;
+  maps.choosingPreset = false;
   go('buttons');
 }
 
@@ -146,16 +149,19 @@ hostMessage('maps.data', (m) => {
   if (state.view === 'maps' || state.view === 'buttons') render();
 });
 
-// The focused element of a scrolling list stays in view (the list scrolls, nothing around it;
-// the stage is scaled, so screen pixels are turned back into the list's own).
+// The focused element of a scrolling list stays in view, clear of the list's faded ends (the
+// list scrolls, nothing around it: app.js's scrollIntoBox); the ends fade only where there is
+// more to scroll to (.more-up, .more-down).
 function keepInView(view, listSelector) {
   const f = document.querySelector(`#${view} [data-nav].focused`);
   const list = f && f.closest(listSelector);
-  if (!list) return;
-  const box = list.getBoundingClientRect(), item = f.getBoundingClientRect();
-  const scale = box.height / list.offsetHeight || 1, room = 8;
-  if (item.bottom > box.bottom - room * scale) list.scrollTop += (item.bottom - box.bottom) / scale + room;
-  else if (item.top < box.top + room * scale) list.scrollTop -= (box.top - item.top) / scale + room;
+  if (list) scrollIntoBox(f, list, 64);
+  for (const l of document.querySelectorAll(`#${view} :is(${listSelector})`)) listEdges(l);
+}
+
+function listEdges(list) {
+  list.classList.toggle('more-up', list.scrollTop > 2);
+  list.classList.toggle('more-down', list.scrollTop + list.clientHeight < list.scrollHeight - 2);
 }
 
 // Re-renders a view with its scrolling list left where it was (the clock and the host redraw
@@ -166,7 +172,14 @@ function renderKeepingScroll(el, html, listSelector, key) {
   el.innerHTML = html;
   el.dataset.listKey = key;
   const list = el.querySelector(listSelector);
-  if (list) list.scrollTop = top;
+  if (list) { list.scrollTop = top; listEdges(list); }
+}
+
+// Moves the focus in a direction, no wrapping round (the lists and the grid stop at their ends);
+// left and right only to what is beside it (not off the wide preset row into the grid).
+function stepFocus(el, dir) {
+  const to = el && nearest(el, dir, items(), true);
+  if (to) setFocus(to);
 }
 
 // ---- The editor ------------------------------------------------------------------------------
@@ -180,7 +193,7 @@ function editorRows(app) {
     let does = actionLabel(control, value);
     if (controller) does = control === 'r3' && !moonlight ? 'On-screen keyboard' : 'To the app';
     const editing = maps.picking === control;
-    const nav = controller || maps.picking ? '' : ` data-nav data-id="b-${control}" data-control="${control}"`;
+    const nav = controller || maps.picking || maps.choosingPreset ? '' : ` data-nav data-id="b-${control}" data-control="${control}"`;
     return `<div class="brow${editing ? ' editing' : ''}${controller ? ' fixed' : ''}"${nav}>` +
       `<span class="bkey${badge.length > 1 ? ' wide' : ''}">${esc(badge)}</span>` +
       `<span class="bdoes">${esc(does)}</span>${changed ? '<span class="bdot" aria-label="Changed"></span>' : ''}</div>`;
@@ -189,24 +202,65 @@ function editorRows(app) {
   return rows.join('');
 }
 
-function focusedControl() {
-  const f = document.querySelector('#buttons [data-control].focused');
-  return maps.picking || (f ? f.dataset.control : null) || maps.row.slice(2);
+const PRESET_ORDER = ['controller', 'mouse', 'keyboard'];
+const STICK_TEXT = { pointer: 'moves the pointer', scroll: 'scrolls', arrows: 'is the arrow keys', none: 'does nothing' };
+
+// What a preset does, from its own map (the host's), so the two never disagree.
+function presetText(id) {
+  if (id === 'controller') return 'Every button goes to the app, which reads the controller itself.';
+  const p = (maps.data && maps.data.presets[id]) || {};
+  return `L stick ${STICK_TEXT[p.leftStick] || 'does nothing'}, R stick ${STICK_TEXT[p.rightStick] || 'does nothing'}; the buttons press keys and click.`;
+}
+
+// The row in focus: the preset row ('b-preset') or a button's ('b-a'...), also while its
+// choice is open in the side panel.
+function focusedRow(app) {
+  if (maps.choosingPreset || app.map.preset === 'controller') return 'b-preset';
+  if (maps.picking) return 'b-' + maps.picking;
+  const f = document.querySelector('#buttons .bmain .focused');
+  return (f && f.dataset.id) || maps.row;
+}
+
+// The side panel: what the focused row is (the preset and what each preset does, or what the
+// focused button does), or the choice open for it.
+function presetAside(app) {
+  const check = `<span class="bcheck">${icon('check', 24, 2.5)}</span>`;
+  const items = PRESET_ORDER.map((p) => {
+    const on = p === app.map.preset;
+    return `<div class="bitem tall${on ? ' on' : ''}"${maps.choosingPreset ? ` data-nav data-id="bp-${p}" data-preset-value="${p}"` : ''}>` +
+      `<span class="grow"><b>${esc(PRESET_NAMES[p])}</b><small>${esc(presetText(p))}</small></span>${on ? check : ''}</div>`;
+  }).join('');
+  return '<span class="btitle">Preset</span>' +
+    `<p class="snote">What ${esc(app.name)}’s buttons start from. Another preset puts every button back as it has them.</p>` +
+    `<div class="blist">${items}</div>`;
+}
+
+function buttonAside(app, control, badge) {
+  const value = valueOf(app, control);
+  const stick = control === 'leftStick' || control === 'rightStick' || control === 'dpad';
+  const cat = stick ? '' : (MAP_CATS.find(([c]) => c === categoryOf(value)) || [null, ''])[1];
+  const preset = PRESET_NAMES[app.map.preset];
+  const changed = app.map.changes[control] !== undefined;
+  const was = (maps.data.presets[app.map.preset] || {})[control];
+  return `<span class="btitle">${esc(badge)} does</span>` +
+    `<div class="bnow"><span class="bnow-value">${esc(actionLabel(control, value))}</span>${cat ? `<span class="bnow-cat">${esc(cat)}</span>` : ''}</div>` +
+    `<p class="snote">${changed ? `Changed. In the ${esc(preset)} preset: ${esc(actionLabel(control, was))}. X puts that back.`
+      : `As in the ${esc(preset)} preset.`} A picks another action.</p>`;
 }
 
 function asideList(app, control) {
   const value = valueOf(app, control);
   const kind = control === 'leftStick' || control === 'rightStick' ? STICK_ACTIONS : control === 'dpad' ? DPAD_ACTIONS : null;
   const list = kind || MAP_ACTIONS[maps.cat];
-  const picking = maps.picking === control;
   const items = list.map(([v, label], i) => {
     const current = v === value || (v === 'combo' && value && value.startsWith('key:') && !MAP_ACTIONS.keys.some(([k]) => k === value));
     const text = v === 'combo' && current ? `Key combination: ${comboText(value)}` : label;
-    return `<div class="bitem${current ? ' on' : ''}"${picking ? ` data-nav data-id="bi-${i}" data-value="${esc(v)}"` : ''}>` +
+    return `<div class="bitem${current ? ' on' : ''}" data-nav data-id="bi-${i}" data-value="${esc(v)}">` +
       `<span class="grow">${esc(text)}</span>${current ? `<span class="bcheck">${icon('check', 24, 2.5)}</span>` : ''}</div>`;
   }).join('');
-  const cats = kind ? '' : '<div class="bcats">' + MAP_CATS.map(([c, label]) =>
-    `<span class="bcat${c === maps.cat ? ' on' : ''}">${esc(label)}</span>`).join('') + '</div>';
+  // The categories, LB and RB (or left and right) at their ends go from one to the next.
+  const cats = kind ? '' : '<div class="bcats"><span class="key wide">LB</span>' + MAP_CATS.map(([c, label]) =>
+    `<span class="bcat${c === maps.cat ? ' on' : ''}">${esc(label)}</span>`).join('') + '<span class="key wide">RB</span></div>';
   return cats + `<div class="blist">${items}</div>`;
 }
 
@@ -222,43 +276,50 @@ function asideCombo() {
     `<div class="buse${c.key ? '' : ' off'}" data-nav data-id="b-use" data-use>Use it</div></div>`;
 }
 
+// The preset row: which preset the app's buttons start from, and how many differ from it.
+function presetRow(app) {
+  const n = Object.keys(app.map.changes).length;
+  const caption = app.map.preset === 'controller' ? `${esc(app.name)} reads the controller itself: every button goes to it.`
+    : n ? `${n} button${n > 1 ? 's' : ''} changed from it, marked <span class="bdot"></span>` : 'Every button as the preset has it.';
+  const nav = maps.picking || maps.choosingPreset || maps.combo ? '' : ' data-nav data-id="b-preset" data-preset';
+  return `<div class="srow bpreset${maps.choosingPreset ? ' editing' : ''}"${nav}>` +
+    `<div class="text"><span class="label">Preset: <b>${esc(PRESET_NAMES[app.map.preset] || app.map.preset)}</b></span>` +
+    `<span class="caption">${caption}</span></div><div class="value">Change${icon('chevright', 28, 2)}</div></div>`;
+}
+
 addView('buttons', {
+  wrap: false,
   render() {
     const app = mapApp(maps.id);
     if (!app) { $('buttons').innerHTML = '<div class="bedit"><p class="snote">Loading…</p></div>'; return; }
-    const presets = ['controller', 'mouse', 'keyboard'];
-    const n = Object.keys(app.map.changes).length;
-    const note = app.map.preset === 'controller' ? `${app.name} reads the controller itself`
-      : n ? `${app.name} changes: ${n} (dots)` : 'Switching resets your changes';
-    const control = focusedControl();
-    const badge = (MAP_CONTROLS.find(([c]) => c === control) || [null, 'Home'])[1];
-    // Not picking: the side panel shows the focused button's action in its category.
-    if (!maps.picking && !maps.combo) maps.cat = categoryOf(valueOf(app, control));
-    const aside = app.map.preset === 'controller'
-      ? `<span class="btitle">Controller preset</span><p class="snote">Every button goes to ${esc(app.name)}, which reads the controller itself. ` +
-        'Pick Mouse or Keyboard to change what each button does.</p>'
-      : `<span class="btitle">${esc(maps.combo ? 'Key combination' : `${badge} does…`)}</span>` +
-        (maps.combo ? asideCombo() : asideList(app, control));
-    const canTest = state.current === app.id;
+    const row = focusedRow(app);
+    const control = row === 'b-preset' ? null : row.slice(2);
+    const badge = control && (MAP_CONTROLS.find(([c]) => c === control) || [null, 'Home'])[1];
+    // Not picking: the category is the focused button's, for when A opens its choice.
+    if (control && !maps.picking && !maps.combo) maps.cat = categoryOf(valueOf(app, control));
+    const aside = maps.combo ? `<span class="btitle">Key combination for ${esc(badge)}</span>${asideCombo()}`
+      : maps.picking ? `<span class="btitle">${esc(badge)} does…</span>${asideList(app, control)}`
+      : control ? buttonAside(app, control, badge) : presetAside(app);
+    const test = state.current === app.id ? [['LB', 'Test in the app']] : [];
+    const fixedList = control === 'leftStick' || control === 'rightStick' || control === 'dpad';
     const list = maps.combo ? [['A', 'Pick'], ['Start', 'Use it'], ['B', 'Back']]
-      : maps.picking ? [['A', 'Pick'], ...(/Stick|dpad/.test(maps.picking) ? [] : [['LB RB', 'Category']]), ['B', 'Cancel']]
-      : app.map.preset === 'controller' ? [['←→', 'Start from'], ...(canTest ? [['LB', 'Test in the app']] : []), ['B', 'Back']]
-      : [['A', 'Change'], ['X', 'Reset this button'], ...(canTest ? [['LB', 'Test in the app']] : []), ['B', 'Back']];
+      : maps.picking ? [['A', 'Pick'], ...(fixedList ? [] : [[['LB', 'RB'], 'Category']]), ['B', 'Cancel']]
+      : maps.choosingPreset ? [['A', 'Use it'], ['B', 'Cancel']]
+      : control ? [['A', 'Change'], ...(app.map.changes[control] !== undefined ? [['X', 'Put back']] : []), ...test, ['B', 'Back']]
+      : [['A', 'Change preset'], ...test, ['B', 'Back']];
     renderKeepingScroll($('buttons'), '<div class="bedit"><div class="bmain">' +
       `<header><span class="back">${icon('chevleft', 22, 2)}Button maps</span><h1>Buttons for ${esc(app.name)}</h1></header>` +
-      '<div class="bpreset"><span class="blabel">Start from</span>' +
-        `<div class="seg"${maps.picking ? '' : ' data-nav data-id="b-preset" data-preset'}>` +
-          presets.map((p) => `<span${p === app.map.preset ? ' class="on"' : ''}>${esc(PRESET_NAMES[p])}</span>`).join('') + '</div>' +
-        `<span class="bnote">${esc(note)}</span></div>` +
+      presetRow(app) +
       `<div class="bgrid">${editorRows(app)}</div></div>` +
       `<aside class="baside">${aside}</aside></div>` +
-      `<footer class="hints">${hints(list.filter(Boolean))}</footer>`,
-      '.blist, .bkeys', `${app.id}:${control}:${maps.picking ? maps.cat : ''}:${maps.combo ? 'combo' : ''}`);
+      `<footer class="hints">${hints(list)}</footer>`,
+      '.blist, .bkeys', `${app.id}:${row}:${maps.picking ? maps.cat : ''}:${maps.combo ? 'combo' : ''}:${maps.choosingPreset ? 'preset' : ''}`);
     setTimeout(() => keepInView('buttons', '.blist, .bkeys'), 0); // after app.js has put the focus back
   },
   focus(list) {
     if (maps.combo) return list.find((e) => e.dataset.key === maps.combo.key) || list.find((e) => e.dataset.key);
     if (maps.picking) return list.find((e) => e.classList.contains('on') && e.dataset.value) || list.find((e) => e.dataset.value);
+    if (maps.choosingPreset) return list.find((e) => e.classList.contains('on') && e.dataset.presetValue) || list[0];
     return list.find((e) => e.dataset.id === maps.row) || list.find((e) => e.dataset.control) || list[0];
   },
   press(button, el) {
@@ -266,14 +327,11 @@ addView('buttons', {
     if (!app) return false;
     if (maps.combo) return comboPress(button, el, app);
     if (maps.picking) return pickPress(button, el, app);
-    if (el && el.dataset.control) maps.row = el.dataset.id;
+    if (maps.choosingPreset) return presetPress(button, el, app);
     switch (button) {
       case 'a':
         if (el && el.dataset.control) { startPicking(app, el.dataset.control); return true; }
-        if (el && el.dataset.preset !== undefined) { stepPreset(app, 1); return true; }
-        return false;
-      case 'left': case 'right':
-        if (el && el.dataset.preset !== undefined) { stepPreset(app, button === 'right' ? 1 : -1); return true; }
+        if (el && el.dataset.preset !== undefined) { maps.choosingPreset = true; state.memory.buttons = null; render(); return true; }
         return false;
       case 'x':
         if (el && el.dataset.control && app.map.changes[el.dataset.control] !== undefined) {
@@ -286,34 +344,56 @@ addView('buttons', {
         if (state.current === app.id) send({ type: 'resume', id: app.id });
         return true;
       case 'up': case 'down': case 'left': case 'right':
-        // The side panel follows the focused row.
-        setTimeout(render, 0);
-        return false;
+        // Around the preset row and the grid, stopping at their edges; the side panel follows.
+        stepFocus(el, button);
+        if (focusedEl()) maps.row = focusedEl().dataset.id;
+        render();
+        return true;
     }
     return false;
   },
-  // #buttons/twitch, #buttons/twitch:start:media (picking Start's action), #buttons/twitch:select:combo.
+  // #buttons/twitch, #buttons/twitch:start:media (picking Start's action), #buttons/twitch:select:combo,
+  // #buttons/twitch:preset (choosing the preset).
   demo(arg) {
     mapsDemo();
     const [id, control, cat] = (arg || 'twitch').split(':');
     maps.id = id;
-    if (control) { maps.picking = control; maps.row = 'b-' + control; }
+    if (control === 'preset') { maps.choosingPreset = true; maps.row = 'b-preset'; }
+    else if (control) { maps.picking = control; maps.row = 'b-' + control; }
     if (cat === 'combo') maps.combo = { mods: ['Alt'], key: 'T' };
     else if (cat) maps.cat = cat;
   },
 });
 
-function stepPreset(app, step) {
-  const order = ['controller', 'mouse', 'keyboard'];
-  const next = order[(order.indexOf(app.map.preset) + step + order.length) % order.length];
+// The preset's choice in the side panel: A takes one (asking first when buttons were changed,
+// since they go back to it), B leaves it as it was.
+function presetPress(button, el, app) {
+  switch (button) {
+    case 'up': case 'down': stepFocus(el, button); return true;
+    case 'a': if (el && el.dataset.presetValue) choosePreset(app, el.dataset.presetValue); return true;
+    case 'b': closePreset(); return true;
+  }
+  return true;
+}
+
+function closePreset() {
+  maps.choosingPreset = false;
+  maps.row = 'b-preset';
+  state.memory.buttons = 'b-preset';
+  render();
+}
+
+function choosePreset(app, next) {
+  if (next === app.map.preset) { closePreset(); return; }
   const apply = () => {
     app.map.preset = next;
     app.map.changes = {};
     send({ type: 'maps.preset', id: app.id, preset: next });
-    render();
+    closePreset();
   };
   const n = Object.keys(app.map.changes).length;
-  if (n) ask({ title: `Start from ${PRESET_NAMES[next]}?`, text: `${app.name}’s ${n} change${n > 1 ? 's go' : ' goes'}.`, yes: 'Switch', onYes: apply });
+  if (n) ask({ title: `Switch ${app.name} to the ${PRESET_NAMES[next]} preset?`, yes: 'Switch', onYes: apply,
+    text: `Its ${n} changed button${n > 1 ? 's go' : ' goes'} back to what the preset has.` });
   else apply();
 }
 
@@ -363,8 +443,8 @@ function pickPress(button, el, app) {
       render();
       return true;
     }
-    case 'up': case 'down':   // along the list, which scrolls
-      move(button);
+    case 'up': case 'down':   // along the list, which scrolls; it stops at its ends
+      stepFocus(el, button);
       keepInView('buttons', '.blist');
       return true;
   }
@@ -396,7 +476,7 @@ function comboPress(button, el, app) {
       state.memory.buttons = null;
       render();
       return true;
-    case 'up': case 'down': case 'left': case 'right': return false;   // around the grid
+    case 'up': case 'down': case 'left': case 'right': return false;   // around the grid (no wrapping)
   }
   return true;
 }
