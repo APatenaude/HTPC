@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Edge policies for the box: Google search, uBlock Origin Lite, no first-run or promotions.
+    Edge policies for the box: Google search, the extensions, no first-run or promotions.
 
 .DESCRIPTION
     Machine policies under HKLM\SOFTWARE\Policies\Microsoft\Edge (check edge://policy).
@@ -19,10 +19,23 @@ param()
 Assert-Admin
 
 $edge = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
-$uboLite = 'cimighlppcgcoapaliogpjjdehbnofhn;https://edge.microsoft.com/extensionwebstorebase/v1/crx'
-
-Write-Host '  Ad blocking: uBlock Origin Lite, force-installed'
-Set-RegValue "$edge\ExtensionInstallForcelist" '1' $uboLite 'String'
+# Force-installed in every Edge profile (the Edge tile and each website tile have their own).
+# IDs taken from each project's own website, not a store search (the stores carry look-alikes).
+# Edge installs Chrome Web Store extensions through this policy too, given Google's update URL.
+$edgeStore = 'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
+$chromeStore = 'https://clients2.google.com/service/update2/crx'
+$extensions = [ordered]@{
+    'uBlock Origin Lite (ad blocking)'     = "cimighlppcgcoapaliogpjjdehbnofhn;$edgeStore"
+    'Dark Reader (dark mode, darkreader.org)' = "ifoakfbpdcdoeenechcleahebpibofpc;$edgeStore"
+    'FrankerFaceZ (Twitch, frankerfacez.com)' = "fadndhdgpmmaapbmfcknlfgcflmmmieb;$chromeStore"
+    'Video Speed Controller (github.com/igrigorik/videospeed)' = "nffaoalbilbmmfgbnbgppjihopabppdk;$chromeStore"
+}
+$slot = 1
+foreach ($name in $extensions.Keys) {
+    Write-Host "  Extension: $name"
+    Set-RegValue "$edge\ExtensionInstallForcelist" "$slot" $extensions[$name] 'String'
+    $slot++
+}
 
 Write-Host '  Search: Google'
 Set-RegValue $edge 'DefaultSearchProviderEnabled' 1
