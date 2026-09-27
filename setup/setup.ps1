@@ -93,13 +93,20 @@ $Steps = [ordered]@{
     }
 }
 
+# One command-line argument, quoted when needed: unquoted, "TV Box Setup.exe" became three
+# arguments and setup stopped on the unknown step "Box" before it logged anything.
+function ConvertTo-Argument([string]$Value) {
+    if ($Value -and $Value -notmatch '[\s"]') { return $Value }
+    '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+
 function Get-ArgumentLine {
-    $line = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    $line = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Argument $PSCommandPath))
     foreach ($entry in $BoundArgs.GetEnumerator()) {
         if ($entry.Value -is [Management.Automation.SwitchParameter]) {
             if ($entry.Value) { $line += "-$($entry.Key)" }
         } else {
-            $line += "-$($entry.Key)", (@($entry.Value) -join ',')
+            $line += "-$($entry.Key)", (ConvertTo-Argument (@($entry.Value) -join ','))
         }
     }
     $line -join ' '
