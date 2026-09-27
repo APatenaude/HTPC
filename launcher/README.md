@@ -103,6 +103,11 @@ field; its own requests never cross the inbound rule, so the real test is a phon
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1 -Keyboard # on-screen keyboard: click a field, type
     powershell -ExecutionPolicy Bypass -File launcher\dev\Publish-Setup.ps1          # launcher\dist\TV Box Setup.exe (68 MB, self-contained; 12 MB of it Kestrel)
 
+Checks that need no box, controller or TV (`dotnet run` in each folder; exit code 0 = all passed):
+`launcher\tests\LauncherTests` (button maps, PadMapper, video end, sleep timer, decode-check
+parser, alerts overlay), `launcher\tests\TileTests` (website addresses and tile edits),
+`launcher\tests\PhoneTests` (the phone remote, its server on 127.0.0.1).
+
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
 `-NoTv` never sends the TV a key (no on at start, no off in standby): for working on the box
