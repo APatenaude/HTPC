@@ -1,0 +1,38 @@
++   0.0s roku GET /query/device-info -> 200
++   0.0s roku GET /query/active-app -> 200
++   5.0s roku GET /query/device-info -> 200
++   5.0s roku GET /query/active-app -> 200
++  10.0s roku GET /query/device-info -> 200
++  10.0s roku GET /query/active-app -> 200
++  15.0s roku GET /query/device-info -> 200
++  15.0s roku GET /query/active-app -> 200
++  20.0s roku GET /query/device-info -> 200
++  20.0s roku GET /query/active-app -> 200
++  25.0s roku GET /query/device-info -> 200
++  25.0s roku GET /query/active-app -> 200
++  30.0s roku GET /query/device-info -> 200
++  30.0s roku GET /query/active-app -> 200
++  30.0s -- TV remote: off
++  35.0s roku GET /query/device-info -> 200
++  35.0s event TvStateChanged(on=False, showingBox=False)
++  40.0s roku GET /query/device-info -> 200
++  45.0s roku GET /query/device-info -> 200
++  50.0s roku GET /query/device-info -> 200
++  55.0s roku GET /query/device-info -> 200
++  60.0s roku GET /query/device-info -> 200
++  60.0s -- box in standby: True
++  60.0s -- TV remote: on (comes back on the box's input)
++  65.0s roku GET /query/device-info -> 200
++  65.0s roku GET /query/active-app -> 200
++  65.0s event TvStateChanged(on=True, showingBox=True)
++  70.0s roku GET /query/device-info -> 200
++  70.0s roku GET /query/active-app -> 200
++  75.0s roku GET /query/device-info -> 200
++  75.0s roku GET /query/active-app -> 200
++  80.0s roku GET /query/device-info -> 200
++  80.0s roku GET /query/active-app -> 200
++  85.0s roku GET /query/device-info -> 200
++  85.0s roku GET /query/active-app -> 200
++  90.0s roku GET /query/device-info -> 200
++  90.0s roku GET /query/active-app -> 200
++  90.0s -- box in standby: False

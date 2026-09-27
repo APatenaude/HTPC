@@ -1,0 +1,17 @@
++   0.0s roku GET /query/device-info -> 200
++   0.0s roku GET /query/active-app -> 200
++   5.0s roku GET /query/device-info -> 200
++   5.0s roku GET /query/active-app -> 200
++  10.0s roku GET /query/device-info -> 200
++  10.0s roku GET /query/active-app -> 200
++  10.0s -- TV remote: HDMI 2
++  15.0s roku GET /query/device-info -> 200
++  15.0s roku GET /query/active-app -> 200
++  15.0s event TvStateChanged(on=True, showingBox=False)
++  20.0s roku GET /query/device-info -> 200
++  20.0s roku GET /query/active-app -> 200
++  25.0s roku GET /query/device-info -> 200
++  25.0s roku GET /query/active-app -> 200
++  30.0s roku GET /query/device-info -> 200
++  30.0s roku GET /query/active-app -> 200
++  30.0s -- box in standby: False

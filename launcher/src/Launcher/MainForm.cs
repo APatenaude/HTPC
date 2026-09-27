@@ -79,9 +79,7 @@ sealed partial class MainForm : Form
             if (connected && standby.Active) standby.Wake("controller reconnected");
             PushState();
         });
-        tv = new TvService(settings) { HandsOff = options.NoTv };
-        tv.Changed += () => BeginInvoke(() => Post(new { type = "tv", tv = tv.Describe() }));
-        tv.TvStateChanged += (on, showingBox) => BeginInvoke(() => OnTvState(on, showingBox));
+        tv = CreateTv(); // MainForm.Tv.cs
         clock.Tick += async (_, _) =>
         {
             CheckSleepTimer();
@@ -95,7 +93,7 @@ sealed partial class MainForm : Form
         {
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
         };
-        mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
+        mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         Directory.CreateDirectory(captureDir);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
         InitSettings(); // MainForm.Settings.cs
@@ -124,12 +122,7 @@ sealed partial class MainForm : Form
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
         StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
-        // SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
-        // launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
-        await tv.Discover();
-        var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
-        if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
-        else Log.Info($"Box up {uptime.TotalHours:0.#} h: the TV is left as it is");
+        await StartTv(); // on (and to the box's input) if the box has just booted: MainForm.Tv.cs
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
@@ -214,34 +207,12 @@ sealed partial class MainForm : Form
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
-                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 } });
                 RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "home": break; // the page reports going home; nothing to do here
-            case "tvChoose": tv.Choose(Str("id")!); break;
-            case "tvRefresh": _ = tv.Discover(); break;
-            case "tvTest":
-                _ = Task.Run(async () =>
-                {
-                    var ok = await tv.Test();
-                    BeginInvoke(() => Post(new { type = "toast", text = ok ? "The TV went off and came back" : "The TV did not respond", kind = ok ? "info" : "warn" }));
-                });
-                break;
-            case "tvSetting":
-                if (tv.Profile is { } profile)
-                {
-                    var on = m.GetProperty("value").GetBoolean();
-                    switch (Str("key"))
-                    {
-                        case "offWithBox": profile.OffWithBox = on; break;
-                        case "onWithBox": profile.OnWithBox = on; break;
-                        case "sleepWithTv": profile.SleepWithTv = on; break;
-                    }
-                    settings.Save();
-                    Post(new { type = "tv", tv = tv.Describe() });
-                }
-                break;
+            // The TV's messages ("tv.*"): MainForm.Tv.cs.
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
                 ApplySettings();
@@ -299,7 +270,9 @@ sealed partial class MainForm : Form
     {
         ButtonMap? map = null;
         string? preset = null;
-        if (!standby.Active && !LauncherActive)
+        // In setup nothing gets a button map: an installer's window in front must not get
+        // clicks from the controller (the wizard reads the controller itself).
+        if (!setupMode && !standby.Active && !LauncherActive)
         {
             var window = Native.GetForegroundWindow();
             if (window != lastForeground)
@@ -477,8 +450,8 @@ sealed partial class MainForm : Form
         var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated) || a.IsWebsite)
             // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
             .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
-        Post(new { type = "init", apps = list, tv = tv.Describe(), controller = controller.Connected, battery = controller.BatteryLevel,
-            canInstall = SetupRunner.FindSetupDir() is not null });
+        Post(new { type = "init", apps = list, tv = TvUiState.Describe(tv), controller = controller.Connected, battery = controller.BatteryLevel,
+            canInstall = SetupRunner.FindSetupDir() is not null, wired = TvNet.Wired() });
     }
 
     void StartSetup(JsonElement m)
@@ -521,7 +494,8 @@ sealed partial class MainForm : Form
                 Reveal(); // installers may have put windows over the launcher
             };
         }
-        if (!setup.Start(picked, SetupRunner.SelfContainedExe())) Post(new { type = "declined" });
+        // Start waits for Windows' permission prompt: the wizard stays on the apps step until then.
+        Post(setup.Start(picked, SetupRunner.SelfContainedExe()) ? new { type = "setupStarted" } : new { type = "declined" });
     }
 
     /// <summary>
@@ -543,6 +517,7 @@ sealed partial class MainForm : Form
             catch (Exception e) { Log.Error("Starting the installed launcher", e); }
         }
         setupMode = false;
+        tv.InSetup = false;
         uiReady = false;
         Log.Info("Setup finished: home screen");
         web.CoreWebView2?.Navigate("https://launcher.htpc/index.html");
@@ -664,7 +639,10 @@ sealed partial class MainForm : Form
                 standby.Sleep("Power menu");
                 break;
             case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
-            case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
+            case "shutdown":
+                tv.TurnOffBeforeShutdown(); // the TV goes off with a shut down (not with a restart)
+                System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0");
+                break;
             case "desktop": WindowState = FormWindowState.Minimized; break;
         }
     }
