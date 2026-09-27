@@ -256,7 +256,7 @@ sealed class TvService
         CancelPairing();
         var cancel = pairCancel = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var channel = codes = System.Threading.Channels.Channel.CreateUnbounded<string>();
-        Pairing = new TvPairState(tv.Key, tv.Name, "working", $"Connecting to {tv.Name}…", 6);
+        Pairing = new TvPairState(tv.Key, tv.Name, "working", $"Connecting to {tv.Name}…", pairs.CodeLength);
         Changed?.Invoke();
         _ = Task.Run(async () =>
         {
@@ -265,7 +265,7 @@ sealed class TvService
             {
                 ok = await pairs.Pair(tv, (stage, message) =>
                 {
-                    Pairing = new TvPairState(tv.Key, tv.Name, stage, message, 6);
+                    Pairing = new TvPairState(tv.Key, tv.Name, stage, message, pairs.CodeLength);
                     Changed?.Invoke();
                 }, async c => { try { return await channel.Reader.ReadAsync(c); } catch (Exception) { return null; } }, cancel.Token);
             }
@@ -278,7 +278,7 @@ sealed class TvService
                 Found = Found.Select(t => t.Key == now.Key ? now : t).ToList();
                 Contact(profile, now); // its MACs, from the paired connection
             }
-            if (!ok && Pairing?.Stage != "failed") Pairing = new TvPairState(tv.Key, tv.Name, "failed", "Not paired. Try again.", 6);
+            if (!ok && Pairing?.Stage != "failed") Pairing = new TvPairState(tv.Key, tv.Name, "failed", "Not paired. Try again.", pairs.CodeLength);
             Changed?.Invoke();
         });
     }

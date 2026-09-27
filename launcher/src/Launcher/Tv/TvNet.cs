@@ -334,6 +334,7 @@ static class TvHttp
     public static SocketsHttpHandler Handler() => new()
     {
         UseProxy = false,
+        UseCookies = false, // no shared cookie jar across TVs: a driver sets its own TV's cookie itself (Sony)
         ConnectTimeout = TimeSpan.FromSeconds(3),
         PooledConnectionLifetime = TimeSpan.FromMinutes(1),
         SslOptions = { RemoteCertificateValidationCallback = delegate { return true; } },

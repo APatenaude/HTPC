@@ -5,7 +5,10 @@ using System.Text;
 namespace Htpc.TvLab;
 
 sealed record FakeRequest(string Method, string Path, Dictionary<string, string> Headers, string Body);
-sealed record FakeResponse(int Status, string Body = "", string ContentType = "text/xml; charset=utf-8");
+sealed record FakeResponse(int Status, string Body = "", string ContentType = "text/xml; charset=utf-8")
+{
+    public string? SetCookie { get; init; }
+}
 
 /// <summary>
 /// A small HTTP/1.1 server on 127.0.0.1 for fake TVs (no http.sys, so no URL reservations or
@@ -27,11 +30,12 @@ sealed class FakeHttp : IDisposable
     public Uri BaseUrl => new($"http://{Bind}:{Port}/");
     public IPAddress Bind { get; }
 
-    public FakeHttp(Func<FakeRequest, FakeResponse> handler, IPAddress? bind = null)
+    public FakeHttp(Func<FakeRequest, FakeResponse> handler, IPAddress? bind = null, int port = 0)
     {
         this.handler = handler;
         Bind = bind ?? IPAddress.Loopback;
-        listener = new TcpListener(Bind, 0);
+        listener = new TcpListener(Bind, port);
+        listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         listener.Start();
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         _ = Task.Run(AcceptLoop);
@@ -66,6 +70,7 @@ sealed class FakeHttp : IDisposable
         catch (Exception e) { response = new FakeResponse(500, e.Message, "text/plain"); }
         var body = Encoding.UTF8.GetBytes(response.Body);
         var head = $"HTTP/1.1 {response.Status} {(response.Status == 200 ? "OK" : "Error")}\r\nContent-Type: {response.ContentType}\r\n" +
+                   (response.SetCookie is null ? "" : $"Set-Cookie: {response.SetCookie}\r\n") +
                    $"Content-Length: {body.Length}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
         await stream.WriteAsync(body);

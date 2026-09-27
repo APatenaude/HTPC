@@ -119,7 +119,8 @@ const TvUi = {
     if (pr.stage === 'code') {
       const n = pr.codeLength || 6;
       const boxes = Array.from({ length: n }, (_, i) => `<span class="tv-cbox${i === TvUi.code.length ? ' now' : ''}">${esc(TvUi.code[i] || '')}</span>`).join('');
-      const keys = '0123456789ABCDEF'.split('').map((k) => btn(`tvkey:${k}`, 'tv-key', k, k)).join('');
+      // A 4-digit PIN (Sony) gets digits only; the Google TV code is hexadecimal.
+      const keys = (n === 4 ? '0123456789' : '0123456789ABCDEF').split('').map((k) => btn(`tvkey:${k}`, 'tv-key', k, k)).join('');
       return `<div class="tv-pair"><h2>Type the code on ${name}</h2><p>${esc(pr.message)}</p>` +
         `<div class="tv-code">${boxes}</div><div class="tv-keys">${keys}</div>` +
         `<div class="tv-pbuttons">${btn('tvkey:del', 'tv-key', 'Delete', 'del')}${btn('tvpair-ok', 'tv-code', 'OK')}${btn('tvpair-cancel', 'tv-cancel-pair', 'Cancel')}</div></div>`;
@@ -198,6 +199,13 @@ const TvUi = {
           caps: { off: true, follow: true, input: true, readInput: true, test: false }, profiles: [{ ...profiles[1], current: true }],
           profile: { ...profile, method: 'webos', methodLabel: 'LG (webOS)', beta: true, deviceId: '1a2b', name: 'LG OLED65C4', model: 'OLED65C4PUA' },
           pairing: stage && { id: 'webos:1a2b', name: 'LG OLED65C4', codeLength: 6, ...stage } };
+      }
+      case 'pair-pin': {
+        const sTv = { id: 'bravia:udn-sony', method: 'bravia', label: 'Sony Bravia', beta: true, name: 'BRAVIA 7', model: 'K-65XR70', locked: false, on: true, power: 'on', input: 1, detected: false, picked: true, paired: false };
+        TvUi.code = '4';
+        return { ...base, screen: 'SONY TV', status: 'unpaired', found: [sTv], caps: { off: true, follow: true, input: true, readInput: true, test: false },
+          profile: { ...profile, method: 'bravia', methodLabel: 'Sony Bravia', beta: true, deviceId: 'udn-sony', name: 'BRAVIA 7', model: 'K-65XR70' },
+          pairing: { id: 'bravia:udn-sony', name: 'BRAVIA 7', stage: 'code', message: 'Type the PIN BRAVIA 7 shows.', codeLength: 4 } };
       }
       case 'pair-code': {
         const g = { id: 'androidtv', label: 'Google TV / Android TV', brand: 'Google TV', beta: true, how: 'Over your network. Type the code the TV shows, once.',

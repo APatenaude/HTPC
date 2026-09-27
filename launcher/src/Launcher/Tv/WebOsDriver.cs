@@ -53,6 +53,7 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
         How: "Over your network. Say yes to the prompt on the TV once.");
 
     public void UseCredentials(TvCredentials c) => credentials = c;
+    public int CodeLength => 0;
 
     string? Key(TvDevice tv) => credentials?.Get(tv.Key)?.Value;
     public bool IsPaired(TvDevice tv) => Key(tv) is { Length: > 0 };

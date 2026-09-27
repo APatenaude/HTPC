@@ -8,6 +8,8 @@ static class TvDrivers
         new RokuDriver(net),
         new WebOsDriver(net),
         new AndroidTvDriver(net),
+        new BraviaDriver(net),
+        new TizenDriver(net),
     };
 }
 

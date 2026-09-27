@@ -9,6 +9,9 @@ interface ITvPairing
 {
     void UseCredentials(TvCredentials credentials);
 
+    /// <summary>Characters of the code the TV shows (0: it asks to say yes on it instead).</summary>
+    int CodeLength { get; }
+
     bool IsPaired(TvDevice tv);
 
     /// <summary>
