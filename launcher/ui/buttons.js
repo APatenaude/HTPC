@@ -108,13 +108,19 @@ addView('maps', {
         `<span class="mname">${esc(a.name)}</span>` +
         `<span class="mpreset">${esc(PRESET_NAMES[a.map.preset] || a.map.preset)}</span>` +
         `<span class="mchanges">${esc(changesText(a))}</span>${icon('chevright', 28, 2)}</div>`).join('');
-    $('maps').innerHTML = settingsNavStatic('controller') +
+    renderKeepingScroll($('maps'), settingsNavStatic('controller') +
       '<div class="spane"><main>' +
         `<header><span class="back">${icon('chevleft', 22, 2)}Controller</span><h1>Button maps</h1>` +
         '<p>Each app gets its own buttons. Home always opens the menu.</p></header>' +
         `<div class="mlist">${rows || '<p class="snote">Loading…</p>'}</div>` +
-      `</main><footer class="hints">${hints([['A', 'Edit'], ['B', 'Back']])}</footer></div>`;
+      `</main><footer class="hints">${hints([['A', 'Edit'], ['B', 'Back']])}</footer></div>`, '.mlist', 'maps');
+    setTimeout(() => keepInView('maps', '.mlist'), 0);
+  },
+  press(button) {
+    if (button !== 'up' && button !== 'down') return false;
+    move(button);
     keepInView('maps', '.mlist');
+    return true;
   },
   demo() { mapsDemo(); },
 });
@@ -140,12 +146,27 @@ hostMessage('maps.data', (m) => {
   if (state.view === 'maps' || state.view === 'buttons') render();
 });
 
-// The focused element of a scrolling list stays in view.
+// The focused element of a scrolling list stays in view (the list scrolls, nothing around it;
+// the stage is scaled, so screen pixels are turned back into the list's own).
 function keepInView(view, listSelector) {
-  requestAnimationFrame(() => {
-    const f = document.querySelector(`#${view} [data-nav].focused`);
-    if (f && f.closest(listSelector)) f.scrollIntoView({ block: 'nearest' });
-  });
+  const f = document.querySelector(`#${view} [data-nav].focused`);
+  const list = f && f.closest(listSelector);
+  if (!list) return;
+  const box = list.getBoundingClientRect(), item = f.getBoundingClientRect();
+  const scale = box.height / list.offsetHeight || 1, room = 8;
+  if (item.bottom > box.bottom - room * scale) list.scrollTop += (item.bottom - box.bottom) / scale + room;
+  else if (item.top < box.top + room * scale) list.scrollTop -= (box.top - item.top) / scale + room;
+}
+
+// Re-renders a view with its scrolling list left where it was (the clock and the host redraw
+// every so often), unless the list now shows something else (another key).
+function renderKeepingScroll(el, html, listSelector, key) {
+  const old = el.querySelector(listSelector);
+  const top = old && el.dataset.listKey === key ? old.scrollTop : 0;
+  el.innerHTML = html;
+  el.dataset.listKey = key;
+  const list = el.querySelector(listSelector);
+  if (list) list.scrollTop = top;
 }
 
 // ---- The editor ------------------------------------------------------------------------------
@@ -211,6 +232,8 @@ addView('buttons', {
       : n ? `${app.name} changes: ${n} (dots)` : 'Switching resets your changes';
     const control = focusedControl();
     const badge = (MAP_CONTROLS.find(([c]) => c === control) || [null, 'Home'])[1];
+    // Not picking: the side panel shows the focused button's action in its category.
+    if (!maps.picking && !maps.combo) maps.cat = categoryOf(valueOf(app, control));
     const aside = app.map.preset === 'controller'
       ? `<span class="btitle">Controller preset</span><p class="snote">Every button goes to ${esc(app.name)}, which reads the controller itself. ` +
         'Pick Mouse or Keyboard to change what each button does.</p>'
@@ -221,8 +244,7 @@ addView('buttons', {
       : maps.picking ? [['A', 'Pick'], ...(/Stick|dpad/.test(maps.picking) ? [] : [['LB RB', 'Category']]), ['B', 'Cancel']]
       : app.map.preset === 'controller' ? [['←→', 'Start from'], ...(canTest ? [['LB', 'Test in the app']] : []), ['B', 'Back']]
       : [['A', 'Change'], ['X', 'Reset this button'], ...(canTest ? [['LB', 'Test in the app']] : []), ['B', 'Back']];
-    if (!maps.picking && !maps.combo) maps.cat = categoryOf(valueOf(app, control));
-    $('buttons').innerHTML = '<div class="bedit"><div class="bmain">' +
+    renderKeepingScroll($('buttons'), '<div class="bedit"><div class="bmain">' +
       `<header><span class="back">${icon('chevleft', 22, 2)}Button maps</span><h1>Buttons for ${esc(app.name)}</h1></header>` +
       '<div class="bpreset"><span class="blabel">Start from</span>' +
         `<div class="seg"${maps.picking ? '' : ' data-nav data-id="b-preset" data-preset'}>` +
@@ -230,8 +252,9 @@ addView('buttons', {
         `<span class="bnote">${esc(note)}</span></div>` +
       `<div class="bgrid">${editorRows(app)}</div></div>` +
       `<aside class="baside">${aside}</aside></div>` +
-      `<footer class="hints">${hints(list.filter(Boolean))}</footer>`;
-    keepInView('buttons', '.blist, .bkeys');
+      `<footer class="hints">${hints(list.filter(Boolean))}</footer>`,
+      '.blist, .bkeys', `${app.id}:${control}:${maps.picking ? maps.cat : ''}:${maps.combo ? 'combo' : ''}`);
+    setTimeout(() => keepInView('buttons', '.blist, .bkeys'), 0); // after app.js has put the focus back
   },
   focus(list) {
     if (maps.combo) return list.find((e) => e.dataset.key === maps.combo.key) || list.find((e) => e.dataset.key);
@@ -340,7 +363,10 @@ function pickPress(button, el, app) {
       render();
       return true;
     }
-    case 'up': case 'down': return false;   // along the list
+    case 'up': case 'down':   // along the list, which scrolls
+      move(button);
+      keepInView('buttons', '.blist');
+      return true;
   }
   return true;
 }
