@@ -143,15 +143,6 @@ sealed partial class MainForm
         return focus;
     }
 
-    /// <summary>
-    /// An app was opened from the launcher: its buttons over it for 4 s (design: Inside an app;
-    /// the user's choice: every time). Off in Settings › Controller.
-    /// </summary>
-    void ShowAppHint(string id)
-    {
-        if (!settings.ShowAppHints || apps.Get(id) is not { } app) return;
-        alertCenter.ShowHint(AppHint.For(app.Name, MapFor(app), app.Id == "moonlight"));
-    }
     void AlertsTick()
     {
         alertCenter.Tick();

@@ -83,8 +83,17 @@ sealed class Dimmer : Form
         BackColor = Color.Black;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        TopMost = true;
+        // Topmost only through WS_EX_TOPMOST below: the TopMost property made Show() activate this
+        // layer, so the launcher lost the foreground and ignored the controller (brightness 95 -> 90
+        // "locked up" until Alt+Tab).
         Opacity = 0;
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_MOUSEACTIVATE = 0x21, MA_NOACTIVATE = 3;
+        if (m.Msg == WM_MOUSEACTIVATE) { m.Result = MA_NOACTIVATE; return; }
+        base.WndProc(ref m);
     }
 
     protected override CreateParams CreateParams
@@ -105,8 +114,15 @@ sealed class Dimmer : Form
         percent = Math.Clamp(percent, 10, 100);
         Bounds = Screen.PrimaryScreen!.Bounds;
         Opacity = (100 - percent) / 100.0;
+        var front = Native.GetForegroundWindow();
         if (percent < 100 && !Visible) Show();
         if (percent == 100 && Visible) Hide();
+        // Should Windows still activate the layer, the window that was in front gets it back.
+        if (IsHandleCreated && Native.GetForegroundWindow() == Handle && front != IntPtr.Zero && front != Handle)
+        {
+            Native.SetForegroundWindow(front);
+            Log.Warn("Brightness layer took the foreground; given back");
+        }
     }
 }
 
