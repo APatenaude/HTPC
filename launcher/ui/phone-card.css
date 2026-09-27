@@ -1,13 +1,19 @@
-/* The home screen's "Add the remote to your phone" card (phone-card.js): two tiles wide, tile height. */
+/* The home screen's "Add the remote to your phone" card (phone-card.js): two tiles wide, after
+   the tiles (order: the tiles are placed by CSS order), the tiles' look. As tall as its content
+   with room all round: on a row of its own it is shorter than a tile, so the grid still clears
+   the hint bar; next to tiles it takes their height, its content centred. */
 #phone-card {
-  grid-column: span 2; display: flex; align-items: center; gap: 32px; padding: 0 32px; box-sizing: border-box;
-  border-radius: 28px; background: var(--tile); border: 2px solid var(--tile-edge); min-width: 0;
+  order: 9999; grid-column: span 2; display: flex; align-items: center; gap: 28px; min-width: 0;
+  padding: 20px 32px 20px 20px; box-sizing: border-box;
+  border-radius: 28px; background: var(--tile); border: 2px solid var(--tile-edge);
 }
 #phone-card .pc-qr { flex-shrink: 0; display: flex; padding: 10px; border-radius: 18px; background: #FFFFFF; }
-#phone-card .pc-text { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; }
-#phone-card b { font-family: var(--display); font-weight: 600; font-size: 30px; }
-#phone-card .pc-text > span { font-size: 21px; line-height: 1.35; color: var(--text-2); }
-#phone-card .pc-wait { display: flex; align-items: center; gap: 10px; color: var(--warn) !important; }
-#phone-card .pc-wait span { width: 12px; height: 12px; border-radius: 6px; background: var(--warn); }
-#phone-card .pc-btn { margin-top: 4px; padding: 12px 26px; border-radius: 16px; background: #22252B; font-size: 22px; }
+#phone-card .pc-text { flex-grow: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+#phone-card b { font-family: var(--display); font-weight: 600; font-size: 29px; line-height: 1.2; }
+#phone-card .pc-text > span { font-size: 20px; line-height: 1.4; color: var(--text-2); }
+#phone-card .pc-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 4px; }
+#phone-card .pc-wait { display: flex; align-items: center; gap: 10px; font-size: 20px; color: var(--warn); }
+#phone-card .pc-wait span { width: 12px; height: 12px; flex-shrink: 0; border-radius: 6px; background: var(--warn); }
+#phone-card .pc-btn { flex-shrink: 0; display: flex; align-items: center; height: 48px; padding: 0 26px; box-sizing: border-box;
+  border-radius: 16px; background: #22252B; font-size: 22px; }
 #phone-card .pc-btn.focused { background: var(--tile-focus); box-shadow: 0 0 0 4px var(--accent); }

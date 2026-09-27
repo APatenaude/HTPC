@@ -37,6 +37,10 @@
     website: { name: '', url: '', field: 'url' },
     moveOrigin: null,      // tile order to restore if a move is cancelled
     draft: '',             // the name being typed in the rename view
+    // Installs: the ids asked with "Install and add to home" (a tile shows them installing),
+    // those queued or running, those just out of the queue (the catalog that follows says
+    // whether they installed), and those that did not.
+    homeBound: new Set(), queued: new Set(), finished: new Set(), failed: new Set(),
   };
 
   const el = (id) => document.getElementById(id);
@@ -63,12 +67,15 @@
     reset('home');
     focusMoving();
   }
+  // The tile trades places with the one it moves onto (the two slide, nothing else moves).
   function moveTile(dir) {
     const arr = state.tiles;
     const i = arr.findIndex((t) => t.id === state.moving);
     if (i < 0) return;
-    const j = dir === 'left' ? i - 1 : dir === 'right' ? i + 1 : dir === 'up' ? i - COLS : i + COLS;
-    if (j < 0 || j >= arr.length) return;
+    let j = dir === 'left' ? i - 1 : dir === 'right' ? i + 1 : dir === 'up' ? i - COLS : i + COLS;
+    // Down onto a shorter last row: its last tile.
+    if (dir === 'down' && j >= arr.length && Math.floor(i / COLS) < Math.floor((arr.length - 1) / COLS)) j = arr.length - 1;
+    if (j < 0 || j >= arr.length || j === i) return;
     [arr[i], arr[j]] = [arr[j], arr[i]];
     render();
     focusMoving();
@@ -113,7 +120,20 @@
         '</aside>' +
         `<footer class="hints">${hints([['A', 'Select'], ['B', 'Close']])}</footer>`;
     },
+    layout() { placeByTile(el('tileopts').querySelector('.to-panel'), lib.target); },
   });
+
+  // Tile options open beside their tile: to its right, or to its left at the right edge, level
+  // with it, and kept on screen above the hints. In stage pixels: the tile's offsets are from
+  // #home, which covers the stage.
+  function placeByTile(panel, id) {
+    const tile = document.querySelector(`#tiles [data-id="tile:${CSS.escape(id)}"]`);
+    if (!panel || !tile) return;
+    const gap = 32, x = tile.offsetLeft, w = tile.offsetWidth;
+    const left = x + w + gap + panel.offsetWidth <= 1920 - 48 ? x + w + gap : x - gap - panel.offsetWidth;
+    panel.style.left = `${Math.max(48, left)}px`;
+    panel.style.top = `${Math.max(48, Math.min(tile.offsetTop, 1080 - 96 - 24 - panel.offsetHeight))}px`;
+  }
 
   onAction('opt-move', startMove);
   onAction('opt-rename', () => { const t = targetTile(); lib.draft = t ? t.name : ''; go('rename'); });
@@ -243,23 +263,37 @@
   }
   onAction('tab', (node, id) => setTab(id));
 
+  // What a card (and a tile being installed) says. Installing looks nothing like "Install": a
+  // spinner, the progress, a bar; one that did not install says so in amber.
   function cardStatus(card) {
     if (card.state === 'installing') {
       const p = lib.progress.current;
-      if (p && p.id === card.id) return { label: p.phase === 'download' ? `Downloading ${p.percent}%` : 'Installing', glyph: 'download', color: '#8CC2FF' };
-      return { label: 'Queued', glyph: 'download', color: '#8CC2FF' };
+      if (p && p.id === card.id) {
+        const pct = p.phase === 'download' && p.percent != null ? p.percent : null;
+        return { label: pct !== null ? `Downloading… ${pct}%` : 'Installing…', spin: true, color: '#8CC2FF', busy: true, percent: pct };
+      }
+      return { label: 'Waiting to install', glyph: 'timer', color: '#B3B5BC', busy: true, percent: 0 };
     }
+    if (card.state === 'install' && lib.failed.has(card.id)) return { label: 'Didn’t install · A to try again', glyph: 'warn', color: '#F2B24C', failed: true };
     return STATUS[card.state] || STATUS.install;
+  }
+
+  function statusIcon(st, size) {
+    return st.spin ? '<span class="lc-spin"></span>' : icon(st.glyph, size, 2.25);
+  }
+
+  function progressBar(st, cls) {
+    return st.busy ? `<span class="${cls}${st.percent === null ? ' going' : ''}"><span style="width:${st.percent === null ? 100 : st.percent}%"></span></span>` : '';
   }
 
   function libraryTabHtml() {
     if (!lib.catalog.apps.length && !lib.catalog.sites.length) return '<p class="at-empty">Loading the library…</p>';
     const apps = lib.catalog.apps.map((c) => {
       const st = cardStatus(c);
-      return `<button class="lc-app" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}" data-uninstall="${c.canUninstall ? 1 : 0}">` +
+      return `<button class="lc-app${st.busy ? ' busy' : ''}${st.failed ? ' failed' : ''}" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}" data-uninstall="${c.canUninstall ? 1 : 0}">` +
         `<div class="lc-top"><span style="display:flex;color:${esc(c.color)}">${icon(c.glyph, 40)}</span><span class="lc-name">${esc(c.name)}</span></div>` +
         `<span class="lc-desc">${esc(c.desc)}</span>` +
-        `<span class="lc-status" style="color:${st.color}">${icon(st.glyph, 22, 2.25)}${esc(st.label)}</span></button>`;
+        `<span class="lc-status" style="color:${st.color}">${statusIcon(st, 22)}${esc(st.label)}</span>${progressBar(st, 'lc-bar')}</button>`;
     }).join('');
     const sites = lib.catalog.sites.map((c) => {
       const st = cardStatus(c);
@@ -411,9 +445,41 @@
   onAction('installBtn', (node, arg) => {
     if (!lib.install) return;
     lib.installing = true;
-    send({ type: 'library.install', id: lib.install.id, addToHome: arg === 'home' });
+    installApp(lib.install.id, arg === 'home');
     render();
   });
+
+  function installApp(id, addToHome) {
+    lib.failed.delete(id);
+    if (addToHome) lib.homeBound.add(id);
+    send({ type: 'library.install', id, addToHome });
+  }
+
+  // ---- Apps being installed, on the home screen ----------------------------------------------
+  // "Install and add to home": until the app's own tile arrives, a tile says it is installing
+  // (dimmed, a dashed edge, the progress); if it did not install, it says so (A tries again, X
+  // takes it away).
+
+  onTiles(() => {
+    for (const id of lib.homeBound) if (state.tiles.some((t) => t.id === id)) lib.homeBound.delete(id);
+    return [...lib.homeBound].filter((id) => lib.queued.has(id) || lib.finished.has(id) || lib.failed.has(id)).map((id) => {
+      const c = findCard(id) || { id, name: id, glyph: 'app', color: '#8CC2FF' };
+      const failed = lib.failed.has(id) && !lib.queued.has(id);
+      // Just out of the queue: installing still, until the catalog says how it went.
+      const st = failed ? { label: 'Didn’t install', glyph: 'warn' }
+        : lib.queued.has(id) ? cardStatus({ ...c, state: 'installing' }) : { label: 'Installing…', spin: true, busy: true, percent: null };
+      return {
+        id: `tile:~${id}`, cls: `tile pending${failed ? ' failed' : ''}`, act: failed ? 'pending-retry' : 'pending-info', arg: id,
+        x: failed ? 'pending-remove' : null, hints: failed ? [['A', 'Try again'], ['X', 'Remove']] : [],
+        html: `<span class="pbadge">${statusIcon(st, 22)}${esc(st.label)}</span>` +
+          `<span class="pglyph" style="color:${esc(c.color)}">${icon(c.glyph, 88)}</span><span class="name">${esc(c.name)}</span>` +
+          progressBar(st, 'pbar'),
+      };
+    });
+  });
+  onAction('pending-info', (node, id) => { const c = findCard(id); toast(`${c ? c.name : 'The app'} is installing. Its tile opens once it’s ready.`); });
+  onAction('pending-retry', (node, id) => { installApp(id, true); render(); });
+  onAction('pending-remove', (node, id) => { lib.failed.delete(id); lib.homeBound.delete(id); render(); });
 
   // ---- Host messages -----------------------------------------------------------------------
 
@@ -422,17 +488,30 @@
       case 'library.available': state.libraryAvailable = !!msg.available; break;
       case 'library.catalog':
         lib.catalog = { apps: msg.apps || [], sites: msg.sites || [] };
+        // Out of the queue and still to install: it did not.
+        for (const id of lib.finished) {
+          const c = findCard(id);
+          if (c && c.state === 'install') lib.failed.add(id); else lib.failed.delete(id);
+        }
+        lib.finished.clear();
         if (state.view === 'addtile' && lib.tab === 'library') { render(); focusBodyIfNeeded(); }
-        else if (state.view === 'installing') render();
+        else if (state.view === 'installing' || state.view === 'home') render();
         break;
       case 'library.programs':
         lib.programs = msg.list || [];
         if (state.view === 'addtile' && lib.tab === 'onbox') { render(); focusBodyIfNeeded(); }
         break;
-      case 'library.progress':
+      case 'library.progress': {
         lib.progress = { current: msg.current || null, pending: msg.pending || [] };
-        if (state.view === 'installing') render();
+        const cur = lib.progress.current;
+        const now = new Set([...(cur && cur.action === 'install' ? [cur.id] : []),
+          ...lib.progress.pending.filter((j) => j.action === 'install').map((j) => j.id)]);
+        for (const id of lib.queued) if (!now.has(id)) lib.finished.add(id);
+        lib.queued = now;
+        // The progress shows on the cards, the dialog and the tiles being installed.
+        if (state.view === 'installing' || (state.view === 'addtile' && lib.tab === 'library') || (state.view === 'home' && lib.homeBound.size)) render();
         break;
+      }
       case 'library.websiteResult':
         if (msg.ok) { toast(`Added ${msg.name}`); reset('home'); }
         else toast(msg.error || 'That address did not work', 'warn');
@@ -499,6 +578,8 @@
       ],
     };
     lib.progress = { current: { id: 'spotify', name: 'Spotify', action: 'install', phase: 'download', percent: 62 }, pending: [] };
+    lib.queued = new Set(['spotify']);
+    lib.failed = new Set(['feishin']);
     lib.programs = [
       { name: 'File Explorer', launchable: true, onHome: false },
       { name: 'Jellyfin Media Player', launchable: true, onHome: true },
@@ -508,5 +589,11 @@
       { name: 'Task Manager', launchable: true, onHome: false },
       { name: 'Windows Media Player', launchable: false, note: 'Windows Installer shortcut' },
     ];
+  }
+
+  // Demo: index.html#home?installing=1, tiles for an app installing and one that did not.
+  if (!(window.chrome && window.chrome.webview) && /[?&]installing=1/.test(location.hash)) {
+    demoData();
+    lib.homeBound = new Set(['spotify', 'feishin']);
   }
 })();

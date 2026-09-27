@@ -42,9 +42,11 @@ addEventListener('resize', fit);
 
 // ---- Rendering ----------------------------------------------------------------------------
 
+// [button, label] pairs; button can be a list of buttons for one label ([['LB', 'RB'], 'Category']).
 function hints(list) {
   return list.map(([btn, label]) =>
-    `<div class="hint"><span class="key${btn.length > 1 ? ' wide' : ''}">${esc(btn)}</span><span>${esc(label)}</span></div>`).join('');
+    '<div class="hint">' + (Array.isArray(btn) ? btn : [btn]).map((b) => `<span class="key${b.length > 1 ? ' wide' : ''}">${esc(b)}</span>`).join('') +
+      `<span>${esc(label)}</span></div>`).join('');
 }
 
 function timeText(d) { return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
@@ -80,36 +82,71 @@ function renderStatus() {
     '</div>';
 }
 
-// Tiles are rebuilt only when something on them changed, so their entrance animation does not
-// replay on every refresh.
-let tilesHtml = '';
+// Tiles are updated in place, by id: a change on one tile (an app closing, a rename) redraws
+// that tile only. Redrawing them all replayed every tile's entrance and flashed the home screen.
+// Their order is CSS order, so a tile that moves (Tile options > Move) never leaves the page
+// either: it slides to its new place.
 function renderTiles() {
-  const tiles = state.tiles.map((t) =>
-    `<div class="tile${state.moving === t.id ? ' moving' : ''}" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
-      (t.running ? '<span class="badge">Running</span>' : '') +
+  const want = state.tiles.map((t) => ({
+    id: `tile:${t.id}`, cls: state.moving === t.id ? 'tile moving' : 'tile', act: 'launch', arg: t.id,
+    html: (t.running ? '<span class="badge">Running</span>' : '') +
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
-      `<span class="name">${esc(t.name)}</span>` +
-    '</div>').join('');
-  // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen.
-  const add = state.moving ? '' :
-    '<div class="tile add" data-nav data-id="tile:+add" data-act="addtile" aria-label="Add tile">' +
-      `<span style="display:flex">${icon('plus', 80, 2)}</span><span class="name">Add tile</span></div>`;
-  const html = tiles + add;
-  if (html !== tilesHtml) { $('tiles').innerHTML = html; tilesHtml = html; }
+      `<span class="name">${esc(t.name)}</span>`,
+  }));
+  for (const f of EXT.tiles) want.push(...f());   // apps being installed (library.js)
+  // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen. While a
+  // tile moves it stays, dimmed, so the grid keeps its shape.
+  want.push({ id: 'tile:+add', cls: `tile add${state.moving ? ' dim' : ''}`, act: 'addtile', label: 'Add tile',
+    html: `<span style="display:flex">${icon('plus', 80, 2)}</span><span class="name">Add tile</span>` });
+  const box = $('tiles');
+  const old = new Map([...box.children].filter((e) => e.classList.contains('tile')).map((e) => [e.dataset.id, e]));
+  const before = new Map([...old.values()].map((e) => [e, e.getBoundingClientRect()]));
+  want.forEach((w, i) => {
+    let el = old.get(w.id);
+    old.delete(w.id);
+    if (!el) { el = document.createElement('div'); el.setAttribute('data-nav', ''); el.dataset.id = w.id; box.appendChild(el); }
+    const cls = w.cls + (el.classList.contains('focused') ? ' focused' : '');
+    if (el.className !== cls) el.className = cls;
+    el.dataset.act = w.act;
+    for (const [k, v] of [['arg', w.arg], ['x', w.x]]) if (v) el.dataset[k] = v; else delete el.dataset[k];
+    if (w.label) el.setAttribute('aria-label', w.label); else el.removeAttribute('aria-label');
+    if (el.tileHtml !== w.html) { el.innerHTML = w.html; el.tileHtml = w.html; }
+    el.tileHints = w.hints || null;
+    el.style.order = i;
+  });
+  for (const el of old.values()) el.remove();
+  slideTiles(before);
   updateHomeHints();
+}
+
+// Tiles whose place changed slide there from where they were (FLIP), instead of jumping. Not
+// while the home screen is hidden (nothing to see, no size).
+function slideTiles(before) {
+  const scale = $('stage').getBoundingClientRect().width / 1920 || 1;
+  for (const [el, r] of before) {
+    if (!el.isConnected || !r.width) continue;
+    const q = el.getBoundingClientRect();
+    const dx = (r.left - q.left) / scale, dy = (r.top - q.top) / scale;
+    if (!q.width || (Math.abs(dx) < 1 && Math.abs(dy) < 1)) continue;
+    el.style.transition = 'none';
+    el.style.translate = `${dx}px ${dy}px`;
+    el.getBoundingClientRect();   // drawn at the old place once, then eased to the new
+    el.style.transition = '';
+    el.style.translate = '';
+  }
 }
 
 // Hints change with the focused tile and with move mode.
 function updateHomeHints() {
   if (state.moving) {
-    $('home-hints').innerHTML = hints([['←→↑↓', 'Move'], ['A', 'Place here'], ['B', 'Cancel']]);
+    $('home-hints').innerHTML = hints([['D-pad', 'Move it'], ['A', 'Drop it here'], ['B', 'Cancel']]);
     return;
   }
   const f = $('home').querySelector('.tile.focused');
   const isAdd = f && f.dataset.act === 'addtile';
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
-  const list = isAdd
-    ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
+  const list = f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : isAdd ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
   $('home-hints').innerHTML = hints(list);
 }
@@ -317,12 +354,18 @@ function render() {
   if (state.view === 'settings' || under === 'settings') renderSettings();
   for (const v of [state.view, under]) if (EXT.views[v]) EXT.views[v].render();
   sectionHooks();
+  const home = $('home'), wasBehind = home.classList.contains('behind');
   for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) $(v).classList.toggle('on', v === state.view || v === under);
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
   $('backdrop').style.backgroundImage = overApp ? `url("${state.backdrop}")` : '';
-  $('home').classList.toggle('behind', state.view !== 'home' && !overApp);
+  home.classList.toggle('behind', state.view !== 'home' && !overApp);
+  // Home back from under an overlay (a confirmation, Tile options, the menu) was on screen all
+  // along: it must not play its entrance again, a flash of the whole screen.
+  if (!home.classList.contains('on')) home.classList.remove('stay');
+  else if (wasBehind && !home.classList.contains('behind')) home.classList.add('stay');
+  for (const v of [state.view, under]) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
   restoreFocus(keep);
 }
 
@@ -519,17 +562,23 @@ function scrollIntoBox(el, box, room) {
 //     demo()                         sample data for index.html#settings/wifi in a browser
 //   })
 //   addView('maps', { render(), press(button, el) -> handled, focus(items) -> element,
-//                     overlay (drawn over the view it opened from), demo(arg) })
+//                     overlay (drawn over the view it opened from), demo(arg),
+//                     layout() (once it is on screen, to place things by their size) })
 //                                    a <section id="maps" class="view"> of its own; go('maps')
 //   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
 //   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")
 //   ask({ title, text, yes, onYes })          the shared yes / cancel dialog, over any view
 //   onHome(fn)                                runs with each render, to draw an extra on the home
 //                                             screen (the phone remote card, phone-card.js)
+//   onTiles(() => [{ id, cls, act, arg, x, label, html, hints }])
+//                                             extra home tiles, before the "+" tile (apps being
+//                                             installed, library.js); x: the action X runs,
+//                                             hints: the hint bar's list while one is focused
 
-const EXT = { sections: {}, views: {}, actions: {}, host: {}, home: [] };
+const EXT = { sections: {}, views: {}, actions: {}, host: {}, home: [], tiles: [] };
 
 function onHome(fn) { EXT.home.push(fn); }
+function onTiles(fn) { EXT.tiles.push(fn); }
 
 function settingsSection(id, section) { EXT.sections[id] = section; }
 
@@ -694,6 +743,8 @@ function press(button) {
     case 'x': {
       // An alert's row: dismisses it, and nothing else (never on to the close below).
       if (el && el.dataset.alert) { noticeDismiss(el.dataset.alert); break; }
+      // An element with an X action of its own (data-x: an app that did not install, library.js).
+      if (el && el.dataset.x && EXT.actions[el.dataset.x]) { EXT.actions[el.dataset.x](el, el.dataset.arg); break; }
       // Home screen: the focused tile, if it is running. Menu: the focused app row, else the
       // app the menu was opened over.
       let id = null;
@@ -718,7 +769,7 @@ function press(button) {
     case 'r3': { const f = textField(); if (f) openKeyboardFor(f); break; }  // textinput.js
     case 'start':
       // Home screen: options for the focused tile (Move, Rename, Change icon, Remove).
-      if (state.view === 'home' && el && el.dataset.arg && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
+      if (state.view === 'home' && el && el.dataset.act === 'launch' && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
       break;
   }
 }

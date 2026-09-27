@@ -48,14 +48,16 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .view.on { display: flex; animation: view-in 0.22s ease-out; }
 @keyframes view-in { from { opacity: 0; transform: scale(1.015); } to { opacity: 1; transform: none; } }
 #menu.on { animation: none; }   /* the panel slides in instead */
-#home.behind { animation: none; }
+#home.behind, #home.stay { animation: none; }   /* stay: back from under an overlay, it never left */
+#home.behind .hints { visibility: hidden; }    /* the overlay's hints are the ones that count */
 
 /* Coming back from a hidden launcher or standby: fade up from dark */
 #stage { transition: opacity 0.35s ease-out; }
 #stage.blank { opacity: 0; transition: none; }
 
-/* Home tiles appear in a short cascade */
-#home.on .tile { animation: tile-in 0.35s ease-out both; }
+/* Home tiles appear in a short cascade. Backwards, not both: an animation that holds its end
+   state overrides the tile's own transform and opacity (the focused tile's zoom, move mode). */
+#home.on .tile { animation: tile-in 0.35s ease-out backwards; }
 #home.on .tile:nth-child(2) { animation-delay: 0.03s; }
 #home.on .tile:nth-child(3) { animation-delay: 0.06s; }
 #home.on .tile:nth-child(4) { animation-delay: 0.09s; }
@@ -90,7 +92,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
   aspect-ratio: 16 / 10; border-radius: 28px; box-sizing: border-box;
   background: var(--tile); border: 2px solid var(--tile-edge); color: #D9D8D4;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, translate 0.22s ease, opacity 0.15s ease;
 }
 .tile .name { font-family: var(--display); font-weight: 600; font-size: 34px; letter-spacing: -0.01em; }
 .tile .badge { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
@@ -110,6 +112,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
   font-family: var(--display); font-weight: 700; font-size: 22px;
 }
 .key.wide { padding: 0 16px; font-size: 20px; }
+.hint .key + .key { margin-left: -6px; }   /* two buttons for one label (LB RB) */
 .hint span:last-child { font-size: 26px; line-height: 1; }
 #power .hints, #timer .hints { position: absolute; left: 0; bottom: 0; }
 

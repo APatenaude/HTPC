@@ -333,6 +333,60 @@
   check('TV: the input is not changed by moving over it', state.tv.profile.input === 1);
   reset('home');
 
+  // ---- Home: tiles updated in place, Tile options, moving a tile, an app installing -------------
+  const tileEl = (id) => $('tiles').querySelector(`[data-id="tile:${id}"]`);
+  state.current = null; state.backdrop = null;
+  onHost({ type: 'state', running: ['jellyfin'] });
+  reset('home');
+  const jf = tileEl('jellyfin'), yt = tileEl('youtube');
+  setFocus(jf);
+  press('x');
+  check('Home: X on a running tile asks to close it', state.view === 'confirm');
+  press('a');
+  check('Home: closed, back on home without its entrance again', state.view === 'home' && $('home').classList.contains('stay') && lastSent('close').id === 'jellyfin');
+  onHost({ type: 'state', running: [] });
+  check('Home: the app gone, only its tile changes (same elements, no badge)', tileEl('jellyfin') === jf && tileEl('youtube') === yt && !jf.querySelector('.badge'));
+
+  setFocus(tileEl('moonlight'));
+  press('start');
+  const panelR = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), mR = tileEl('moonlight').getBoundingClientRect();
+  check('Tile options: one hint bar (the home one hidden under it)', getComputedStyle($('home-hints')).visibility === 'hidden' && !!$('tileopts').querySelector('.hints'));
+  check('Tile options: beside the tile, level with it', panelR.left >= mR.right && panelR.top < mR.bottom && panelR.bottom > mR.top, `${panelR.left},${panelR.top} / ${mR.right},${mR.top}`);
+  press('b');
+  setFocus(tileEl('jellyfin'));
+  press('start');
+  const p2 = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), jR = tileEl('jellyfin').getBoundingClientRect();
+  check('Tile options: at the right edge, on the tile\'s left and on screen', p2.right <= jR.left && p2.left >= 0, `${p2.left}-${p2.right} / ${jR.left}`);
+  press('b');
+
+  setFocus(tileEl('moonlight'));
+  press('start');
+  press('a');                                       // Move
+  const mv = tileEl('moonlight');
+  check('Move: the tile is marked, the "+" tile stays (dimmed)', mv.classList.contains('moving') && tileEl('+add') && tileEl('+add').classList.contains('dim'));
+  press('right');
+  check('Move: it trades places with its neighbour, the same element', state.tiles.findIndex((t) => t.id === 'moonlight') === 5 && tileEl('moonlight') === mv && mv.classList.contains('focused'));
+  press('b');
+  check('Move: B puts it back', state.tiles.findIndex((t) => t.id === 'moonlight') === 4 && !state.moving);
+
+  // "Install and add to home": a tile shows it installing, then that it did not install.
+  const kodi = { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: '', type: 'app', state: 'install', canUninstall: true };
+  onHost({ type: 'library.catalog', apps: [kodi], sites: [] });
+  state.libraryAvailable = true;
+  EXT.actions.libcard(null, 'kodi');
+  EXT.actions.installBtn(null, 'home');
+  check('Install: asked with add to home', lastSent('library.install').id === 'kodi' && lastSent('library.install').addToHome === true);
+  onHost({ type: 'library.progress', current: { id: 'kodi', name: 'Kodi', action: 'install', phase: 'download', percent: 40 }, pending: [] });
+  reset('home');
+  check('Install: home shows a tile installing it, with the progress', tileEl('~kodi') && /Downloading/.test(tileEl('~kodi').textContent) && !!tileEl('~kodi').querySelector('.pbar'));
+  onHost({ type: 'library.progress', current: null, pending: [] });
+  onHost({ type: 'library.catalog', apps: [kodi], sites: [] });
+  check('Install: it did not install: the tile says so', tileEl('~kodi') && tileEl('~kodi').classList.contains('failed') && /Didn/.test(tileEl('~kodi').textContent));
+  setFocus(tileEl('~kodi'));
+  check('Install: its hints: A tries again, X removes', /Try again/.test($('home-hints').textContent) && /Remove/.test($('home-hints').textContent));
+  press('x');
+  check('Install: X takes the tile away', !tileEl('~kodi'));
+
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
   console.log = log;
