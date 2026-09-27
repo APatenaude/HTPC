@@ -108,6 +108,9 @@ sealed class AppManager
 
     public CatalogApp? Get(string id) => byId.GetValueOrDefault(id);
 
+    /// <summary>The name the catalog ships (a renamed tile keeps its installer's Start-menu name).</summary>
+    string ShippedName(CatalogApp app) => catalog.FirstOrDefault(c => c.Id == app.Id)?.Name ?? app.Name;
+
     /// <summary>
     /// Sets the home row from an ordered id list. Ids that are not known apps are dropped, but a
     /// custom-tile id is known as soon as SetCustom has run, so added tiles are kept.
@@ -131,7 +134,7 @@ sealed class AppManager
         if (app is null) return false;
         if (app.IsWebsite || app.Custom) return true;
         if (app.Exe is not null && File.Exists(Environment.ExpandEnvironmentVariables(app.Exe))) return true;
-        return StartMenuTarget(app.Name) is not null;
+        return StartMenuTarget(ShippedName(app)) is not null;
     }
 
     public List<string> RunningIds()
@@ -227,7 +230,7 @@ sealed class AppManager
             var exe = Environment.ExpandEnvironmentVariables(app.Exe);
             psi = new ProcessStartInfo(exe, Environment.ExpandEnvironmentVariables(app.Args ?? ""));
         }
-        else if (StartMenuTarget(app.Name) is { } target)
+        else if (StartMenuTarget(ShippedName(app)) is { } target)
         {
             // No launch path in the catalog, or not where the catalog says: the Start menu
             // shortcut its installer made.

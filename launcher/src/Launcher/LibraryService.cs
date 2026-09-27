@@ -79,10 +79,14 @@ sealed class LibraryService
 
     static string FindJobScript()
     {
-        var beside = Path.Combine(AppContext.BaseDirectory, "lib", "Invoke-AppJob.ps1");
-        if (File.Exists(beside)) return beside;
-        var setup = Path.Combine(AppContext.BaseDirectory, "setup", "lib", "Invoke-AppJob.ps1");
-        return setup;
+        // The installed exe's own folder (Program Files\HTPC\Launcher) first: a self-extracting
+        // single-file build's BaseDirectory is its extraction folder under %TEMP%.
+        foreach (var dir in new[] { Path.GetDirectoryName(Environment.ProcessPath), AppContext.BaseDirectory }.OfType<string>())
+        {
+            var beside = Path.Combine(dir, "lib", "Invoke-AppJob.ps1");
+            if (File.Exists(beside)) return beside;
+        }
+        return Path.Combine(AppContext.BaseDirectory, "setup", "lib", "Invoke-AppJob.ps1");
     }
 
     /// <summary>The current job and the ids waiting behind it, for the UI.</summary>
