@@ -11,7 +11,7 @@ namespace Htpc.Launcher;
 /// Apps open on top of this window. The Home button brings it back: a capture of the app's
 /// screen becomes the backdrop behind the Home menu while the app keeps running underneath.
 /// </summary>
-sealed class MainForm : Form
+sealed partial class MainForm : Form
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -42,9 +42,6 @@ sealed class MainForm : Form
 
     bool uiReady;
     int brightness = 100;
-    DateTime? sleepAt;
-    string? sleepLabel;
-    bool sleepWarned;
 
     public MainForm(Options options)
     {
@@ -93,6 +90,7 @@ sealed class MainForm : Form
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
         Directory.CreateDirectory(captureDir);
+        InitSettings(); // MainForm.Settings.cs
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -101,7 +99,7 @@ sealed class MainForm : Form
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         apps.Adopt(); // apps left open by a previous launcher
-        standby = new Standby(controller, settings);
+        standby = new Standby(controller, settings, media);
         standby.Changed += OnStandbyChanged;
         standby.GoingDown += () =>
         {
@@ -173,6 +171,8 @@ sealed class MainForm : Form
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
+        try { await alerts.Init(env, options.UiDir); }
+        catch (Exception e) { Log.Error("Alerts failed to start", e); }
     }
 
     // --- Messages from the UI ----------------------------------------------------------------
@@ -208,6 +208,7 @@ sealed class MainForm : Form
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
                 Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
+                PostSettingsInit();
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "tvChoose": tv.Choose(Str("id")!); break;
@@ -243,6 +244,7 @@ sealed class MainForm : Form
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
             case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
+            default: HandleSettingsMessage(Str("type"), m); break;
         }
     }
 
@@ -261,7 +263,7 @@ sealed class MainForm : Form
         brightness,
         controller = controller.Connected,
         battery = controller.BatteryLevel,
-        timer = sleepAt is null ? null : new { label = sleepLabel, endsAt = new DateTimeOffset(sleepAt.Value).ToUnixTimeMilliseconds() }
+        timer = sleepTimer.Describe()
     };
 
     void PushState() => Post(StateObject());
@@ -318,6 +320,8 @@ sealed class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) return;
+        // The sleep timer's last minute: Home is +15 min (the warning says so), wherever the box is.
+        if (pad == Pad.Home && sleepTimer.Warned) { sleepTimer.Extend(); return; }
         if (keyboard.Visible)
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
@@ -648,6 +652,7 @@ sealed class MainForm : Form
     void OnStandbyChanged(bool active)
     {
         Log.Info(active ? "In standby" : "Awake");
+        alerts.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.
         if (!tvChangedItself) _ = active ? tv.TurnOff() : tv.TurnOn();
         tvChangedItself = false;
@@ -698,43 +703,7 @@ sealed class MainForm : Form
         base.WndProc(ref m);
     }
 
-    void SetSleepTimer(JsonElement minutes)
-    {
-        sleepWarned = false;
-        if (minutes.ValueKind == JsonValueKind.Number && minutes.GetInt32() > 0)
-        {
-            var m = minutes.GetInt32();
-            sleepAt = DateTime.Now.AddMinutes(m);
-            sleepLabel = m switch { 60 => "1 hour", 90 => "1 h 30", 120 => "2 hours", _ => $"{m} min" };
-            Log.Info($"Sleep timer: {sleepLabel}");
-        }
-        else
-        {
-            if (minutes.ValueKind == JsonValueKind.String)
-                Post(new { type = "toast", text = "“When this video ends” comes in a later update", kind = "warn" });
-            sleepAt = null;
-            sleepLabel = null;
-        }
-        PushState();
-    }
-
-    void CheckSleepTimer()
-    {
-        if (sleepAt is null) return;
-        var left = sleepAt.Value - DateTime.Now;
-        if (!sleepWarned && left <= TimeSpan.FromMinutes(1))
-        {
-            sleepWarned = true;
-            Post(new { type = "toast", text = "Going to sleep in 1 minute" });
-        }
-        if (left <= TimeSpan.Zero)
-        {
-            sleepAt = null;
-            sleepLabel = null;
-            PushState();
-            standby.Sleep("sleep timer");
-        }
-    }
+    // The sleep timer (SetSleepTimer, CheckSleepTimer): MainForm.Settings.cs and SleepTimer.cs.
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

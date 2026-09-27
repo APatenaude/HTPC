@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using Windows.Media.Control;
 
 namespace Htpc.Launcher;
 
@@ -28,6 +27,7 @@ sealed class LauncherSettings
 
     /// <summary>TV profiles by HDMI identity (EDID key): each TV the box meets gets its own.</summary>
     public Dictionary<string, TvProfile> Tvs { get; set; } = new();
+
 
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
@@ -107,6 +107,7 @@ sealed class Standby
     readonly DisplayPower display = new();
     readonly ControllerService controller;
     readonly LauncherSettings settings;
+    readonly MediaWatcher media;
     DateTime since;
 
     public bool Active { get; private set; }
@@ -115,10 +116,11 @@ sealed class Standby
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
 
-    public Standby(ControllerService controller, LauncherSettings settings)
+    public Standby(ControllerService controller, LauncherSettings settings, MediaWatcher media)
     {
         this.controller = controller;
         this.settings = settings;
+        this.media = media;
         // The launcher decides when the box sleeps: keep Windows from sleeping on its own
         // (Windows' idle timer ignores the controller).
         SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
@@ -144,7 +146,9 @@ sealed class Standby
         Active = true;
         controller.Slow = true;
         controller.WakeMode = true;
-        await PausePlayback();
+        await media.PauseAllAsync();
+        // And whatever starts playing meanwhile (an autoplay countdown running out).
+        media.Want("standby", true);
         // The launcher goes in front first: bringing a window forward can inject a key press,
         // which would turn the display straight back on. Then the video output goes off
         // (the TV sees no signal), and again a moment later in case something woke it.
@@ -179,6 +183,7 @@ sealed class Standby
         Active = false;
         controller.Slow = false;
         controller.WakeMode = false;
+        media.Want("standby", false);
         display.On();
         NudgeMouse();
         var screenMs = clock.ElapsedMilliseconds;
@@ -215,7 +220,7 @@ sealed class Standby
         var controllerIdle = DateTime.Now - controller.LastActivity;
         if (controllerIdle < idle) idle = controllerIdle;
         if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
-        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await IsPlaying())) return;
+        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) return;
         Sleep($"idle {settings.IdleMinutes} min");
     }
 
@@ -240,36 +245,6 @@ sealed class Standby
     static bool SomethingNeedsDisplay()
     {
         return CallNtPowerInformation(SystemExecutionState, IntPtr.Zero, 0, out var state, 4) == 0 && (state & ES_DISPLAY_REQUIRED) != 0;
-    }
-
-    static async Task<GlobalSystemMediaTransportControlsSessionManager?> Sessions()
-    {
-        try { return await GlobalSystemMediaTransportControlsSessionManager.RequestAsync(); }
-        catch (Exception e) { Log.Warn($"Media sessions unavailable: {e.Message}"); return null; }
-    }
-
-    /// <summary>Any app reporting playback through Windows' media controls (Edge, VacuumTube...).</summary>
-    public static async Task<bool> IsPlaying()
-    {
-        var manager = await Sessions();
-        return manager is not null && manager.GetSessions().Any(s =>
-            s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
-    }
-
-    static async Task PausePlayback()
-    {
-        var manager = await Sessions();
-        if (manager is null) return;
-        foreach (var session in manager.GetSessions())
-        {
-            if (session.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
-            try
-            {
-                await session.TryPauseAsync();
-                Log.Info($"Paused {session.SourceAppUserModelId}");
-            }
-            catch (Exception e) { Log.Warn($"Pausing {session.SourceAppUserModelId}: {e.Message}"); }
-        }
     }
 
     // A zero-distance mouse move counts as input, so Windows keeps the screen on.
