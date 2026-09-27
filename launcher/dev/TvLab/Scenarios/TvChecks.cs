@@ -173,6 +173,21 @@ static class TvChecks
             h.Dispose(); w.Dispose();
         }
 
+        // No doubt from a TV that is off, or under --no-tv (both seen on the box: controller use at night, TV off).
+        foreach (var handsOff in new[] { false, true })
+        {
+            var (w, h) = await Start(handsOff: handsOff);
+            var tv = w.AddRoku("roku", "X00000000001");
+            h.Bind(tv, 1, RokuWorld.EdidKey);
+            h.Profiles[RokuWorld.EdidKey].SleepWithTv = false; // the box stays awake with the TV off
+            await h.Boot(TimeSpan.FromMinutes(30));
+            h.LastUserInput = w.Clock.Now.AddHours(10);
+            await w.RunFor(90);
+            if (handsOff) { tv.On = true; tv.Input = 2; await w.RunFor(90); }
+            Check.That(h.Profiles[RokuWorld.EdidKey].Paused is null, handsOff ? "doubt: never under --no-tv" : "doubt: a TV that is off is no doubt");
+            h.Dispose(); w.Dispose();
+        }
+
         // The quiet time ends when the TV gets there: its remote right after counts.
         {
             var (w, h) = await Start();

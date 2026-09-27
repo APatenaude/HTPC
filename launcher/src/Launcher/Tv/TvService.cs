@@ -315,29 +315,30 @@ sealed class TvService
     }
 
     /// <summary>
-    /// Is the bound TV still the one the box is plugged into? Only asked while someone looks at the
-    /// box's picture (settings on screen, or controller or keyboard use in the last minute, box
-    /// awake), for TVs that report their power and input, outside our own quiet time: if for 30 s
-    /// the TV says it is off or on another input, or an identical TV also shows the box's input,
-    /// the box stops controlling it and asks.
+    /// Is the bound TV still the one the box is plugged into? Only asked while someone uses the
+    /// box (settings on screen, or controller or keyboard use in the last minute, box awake), for
+    /// TVs that report their power and input, outside our own quiet time and never under --no-tv:
+    /// if for 30 s the TV says it is on but showing another input, or an identical TV also shows
+    /// the box's input, the box stops controlling it and asks. A TV that says it is off proves
+    /// nothing: the box can be awake and used with the TV off (seen on the box: a controller
+    /// press at night, TV off, paused a right binding).
     /// </summary>
     void CheckBinding()
     {
-        if (Profile is not { Paused: null } p || p.Input == 0 || Current is not { } tv || DriverFor(p.Method) is not { } d ||
-            !d.Info.Caps.HasFlag(TvCaps.ReadPower | TvCaps.ReadInput) || tv.State.Power == TvPower.Unknown ||
+        if (HandsOff || Profile is not { Paused: null } p || p.Input == 0 || Current is not { } tv || DriverFor(p.Method) is not { } d ||
+            !d.Info.Caps.HasFlag(TvCaps.ReadPower | TvCaps.ReadInput) || !tv.State.IsOn ||
             clock.Now < quietUntil || turningOn == 1 || !ScreenOn() || !(uiShowing || clock.Now - LastUserInput() < TimeSpan.FromMinutes(1)))
         {
             doubtSince = null;
             return;
         }
-        var notShowing = !tv.State.IsOn || tv.State.Input != p.Input;
+        var notShowing = tv.State.Input != p.Input;
         var twins = Found.Count(t => t.State.IsOn && t.State.Input == p.Input && t.Method == tv.Method && Normalize(t.Model) == Normalize(tv.Model)) > 1;
         if (!notShowing && !twins) { doubtSince = null; return; }
         doubtSince ??= clock.Now;
         if (clock.Now - doubtSince < TimeSpan.FromSeconds(30)) return;
         var reason = twins ? $"Two {tv.Model} TVs show HDMI {p.Input}, the box's input"
-            : tv.State.IsOn ? $"{tv.Name} says it shows {(tv.State.Input > 0 ? $"HDMI {tv.State.Input}" : "something else")}, not the box (HDMI {p.Input})"
-            : $"{tv.Name} says it is off while the box's picture is on screen";
+            : $"{tv.Name} says it shows {(tv.State.Input > 0 ? $"HDMI {tv.State.Input}" : "something else")}, not the box (HDMI {p.Input})";
         p.Paused = reason;
         parts.SaveProfiles();
         Log.Warn($"TV control paused: {reason}");

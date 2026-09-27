@@ -37,7 +37,8 @@ static class TvUiState
             : "ok";
         return new
         {
-            screen = screen is null ? null : $"{screen.Brand} {screen.Name}".Trim(),
+            // "TCL 65S41CA"; "LG TV SSCR2" already names its brand.
+            screen = screen is null ? null : screen.Name.StartsWith(screen.Brand, StringComparison.OrdinalIgnoreCase) ? screen.Name : $"{screen.Brand} {screen.Name}".Trim(),
             screenKey = screen?.Key,
             port = screen?.Port ?? 0,
             handsOff = tv.HandsOff,

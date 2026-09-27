@@ -90,7 +90,8 @@ function views() {
     };
   }
   if (s === 'wifi') return {
-    // The Wi-Fi list itself is the Wi-Fi component's (wifi.js), mounted here when it is there.
+    // HOOK for the Wi-Fi component (WifiUI, the alerts/network agent's): it draws its network
+    // list into #su-wifi (see mountWifi below). setup.html loads its script before this one.
     main: '<div class="su-col"><div class="su-head"><h1>Connect to your network</h1>' +
       '<p>No network cable is plugged in. Pick your Wi-Fi network, or plug in a cable. The box finds the TV and installs apps over the network.</p></div>' +
       '<div id="su-wifi"></div></div>',
@@ -183,7 +184,7 @@ function tvDialog() {
   const tv = state.tv;
   const found = TvUi.foundRows(tv, 'tv-mrow');
   return '<div class="tv-dialog-wrap"><div class="tv-dialog">' +
-    `<h2>How should the box control ${esc(tv.screen || 'this TV')}?</h2>` +
+    `<h2>How should the box control ${esc((tv.profile && tv.profile.name) || 'this TV')}?</h2>` +
     `<p>${found ? 'Pick your TV, its brand to see what to turn on, or skip TV control.' : 'Pick your TV’s brand to see what to turn on, or skip TV control.'}</p>` +
     (found ? `<span class="tv-label">TVs on your network</span>${found}<span class="tv-label">Not listed?</span>` : '') +
     TvUi.methodRows(tv, 'tv-mrow', state.tvHint) + '</div></div>';
@@ -218,9 +219,24 @@ function render() {
   main.innerHTML = v.main;
   if (shownStep !== state.step) { main.style.animation = 'none'; void main.offsetWidth; main.style.animation = ''; shownStep = state.step; }
   $('su-buttons').innerHTML = v.buttons;
+  if (state.step === 'wifi') mountWifi($('su-wifi'));
   const nav = items();
   const keep = nav.find((e) => e.dataset.id === state.focus);
   setFocus(keep || nav.find((e) => e.classList.contains('picked')) || nav.find((e) => e.classList.contains('primary')) || nav[0] || null);
+}
+
+/**
+ * The Wi-Fi step's list: the Wi-Fi component's job (WifiUI, not built here). To wire it: load its
+ * script in setup.html before setup.js and put its call in here, drawing into `el` with data-nav
+ * rows (the controller moves through them like any other) and sending its "wifi.*" messages;
+ * the host passes those on through its [UiMessages("wifi.")] handler. Until then the step
+ * says what to do, and Next goes on (the TV search just finds nothing without a network).
+ */
+function mountWifi(el) {
+  if (!el) return;
+  if (typeof WifiUI === 'undefined') {
+    el.innerHTML = '<div class="su-row">Plug in a network cable, then press Next. (Picking a Wi-Fi network here comes with the Wi-Fi screen.)</div>';
+  }
 }
 
 // ---- Focus ----------------------------------------------------------------------------------

@@ -128,11 +128,11 @@ const TvUi = {
       case 'twins': return { ...base, status: 'unbound', profile: null, profiles: [],
         found: [{ ...roku, picked: false, detected: false }, { ...roku, id: 'roku:X00000000002', name: 'Bedroom TV', input: 3, picked: false, detected: false }] };
       case 'unbound': return { ...base, status: 'unbound', profile: null, profiles: [], found: [{ ...roku, picked: false }] };
-      case 'lg': return { ...base, screen: 'LG LG TV SSCR2', status: 'unbound', profile: null, profiles: [], methods: [methods[0], lg].map((m) => ({ ...m, detected: m.id === 'webos' })),
+      case 'lg': return { ...base, screen: 'LG TV SSCR2', status: 'unbound', profile: null, profiles: [], methods: [methods[0], lg].map((m) => ({ ...m, detected: m.id === 'webos' })),
         found: [{ id: 'webos:1a2b', method: 'webos', label: 'LG (webOS)', beta: true, name: 'LG OLED65C4', model: 'OLED65C4PUA', locked: false, on: true, power: 'on', input: 1, detected: true, picked: false }] };
-      case 'paused': return { ...base, status: 'paused', profile: { ...profile, paused: 'Living room tv says it shows HDMI 3, not the box (HDMI 1)' } };
+      case 'paused': return { ...base, status: 'paused', caps: { ...caps, test: false }, profile: { ...profile, paused: 'Living room tv says it shows HDMI 3, not the box (HDMI 1)' } };
       case 'none': return { ...base, status: 'none', profile: { ...profile, method: 'none', methodLabel: 'No TV control', deviceId: '' }, caps: { off: false, follow: false, input: false, readInput: false, test: false } };
-      case 'missing': return { ...base, status: 'missing', found: [{ ...roku, on: false, power: 'unknown' }] };
+      case 'missing': return { ...base, status: 'missing', caps: { ...caps, test: false }, found: [{ ...roku, on: false, power: 'unknown' }] };
       default: return base;
     }
   },

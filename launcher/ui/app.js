@@ -292,6 +292,7 @@ function render() {
   const under = over ? state.stack[state.stack.length - 1] : null;
   renderStatus();
   renderTiles();
+  for (const f of EXT.home) f();
   if (state.view === 'menu' || under === 'menu') renderMenu();
   if (state.view === 'power') renderPower();
   if (state.view === 'timer') renderTimer();
@@ -422,8 +423,12 @@ function settingsPress(button, el) {
 //   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
 //   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")
 //   ask({ title, text, yes, onYes })          the shared yes / cancel dialog, over any view
+//   onHome(fn)                                runs with each render, to draw an extra on the home
+//                                             screen (the phone remote card, phone-card.js)
 
-const EXT = { sections: {}, views: {}, actions: {}, host: {} };
+const EXT = { sections: {}, views: {}, actions: {}, host: {}, home: [] };
+
+function onHome(fn) { EXT.home.push(fn); }
 
 function settingsSection(id, section) { EXT.sections[id] = section; }
 
@@ -473,7 +478,8 @@ onAction('ask-yes', () => { const q = asking; back(); if (q && q.onYes) q.onYes(
 // index.html#view or #view/arg in a plain browser: #settings/wifi opens that section (with
 // its demo data), #maps or #buttons/twitch an added view.
 function demoRoute(hash) {
-  const [view, arg] = hash.split('/');
+  // "?..." after the route is the screen's own demo options (#settings/tv?demo=paused): theirs to read.
+  const [view, arg] = hash.split('?')[0].split('/');
   if (view === 'settings' && arg) {
     state.section = arg;
     if (EXT.sections[arg] && EXT.sections[arg].demo) EXT.sections[arg].demo();
