@@ -256,8 +256,3 @@ user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Ins
 while nobody is watching. It pauses the installed watchdog (if any) for 15 minutes, or until
 the dev build is up, so the installed launcher does not come back meanwhile.
 Log: `C:\ProgramData\HTPC\logs\launcher.log`.
-
-## Not built yet
-
-Phone: no link player (links no tile opens go to
-the browser).

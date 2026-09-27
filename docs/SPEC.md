@@ -67,7 +67,7 @@ Content rows ("Live now", "Continue watching") · HDR · surround passthrough ·
 | Tiles | Edited on the TV |
 | Moonlight Home | Tap to game PC, hold 1 s for our menu (was 2 s; changed 26 Sept 2026) |
 | Idle sleep | Configurable, default 30 min |
-| YouTube links from Share sheet | Open in VacuumTube (fallback: link player) |
+| YouTube links from Share sheet | Open in VacuumTube (fallback: link player; the link player was dropped on 27 September) |
 | TV power on | Whenever the box boots or wakes |
 | Preinstalled apps | Picked in first-run setup, six pre-ticked |
 | Library scope | Media apps + streaming-site tiles (client only) |
@@ -122,6 +122,7 @@ Decisions of 27 September 2026 (after the night's merges):
 | Bluetooth | The box keeps Windows' generic Bluetooth driver when Windows Update has none for its chip (this box's Realtek 0BDA:C821); a keyboard pairs only with a PIN. The launcher follows one controller (the 8BitDo); others work in games |
 | Stremio | Its update notice is off (`--autoupdater-endpoint` pointed nowhere; checked in the VM) |
 | Next | The box gets the new build in a session with the user at the TV (one Windows permission prompt); the shell switch stays for the end of development |
+| Link player | Dropped (no mpv + yt-dlp player): a link from the phone opens in its site's tile (YouTube videos in VacuumTube, Twitch in the Twitch tile), anything else in the browser. The decoding check (N5) asks the graphics driver only and plays no clips |
 
 ## Controller map
 
@@ -178,7 +179,6 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 - **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button maps (preset + overrides) applied to the foreground window, emitted via SendInput.
 - **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket + Wake-on-LAN), Samsung Tizen (websocket + WoL), Sony / Google / Android TV (Android TV Remote protocol or Bravia API), HDMI-CEC (libCEC). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
 - **Phone:** launcher serves the remote web app at `http://tv.local`; a pairing code for new phones; HTTPS with the box's own CA only later, for Android's Share target; iOS Shortcut or Android Web Share Target posts links.
-- **Link player:** mpv + yt-dlp with hardware decoding (d3d11va).
 - **App catalog:** one list (winget IDs + website tiles) drives the setup picks and the library.
 - **Keyboard and brightness:** launcher overlay layers above every app.
 - **Updates:** winget for apps, launcher self-update, Windows updates on demand, restore point first.
@@ -187,17 +187,17 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 
 1. **Base install:** USB install, setup script with the app catalog, apps with hardware decoding, decoding check.
 2. **Launcher core:** tiles, Home menu, power menu + sleep timer, controller service with presets, keyboard, brightness, sleep, Roku control.
-3. **Phone:** remote web app for iPhone and Android, Send to TV on both, link player.
+3. **Phone:** remote web app for iPhone and Android, Send to TV on both.
 4. **Polish:** settings screens, button map editor, TV profiles + other brands, app library, tile editing, alerts, first-run setup.
 
 ## Screens (on the design canvas)
 
-- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Inside an app (button hint) · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Link player · Alerts · First-run setup (incl. pick your apps)
+- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Inside an app (button hint) · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · First-run setup (incl. pick your apps)
 - **Settings:** Sleep & power · TV (profiles) · How the box controls a TV · Controller · Button maps · Button map editor · Phone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
 - **Phone:** Remote (touchpad) · Remote (arrows) · Type (+ paste link) · Playing (+ sleep timer) · Send to TV
 
 ## Open questions
 
 1. Look: colored icons, blue focus glow, 4 tiles per row, 24-hour clock.
-2. Can VacuumTube be handed a YouTube link to open? (Verify before build; fallback is the link player.)
+2. Can VacuumTube be handed a YouTube link to open? (Verify before build; the fallback was the link player, since dropped.)
 3. Library list: anything to add or drop?

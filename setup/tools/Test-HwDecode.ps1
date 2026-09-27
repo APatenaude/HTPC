@@ -23,7 +23,7 @@
                  creates its own device and uses the same hardware decoder.
          ffmpeg: -hwaccel d3d11va -hwaccel_output_format d3d11; hardware when the decoded
                  frames reach the filter graph as d3d11 surfaces.
-       mpv is preferred (it is the link player). Searched: PATH (this process, and the user and
+       mpv is tried first, then ffmpeg. Searched: PATH (this process, and the user and
        machine PATH as stored, which a fresh winget install updates), winget portable installs
        (user: %LOCALAPPDATA%\Microsoft\WinGet, machine: %ProgramFiles%\WinGet; Links and
        Packages), %ProgramFiles%\<tool>, %USERPROFILE%\Tools\<tool>*, scoop. When none is

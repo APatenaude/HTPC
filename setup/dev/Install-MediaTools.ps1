@@ -7,7 +7,7 @@
     ffmpeg (Gyan.FFmpeg) makes the decoding test clips; mpv (the official mpv-player
     build, which has a per-user package) plays them in Test-HwDecode.ps1. Both are winget
     portable installs for the current user, so no admin rights and no UAC prompt.
-    The link player's own mpv comes with Phase 3.
+    Nothing on the finished box uses them (setup installs neither).
 #>
 param()
 
