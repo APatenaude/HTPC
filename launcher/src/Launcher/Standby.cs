@@ -268,6 +268,7 @@ sealed class Standby
     {
         if (Active)
         {
+            WarnIdle(false);
             if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep &&
                 DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
             {
@@ -276,15 +277,34 @@ sealed class Standby
             }
             return;
         }
-        if (settings.IdleMinutes <= 0) return;
+        if (settings.IdleMinutes <= 0) { WarnIdle(false); return; }
         var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
         var controllerIdle = DateTime.Now - controller.LastActivity;
         if (controllerIdle < idle) idle = controllerIdle;
         var phoneIdle = DateTime.Now - PhoneActivity;
         if (phoneIdle < idle) idle = phoneIdle;
-        if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
-        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) return;
+        var left = TimeSpan.FromMinutes(settings.IdleMinutes) - idle;
+        if (left > IdleWarningTime) { WarnIdle(false); return; }
+        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) { WarnIdle(false); return; }
+        // The last minute: say so first (any button keeps the box awake), then sleep.
+        if (left > TimeSpan.Zero) { WarnIdle(true); return; }
+        WarnIdle(false);
         Sleep($"idle {settings.IdleMinutes} min");
+    }
+
+    /// <summary>The idle sleep warning comes this long before (the Tick runs every 5 s, so 55 to 60 s).</summary>
+    public static readonly TimeSpan IdleWarningTime = TimeSpan.FromMinutes(1);
+
+    bool idleWarned;
+
+    /// <summary>Idle sleep is a minute away (true), or no longer coming (false): the warning alert.</summary>
+    public event Action<bool>? IdleWarning;
+
+    void WarnIdle(bool on)
+    {
+        if (on == idleWarned) return;
+        idleWarned = on;
+        IdleWarning?.Invoke(on);
     }
 
     static Guid? ActivePlan()

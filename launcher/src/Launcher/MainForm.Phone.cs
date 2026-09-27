@@ -249,8 +249,17 @@ partial class MainForm
     void PhoneType(TypeCommand t)
     {
         var c = PhoneContextNow();
-        // The launcher has no text fields; in Moonlight the keys would go to the game PC.
-        if (c.Standby || c.LauncherFront || !c.Keys.Typing) return;
+        if (c.Standby) return;
+        // The launcher's own fields (the Wi-Fi password): posted to its page, not typed through
+        // Windows (MainForm.Alerts.cs, TypeText); the page ignores it when no field has the focus.
+        if (c.LauncherFront)
+        {
+            for (var i = 0; i < Math.Min(t.Back, 256); i++) TypeKey("backspace");
+            if (t.Text.Length > 0) TypeText(t.Text);
+            return;
+        }
+        // In Moonlight the keys would go to the game PC.
+        if (!c.Keys.Typing) return;
         // The TV's own keyboard stays closed while the phone types.
         if (keyboard.Visible) CloseKeyboard("typing on the phone");
         var back = phoneTyping.Backspaces(c.AppId, t.Back, c.Keys.BackspaceAfterTypingOnly);

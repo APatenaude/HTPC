@@ -39,6 +39,32 @@ sealed class AppManager
     /// <summary>An app started, exited or was closed. Raised on a thread-pool thread.</summary>
     public event Action<string, bool>? RunningChanged;
 
+    /// <summary>
+    /// An app's process ended, with what tells a crash from a normal end (AppExitClassifier).
+    /// Raised on a thread-pool thread, after RunningChanged.
+    /// </summary>
+    public event Action<AppExit>? Exited;
+
+    // Why the launcher is closing an app (X, uninstall, update, restart): its end is no news.
+    readonly Dictionary<string, string> closing = new();
+    // When each tracked process started, and whether it was adopted rather than started here.
+    readonly Dictionary<Process, (DateTime Started, bool Adopted)> started = new();
+
+    /// <summary>
+    /// The launcher is about to end this app on purpose (the library uninstalling it, an update,
+    /// its own updater being run): its exit is not a crash. Cleared when it has ended.
+    /// </summary>
+    public void MarkClosing(string id, string why)
+    {
+        lock (running) closing[id] = why;
+    }
+
+    /// <summary>Restart, shut down, the session ending: every app's end is expected.</summary>
+    public void MarkAllClosing(string why)
+    {
+        lock (running) foreach (var id in running.Keys) closing[id] = why;
+    }
+
     public AppManager(string catalogPath, IReadOnlyList<string>? tileIds = null)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(catalogPath));
@@ -183,23 +209,46 @@ sealed class AppManager
             }
             if (match is null) { p.Dispose(); continue; }
             wanted.Remove(match);
-            Track(match.Id, p);
+            Track(match.Id, p, adopted: true);
             Log.Info($"{match.Id} was already running (pid {p.Id}): taken over");
             RunningChanged?.Invoke(match.Id, true);
             if (wanted.Count == 0) break;
         }
     }
 
-    void Track(string id, Process process)
+    void Track(string id, Process process, bool adopted = false)
     {
+        DateTime since;
+        try { since = adopted ? process.StartTime : DateTime.Now; } catch (Exception) { since = DateTime.Now; }
         process.EnableRaisingEvents = true;
         process.Exited += (_, _) =>
         {
             Log.Info($"{id} exited ({SafeExitCode(process)})");
-            lock (running) if (running.TryGetValue(id, out var p) && p == process) running.Remove(id);
+            string? closedBy;
+            (DateTime Started, bool Adopted) info;
+            lock (running)
+            {
+                if (running.TryGetValue(id, out var p) && p == process) running.Remove(id);
+                closedBy = closing.GetValueOrDefault(id);
+                if (!running.ContainsKey(id)) closing.Remove(id);
+                info = started.GetValueOrDefault(process, (since, adopted));
+                started.Remove(process);
+            }
             RunningChanged?.Invoke(id, false);
+            Exited?.Invoke(new AppExit(id, ExitCodeOf(process), closedBy, DateTime.Now - info.Started, info.Adopted));
         };
-        lock (running) running[id] = process;
+        lock (running)
+        {
+            running[id] = process;
+            started[process] = (since, adopted);
+            closing.Remove(id); // a new copy: any earlier "closing" was about the old one
+        }
+    }
+
+    /// <summary>The exit code, or null when Windows will not say (a process the launcher did not start may not).</summary>
+    static int? ExitCodeOf(Process p)
+    {
+        try { return p.ExitCode; } catch (Exception) { return null; }
     }
 
     /// <summary>Starts the app; returns false (and logs why) when it cannot.</summary>
@@ -346,7 +395,11 @@ sealed class AppManager
     public void Close(string id)
     {
         Process? p;
-        lock (running) if (!running.TryGetValue(id, out p) || p.HasExited) return;
+        lock (running)
+        {
+            if (!running.TryGetValue(id, out p) || p.HasExited) return;
+            closing.TryAdd(id, "closed from the launcher");
+        }
         Log.Info($"Closing {id}");
         Task.Run(() =>
         {
