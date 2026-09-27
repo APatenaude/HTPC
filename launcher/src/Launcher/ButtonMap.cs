@@ -1,7 +1,7 @@
 namespace Htpc.Launcher;
 
 /// <summary>The controller's buttons as a button map sees them (triggers count as buttons).</summary>
-enum PadControl { A, B, X, Y, Up, Down, Left, Right, LB, RB, LT, RT, Select, Start, L3 }
+enum PadControl { A, B, X, Y, Up, Down, Left, Right, LB, RB, LT, RT, Select, Start, L3, R3 }
 
 enum StickRole { None, Pointer, Scroll, Arrows }
 
@@ -17,9 +17,17 @@ sealed record ClickAction(Input.Button Button) : PadAction;
 sealed record PreciseAction : PadAction;
 
 /// <summary>
+/// Something the launcher does instead of input for the app (SPEC N13 "launcher action"):
+/// menu, power, timer, keyboard, volumeUp, volumeDown, mute. PadMapper sends nothing for it;
+/// MainForm runs it when the button goes down.
+/// </summary>
+sealed record CommandAction(string Command) : PadAction;
+
+/// <summary>
 /// A button map (SPEC N13 and "Controller map"): what each button and stick sends to the app in
 /// front. Presets: Controller (null map: the app reads the controller itself), Mouse, Keyboard.
-/// Home and R3 (on-screen keyboard) always belong to the launcher and are not in the map.
+/// Home always belongs to the launcher and is not in the map. R3 opens the on-screen keyboard
+/// (KeyboardButton) unless the app's map gives it another job (ButtonMapStore adds the changes).
 /// </summary>
 sealed class ButtonMap
 {
@@ -84,6 +92,9 @@ sealed class ButtonMap
             [PadControl.L3] = new ClickAction(Input.Button.Left),
         },
     };
+
+    /// <summary>What R3 does in the Mouse and Keyboard presets: the on-screen keyboard (SPEC N11).</summary>
+    public static readonly PadAction KeyboardButton = new CommandAction("keyboard");
 
     /// <summary>The map for a catalog preset; null for "controller" (the app reads the pad).</summary>
     public static ButtonMap? For(string? preset) => preset switch

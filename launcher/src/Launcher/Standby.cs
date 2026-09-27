@@ -28,6 +28,20 @@ sealed class LauncherSettings
     /// <summary>TV profiles by HDMI identity (EDID key): each TV the box meets gets its own.</summary>
     public Dictionary<string, TvProfile> Tvs { get; set; } = new();
 
+    /// <summary>
+    /// Button maps per tile (SPEC N13): { tile id: { "preset": ..., "start": "key:F", ... } }.
+    /// Kept as raw JSON and read leniently by ButtonMapStore, so a bad entry never costs the
+    /// other settings.
+    /// </summary>
+    public JsonElement? ButtonMaps { get; set; }
+
+    /// <summary>Pointer, precise pointer (RT) and scroll speed, 1 to 10 (5 = the tuned default).</summary>
+    public int PointerSpeed { get; set; } = 5;
+    public int PreciseSpeed { get; set; } = 5;
+    public int ScrollSpeed { get; set; } = 5;
+
+    /// <summary>The on-screen keyboard pops up by itself on text fields (SPEC N11).</summary>
+    public bool ShowKeyboardAutomatically { get; set; } = true;
 
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
@@ -66,6 +80,10 @@ sealed class LauncherSettings
                 break;
             case "sleepAfterStandbyHours": SleepAfterStandbyHours = value.GetInt32(); break;
             case "stayAwakeWhilePlaying": StayAwakeWhilePlaying = value.GetBoolean(); break;
+            case "pointerSpeed": PointerSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "preciseSpeed": PreciseSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "scrollSpeed": ScrollSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "showKeyboardAutomatically": ShowKeyboardAutomatically = value.GetBoolean(); break;
             default: return false;
         }
         Save();

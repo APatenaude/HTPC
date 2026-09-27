@@ -116,7 +116,7 @@ function renderMenu() {
     `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 34)}` +
       `<div class="track"><div class="fill white" style="width:${state.brightness}%"></div></div><span class="value">${state.brightness}</span></div>` +
     '<div class="quicks">' +
-      `<div class="quick" data-nav data-id="q-buttons" data-act="soon" data-arg="Button maps">${icon('controller', 34)}Buttons</div>` +
+      `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 34)}Buttons</div>` +
       `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 34)}Timer</div>` +
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +

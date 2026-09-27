@@ -227,6 +227,7 @@ sealed partial class MainForm : Form
                 break;
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
+                ApplySettings();
                 break;
             case "launch": Open(Str("id")!); break;
             case "switchTo": case "resume": SwitchTo(Str("id")!); break;
@@ -271,13 +272,15 @@ sealed partial class MainForm : Form
     bool foregroundIsOurs;
 
     /// <summary>
-    /// Picks the button map for the app in front (its catalog preset). None while the launcher
-    /// is in front or in standby. A window that belongs to none of the catalog's apps (the
-    /// desktop, a window an app opened) gets the Mouse preset, so it can still be used.
+    /// Picks the button map for the app in front (its tile's map: preset and changes). None
+    /// while the launcher is in front or in standby. A window that belongs to none of the
+    /// catalog's apps (the desktop, a window an app opened) gets Other windows' map (Mouse
+    /// unless changed), so it can still be used.
     /// </summary>
     void UpdateMapper()
     {
         ButtonMap? map = null;
+        string? preset = null;
         if (!standby.Active && !LauncherActive)
         {
             var window = Native.GetForegroundWindow();
@@ -288,12 +291,16 @@ sealed partial class MainForm : Form
                 foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
             }
             if (window != IntPtr.Zero && !foregroundIsOurs)
-                map = foregroundApp is null ? ButtonMap.Mouse : ButtonMap.For(foregroundApp.Preset);
+            {
+                map = MapFor(foregroundApp);
+                preset = PresetFor(foregroundApp);
+            }
         }
-        // Text fields are watched (for the keyboard to pop up) only while an app with a button map
-        // is in front: Chromium-based apps build their accessibility tree while anyone listens.
-        // Apps on the Controller preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard.
-        textFields.Enabled = map is not null;
+        // Text fields are watched (for the keyboard to pop up) only while a Mouse or Keyboard
+        // preset app is in front, and only if the keyboard is to pop up by itself: Chromium-based
+        // apps build their accessibility tree while anyone listens. Apps on the Controller
+        // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard.
+        textFields.Enabled = settings.ShowKeyboardAutomatically && preset is "mouse" or "keyboard";
         if (keyboard.Visible) map = null; // the controller drives the keyboard
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
@@ -345,9 +352,13 @@ sealed partial class MainForm : Form
                 return;
         }
 
-        // R3: the on-screen keyboard, for the text field that has the focus (not in Moonlight:
-        // R3 is a game button there).
-        if (pad == Pad.R3 && !active && !moonlight)
+        // A launcher action on one of the map's buttons (Home menu, keyboard, volume...).
+        if (!active && RunMappedCommand(pad, app)) return;
+
+        // R3 in apps without a map (Controller preset): the on-screen keyboard, for the text
+        // field that has the focus (not in Moonlight: R3 is a game button there). Where there
+        // is a map, R3 does what the map says (the keyboard unless changed).
+        if (pad == Pad.R3 && !active && !moonlight && mapper.Map is null)
         {
             var field = lastField is { } f && f.ProcessId == Native.ProcessOf(Native.GetForegroundWindow()) ? f : null;
             OpenKeyboard(field, auto: false);
@@ -428,6 +439,7 @@ sealed partial class MainForm : Form
                     case "left": Input.Tap(0x25); break;
                     case "right": Input.Tap(0x27); break;
                     case "enter": Input.Tap(0x0D); CloseKeyboard("Enter"); break;
+                    case var extra: KeyboardExtraKey(extra); break;
                 }
                 break;
             case "close":

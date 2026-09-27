@@ -10,5 +10,6 @@ sealed partial class MainForm
     void InitSettings()
     {
         InitTimer();
+        InitMaps();
     }
 }
