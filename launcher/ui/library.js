@@ -269,7 +269,7 @@
         `<span style="display:flex;color:${st.color}">${icon(st.glyph, 24, 2.25)}</span></button>`;
     }).join('');
     return '<span class="at-label">Apps</span>' + `<div class="lc-grid">${apps}</div>` +
-      '<span class="at-label">Streaming sites · open in Edge, no install</span>' + `<div class="lc-grid sites">${sites}</div>`;
+      '<span class="at-label">Streaming sites · each opens as its own app, no install</span>' + `<div class="lc-grid sites">${sites}</div>`;
   }
 
   function onboxTabHtml() {

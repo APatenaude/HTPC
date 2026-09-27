@@ -203,6 +203,7 @@ sealed class Standby
         controller.Slow = true;
         controller.WakeMode = true;
         await media.PauseAllAsync();
+        if (!Active) return; // woken while pausing: nothing more to do
         // And whatever starts playing meanwhile (an autoplay countdown running out).
         media.Want("standby", true);
         // The launcher goes in front first: bringing a window forward can inject a key press,
@@ -210,6 +211,7 @@ sealed class Standby
         // (the TV sees no signal), and again a moment later in case something woke it.
         Changed?.Invoke(true);
         await Task.Delay(300);
+        if (!Active) return;
         display.Off();
         _ = Task.Delay(3000).ContinueWith(_ => { if (Active) display.Off(); });
 

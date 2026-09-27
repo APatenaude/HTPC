@@ -115,10 +115,13 @@ sealed class ButtonMapStore
     {
         var preset = ButtonMap.For(PresetOf(id, catalogPreset));
         if (preset is null) return null;
+        var changes = ChangesOf(id, catalogPreset);
+        // Unchanged tiles share one map per preset, so moving between two Mouse apps (or an app
+        // and Other windows) is not a new map: a held button (a drag) is not let go.
+        if (changes.Count == 0 && plain.TryGetValue(preset.Name, out var shared)) return shared;
         var buttons = new Dictionary<PadControl, PadAction>(preset.Buttons);
         buttons.TryAdd(PadControl.R3, ButtonMap.KeyboardButton);
         StickRole left = preset.LeftStick, right = preset.RightStick;
-        var changes = ChangesOf(id, catalogPreset);
         foreach (var (control, value) in changes)
         {
             switch (control)
@@ -139,14 +142,18 @@ sealed class ButtonMapStore
                     break;
             }
         }
-        return new ButtonMap
+        var map = new ButtonMap
         {
             Name = changes.Count == 0 ? preset.Name : $"{preset.Name} + {changes.Count} change{(changes.Count == 1 ? "" : "s")} ({id})",
             LeftStick = left,
             RightStick = right,
             Buttons = buttons,
         };
+        if (changes.Count == 0) plain[preset.Name] = map;
+        return map;
     }
+
+    readonly Dictionary<string, ButtonMap> plain = new(); // the unchanged map of each preset
 
     /// <summary>The tile's changes that differ from its preset (none on Controller).</summary>
     Dictionary<string, string> ChangesOf(string id, string catalogPreset)

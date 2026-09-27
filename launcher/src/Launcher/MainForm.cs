@@ -217,6 +217,7 @@ sealed partial class MainForm : Form
                 RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
+            case "home": break; // the page reports going home; nothing to do here
             case "tvChoose": tv.Choose(Str("id")!); break;
             case "tvRefresh": _ = tv.Discover(); break;
             case "tvTest":

@@ -76,9 +76,7 @@ sealed class MediaWatcher
             try
             {
                 sessions = await ReadAsync();
-                if (Wanted("standby"))
-                    foreach (var s in sessions.Where(s => s.Status == MediaStatus.Playing))
-                        await SendAsync(s.Source, "pause");
+                if (Wanted("standby") && sessions.Any(s => s.Status == MediaStatus.Playing)) await PausePlayingAsync();
                 Updated?.Invoke();
             }
             catch (Exception e) { Log.Warn($"Reading media sessions: {e.Message}"); }
@@ -102,9 +100,12 @@ sealed class MediaWatcher
     {
         var m = await Manager();
         if (m is null) return Array.Empty<MediaInfo>();
-        var current = m.GetCurrentSession()?.SourceAppUserModelId;
+        string? current;
+        IReadOnlyList<GlobalSystemMediaTransportControlsSession> all;
+        try { current = m.GetCurrentSession()?.SourceAppUserModelId; all = m.GetSessions(); }
+        catch { manager = null; throw; } // asked again next time (the media service restarted)
         var list = new List<MediaInfo>();
-        foreach (var s in m.GetSessions())
+        foreach (var s in all)
         {
             try { list.Add(await Describe(s, s.SourceAppUserModelId == current)); }
             catch (Exception e) { Log.Warn($"Media session {s.SourceAppUserModelId}: {e.Message}"); }
@@ -154,11 +155,29 @@ sealed class MediaWatcher
         catch (Exception e) { Log.Warn($"Media sessions: {e.Message}"); return false; }
     }
 
-    /// <summary>Pauses everything that plays (standby).</summary>
-    public async Task PauseAllAsync()
+    /// <summary>Pauses everything that plays (standby). Never throws.</summary>
+    public Task PauseAllAsync() => PausePlayingAsync();
+
+    // Each playing session object is paused itself: several sessions can share an app id (every
+    // Edge window reports "MSEdge"), so pausing by id could pick an idle one.
+    async Task PausePlayingAsync()
     {
-        foreach (var s in await ReadAsync())
-            if (s.Status == MediaStatus.Playing) await SendAsync(s.Source, "pause");
+        try
+        {
+            var m = await Manager();
+            if (m is null) return;
+            foreach (var s in m.GetSessions())
+            {
+                try
+                {
+                    if (s.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
+                    var ok = await s.TryPauseAsync();
+                    Log.Info($"Media pause to {s.SourceAppUserModelId}: {(ok ? "done" : "refused")}");
+                }
+                catch (Exception e) { Log.Warn($"Pausing {s.SourceAppUserModelId}: {e.Message}"); }
+            }
+        }
+        catch (Exception e) { manager = null; Log.Warn($"Pausing media: {e.Message}"); }
     }
 
     /// <summary>
