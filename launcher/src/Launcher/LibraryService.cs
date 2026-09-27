@@ -75,6 +75,7 @@ sealed class LibraryService
     JobProgress? last;
     Process? userProcess;      // the running user-scope job, for Cancel
     bool cancelled;
+    volatile bool taskStarted;   // the current job's Run went to \HTPC\Jobs (only then may Cancel stop the task)
 
     /// <summary>The queue changed or a job made progress. Args: the job now running (or null) and the waiting ids.</summary>
     public event Action? Changed;
@@ -185,7 +186,8 @@ sealed class LibraryService
         try
         {
             if (userProcess is { HasExited: false } p) p.Kill(entireProcessTree: true);
-            else if (!running.AsUser && (running.BoxJob || apps.Get(running.Id)?.Scope != "user")) ((dynamic)GetTask()!).Stop(0);
+            else if (taskStarted && !running.AsUser && (running.BoxJob || apps.Get(running.Id)?.Scope != "user")) ((dynamic)GetTask()!).Stop(0);
+            // Not started yet (still waiting for the task to be free): the wait sees cancelled and stops.
             return true;
         }
         catch (Exception e) { Log.Warn($"Library: could not stop {token}: {e.Message}"); return false; }
@@ -198,7 +200,7 @@ sealed class LibraryService
             lock (gate)
             {
                 if (!pending.Contains(job)) continue;   // cancelled while it waited
-                current = job; pending.Remove(job); SavePending(); cancelled = false;
+                current = job; pending.Remove(job); SavePending(); cancelled = false; taskStarted = false;
             }
             Changed?.Invoke();
             // The launcher's own update waits here, at the head of the lane, until Home or standby.
@@ -272,14 +274,17 @@ sealed class LibraryService
         var waitSince = DateTime.Now;
         while (TaskRunning(t))
         {
+            lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
             if (DateTime.Now - waitSince > app.Stall) return (false, $"{app.Name}: the job runner stayed busy; try again");
             Thread.Sleep(1000);
         }
+        lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
         var startedAt = DateTime.Now;
         if (waitForProgress) ClearProgress(MachineProgress);
         try
         {
             t.Run(token);   // the token becomes $(Arg0) in the task's action
+            taskStarted = true;
             Log.Info($"Library: started \\HTPC\\Jobs with {token}");
         }
         catch (Exception e)
@@ -348,6 +353,7 @@ sealed class LibraryService
         string lastSeen = "";
         while (true)
         {
+            lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");   // Cancel stopped it (or the task)
             // A per-user install must not raise a Windows permission prompt on the TV. If one
             // appears (consent.exe), stop the job at once rather than leave it stuck behind a
             // prompt the user cannot answer with the controller.

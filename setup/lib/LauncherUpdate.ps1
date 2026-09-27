@@ -246,7 +246,9 @@ function Test-NewJobRunner($Paths) {
     $runner = Join-Path $lib 'Invoke-AppJob.ps1'
     if (-not (Test-Path -LiteralPath $runner)) { return 'lib\Invoke-AppJob.ps1 is missing' }
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $out = & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Job reconcile -DryRun 2>&1 | Out-String
+    # Its stderr must not throw here (PowerShell 5.1 with ErrorActionPreference Stop turns the
+    # first stderr line into an exception): the exit code decides.
+    $out = & { $ErrorActionPreference = 'Continue'; & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Job reconcile -DryRun 2>&1 | Out-String }
     if ($LASTEXITCODE -ne 0) { return "the job runner's dry run failed: $($out.Trim())" }
     $null
 }
@@ -440,6 +442,15 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
 # Everything is checked before anything is stopped or moved: a rollback that cannot finish must
 # not start.
 function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
+    # Setup ran again meanwhile (it copies its launcher before clearing this journal): the launcher
+    # in place is not the one this update put there, so there is nothing of this update to undo.
+    $launcherSlot = @(Get-JournalSlots $Paths $Journal) | Where-Object { $_.Role -eq 'launcher' } | Select-Object -First 1
+    if ($launcherSlot -and $Journal.toSha256 -and (Get-SlotState $launcherSlot) -eq 'placed' -and
+        (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash -ne $Journal.toSha256) {
+        Save-LauncherJournal $Paths $Journal 'superseded' 'The launcher was replaced since (setup ran again)'
+        Write-Host '  not rolled back: setup replaced the launcher meanwhile'
+        return
+    }
     Write-Host "  rolling back: $Reason"
     $created = Get-JournalList $Journal 'created'
     $plan = foreach ($slot in Get-JournalSlots $Paths $Journal) {

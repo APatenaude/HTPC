@@ -28,6 +28,11 @@ $target = Join-Path $installDir 'HtpcLauncher.exe'
 if (-not (Test-Path -LiteralPath $Exe)) { throw "Launcher not found: $Exe" }
 
 New-Item -ItemType Directory -Force $installDir | Out-Null
+# First of all, before anything is copied: a launcher update's journal goes, so an update job
+# checking its new version meanwhile cannot "roll back" what setup is about to put in place.
+$journal = Join-Path $HtpcData 'state\launcher-update.json'
+if (Test-Path -LiteralPath $journal) { Remove-Item -LiteralPath $journal -Force; Write-Change 'launcher update journal cleared' }
+
 $same = (Test-Path $target) -and (Get-FileHash -LiteralPath $Exe).Hash -eq (Get-FileHash $target).Hash
 if ($same) {
     Write-Same "launcher already installed ($target)"
@@ -64,10 +69,9 @@ if (Test-Path (Join-Path $from 'jobs')) { Copy-Item (Join-Path $from 'jobs\*') $
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
 Write-Change "job runner and trusted catalog in $installDir"
 
-# Setup replaces whatever a launcher update left: its journal (so nothing ever "rolls back" to
-# the launcher before that update) and the copies it kept (.prev, .new, .bad, set aside .old-*).
-$journal = Join-Path $HtpcData 'state\launcher-update.json'
-if (Test-Path -LiteralPath $journal) { Remove-Item -LiteralPath $journal -Force; Write-Change 'launcher update journal cleared' }
+# Setup replaces whatever a launcher update left: its journal (cleared above, so nothing ever
+# "rolls back" to the launcher before that update) and the copies it kept (.prev, .new, .bad,
+# set aside .old-*).
 $leftovers = @(foreach ($base in (Join-Path $installDir 'HtpcLauncher'), (Join-Path $installDir 'HtpcWatchdog'), (Join-Path $installDir 'catalog')) {
         $ext = if ($base.EndsWith('catalog')) { '.json' } else { '.exe' }
         foreach ($kind in 'prev', 'new', 'bad') { "$base.$kind$ext" }

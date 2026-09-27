@@ -19,8 +19,11 @@
          release restores in locked mode). Its own file name: NuGet updates any packages.lock.json
          it finds, and a Debug build (publishing self-contained adds a package it does not) would
          keep rewriting it. -->
-    <RestorePackagesWithLockFile Condition="'$(Configuration)' == 'Release'">true</RestorePackagesWithLockFile>
-    <NuGetLockFilePath Condition="'$(Configuration)' == 'Release'">packages.release.lock.json</NuGetLockFilePath>
+    <!-- Only in locked mode (Publish-Setup -Locked, the release) or when renewing it (-p:Relock=true
+         with a Release publish): a plain Release build would rewrite it without the publish-only
+         package. -->
+    <RestorePackagesWithLockFile Condition="'$(Configuration)' == 'Release' and ('$(RestoreLockedMode)' == 'true' or '$(Relock)' == 'true')">true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath Condition="'$(Configuration)' == 'Release' and ('$(RestoreLockedMode)' == 'true' or '$(Relock)' == 'true')">packages.release.lock.json</NuGetLockFilePath>
     <!-- The WebView2 package also carries its WPF control, whose WindowsBase reference
          conflicts with WinForms' copy. Harmless: the WPF control is not used. -->
     <NoWarn>$(NoWarn);MSB3277</NoWarn>

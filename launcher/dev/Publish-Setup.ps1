@@ -15,7 +15,7 @@
 .PARAMETER Out
     Output folder.
 .PARAMETER Locked
-    Restore NuGet packages exactly as packages.lock.json says, failing if the project asks for
+    Restore NuGet packages exactly as packages.release.lock.json says, failing if the project asks for
     anything else (the release build).
 #>
 param(
