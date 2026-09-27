@@ -82,7 +82,8 @@ const WifiUI = (() => {
     if (f.hidden) {
       h += `<div class="srow wifi-field" data-nav data-id="wifi-name"><div class="text"><span class="label">Network name</span>` +
         `<input id="wifi-name-input" type="text" autocomplete="off" spellcheck="false" aria-label="Network name" maxlength="32"></div></div>`;
-      h += `<div class="srow" data-nav data-id="wifi-security" data-wifi-step="1"><div class="text"><span class="label">Security</span></div>` +
+      // data-edit: in Settings, left/right change it only once A has picked the row (app.js).
+      h += `<div class="srow" data-nav data-id="wifi-security" data-wifi-step="1" data-edit><div class="text"><span class="label">Security</span></div>` +
         `<div class="value">${icon('chevleft', 28, 2)}${esc(HIDDEN_SECURITY.find(([v]) => v === f.security)[1])}${icon('chevright', 28, 2)}</div></div>`;
     }
     if (needsPassword) {

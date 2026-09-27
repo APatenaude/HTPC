@@ -175,7 +175,9 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .sitem.on .icon { color: var(--accent); }
 .sitem.focused { background: var(--tile-focus); color: #FFFFFF; }
 .spane { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
-.spane main { flex-grow: 1; padding: 72px 96px 0 80px; display: flex; flex-direction: column; gap: 14px; }
+/* Room at the bottom: the pane scrolls to the focus (app.js scrollIntoBox) with its ring clear of the hints */
+.spane main { flex-grow: 1; min-height: 0; padding: 72px 96px 32px 80px; display: flex; flex-direction: column; gap: 14px; }
+.spane main > :not(.wifi-scroll) { flex-shrink: 0; }   /* not squeezed: the pane scrolls instead (a list that scrolls itself still fits) */
 .spane header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
 .spane h1 { font-size: 48px; }
 .spane header p { margin: 0; font-size: 26px; color: var(--text-2); }
@@ -194,6 +196,13 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .toggle span { width: 36px; height: 36px; border-radius: 18px; background: var(--muted); }
 .toggle.on { background: var(--accent); }
 .toggle.on span { margin-left: auto; background: var(--bg); }
+/* A value row (data-edit): its arrows are faint until A picks it (.editing); then left/right change it */
+.srow[data-edit] .value .icon { opacity: 0.3; transition: opacity 0.15s ease; }
+.srow.editing { background: var(--accent-bg); }
+.srow.editing .value, .srow.editing .svalue { color: var(--accent); }
+.srow.editing .value .icon { opacity: 1; }
+.srow.editing .knob { box-shadow: 0 0 0 5px var(--accent); }
+.srow.editing .seg { box-shadow: 0 0 0 3px var(--accent); }
 .sbuttons { display: flex; gap: 16px; margin-top: 18px; }
 .sbutton { display: flex; align-items: center; height: 72px; padding: 0 32px; border-radius: 20px; background: #22252B; font-size: 26px; }
 .sbutton.focused { background: var(--tile-focus); }

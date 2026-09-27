@@ -252,7 +252,7 @@ if (typeof settingsSection === 'function') (() => {
     const pairing = tv.pairing && ['code', 'prompt', 'working'].includes(tv.pairing.stage);
     if (pairing) right = TvUi.pairHtml(tv);
     if (!pairing && p && p.method !== 'none') {
-      if (tv.caps.input) right += `<div class="srow" data-nav data-id="tv-input" data-tv-input="1"><div class="text"><span class="label">Input this box is on</span>` +
+      if (tv.caps.input) right += `<div class="srow" data-nav data-id="tv-input" data-tv-input="1" data-edit><div class="text"><span class="label">Input this box is on</span>` +
         `<span class="caption">${esc(TvUi.portNote(tv))}</span></div>` +
         `<div class="value">${icon('chevleft', 26, 2)}${p.input ? `HDMI ${p.input}` : 'Unknown'}${icon('chevright', 26, 2)}</div></div>`;
       for (const [key, label, caption, cap] of TOGGLES) {
@@ -276,7 +276,8 @@ if (typeof settingsSection === 'function') (() => {
     render: renderTv,
     press(button, el) {
       if (!el) return false;
-      if (el.dataset.tvInput && (button === 'left' || button === 'right' || button === 'a')) {
+      // The input: left/right once A has picked the row (app.js's editPress).
+      if (el.dataset.tvInput && (button === 'left' || button === 'right')) {
         const p = state.tv.profile;
         const max = Math.max(4, state.tv.port || 0);
         const next = ((p.input || 1) - 1 + (button === 'left' ? -1 : 1) + max) % max + 1;

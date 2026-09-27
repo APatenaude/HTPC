@@ -38,7 +38,7 @@ function track(percent, white) {
 
 function levelRow(key, label, caption) {
   const v = prefValue(key, 5);
-  return `<div class="srow" data-nav data-id="set-${key}" data-level="${key}">` +
+  return `<div class="srow" data-nav data-id="set-${key}" data-level="${key}" data-edit>` +
     `<div class="text"><span class="label">${esc(label)}</span><span class="caption">${esc(caption)}</span></div>` +
     `${track(v * 10)}<span class="svalue">${v}</span></div>`;
 }
@@ -49,14 +49,15 @@ function flagRow(key, label, caption) {
     toggle(prefValue(key, true)) + '</div>';
 }
 
-// Volume and brightness: app.js's own sliders (left/right, sent as {type: key}).
+// Volume and brightness: app.js's own sliders (left/right once picked with A, sent as {type: key}).
 function sliderRow(key, label, caption, white) {
-  return `<div class="srow" data-nav data-id="set-${key}" data-slider="${key}">` +
+  return `<div class="srow" data-nav data-id="set-${key}" data-slider="${key}" data-edit>` +
     `<div class="text"><span class="label">${esc(label)}</span><span class="caption">${esc(caption)}</span></div>` +
     `${track(state[key], white)}<span class="svalue">${state[key]}</span></div>`;
 }
 
-// Left/right (and A) on the rows above.
+// The rows above: left/right on a level row (only once A has picked it: app.js's editPress),
+// A on a flag.
 function pressRows(button, el) {
   if (!el) return false;
   const step = button === 'right' ? 1 : button === 'left' ? -1 : 0;
@@ -65,8 +66,7 @@ function pressRows(button, el) {
     setPref(key, Math.max(1, Math.min(10, prefValue(key, 5) + step)));
     return true;
   }
-  if (el.dataset.level && button === 'a') return true;
-  if (el.dataset.flag && (button === 'a' || step)) {
+  if (el.dataset.flag && button === 'a') {
     setPref(el.dataset.flag, !prefValue(el.dataset.flag, true));
     return true;
   }
@@ -201,7 +201,7 @@ settingsSection('sound', {
     const outputs = a ? a.outputs : [];
     const current = outputs.find((o) => o.isDefault);
     const row = (caption, value, nav) =>
-      `<div class="srow"${nav ? ' data-nav data-id="snd-output" data-output' : ''}>` +
+      `<div class="srow"${nav ? ' data-nav data-id="snd-output" data-output data-edit' : ''}>` +
       `<div class="text"><span class="label">Output</span><span class="caption">${esc(caption)}</span></div>${value}</div>`;
     let output;
     if (!a) output = row('Looking…', '');
@@ -219,7 +219,8 @@ settingsSection('sound', {
       '<div class="sbuttons"><div class="sbutton" data-nav data-id="snd-test" data-act="test-sound">Play a test sound</div></div>';
   },
   press(button, el) {
-    if (el && el.dataset.output !== undefined && (button === 'left' || button === 'right' || button === 'a')) {
+    // Left/right on the output row once A has picked it (app.js's editPress).
+    if (el && el.dataset.output !== undefined && (button === 'left' || button === 'right')) {
       stepOutput(button === 'left' ? -1 : 1);
       return true;
     }

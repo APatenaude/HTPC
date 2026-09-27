@@ -156,14 +156,8 @@ function updWindowsCard(w) {
 settingsSection('updates', {
   render: renderUpdatesSection,
   shown() { send({ type: 'updates.get' }); },
-  // Two columns: left and right move between the list and the cards; left from the list goes
-  // to the section list as usual.
-  press(button, el) {
-    if (!el) return false;
-    if (button === 'left' && el.closest('.upd-side')) { move('left'); return true; }
-    if (button === 'right' && el.closest('.upd-list')) { move('right'); return true; }
-    return false;
-  },
+  // Two columns: left and right move between the list and the cards (app.js's settingsPress, as
+  // in every section); left from the list goes to the section list.
   demo() { updDemo(); },
 });
 
