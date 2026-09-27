@@ -38,7 +38,7 @@ Write-Host "`nFirewall rules (group HTPC):"
 $rules = @(Get-NetFirewallRule -Group 'HTPC' -ErrorAction SilentlyContinue)
 foreach ($rule in $rules) { Write-Host ("  {0,-6} {1,-8} {2}" -f $rule.Action, $rule.Profile, $rule.DisplayName) }
 $exe = $launcher.Path
-# Our Allow rule for this exe must be on, Private, TCP 80 and 8765, from the local subnet; and no
+# Our Allow rule for this exe must be on, Private, TCP 80, 8765 and 443, from the local subnet; and no
 # enabled Block rule for it on Private (a Block rule beats any Allow rule).
 $all = @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -and [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $exe } | Get-NetFirewallRule)
 $good = @($all | Where-Object {
@@ -46,11 +46,11 @@ $good = @($all | Where-Object {
     $scope = $_ | Get-NetFirewallAddressFilter
     $_.Group -eq 'HTPC' -and "$($_.Action)" -eq 'Allow' -and "$($_.Enabled)" -eq 'True' -and "$($_.Direction)" -eq 'Inbound' -and
     "$($_.Profile)" -match 'Private' -and "$($ports.Protocol)" -eq 'TCP' -and
-    (@($ports.LocalPort) -contains '80') -and (@($ports.LocalPort) -contains '8765') -and (@($scope.RemoteAddress) -join ',') -eq 'LocalSubnet'
+    (@($ports.LocalPort) -contains '80') -and (@($ports.LocalPort) -contains '8765') -and (@($ports.LocalPort) -contains '443') -and (@($scope.RemoteAddress) -join ',') -eq 'LocalSubnet'
 })
 $blocks = @($all | Where-Object { "$($_.Action)" -eq 'Block' -and "$($_.Enabled)" -eq 'True' -and ("$($_.Profile)" -match 'Private|Any') })
-if (-not $good) { Write-Warning "No Allow rule for $exe (on, Private, TCP 80 and 8765, local subnet). Phones cannot get in. As admin: setup\lib\Set-PhoneRemote.ps1 -Program `"$exe`"" }
-else { Write-Host "  Allow rule for this exe: on, Private, TCP 80 and 8765, local subnet" }
+if (-not $good) { Write-Warning "No Allow rule for $exe (on, Private, TCP 80, 8765 and 443, local subnet). Phones cannot get in. As admin: setup\lib\Set-PhoneRemote.ps1 -Program `"$exe`"" }
+else { Write-Host "  Allow rule for this exe: on, Private, TCP 80, 8765 and 443, local subnet" }
 foreach ($b in $blocks) { Write-Warning "Block rule '$($b.DisplayName)' ($($b.Profile)) stops phones; Set-PhoneRemote.ps1 removes it" }Write-Host "Network: $((@(Get-NetConnectionProfile | ForEach-Object { "$($_.InterfaceAlias) $($_.NetworkCategory)" })) -join ', ')"
 
 Write-Host "`nOn the phone, on the same Wi-Fi (the only test that crosses the firewall):"

@@ -54,7 +54,9 @@ partial class MainForm
             phoneMedia = new PhoneMedia(this);
             phoneAlerts = alerts;
             pairing = new PhonePairing(PhonePairing.DefaultPath);
-            phones = new PhoneServer(new PhoneHost(this), Path.Combine(AppContext.BaseDirectory, "phone"), pairing);
+            // HTTPS with the box's own certificates (Android's installed app and Share target, SPEC N9).
+            var certificates = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore());
+            phones = new PhoneServer(new PhoneHost(this), Path.Combine(AppContext.BaseDirectory, "phone"), pairing, certificates: certificates);
             // Both run inside other work (Standby.Enter, SleepTimer.Tick): nothing may escape.
             standby.Changed += active =>
             {
@@ -167,7 +169,9 @@ partial class MainForm
     {
         // In standby only Home, the power button and Wake do anything (they wake the box): the
         // phone shows "asleep" over its controls, and nothing else should change unseen.
-        if (standby.Active && command is not (KeyCommand or PowerCommand)) return;
+        // A link shared from another app (Android's Share target) is the exception: sharing to the TV
+        // turns it on (the design's "Send to TV").
+        if (standby.Active && command is not (KeyCommand or PowerCommand or OpenCommand { Shared: true })) return;
         switch (command)
         {
             case KeyCommand k: PhoneKeyPress(k.Key); break;
@@ -194,7 +198,10 @@ partial class MainForm
                 if (!standby.Active) standby.Sleep("phone");
                 break;
             case PowerCommand: standby.Wake("phone"); break;
-            case OpenCommand o: _ = PhoneOpen(phone, o.Url); break;
+            case OpenCommand o:
+                if (o.Shared && standby.Active) standby.Wake("shared link");
+                _ = PhoneOpen(phone, o.Url);
+                break;
         }
     }
 
@@ -318,22 +325,28 @@ partial class MainForm
     /// reads a link only as it starts, and a website tile would open a second window: those close
     /// and start again on the link. Edge takes it as a new tab in its open window.
     /// </summary>
-    async Task PhoneOpen(PhoneClient phone, string url)
+    /// <param name="phone">The phone to tell how it went; null for the iPhone Shortcut (/api/open).</param>
+    async Task PhoneOpen(PhoneClient? phone, string url)
     {
         try { await OpenPhoneLink(phone, url); }
         catch (Exception e)
         {
             Log.Error("Phone link", e);
-            phones?.Send(phone, new { t = "toast", text = "The TV could not open that link", kind = "warn" });
+            Tell(phone, new { t = "toast", text = "The TV could not open that link", kind = "warn" });
         }
     }
 
-    async Task OpenPhoneLink(PhoneClient phone, string url)
+    void Tell(PhoneClient? phone, object message)
+    {
+        if (phone is not null) phones?.Send(phone, message);
+    }
+
+    async Task OpenPhoneLink(PhoneClient? phone, string url)
     {
         var target = PhoneLinks.Route(url);
         if (target is null)
         {
-            phones?.Send(phone, new { t = "toast", text = "That isn’t a web link the TV can open", kind = "warn" });
+            Tell(phone, new { t = "toast", text = "That isn’t a web link the TV can open", kind = "warn" });
             return;
         }
         Log.Info($"Phone link: {target.Kind} on {target.Uri.Host}"); // not the whole link: it may carry someone's session
@@ -347,7 +360,7 @@ partial class MainForm
         };
         if (apps.Get(id) is null) (id, page) = ("edge", target.Uri);
         var name = apps.Get(id)?.Name ?? "the browser";
-        phones?.Send(phone, new { t = "toast", text = $"Opening in {name} on the TV" });
+        Tell(phone, new { t = "toast", text = $"Opening in {name} on the TV" });
         if (page is null) { Open(id); return; }
 
         if (id != "edge" && apps.IsRunning(id))
@@ -361,7 +374,7 @@ partial class MainForm
         {
             if (id == "edge" || !apps.LaunchWith("edge", target.Uri))
             {
-                phones?.Send(phone, new { t = "toast", text = $"{name} could not be opened", kind = "warn" });
+                Tell(phone, new { t = "toast", text = $"{name} could not be opened", kind = "warn" });
                 return;
             }
             (id, name, handOver) = ("edge", apps.Get("edge")?.Name ?? "the browser", false);
@@ -466,11 +479,16 @@ partial class MainForm
                 ip = home is null ? null : $"{home}{suffix}",
                 // The QR code opens the box's IP address (every phone can) with a one-time pairing key.
                 qr = qr && port != 0 ? $"{PhoneUrl()}/?k={pairing.NewKey()}" : null,
+                // Card 2 (Share to TV): the same, on the page that says how (certificate, Shortcut).
+                sendQr = qr && port != 0 ? $"{PhoneUrl()}/send?k={pairing.NewKey()}" : null,
+                secure = phones.SecurePort != 0,
+                // The root's fingerprint: Android shows the installed one; they must match (card 2).
+                fingerprint = phones.Fingerprint,
                 requireCode = pairing.RequireCode,
                 reach = phoneReach,
                 unpaired = phones.Clients.Count(c => c.Phone is null),
                 phones = pairing.Phones.OrderByDescending(p => p.LastSeen)
-                    .Select(p => new { id = p.Id, name = p.Name, connected = connected.Contains(p.Id), lastSeen = Unix(p.LastSeen) }),
+                    .Select(p => new { id = p.Id, name = p.Name, connected = connected.Contains(p.Id), lastSeen = Unix(p.LastSeen), shortcut = p.Shortcut }),
             },
         });
     }
@@ -557,6 +575,11 @@ partial class MainForm
         public void OnDisconnected(PhoneClient phone) => form.OnUi(() => { form.ReleasePhoneDrag(); form.WatchMediaForPhones(); });
         public void HidePairingCode(bool paired) => form.OnUi(() => form.HidePairCode(paired));
         public void PhonesChanged() => form.OnUi(() => { form.PostPhoneInfo(qr: false); form.PushState(); });
+        public void OpenShared(string url) => form.OnUi(() =>
+        {
+            if (form.standby.Active) form.standby.Wake("shared link"); // sharing to the TV turns it on
+            _ = form.PhoneOpen(null, url);
+        });
         public (byte[] Data, string ContentType)? Artwork() => form.phoneMedia.Artwork();
 
         public bool ShowPairingCode(string code)

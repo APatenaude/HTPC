@@ -39,7 +39,7 @@ dimmed behind it, and the app keeps running underneath. B or the app's row retur
 A web app the launcher serves at **http://tv.local** (port 80; when 80 stays taken for 10 s,
 8765 until the next start). iPhone: Safari › Share › Add to
 Home Screen; Android: Chrome › ⋮ › Add to Home screen (over plain HTTP Android makes it a
-shortcut, not an installed app; that comes with HTTPS for Share, SPEC N9). Settings › Phone
+shortcut; as an installed app, with Share, over HTTPS: below). Settings › Phone
 remote shows a QR code with the box's IP address and a one-time pairing key; the page moves on
 to tv.local by itself where the phone can open it (some Android phones cannot).
 
@@ -77,8 +77,49 @@ HttpOnly cookie (on iPhone the Home Screen app pairs once more: it has its own c
 › Phone remote lists the phones (Forget) and can switch codes off. Keys are a fixed list (no
 Windows key or shortcuts), text is at most 256 characters a message and never logged, links
 must be http(s) with nothing that could become a command-line switch, and apps get them as
-separate arguments after `--` (VacuumTube only the checked video id). Typing is not encrypted on
-the home network until HTTPS (SPEC N9).
+separate arguments after `--` (VacuumTube only the checked video id). The remote at
+http://tv.local is not encrypted on the home network (SPEC: HTTPS only for Android's Share).
+
+Send to TV from other apps (SPEC N9; the phone's Type tab › Send to TV from other apps, or the
+second QR code in Settings › Phone remote, which opens /send and pairs):
+- **Android:** the Share target of the installed web app, over HTTPS. The box is its own
+  certificate authority (`PhoneCertificates.cs`), in two steps: a root, which phones install,
+  whose key lives only in memory while it signs the intermediate once and is then gone; and an
+  intermediate (pathlen 0, server authentication only) whose critical Name Constraints permit
+  only tv.local, the box's .local name and the private IPv4 ranges (e-mail, URI and directory
+  names only under placeholders), so its key could never pass off a public site (constraints on
+  an intermediate bind every verifier; on a root some skip them). The intermediate's key is
+  non-exportable, in the TPM when the box has one that does ECDSA P-256 (this box: the software
+  key store). It signs the server certificate (1 year) for tv.local and the box's private
+  addresses, made again at once when the address changes (no DHCP reservation) and a month before
+  it ends; the handshake sends it with the intermediate. Root and intermediate end together after
+  10 years: then the box makes a new pair and each phone installs the new root once more. Public
+  certificates in `%LOCALAPPDATA%\HTPC\certs`; nothing about the keys is logged. Kestrel adds port
+  443 (a failure leaves HTTP running).
+  The phone downloads the root from /ca.crt over plain HTTP, so it checks what it got: card 2 on
+  the TV shows the root's SHA-256 fingerprint, and Android shows the installed one under
+  Settings › Security › Encryption & credentials › Trusted credentials › User › the certificate;
+  they must match before going on (the /send page says so and shows it too, but only the TV's
+  is to be trusted). Then it opens https://tv.local, pairs and installs the app. Share › TV remote
+  POSTs the shared text and link to /share: when the phone itself posted it (`Sec-Fetch-Site:
+  none`) and it holds a link, the box keeps a one-time ticket (60 s, at most 16 waiting) bound to
+  that link and hands the link back in the page's WebSocket hello: it plays at once. A GET
+  /share?url=... (what a link in a message, a mail or a QR code can do) never gets a ticket, the
+  ticket cookie is deleted, and the page asks first. A shared link wakes the box from standby
+  (the design's "Send to TV").
+- **iPhone:** a Shortcut the user makes once (Share sheet › Send to TV): POST
+  http://tv.local/api/open, `Authorization: Bearer <key>`, JSON `{ "url": Shortcut Input }`.
+  The key comes from the phone's Send page (only a phone that paired may ask; shown once, kept
+  as a hash, at most 10, listed apart from the phones with Forget in Settings › Phone remote);
+  it is the only endpoint without the Origin check: 4 KB at most, 20 links a minute per key
+  (only requests with that key count), a device sending 10 wrong keys in a minute is shut out
+  for a minute (nobody else is). No Shortcut file is made (Apple only imports signed ones).
+- Links go where pasted ones go (YouTube in VacuumTube, Twitch in Twitch, the rest in the
+  browser). YouTube's cast button (VacuumTube's own DIAL server, let in by setup's rule) and
+  Jellyfin's "Play on" (through the Jellyfin server) need nothing from the launcher; they work
+  while those apps are open.
+- When the phone cannot reach the box for about 10 s it says so: the box may be off, or have a
+  new address; the QR code in Settings › Phone remote brings the phone back.
 
 Server (`PhoneServer.cs`): Kestrel inside the launcher, started in the background after the UI
 (never in setup mode; a failure is logged and the launcher carries on), serving only `phone/`.
@@ -98,7 +139,8 @@ is to be checked on the box. Twitch links reopen the Twitch window on that page.
 
 Tests: `tests\PhoneTests` (`dotnet run --project launcher\tests\PhoneTests`: protocol, links,
 routing, pointer, pairing and its locks, Host/Origin, the server on 127.0.0.1 with a fake
-launcher), `dev\phone-test.html` (typing differences, gestures; open it, or headless
+launcher, the root and the constrained intermediate, HTTPS with a test key made in the user's key
+store and deleted after, the Share target's ticket, the Shortcut's /api/open and its limits), `dev\phone-test.html` (typing differences, gestures; open it, or headless
 `--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
 field; its own requests never cross the inbound rule, so the real test is a phone),
 `dev\New-PhoneIcons.ps1` (the app icons).
@@ -200,5 +242,5 @@ Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 
 ## Not built yet
 
-Phone: Share to TV and HTTPS with the box's
-own certificate (SPEC N9), the link player.
+Phone: no link player (links no tile opens go to
+the browser).

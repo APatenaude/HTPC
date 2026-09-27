@@ -160,6 +160,25 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .pair .field input { font-family: var(--display); font-size: 28px; letter-spacing: 0.4em; text-align: center; }
 .pair-error { min-height: 1.4em; color: var(--warn) !important; }
 
+/* Send to TV from other apps (the Shortcut, the certificate) and the Type tab's way in. */
+.send-link { display: flex; align-items: center; gap: 12px; margin: 14px var(--gutter) 0; min-height: 52px; padding: 0 16px; border-radius: 16px; background: var(--panel); font-size: 15px; text-align: left; color: var(--text); }
+.send { position: fixed; inset: 0; z-index: 25; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: max(16px, env(safe-area-inset-top)) var(--gutter) max(24px, env(safe-area-inset-bottom)); background: var(--bg); }
+.send-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 8px; }
+.send-top h2 { font-size: 22px; }
+.send .lead { margin: 0 0 8px; }
+.send-part { display: flex; flex-direction: column; margin-top: 18px; padding: 16px; border-radius: 20px; background: var(--panel); }
+.send-top, .send > .lead { order: -2; }
+.send-part.first { order: -1; }
+.send-part h3 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 18px; }
+.steps { margin: 12px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
+.steps b { color: var(--text); }
+.copy-row { display: flex; gap: 8px; margin-top: 6px; }
+.copy-row input { flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--button); color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.copy-row button { height: 44px; padding: 0 14px; border-radius: 12px; font-size: 14px; }
+.small-button, a.button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 6px; padding: 0 16px; border-radius: 12px; font-size: 15px; text-decoration: none; }
+.send .note { margin: 12px 0 0; }
+.fingerprint { display: block; margin-top: 6px; padding: 10px 12px; border-radius: 12px; background: var(--button); color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.6; white-space: pre; }
+.send-body { display: flex; flex-direction: column; }
 .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: rgba(0, 0, 0, 0.55); }
 .sheet { width: 100%; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 22px var(--gutter) max(20px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; background: var(--panel); }
 .sheet h2 { font-size: 20px; }

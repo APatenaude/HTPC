@@ -17,6 +17,9 @@ sealed class HostAllowlist
     /// <summary>The port the remote listens on; a Host or Origin with another port is refused.</summary>
     public int Port { get; set; } = 80;
 
+    /// <summary>Its HTTPS port (0: none); https Origins must name it.</summary>
+    public int SecurePort { get; set; }
+
     readonly string[] extra;
 
     /// <param name="fixedNames">More names to allow (tests).</param>
@@ -59,7 +62,7 @@ sealed class HostAllowlist
     }
 
     /// <summary>A Host header value ("tv.local", "TV.local.:80", "[fe80::1]:8765") as a bare lower-case name; null if malformed or on another port.</summary>
-    public string? Normalize(string? host) => Parse(host, Port);
+    public string? Normalize(string? host) => Parse(host, Port) ?? (SecurePort != 0 ? Parse(host, SecurePort) : null);
 
     static string? Parse(string? host, int? port)
     {
@@ -96,7 +99,8 @@ sealed class HostAllowlist
     public bool IsAllowedOrigin(string? origin)
     {
         if (string.IsNullOrEmpty(origin) || !Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-        if (uri.Scheme != Uri.UriSchemeHttp || uri.Port != Port || uri.AbsolutePath != "/") return false;
+        var ours = (uri.Scheme == Uri.UriSchemeHttp && uri.Port == Port) || (uri.Scheme == Uri.UriSchemeHttps && SecurePort != 0 && uri.Port == SecurePort);
+        if (!ours || uri.AbsolutePath != "/") return false;
         var host = uri.HostNameType == UriHostNameType.IPv6 ? AddressName(IPAddress.Parse(uri.Host.Trim('[', ']'))) : uri.Host.ToLowerInvariant().TrimEnd('.');
         return names.Contains(host);
     }
@@ -128,6 +132,22 @@ static class PhoneNetwork
         }
         catch (Exception e) { Log.Warn($"Phone remote: finding the home address: {e.Message}"); }
         return null;
+    }
+
+    /// <summary>The box's IPv4 addresses on its home networks (up adapters, not loopback), for the HTTPS certificate.</summary>
+    public static List<IPAddress> LocalAddresses()
+    {
+        var list = new List<IPAddress>();
+        try
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                list.AddRange(nic.GetIPProperties().UnicastAddresses.Select(a => a.Address).Where(a => a.AddressFamily == AddressFamily.InterNetwork));
+            }
+        }
+        catch (Exception e) { Log.Warn($"Phone remote: reading the box's addresses: {e.Message}"); }
+        return list;
     }
 
     /// <summary>

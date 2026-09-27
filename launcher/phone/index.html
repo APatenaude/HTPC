@@ -91,6 +91,7 @@
         <button type="submit" class="primary">Play</button>
       </form>
       <p class="note">YouTube opens in YouTube, Twitch in Twitch, anything else in the browser.</p>
+      <button type="button" class="send-link" id="send-open"><span data-icon="share" aria-hidden="true"></span><span class="grow">Send to TV from other apps</span><span data-icon="chevright" aria-hidden="true"></span></button>
       <button type="button" class="kbd-space" id="kbd-space">Your phone’s keyboard opens here</button>
     </section>
 
@@ -130,6 +131,12 @@
       <p>Wake it here, or hold Home on the controller.</p>
       <button type="button" class="primary wide" id="wake">Wake it</button>
     </div>
+    <div class="cover" id="lost" hidden>
+      <span data-icon="tv" data-size="48" data-weight="1.75" aria-hidden="true"></span>
+      <h2>Can’t reach the TV box</h2>
+      <p>Is it on, and this phone on the same Wi-Fi? If the TV box has a new address on your network, scan the code in Settings › Phone remote on the TV again.</p>
+      <button type="button" class="primary wide" id="retry">Try again</button>
+    </div>
   </main>
 
   <nav class="tabs" aria-label="Remote sections">
@@ -151,6 +158,39 @@
     </form>
     <p class="pair-error" id="pair-error" role="alert"></p>
     <p class="note">Or scan the code in Settings › Phone remote on the TV.</p>
+  </div>
+
+  <div class="send" id="send" role="dialog" aria-modal="true" aria-labelledby="send-title" hidden>
+    <header class="send-top">
+      <h2 id="send-title">Send to TV from other apps</h2>
+      <button type="button" class="round" id="send-close" aria-label="Close" data-icon="close"></button>
+    </header>
+    <p class="lead">A link shared from any app (browser, YouTube, Reddit…) plays on the TV. Set it up once on each phone.</p>
+    <section class="send-part" id="send-iphone" aria-labelledby="send-iphone-title">
+      <h3 id="send-iphone-title">iPhone: a Shortcut</h3>
+      <ol class="steps">
+        <li>Make a key for the Shortcut: <button type="button" class="primary small-button" id="shortcut-make">Make a key</button></li>
+        <li>In the Shortcuts app: + › Add Action › <b>Get Contents of URL</b>.</li>
+        <li>URL:<span class="copy-row"><input id="sc-url" readonly value="http://tv.local/api/open" aria-label="URL"><button type="button" data-copy="sc-url">Copy</button></span></li>
+        <li>Tap the arrow next to it: Method <b>POST</b>.</li>
+        <li>Headers › Add new header: Key <b>Authorization</b>, Text:<span class="copy-row"><input id="sc-key" readonly placeholder="Make a key first" aria-label="Authorization"><button type="button" data-copy="sc-key">Copy</button></span></li>
+        <li>Request Body <b>JSON</b> › Add new field › Text: Key <b>url</b>, Value <b>Shortcut Input</b>.</li>
+        <li>Shortcut details (ⓘ): <b>Show in Share Sheet</b> on, for URLs and Text. Name it “Send to TV”.</li>
+      </ol>
+      <p class="note">Keep the key private: with it, anything on your home network can send the TV links. Remove it any time in Settings › Phone remote on the TV.</p>
+    </section>
+    <section class="send-part" id="send-android" aria-labelledby="send-android-title">
+      <h3 id="send-android-title">Android: the remote as an app, in Share</h3>
+      <ol class="steps">
+        <li>Download the TV box’s certificate: <a class="button primary small-button" id="ca-download" href="/ca.crt" download="tv-box.crt">Download</a></li>
+        <li>Android Settings › Security › More security settings › Encryption &amp; credentials › Install a certificate › <b>CA certificate</b> › Install anyway, and pick “tv-box.crt” (the names differ a little between phones).</li>
+        <li>Check it before going on: Encryption &amp; credentials › <b>Trusted credentials › User</b> › tap it. Its <b>SHA-256 fingerprint</b> must be the one the TV shows (Settings › Phone remote, card 2).<span id="ca-here" hidden> This page says:<code class="fingerprint" id="ca-fingerprint"></code></span> If it differs, remove it there and stop: something else answered for the TV box.</li>
+        <li><a class="button primary small-button" id="secure-open" href="https://tv.local/">Open the secure remote</a> and pair it with the code on the TV.</li>
+        <li>There: ⋮ › <b>Install app</b> (or Add to Home screen › Install).</li>
+        <li>Then in any app: Share › <b>TV remote</b>.</li>
+      </ol>
+      <p class="note">Android then says the network may be monitored: that is this certificate. It works only for tv.local and addresses on home networks, never for other sites.</p>
+    </section>
   </div>
 
   <div class="sheet-wrap" id="sheet" hidden>

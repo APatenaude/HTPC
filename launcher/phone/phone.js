@@ -48,6 +48,8 @@ const ICONS = {
   keyboard: 'M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10',
   moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
   phone: 'M7 2h10v20H7zM11 18.5h2',
+  share: 'M12 3v12M8 7l4-4 4 4M5 11v9h14v-9',
+  tv: 'M3 5h18v12H3zM8 21h8',
 };
 
 function icon(name, size = 22, weight = 2) {
@@ -83,7 +85,7 @@ const vibrate = (ms = 8) => { try { if (navigator.vibrate) navigator.vibrate(ms)
 
 // ---- Connection -----------------------------------------------------------------------------------
 
-let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0;
+let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0, failures = 0;
 const sentLog = [];   // demo and self-test: what would have gone to the box
 
 function send(msg) {
@@ -99,6 +101,8 @@ function connect() {
   ws = socket;
   socket.onopen = () => {
     retryMs = 500;
+    failures = 0;
+    $('lost').hidden = true;
     clearInterval(pingTimer);
     pingTimer = setInterval(() => send({ t: 'ping' }), 5000); // the box drops a phone silent for 15 s
   };
@@ -113,6 +117,8 @@ function connect() {
     ws = null;
     if (state.conn === 'pairing') return; // connects again once paired
     setConn('connecting');
+    // About 10 s without the box: say so (it may be off, or have a new address: the QR code again).
+    if (++failures >= 4) $('lost').hidden = false;
     reconnectTimer = setTimeout(connect, retryMs);
     retryMs = Math.min(retryMs * 2, 5000);
   };
@@ -131,6 +137,13 @@ function onBox(m) {
       hidePairing();
       setConn('open');
       applyState(m.state);
+      if (m.ca) { $('ca-fingerprint').textContent = groupFingerprint(m.ca); $('ca-here').hidden = false; }
+      if (pendingShare !== undefined) handleShare(m.share || null);
+      break;
+    case 'shortcutKey':
+      $('sc-url').value = m.url;
+      $('sc-key').value = 'Bearer ' + m.token;
+      toast('Key made: copy it into the Shortcut');
       break;
     case 'state': applyState(m.state); break;
     case 'toast': toast(m.text, m.kind); break;
@@ -634,6 +647,73 @@ async function submitCode() {
 $('pair-form').addEventListener('submit', (e) => { e.preventDefault(); submitCode(); });
 $('pair-code').addEventListener('input', () => { if ($('pair-code').value.replace(/\D/g, '').length === 4) submitCode(); });
 
+// ---- Send to TV from other apps ---------------------------------------------------------------------------
+
+// Android's Share target (/share?url=...&text=...): the link in what was shared, if any.
+function sharedLink() {
+  for (const name of ['url', 'text', 'title']) {
+    const m = /https?:\/\/[^\s<>"]+/i.exec(params.get(name) || '');
+    if (m) return m[0].replace(/[.,;:!?)\]'"]+$/, '');
+  }
+  return null;
+}
+
+// undefined: nothing shared; null: shared, but no link in it.
+let pendingShare = location.pathname === '/share' ? sharedLink() : undefined;
+
+// Posted by this phone's Share sheet, the box hands the link back in hello (a one-time ticket):
+// it plays at once. A link in the address (/share?url=..., which any message or web page can
+// link to) always asks first.
+function handleShare(ticketLink) {
+  const url = ticketLink || pendingShare;
+  pendingShare = undefined;
+  if (!demo) history.replaceState(null, '', '/');
+  if (!url) { toast('No link in what was shared', 'warn'); return; }
+  const go = () => { send({ t: 'open', url, share: true }); toast('Sent to the TV'); };
+  if (ticketLink) { go(); return; }
+  openSheet('Play this on the TV?', url, [{ label: 'Play on the TV', primary: true, full: true, run: go }]);
+}
+
+// "AB:CD:..." as 4 lines of 8 bytes, as easy to compare as Android's own display.
+function groupFingerprint(fp) {
+  const bytes = String(fp).split(':');
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += 8) lines.push(bytes.slice(i, i + 8).join(':'));
+  return lines.join('\n');
+}
+
+const isIphone = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
+
+function openSend() {
+  // This phone's part first.
+  $('send-iphone').classList.toggle('first', isIphone);
+  $('send-android').classList.toggle('first', !isIphone);
+  // The secure remote at the same name (the IP address when tv.local does not answer on this phone).
+  $('secure-open').href = `https://${location.hostname}/`;
+  if (location.protocol === 'https:') $('secure-open').textContent = 'This is the secure remote';
+  $('send').hidden = false;
+  $('send').scrollTop = 0;
+}
+function closeSend() {
+  $('send').hidden = true;
+  if (!demo && location.pathname === '/send') history.replaceState(null, '', '/');
+}
+$('send-open').addEventListener('click', openSend);
+$('send-close').addEventListener('click', closeSend);
+$('shortcut-make').addEventListener('click', () => send({ t: 'shortcutKey' }));
+$('retry').addEventListener('click', () => { failures = 0; $('lost').hidden = true; connect(); });
+
+// Copy: the clipboard API needs HTTPS; over plain HTTP, the old way (select, copy).
+for (const b of document.querySelectorAll('[data-copy]')) {
+  b.addEventListener('click', async () => {
+    const input = $(b.dataset.copy);
+    if (!input.value) return;
+    try { await navigator.clipboard.writeText(input.value); }
+    catch (e) { input.select(); input.setSelectionRange(0, input.value.length); document.execCommand('copy'); }
+    toast('Copied');
+  });
+}
+
 // ---- Start ---------------------------------------------------------------------------------------------------
 
 const onIpAddress = () => /^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname) || location.hostname.startsWith('[');
@@ -644,7 +724,7 @@ const isLoopback = () => ['127.0.0.1', 'localhost', '[::1]'].includes(location.h
 function probeTvLocal() {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), 1500);
-    fetch(`http://tv.local${location.port ? ':' + location.port : ''}/api/hello`, { mode: 'no-cors', cache: 'no-store' })
+    fetch(`${location.protocol}//tv.local${location.port ? ':' + location.port : ''}/api/hello`, { mode: 'no-cors', cache: 'no-store' })
       .then(() => { clearTimeout(timer); resolve(true); }, () => { clearTimeout(timer); resolve(false); });
   });
 }
@@ -654,15 +734,18 @@ async function boot() {
   if (demo) { runDemo(demo); return; }
   const oneTimeKey = params.get('k');
   if (onIpAddress() && !isLoopback() && await probeTvLocal()) {
-    location.replace(`http://tv.local${location.port ? ':' + location.port : ''}/${oneTimeKey ? '?k=' + encodeURIComponent(oneTimeKey) : ''}`);
+    location.replace(`${location.protocol}//tv.local${location.port ? ':' + location.port : ''}${location.pathname}${location.search}`);
     return;
   }
   if (oneTimeKey) {
     // The QR code in Settings › Phone remote: pairs this phone at once (whoever scanned it is at the TV).
-    history.replaceState(null, '', location.pathname);
+    const rest = new URLSearchParams(location.search);
+    rest.delete('k');
+    history.replaceState(null, '', location.pathname + (rest.toString() ? '?' + rest : ''));
     const res = await post('/api/pair', { key: oneTimeKey });
     if (res.status === 200) toast('Paired');
   }
+  if (location.pathname === '/send') openSend();
   connect();
 }
 
@@ -687,6 +770,13 @@ function runDemo(view) {
   if (view === 'pair') showPairing();
   if (view === 'sleep') $('power').click();
   if (view === 'timer') $('timer-button').click();
+  if (view === 'send' || view === 'sendkey') {
+    onBox({ t: 'hello', v: PROTOCOL, paired: true, state: box, ca: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8' });
+    openSend();
+  }
+  if (view === 'sendkey') onBox({ t: 'shortcutKey', token: 'demo-Qm9vc3RlZC1kZW1vLWtleS1ub3QtcmVhbA', url: 'http://tv.local/api/open' });
+  if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
+  if (view === 'lost') $('lost').hidden = false;
 }
 
 boot();
