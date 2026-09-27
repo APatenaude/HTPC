@@ -129,10 +129,17 @@ Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm
   launcher's WebViews close and open again, no restart.
 - **The apps' own updaters** are off where they can be: VacuumTube's (catalog
   `install.selfUpdate`: `resources\app-update.yml` removed at install and update, its download
-  folder deleted). Not done yet: Stremio's notice (its `--autoupdater-endpoint` option exists, but
-  what it does could not be checked without starting Stremio on the box); Plex HTPC and Spotify
-  (no setting found; Spotify has none).
+  folder deleted) and Stremio's (launch.args `--autoupdater-endpoint=http://127.0.0.1:9/`, a port
+  where nothing answers: checked in the VM with Stremio 5.0.24, whose "A new version of Stremio is
+  available" banner shows without it and not with it; the add-ons' catalogs still load). Plex HTPC
+  and Spotify: no setting found (Spotify has none).
 
+Checks: `setup\test\Test-Updates.ps1` (elevated; `-Only Core,Download,Swap,Faults,Planting,Wua`)
+runs the update jobs against fakes under `%TEMP%\htpc-updtest`: a fake GitHub on 127.0.0.1
+(`Serve-FakeRelease.ps1`: bad redirects, lying lengths, 429, 404, wrong hashes), fake launchers
+(healthy, crashing, hanging) and a fake watchdog, the job ended hard after every journal step,
+planted junctions / foreign owners / writable folders, and a faked Windows Update child. Nothing
+on the machine changes. Run it as SYSTEM too (a one-off scheduled task, in the test VM).
 ### Releases
 
     powershell -ExecutionPolicy Bypass -File launcher\dev\New-Release.ps1 -Version 0.2.0 -Notes "What changed, in a sentence"

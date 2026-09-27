@@ -81,7 +81,9 @@ try {
     Send @{ event = 'found'; updates = $described }
 
     if ($Mode -eq 'Scan') {
-        Send @{ event = 'result'; ok = $true; updates = $described; lastInstalled = (Get-LastInstalled $session) }
+        $pending = $false
+        try { $pending = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired } catch { }
+        Send @{ event = 'result'; ok = $true; updates = $described; rebootRequired = $pending; lastInstalled = (Get-LastInstalled $session) }
         exit 0
     }
 

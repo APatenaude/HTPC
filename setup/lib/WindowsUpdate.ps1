@@ -149,7 +149,8 @@ function Invoke-WindowsScan {
     }
     $updates = @($r.updates)
     $reboot = $false
-    try { $reboot = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired } catch { }
+    # Every Windows Update call is the child's (a restart already pending comes in its result).
+    $reboot = [bool]$r.rebootRequired
     Save-WindowsResult $Paths @{ result = 'ok'; message = ''; updates = $updates; rebootRequired = $reboot; lastInstalledUtc = $r.lastInstalled }
     $counted = @($updates | Where-Object { $_.counted }).Count
     $text = if ($updates.Count -eq 0) { 'Windows is up to date' } elseif ($counted -eq 0) { 'Only security definitions to install' } else { "$counted Windows update$(if ($counted -ne 1) { 's' }) ready" }
