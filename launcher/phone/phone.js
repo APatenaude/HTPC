@@ -5,12 +5,11 @@
 // on-screen keyboard or the app in front). Messages: PhoneProtocol.cs.
 //
 // ?demo=remote|arrows|type|playing|pair|asleep|sleep|timer shows a screen with made-up data and
-// no box (screenshots); ?selftest drives the page against a test server (launcher\dev).
+// no box (screenshots). It sends nothing.
 
 const PROTOCOL = 1;
 const params = new URLSearchParams(location.search);
 const demo = params.get('demo');
-const selftest = params.has('selftest');
 const $ = (id) => document.getElementById(id);
 
 // Errors show on the page itself: the headless screenshot tests read them there.
@@ -132,7 +131,6 @@ function onBox(m) {
       hidePairing();
       setConn('open');
       applyState(m.state);
-      if (selftest) runSelftest();
       break;
     case 'state': applyState(m.state); break;
     case 'toast': toast(m.text, m.kind); break;
@@ -595,10 +593,13 @@ function showPairing() {
 
 function hidePairing() { $('pair').hidden = true; }
 
+const later = (s) => s >= 120 ? `${Math.ceil(s / 60)} minutes` : `${s} seconds`;
+
 function pairError(res) {
   switch (res.data.error) {
     case 'wrong': return `That code didn’t match. ${res.data.left} ${res.data.left === 1 ? 'try' : 'tries'} left.`;
-    case 'locked': return `Too many wrong codes. Try again in ${res.data.retry || 60} seconds.`;
+    case 'locked': return `Too many wrong codes. Try again in ${later(res.data.retry || 60)}.`;
+    case 'wait': return `A code was just shown and not used. Try again in ${later(res.data.retry || 30)}.`;
     case 'expired': return 'The TV isn’t showing that code any more. Ask for a new one.';
     case 'asleep': return 'The TV box is asleep. Wake it with the controller, then try again.';
     default: return res.status === 0 ? 'Can’t reach the TV box.' : 'That didn’t work. Try again.';
@@ -682,47 +683,6 @@ function runDemo(view) {
   if (view === 'pair') showPairing();
   if (view === 'sleep') $('power').click();
   if (view === 'timer') $('timer-button').click();
-}
-
-// Drives the page against launcher\dev's test server; the server checks what arrives.
-async function runSelftest() {
-  if (runSelftest.started) return;
-  runSelftest.started = true;
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const fire = (el, type, x = 0, y = 0) => el.dispatchEvent(new PointerEvent(type, { pointerId: 7, isPrimary: true, button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
-  const press = async (el, holdMs = 40) => { fire(el, 'pointerdown'); await wait(holdMs); fire(el, 'pointerup'); };
-  send({ t: 'selftest', step: 'start' }); // not a command: the server drops it
-  choosePad('arrows');
-  await press(document.querySelector('[data-key="up"]'));
-  await press(document.querySelector('[data-key="ok"]'));
-  await press(document.querySelector('[data-key="back"]'));
-  await press($('home'), 60);
-  await press(document.querySelector('[data-step="1"]'));
-  $('brightness').value = '60';
-  $('brightness').dispatchEvent(new Event('change'));
-  choosePad('touchpad');
-  await wait(50);
-  const r = pad.getBoundingClientRect();
-  const x = r.left + 50, y = r.top + 50;
-  fire(pad, 'pointerdown', x, y); await wait(40);
-  fire(pad, 'pointermove', x + 30, y + 10); await wait(40);
-  fire(pad, 'pointermove', x + 60, y + 20); await wait(40);
-  fire(pad, 'pointerup', x + 60, y + 20); await wait(40);
-  fire(pad, 'pointerdown', x, y); await wait(30); fire(pad, 'pointerup', x, y); await wait(40);
-  state.tab = 'type'; render();
-  text.value = 'hi'; text.dispatchEvent(new Event('input'));
-  text.value = 'h'; text.dispatchEvent(new Event('input'));
-  await press($('enter'));
-  await press($('tab'));
-  $('link').value = 'https://youtu.be/dQw4w9WgXcQ';
-  $('link-form').dispatchEvent(new Event('submit', { cancelable: true }));
-  state.tab = 'playing'; render();
-  await press($('playpause'));
-  await wait(200);
-  const done = document.createElement('p');
-  done.id = 'selftest-done';
-  done.textContent = 'SELFTEST DONE';
-  document.body.appendChild(done);
 }
 
 boot();

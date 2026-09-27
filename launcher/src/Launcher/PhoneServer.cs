@@ -79,8 +79,8 @@ sealed class PhoneClient
 /// Kestrel, inside the launcher: it needs no URL reservation (HttpListener's http.sys wants one
 /// made as admin), the listening socket belongs to the launcher so the firewall rule can name its
 /// program, and HTTPS for Android's Share target later (N9) is one certificate on the same
-/// server. Port 80, so the address has no port; when 80 is taken (or refused), 8765, and the port
-/// that worked is kept for next time. It listens on every address (IPv4 and IPv6); setup's
+/// server. Port 80, so the address has no port; when 80 stays taken (or refused) for 10 s, 8765
+/// for this run only. It listens on every address (IPv4 and IPv6); setup's
 /// firewall rule lets in the home network only (Private, local subnet).
 ///
 /// Every request must name the box in its Host header (tv.local, its name or one of its
@@ -90,14 +90,14 @@ sealed class PhoneClient
 /// </summary>
 sealed class PhoneServer
 {
-    /// <summary>The ports tried, in order (the one that last worked first). Setup's firewall rule opens both.</summary>
+    /// <summary>The ports tried, in order. Setup's firewall rule opens both.</summary>
     public static readonly int[] Ports = { 80, 8765 };
 
     public const int MaxPhones = 8;
     public const string CookieName = "htpc_phone";
     static readonly TimeSpan Silence = TimeSpan.FromSeconds(15);
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    static readonly Regex Code = new("^[0-9]{4}$");
+    static readonly Regex Code = new(@"^[0-9]{4}\z");
 
     static readonly Dictionary<string, string> Types = new()
     {
@@ -138,36 +138,44 @@ sealed class PhoneServer
 
     public List<PhoneClient> Clients { get { lock (clients) return clients.ToList(); } }
 
-    /// <summary>Starts listening on the first port that works; returns it (0: none did, logged).</summary>
+    /// <summary>
+    /// Starts listening; returns the port (0: none worked, logged). Port 80 is tried for about
+    /// 10 s (a launcher just restarted may still hold it), then 8765, for this run only: the next
+    /// start tries 80 again, so the remote is back at plain http://tv.local as soon as it can be.
+    /// </summary>
+    /// <param name="ports">Tests: these ports, once each.</param>
     public async Task<int> StartAsync(IReadOnlyList<int>? ports = null)
     {
-        var order = ports ?? (Ports.Contains(pairing.Port) ? new[] { pairing.Port }.Concat(Ports.Where(p => p != pairing.Port)).ToArray() : Ports);
+        var order = ports ?? Ports;
         foreach (var port in order)
         {
-            var candidate = Build(port);
-            try
+            var attempts = ports is null && port == Ports[0] ? 5 : 1;
+            for (var attempt = 1; attempt <= attempts; attempt++)
             {
-                await candidate.StartAsync();
+                var candidate = Build(port);
+                try
+                {
+                    await candidate.StartAsync();
+                }
+                catch (Exception e)
+                {
+                    // In use by another program, or refused (access denied): again, then the next port.
+                    Log.Warn($"Phone remote: port {port} not available ({(e.InnerException ?? e).Message})");
+                    try { await candidate.DisposeAsync(); } catch (Exception) { }
+                    if (attempt < attempts) await Task.Delay(2000);
+                    continue;
+                }
+                app = candidate;
+                Port = port;
+                Allowed.Port = port;
+                NetworkChange.NetworkAddressChanged += OnAddressChanged;
+                Log.Info($"Phone remote on port {port} ({(bindTo is null ? "all addresses" : bindTo.ToString())})");
+                return port;
             }
-            catch (Exception e)
-            {
-                // In use by another program, or refused (access denied): the next port.
-                Log.Warn($"Phone remote: port {port} not available ({(e.InnerException ?? e).Message})");
-                try { await candidate.DisposeAsync(); } catch (Exception) { }
-                continue;
-            }
-            app = candidate;
-            Port = port;
-            Allowed.Port = port;
-            if (bindTo is null) pairing.Port = port;
-            NetworkChange.NetworkAddressChanged += OnAddressChanged;
-            Log.Info($"Phone remote on port {port} ({(bindTo is null ? "all addresses" : bindTo.ToString())})");
-            return port;
         }
         Log.Error($"Phone remote: none of the ports {string.Join(", ", order)} could be used");
         return 0;
     }
-
     public async Task StopAsync()
     {
         NetworkChange.NetworkAddressChanged -= OnAddressChanged;
@@ -291,8 +299,14 @@ sealed class PhoneServer
     {
         if (!HttpMethods.IsPost(ctx.Request.Method) || !FromOurPage(ctx)) { ctx.Response.StatusCode = 403; return; }
         if (!pairing.RequireCode) { await Reply(ctx, 200, new { ok = true }); return; }
-        var (code, locked) = pairing.NewCode();
-        if (code is null) { await Reply(ctx, 429, new { error = "locked", retry = (int)Math.Ceiling(locked.TotalSeconds) }); return; }
+        var (code, left, wait) = pairing.NewCode();
+        // A code is on the TV already: this phone may type that one (no second code, no menu pulled up again).
+        if (code is null && left > TimeSpan.Zero) { await Reply(ctx, 200, new { ok = true, seconds = (int)Math.Ceiling(left.TotalSeconds) }); return; }
+        if (code is null)
+        {
+            await Reply(ctx, 429, new { error = pairing.LockedFor > TimeSpan.Zero ? "locked" : "wait", retry = (int)Math.Ceiling(wait.TotalSeconds) });
+            return;
+        }
         if (!host.ShowPairingCode(code))
         {
             pairing.CancelCode();
@@ -340,7 +354,7 @@ sealed class PhoneServer
             case PairOutcome.Wrong: await Reply(ctx, 403, new { error = "wrong", left = result.TriesLeft }); break;
             case PairOutcome.Locked:
                 host.HidePairingCode(false);
-                await Reply(ctx, 429, new { error = "locked", retry = (int)PhonePairing.Lockout.TotalSeconds });
+                await Reply(ctx, 429, new { error = "locked", retry = (int)Math.Ceiling(pairing.LockedFor.TotalSeconds) });
                 break;
             default: await Reply(ctx, 410, new { error = "expired" }); break;
         }
@@ -364,7 +378,7 @@ sealed class PhoneServer
 
         using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
         var client = new PhoneClient(socket, phone, PhonePairing.NameFrom(ctx.Request.Headers.UserAgent));
-        await client.Send(Serialize(new { t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = RawState() }));
+        await client.Send(Serialize(new { t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = allowed ? RawState() : (JsonElement?)null }));
         if (!allowed)
         {
             // Not paired: the page shows the pairing screen and connects again once paired.
@@ -459,6 +473,12 @@ sealed class PhoneServer
     }
 
     public void Send(PhoneClient client, object message) => _ = client.Send(Serialize(message));
+
+    /// <summary>"Ask for a code" was switched back on: phones connected without one leave (they pair to come back).</summary>
+    public void DisconnectUnpaired()
+    {
+        foreach (var c in Clients.Where(c => c.Phone is null)) c.Abort();
+    }
 
     /// <summary>A phone was forgotten in Settings: its open sockets close.</summary>
     public void Disconnect(string phoneId)

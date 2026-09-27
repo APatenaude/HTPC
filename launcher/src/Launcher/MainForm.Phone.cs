@@ -148,6 +148,9 @@ partial class MainForm
 
     void HandlePhone(PhoneClient phone, PhoneCommand command)
     {
+        // In standby only Home, the power button and Wake do anything (they wake the box): the
+        // phone shows "asleep" over its controls, and nothing else should change unseen.
+        if (standby.Active && command is not (KeyCommand or PowerCommand)) return;
         switch (command)
         {
             case KeyCommand k: PhoneKeyPress(k.Key); break;
@@ -293,7 +296,6 @@ partial class MainForm
             return;
         }
         Log.Info($"Phone link: {target.Kind} on {target.Uri.Host}"); // not the whole link: it may carry someone's session
-        if (standby.Active) standby.Wake("phone link");
 
         var (id, page) = target.Kind switch
         {
@@ -397,6 +399,7 @@ partial class MainForm
                     {
                         pairing.RequireCode = value.GetBoolean();
                         Log.Info($"Phone remote: code for new phones {(pairing.RequireCode ? "on" : "off")}");
+                        if (pairing.RequireCode) phones?.DisconnectUnpaired(); // phones that came in without a code leave
                     }
                     PostPhoneInfo(qr: false);
                     break;

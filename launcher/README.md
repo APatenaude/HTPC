@@ -22,8 +22,8 @@ dimmed behind it, and the app keeps running underneath. B or the app's row retur
 
 ## Phone remote
 
-A web app the launcher serves at **http://tv.local** (port 80; when 80 is taken, 8765, and the
-port that worked is kept in `%LOCALAPPDATA%\HTPC\phones.json`). iPhone: Safari › Share › Add to
+A web app the launcher serves at **http://tv.local** (port 80; when 80 stays taken for 10 s,
+8765 until the next start). iPhone: Safari › Share › Add to
 Home Screen; Android: Chrome › ⋮ › Add to Home screen (over plain HTTP Android makes it a
 shortcut, not an installed app; that comes with HTTPS for Share, SPEC N9). Settings › Phone
 remote shows a QR code with the box's IP address and a one-time pairing key; the page moves on
@@ -48,15 +48,17 @@ game PC). Nothing typed from the phone reaches the launcher's own screens. Touch
 to PadMapper's frame thread (one writer for the pointer, in step with the TV); a phone that goes
 quiet for 15 s lets go of a held button. Phone use counts as activity for idle sleep, and while
 the phone is newer than the controller, the TV's keyboard does not pop up by itself. In standby
-only Home, the power button or Wake do anything (they wake the box). A phone cannot wake it from
+only Home, the power button or Wake do anything (they wake the box); volume, typing, links and
+the rest wait until it is awake. A phone cannot wake it from
 Windows sleep or hibernate: a web page cannot send Wake-on-LAN.
 
 Who may use it: the firewall lets in the home network only (Private networks, local subnet;
 setup's PhoneRemote step). Every request must name the box (Host: tv.local, its name or
 addresses); the WebSocket and pairing calls must come from the remote's own page (Origin), so
 no other web page, on any device, can drive the TV. A new phone pairs with a 4-digit code the
-TV shows (an urgent alert, over any app, only while shown; 5 wrong tries lock pairing for a
-minute), or by scanning the QR code in Settings; it then keeps a long random token in an
+TV shows (an urgent alert, over any app, only while shown, one code at a time, 30 s before the
+next after one goes unused; 5 wrong tries lock pairing for 1 minute, then 2, 4... up to an hour,
+until a phone pairs), or by scanning the QR code in Settings; it then keeps a long random token in an
 HttpOnly cookie (on iPhone the Home Screen app pairs once more: it has its own cookies). Settings
 › Phone remote lists the phones (Forget) and can switch codes off. Keys are a fixed list (no
 Windows key or shortcuts), text is at most 256 characters a message and never logged, links
@@ -79,8 +81,11 @@ Its main process reads the last plain argument as the start-up deep link and han
 YouTube's TV app (`h5vcc.runtime.initialDeepLink`, VacuumTube 1.8.2); whether YouTube plays it
 is to be checked on the box. Twitch links reopen the Twitch window on that page.
 
-Tests: `dev\phone-test.html` (typing differences, gestures; open it, or headless
-`--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, tv.local, firewall rules),
+Tests: `tests\PhoneTests` (`dotnet run --project launcher\tests\PhoneTests`: protocol, links,
+routing, pointer, pairing and its locks, Host/Origin, the server on 127.0.0.1 with a fake
+launcher), `dev\phone-test.html` (typing differences, gestures; open it, or headless
+`--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
+field; its own requests never cross the inbound rule, so the real test is a phone),
 `dev\New-PhoneIcons.ps1` (the app icons).
 
 ## Build and run on the box

@@ -12,8 +12,9 @@
         any port.
     The same programs get a Block rule on Public networks. With a rule on each network type,
     Windows never asks "allow access?" over the TV when one of them starts listening.
-    Block rules for these programs that are not ours are removed: Windows makes them when
-    someone answers that question with Cancel, and a Block rule beats every Allow rule.
+    Rules for these programs that are not ours come from someone answering that question:
+    Block rules (Cancel) are removed, since a Block rule beats every Allow rule; Allow rules
+    (Allow access: any address and port, maybe on Public networks) are turned off.
     The built-in mDNS rule for Private networks is turned on (it answers for tv.local).
     Safe to re-run: a rule is only changed when it differs from what is wanted.
 
@@ -69,13 +70,20 @@ function Set-FirewallRule {
     Write-Change "firewall: $Name"
 }
 
-# Block rules for a program that are not ours (someone answered Windows' question with Cancel).
-function Remove-ForeignBlock([string]$Path) {
+# Rules for a program that are not ours, made when someone answered Windows' question: Block rules
+# (they beat every Allow rule) are removed; Allow rules (any address, any port, maybe Public
+# networks too) are turned off, so only our rules decide.
+function Set-ForeignRules([string]$Path) {
     $filters = @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -and [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $Path })
     foreach ($rule in @($filters | Get-NetFirewallRule)) {
-        if ("$($rule.Action)" -ne 'Block' -or $rule.Group -eq $Group) { continue }
-        $rule | Remove-NetFirewallRule
-        Write-Change "firewall: removed Block rule '$($rule.DisplayName)' ($($rule.Profile)) for $(Split-Path $Path -Leaf)"
+        if ($rule.Group -eq $Group) { continue }
+        if ("$($rule.Action)" -eq 'Block') {
+            $rule | Remove-NetFirewallRule
+            Write-Change "firewall: removed Block rule '$($rule.DisplayName)' ($($rule.Profile)) for $(Split-Path $Path -Leaf)"
+        } elseif ("$($rule.Enabled)" -eq 'True') {
+            $rule | Disable-NetFirewallRule
+            Write-Change "firewall: turned off Allow rule '$($rule.DisplayName)' ($($rule.Profile)) for $(Split-Path $Path -Leaf)"
+        }
     }
 }
 
@@ -84,7 +92,7 @@ foreach ($exe in $Program) {
     $which = if ($exe -ieq $Installed) { '' } else { " ($exe)" }
     Set-FirewallRule "HTPC: phone remote from the home network$which" $exe Allow Private -Protocol TCP -LocalPort $RemotePorts -RemoteAddress LocalSubnet
     Set-FirewallRule "HTPC: launcher not reachable on public networks$which" $exe Block Public
-    Remove-ForeignBlock $exe
+    Set-ForeignRules $exe
 }
 
 Write-Host '  Casting from the phone (catalog install.allowInbound)'
@@ -95,7 +103,7 @@ foreach ($app in (Get-Content $Catalog -Raw | ConvertFrom-Json).apps) {
         $leaf = Split-Path $path -Leaf
         Set-FirewallRule "HTPC: $($app.name) ($leaf) from the home network" $path Allow Private -RemoteAddress LocalSubnet
         Set-FirewallRule "HTPC: $($app.name) ($leaf) not reachable on public networks" $path Block Public
-        Remove-ForeignBlock $path
+        Set-ForeignRules $path
     }
 }
 

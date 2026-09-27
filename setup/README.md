@@ -29,7 +29,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
 | Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, these scripts kept in `ProgramData\HTPC\setup`, started at sign-in |
-| PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80 and 8765) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); Block rules left by a Cancel on that question removed; the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
+| PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80 and 8765) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
 `catalog.json` is the one app list for setup now and the launcher's library later.

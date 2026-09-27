@@ -22,17 +22,23 @@ enum PairOutcome { Paired, Wrong, NoCode, Locked }
 /// gets a long random token, kept in an HttpOnly cookie. On iPhone the Home Screen app has its
 /// own cookies, apart from Safari's, so it pairs by itself, the same way.
 ///
-/// The code only works while the TV shows it (2 minutes at most). Five wrong codes in a row, from
-/// any phone, cancel it and lock pairing for a minute. The QR code in Settings › Phone remote
-/// carries a one-time key instead (2 minutes, used once): scanning it pairs straight away,
-/// since whoever scans it is in front of the TV.
+/// The code only works while the TV shows it (2 minutes at most), and there is one at a time:
+/// asking while it shows gets its time left, not a new code, so another phone cannot take over
+/// someone's pairing. After a code goes unused (timed out, or the TV stopped showing it) the
+/// next one comes 30 s later at the soonest, so a phone asking again and again cannot keep
+/// pulling the Home menu over the video. Five wrong codes in a row, from any phone, cancel the
+/// code and lock pairing: for 1 minute, then 2, 4... up to an hour, until a phone pairs (at 5
+/// guesses a lock, 10,000 codes take days, and every code asked for shows on the TV). The QR code
+/// in Settings › Phone remote carries a one-time key instead (2 minutes, used once): scanning it
+/// pairs straight away, since whoever scans it is in front of the TV.
 ///
-/// Kept in %LOCALAPPDATA%\HTPC\phones.json with the remote's port. Thread-safe.
+/// Kept in %LOCALAPPDATA%\HTPC\phones.json. Thread-safe.
 /// </summary>
 sealed class PhonePairing
 {
     public const int MaxTries = 5;
-    public static readonly TimeSpan CodeLife = TimeSpan.FromMinutes(2), KeyLife = TimeSpan.FromMinutes(2), Lockout = TimeSpan.FromMinutes(1);
+    public static readonly TimeSpan CodeLife = TimeSpan.FromMinutes(2), KeyLife = TimeSpan.FromMinutes(2),
+        FirstLockout = TimeSpan.FromMinutes(1), MaxLockout = TimeSpan.FromHours(1), Cooldown = TimeSpan.FromSeconds(30);
 
     public static readonly string DefaultPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "phones.json");
@@ -40,7 +46,6 @@ sealed class PhonePairing
     sealed class Stored
     {
         public bool RequireCode { get; set; } = true;
-        public int Port { get; set; }
         public List<PairedPhone> Phones { get; set; } = new();
     }
 
@@ -54,6 +59,8 @@ sealed class PhonePairing
     DateTime codeUntil;
     int wrong;
     DateTime lockedUntil;
+    TimeSpan lockout = FirstLockout;   // the next lock's length: doubles each time, back to 1 minute once a phone pairs
+    DateTime cooldownUntil;            // no new code before this (the last one went unused)
     readonly Dictionary<string, DateTime> keys = new();   // one-time QR keys (hashed) and when they expire
 
     public PhonePairing(string path, Func<DateTime>? clock = null)
@@ -92,13 +99,6 @@ sealed class PhonePairing
         set { lock (gate) { if (data.RequireCode == value) return; data.RequireCode = value; Save(); } }
     }
 
-    /// <summary>The port the remote last listened on (0: none yet), so its address stays the same.</summary>
-    public int Port
-    {
-        get { lock (gate) return data.Port; }
-        set { lock (gate) { if (data.Port == value) return; data.Port = value; Save(); } }
-    }
-
     public List<PairedPhone> Phones
     {
         get { lock (gate) return data.Phones.ToList(); }
@@ -110,22 +110,44 @@ sealed class PhonePairing
         get { lock (gate) return code is not null && now() < codeUntil ? code : null; }
     }
 
-    /// <summary>A new code to show on the TV, or how long pairing stays locked.</summary>
-    public (string? Code, TimeSpan Locked) NewCode()
+    /// <summary>How long pairing stays locked (zero: not locked).</summary>
+    public TimeSpan LockedFor
+    {
+        get { lock (gate) return lockedUntil > now() ? lockedUntil - now() : TimeSpan.Zero; }
+    }
+
+    /// <summary>
+    /// A new code to show on the TV; or, while one shows, none and its time left; or, locked or
+    /// cooling down, none and how long to wait.
+    /// </summary>
+    public (string? Code, TimeSpan Left, TimeSpan Wait) NewCode()
     {
         lock (gate)
         {
-            if (now() < lockedUntil) return (null, lockedUntil - now());
+            var t = now();
+            if (t < lockedUntil) return (null, TimeSpan.Zero, lockedUntil - t);
+            if (code is not null)
+            {
+                if (t < codeUntil) return (null, codeUntil - t, TimeSpan.Zero);
+                Unused(codeUntil);
+            }
+            if (t < cooldownUntil) return (null, TimeSpan.Zero, cooldownUntil - t);
             code = RandomNumberGenerator.GetInt32(0, 10000).ToString("D4");
-            codeUntil = now() + CodeLife;
-            return (code, TimeSpan.Zero);
+            codeUntil = t + CodeLife;
+            return (code, CodeLife, TimeSpan.Zero);
         }
+    }
+
+    void Unused(DateTime at)
+    {
+        code = null;
+        cooldownUntil = at + Cooldown;
     }
 
     /// <summary>The TV stopped showing the code: it no longer works.</summary>
     public void CancelCode()
     {
-        lock (gate) code = null;
+        lock (gate) { if (code is not null) Unused(now() < codeUntil ? now() : codeUntil); }
     }
 
     /// <summary>Checks a code typed on a phone. Paired: the phone's new token.</summary>
@@ -141,19 +163,18 @@ sealed class PhonePairing
                 {
                     code = null;
                     wrong = 0;
-                    lockedUntil = now() + Lockout;
-                    Log.Warn("Phone pairing: 5 wrong codes, locked for a minute");
+                    lockedUntil = now() + lockout;
+                    Log.Warn($"Phone pairing: 5 wrong codes, locked for {lockout.TotalMinutes:0} min");
+                    lockout = lockout * 2 > MaxLockout ? MaxLockout : lockout * 2;
                     return (PairOutcome.Locked, null, null, 0);
                 }
                 return (PairOutcome.Wrong, null, null, MaxTries - wrong);
             }
             code = null;
-            wrong = 0;
             var (token, phone) = Add(name);
             return (PairOutcome.Paired, token, phone, MaxTries);
         }
     }
-
     /// <summary>A one-time key for the QR code in Settings (2 minutes, used once).</summary>
     public string NewKey()
     {
@@ -190,6 +211,8 @@ sealed class PhonePairing
             Name = unique, TokenHash = Hash(token), Paired = now(), LastSeen = now(),
         };
         data.Phones.Add(phone);
+        wrong = 0;
+        lockout = FirstLockout;
         Save();
         Log.Info($"Phone paired: {phone.Name} ({phone.Id})");
         return (token, phone);

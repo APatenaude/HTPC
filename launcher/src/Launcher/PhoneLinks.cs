@@ -24,8 +24,8 @@ sealed record LinkTarget(LinkKind Kind, Uri Uri, string? VideoId = null)
 /// </summary>
 static class PhoneLinks
 {
-    static readonly Regex VideoId = new("^[A-Za-z0-9_-]{11}$", RegexOptions.CultureInvariant);
-    static readonly Regex BareDomain = new(@"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(:\d{1,5})?([/?#].*)?$", RegexOptions.CultureInvariant);
+    static readonly Regex VideoId = new(@"^[A-Za-z0-9_-]{11}\z", RegexOptions.CultureInvariant);
+    static readonly Regex BareDomain = new(@"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(:\d{1,5})?([/?#].*)?\z", RegexOptions.CultureInvariant);
 
     static readonly HashSet<string> YouTubeHosts = new(StringComparer.OrdinalIgnoreCase)
         { "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "www.youtube-nocookie.com" };
