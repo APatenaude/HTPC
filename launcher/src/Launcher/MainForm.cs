@@ -706,6 +706,7 @@ sealed partial class MainForm : Form
     {
         Log.Info(active ? "In standby" : "Awake");
         overlay.Suppress(active);
+        volumeOsd.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.
         if (!tvChangedItself) _ = active ? tv.TurnOff() : tv.TurnOn();
         tvChangedItself = false;
@@ -762,6 +763,7 @@ sealed partial class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         controller.Dispose();
+        volumeWatch.Dispose();
         textFields.Dispose();
         keyboard.Dispose();
         cursor.Restore();

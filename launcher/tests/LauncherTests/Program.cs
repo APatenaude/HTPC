@@ -196,6 +196,95 @@ Console.WriteLine("== PadMapper");
     Check(presses == 1, $"R3 held 0.7 s raises one press (got {presses})");
 }
 
+// ---------------------------------------------------------------- Start + D-pad: the volume
+Console.WriteLine("== Start + D-pad (StartChord)");
+{
+    const ushort St = StartChord.Start, Up = StartChord.Up, Dn = StartChord.Down, Lf = StartChord.Left, Rt = StartChord.Right, A = 0x1000;
+    var c = new StartChord();
+    var log = new List<string>();
+    // Feeds polls 8 ms apart from `from` to `to` with the same raw buttons; what came out, in order.
+    ushort last = 0;
+    void Hold(ushort raw, long from, long to)
+    {
+        for (var t = from; t <= to; t += 8)
+        {
+            var (seen, command, repeat) = c.Update(raw, t);
+            if (command is not null) log.Add(repeat ? command + "+" : command);
+            if ((seen & St) != 0) log.Add("start");
+            last = seen;
+        }
+    }
+    string Log() { var s = string.Join(" ", log); log.Clear(); return s; }
+
+    Hold(St, 0, 200); Hold(0, 208, 216);
+    Check(Log() == "start", "Start alone: one Start, as it is let go");
+    Hold(St, 300, 340); Hold(St | Up, 348, 348);
+    Check(Log() == "volumeUp" && (last & (St | Up)) == 0, "Start + Up: volume up at once; neither button reaches the app or the launcher");
+    Hold(St | Up, 356, 348 + StartChord.RepeatDelayMs + 3 * (StartChord.RepeatEveryMs + 8)); // polls every 8 ms: a repeat can come up to 8 ms late
+    var held = Log();
+    Check(held == "volumeUp+ volumeUp+ volumeUp+ volumeUp+", "held: repeats after the delay, then steadily: " + held);
+    Hold(Up, 900, 916);
+    Check(Log() == "" && (last & Up) == 0, "Start let go first: no Start, and the held Up stays back (no stray arrow)");
+    Hold(0, 924, 932); Hold(Up, 940, 948);
+    Check(Log() == "" && (last & Up) != 0, "Up alone afterwards: an arrow again");
+    Hold(0, 956, 964);
+    Hold(St, 1000, 1016); Hold(St | Dn, 1024, 1040); Hold(St, 1048, 1064); Hold(0, 1072, 1080);
+    Check(Log() == "volumeDown", "Start + Down, Down let go first: volume down, no Start");
+    Hold(St, 1100, 1116); Hold(St | Lf, 1124, 1124 + 2000); Hold(0, 3200, 3208);
+    Check(Log() == "mute", "Start + Left: mute once, however long it is held");
+    Hold(St, 3300, 3316); Hold(St | Rt, 3324, 3340); Hold(0, 3348, 3356);
+    Check(Log() == "", "Start + Right: nothing, and Start's own action is dropped");
+    Hold(Dn, 3400, 3416); Hold(Dn | St, 3424, 3500);
+    Check(Log() == "" && (last & Dn) != 0 && (last & St) == 0, "Down already held when Start goes down: still an arrow, no volume");
+    Hold(Dn, 3508, 3508); Hold(0, 3516, 3524);
+    Check(Log() == "start", "... and Start let go is a plain Start");
+    Hold(St | A, 3600, 3616);
+    Check((last & A) != 0, "other buttons pass while Start is down");
+    Hold(0, 3624, 3632); Log();
+
+    // Through the Mouse preset: Start's play/pause only for a tap, the D-pad's arrows only alone.
+    var mouse = new PadMapper { Map = ButtonMap.Mouse };
+    var c2 = new StartChord();
+    long now = 5000;
+    void Feed(ushort raw, int polls) { for (var i = 0; i < polls; i++) { now += 8; mouse.Update(new PadState(c2.Update(raw, now).Buttons, 0, 0, 0, 0, 0, 0), now, true); } }
+    Feed(0, 2); Input.Clear();
+    Feed(St, 10); Feed(0, 2);
+    Check(Input.Snapshot().SequenceEqual(new[] { "down B3", "up B3" }), "Mouse preset, Start tapped: play/pause down and up, on release: " + string.Join(" | ", Input.Snapshot()));
+    Input.Clear();
+    Feed(St, 5); Feed(St | Up, 60); Feed(Up, 5); Feed(0, 2);
+    Check(Input.Snapshot().Length == 0, "Start + Up held 0.5 s: nothing reaches the app (no arrow, no play/pause): " + string.Join(" | ", Input.Snapshot()));
+    Input.Clear();
+    Feed(Dn, 60); Feed(0, 2);
+    var arrows = Input.Snapshot();
+    Check(arrows.First() == "down 28" && arrows.Count(x => x == "down 28") >= 3 && arrows.Last() == "up 28", "Down alone held 0.5 s: the arrow key, repeating like a held key (Edge scrolls the page): " + string.Join(" | ", arrows));
+
+    // End to end: the controller thread raises the chord, not the buttons.
+    var controller = new ControllerService();
+    var pads = new List<Pad>();
+    var chords = new List<string>();
+    controller.Pressed += (pad, repeat) => { lock (pads) pads.Add(pad); };
+    controller.Chord += (command, repeat) => { lock (chords) chords.Add(command); };
+    PadState P(ushort b) => new(b, 0, 0, 0, 0, 0, 0);
+    controller.Inject(P(0));
+    controller.Start();
+    Thread.Sleep(60);
+    controller.Inject(P(St)); Thread.Sleep(60);
+    controller.Inject(P(St | Dn)); Thread.Sleep(60);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    controller.Inject(P(St)); Thread.Sleep(60);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    controller.Dispose();
+    lock (pads) lock (chords)
+    {
+        Check(chords.SequenceEqual(new[] { "volumeDown" }), "controller: Start + Down raises volume down: " + string.Join(",", chords));
+        Check(pads.SequenceEqual(new[] { Pad.Start }), "controller: the launcher sees one Start (the tap), no Down: " + string.Join(",", pads));
+    }
+
+    Check(AudioVolume.NextLevel(47, 5) == 50 && AudioVolume.NextLevel(47, -5) == 40, "volume buttons: steps of 5, to multiples of 5");
+    Check(AudioVolume.NextLevel(45, 2) == 46 && AudioVolume.NextLevel(45, -2) == 42 && AudioVolume.NextLevel(46, 2) == 48, "Start + D-pad: steps of 2");
+    Check(AudioVolume.NextLevel(99, 2) == 100 && AudioVolume.NextLevel(100, 2) == 100 && AudioVolume.NextLevel(1, -2) == 0, "stays within 0 to 100");
+}
+
 // ---------------------------------------------------------------- VideoEndDetector
 Console.WriteLine("== VideoEndDetector");
 {
@@ -413,6 +502,27 @@ Console.WriteLine("== Alerts overlay");
     Shot("hint-keyboard-bottom", new OverlayView(Array.Empty<OverlayCard>(), hint), hd, new Rectangle(0, 1080 - 560, 1920, 560));
     Shot("cards-keyboard-top", new OverlayView(cards.Take(2).ToList(), null), hd, new Rectangle(0, 0, 1920, 560));
     Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>(), null), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
+
+    // The volume indicator: top left, clear of the alert cards (top right) and of the keyboard.
+    void VolumeShot(string name, SoundLevel level, string? output, Rectangle screen, Rectangle avoid, Action<Rectangle> check)
+    {
+        using var b = VolumeOsd.Render(level, output, screen, avoid, iconsFile, out var at);
+        check(at);
+        using var canvas = new Bitmap(screen.Width, screen.Height);
+        using (var g = Graphics.FromImage(canvas))
+        {
+            g.Clear(Color.FromArgb(40, 44, 52));
+            if (!avoid.IsEmpty) using (var kb = new SolidBrush(Color.FromArgb(22, 24, 28))) g.FillRectangle(kb, avoid);
+            g.DrawImage(b, at.X - screen.X, at.Y - screen.Y);
+        }
+        canvas.Save(Path.Combine(outDir, $"volume-{name}.png"), System.Drawing.Imaging.ImageFormat.Png);
+        Console.WriteLine($"  volume-{name}: window {at}");
+    }
+    var cardsLeft = 1920 - 96 - 680;
+    VolumeShot("45", new SoundLevel(45, false), null, hd, Rectangle.Empty, at => Check(at.Left < 96 && at.Top < 48 && at.Right < cardsLeft && at.Bottom < 250, "volume: top left, clear of the cards"));
+    VolumeShot("muted", new SoundLevel(45, true), null, hd, Rectangle.Empty, _ => { });
+    VolumeShot("output-4k", new SoundLevel(30, false), "Speakers (USB Audio and HID)", new Rectangle(0, 0, 3840, 2160), Rectangle.Empty, at => Check(at.Right < cardsLeft * 2 && at.Height > 2 * (88 + 80), "volume with the output's name, 4K: taller, still clear of the cards"));
+    VolumeShot("keyboard-top", new SoundLevel(80, false), null, hd, new Rectangle(0, 0, 1920, 560), at => Check(at.Top >= 560 - 40, "keyboard at the top: the volume below it"));
 }
 
 // ---------------------------------------------------------------- Core Audio (reads only)
@@ -452,6 +562,19 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread");
     Check(!hasAudio || outputs.Count(o => o.IsDefault) == 1, "one default output");
     Check(!hasAudio || endpoints.Where(e => e.IsDefault).All(e => e.Level == level), "the listed default output's level is the default's level");
+
+    // The volume indicator's watch: registers with Windows and stops, changing nothing. The
+    // first look only starts watching (no indicator at start).
+    var changes = 0;
+    using (var watch = new VolumeWatch())
+    {
+        watch.Changed += (_, _) => Interlocked.Increment(ref changes);
+        On(ApartmentState.STA, () => { watch.Poll(); watch.Poll(); });
+    }
+    int watchBefore;
+    lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume"));
+    Check(changes == 0 && watchBefore == 0, $"volume watch: starts and stops quietly ({changes} changes)");
+    Check(!hasAudio || CoreAudio.DefaultId() == outputs.First(o => o.IsDefault).Id, "the default output's id");
 }
 
 // ---------------------------------------------------------------- Over an app: what is left alone

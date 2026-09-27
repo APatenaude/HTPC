@@ -46,7 +46,7 @@ sealed class AlertsForm : Form
     const uint SWP_NOMOVE = 0x2, SWP_NOSIZE = 0x1, SWP_NOACTIVATE = 0x10;
 
     // The design's colours (app.css tokens).
-    static readonly Color CardBg = Color.FromArgb(0x1D, 0x20, 0x25), CardEdge = Color.FromArgb(0x2B, 0x2F, 0x36),
+    internal static readonly Color CardBg = Color.FromArgb(0x1D, 0x20, 0x25), CardEdge = Color.FromArgb(0x2B, 0x2F, 0x36),
         MainText = Color.FromArgb(0xF3, 0xF2, 0xEF), SecondText = Color.FromArgb(0xB3, 0xB5, 0xBC), Muted = Color.FromArgb(0x8E, 0x91, 0x99),
         KeyBg = Color.FromArgb(0x2B, 0x2F, 0x36), KeyEdge = Color.FromArgb(0x3F, 0x44, 0x4D), ActionText = Color.FromArgb(0xD9, 0xD8, 0xD4),
         Accent = Color.FromArgb(0x8C, 0xC2, 0xFF);
@@ -342,7 +342,7 @@ sealed class AlertsForm : Form
     }
 
     // A soft shadow under a card: rounded rectangles growing outwards, fading (0 24px 60px rgba(0,0,0,.5)).
-    static void Shadow(Graphics g, RectangleF r, float radius)
+    internal static void Shadow(Graphics g, RectangleF r, float radius)
     {
         const int steps = 8;
         for (var i = steps; i >= 1; i--)
@@ -355,7 +355,7 @@ sealed class AlertsForm : Form
         }
     }
 
-    static GraphicsPath Rounded(RectangleF r, float radius)
+    internal static GraphicsPath Rounded(RectangleF r, float radius)
     {
         var d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
         var path = new GraphicsPath();
@@ -372,6 +372,12 @@ sealed class AlertsForm : Form
     static void DrawIcon(Graphics g, Dictionary<string, string> icons, string name, RectangleF box, Color color, float weight)
     {
         if (!icons.TryGetValue(name, out var d) && !icons.TryGetValue("info", out d)) return;
+        DrawSvg(g, d, box, color, weight);
+    }
+
+    /// <summary>A 24x24 icon's path data (icons.js), stroked into the box.</summary>
+    internal static void DrawSvg(Graphics g, string d, RectangleF box, Color color, float weight)
+    {
         var state = g.Save();
         g.TranslateTransform(box.X, box.Y);
         g.ScaleTransform(box.Width / 24, box.Height / 24);
@@ -389,7 +395,7 @@ sealed class AlertsForm : Form
     // Read once per file.
     static readonly Dictionary<string, Dictionary<string, string>> IconFiles = new();
 
-    static Dictionary<string, string> IconsFor(string? file)
+    internal static Dictionary<string, string> IconsFor(string? file)
     {
         lock (IconFiles)
         {
@@ -416,6 +422,12 @@ sealed class AlertsForm : Form
     void Present(Bitmap bitmap, Rectangle at)
     {
         if (!Visible) base.Show();
+        PaintLayered(Handle, bitmap, at);
+    }
+
+    /// <summary>Puts a bitmap (per-pixel alpha) on a layered window at a screen rectangle, topmost.</summary>
+    internal static void PaintLayered(IntPtr window, Bitmap bitmap, Rectangle at)
+    {
         var screenDc = GetDC(IntPtr.Zero);
         var memDc = CreateCompatibleDC(screenDc);
         var hBitmap = bitmap.GetHbitmap(Color.FromArgb(0));
@@ -426,7 +438,7 @@ sealed class AlertsForm : Form
             var src = new Point32();
             var dst = new Point32 { X = at.X, Y = at.Y };
             var blend = new Blend { Op = 0 /* AC_SRC_OVER */, Alpha = 255, Format = 1 /* AC_SRC_ALPHA */ };
-            UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, 2 /* ULW_ALPHA */);
+            UpdateLayeredWindow(window, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, 2 /* ULW_ALPHA */);
         }
         finally
         {
@@ -436,7 +448,7 @@ sealed class AlertsForm : Form
             ReleaseDC(IntPtr.Zero, screenDc);
         }
         // Above everything topmost that came before it (the brightness layer, the keyboard).
-        SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 

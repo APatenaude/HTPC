@@ -6,11 +6,69 @@ namespace Htpc.Launcher;
 enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT }
 
 /// <summary>
+/// Start + D-pad, the volume in every app (the user's request, 27 Sept; Home is out: holding it
+/// turns the controller off): Start + Up or Down turns it up or down, repeating while held;
+/// Start + Left mutes or unmutes. Fed the raw buttons at every poll, it says what the rest of
+/// the launcher sees instead (the button map, the launcher's own buttons): while Start is down,
+/// Start is held back, and so is a D-pad button pressed meanwhile, until it is let go (even if
+/// Start goes first). A direction pressed with Start makes the volume command and drops Start's
+/// own action; Start let go without one is a plain press, seen for one poll as it comes up.
+/// The D-pad alone is untouched (arrow keys, the launcher's menus), and so is a direction
+/// already held when Start goes down. Only the D-pad itself: the stick moves the pointer.
+/// Checked in launcher\tests\LauncherTests.
+/// </summary>
+sealed class StartChord
+{
+    public const ushort Up = 0x0001, Down = 0x0002, Left = 0x0004, Right = 0x0008, Start = 0x0010;
+    const ushort DPad = Up | Down | Left | Right;
+    public const int RepeatDelayMs = 400, RepeatEveryMs = 110;
+
+    ushort previous, withStart;   // directions pressed while Start was down, held back until let go
+    bool startDown, used;         // used: a direction came while Start was down
+    long nextRepeat;
+
+    /// <returns>The buttons everything else sees, and the command to run now (volumeUp,
+    /// volumeDown, mute) with Repeat true for a repeat while held.</returns>
+    public (ushort Buttons, string? Command, bool Repeat) Update(ushort raw, long now)
+    {
+        string? command = null;
+        var repeat = false;
+        var start = (raw & Start) != 0;
+        var tap = false;
+        if (start && !startDown) { startDown = true; used = false; }
+        if (startDown && start)
+        {
+            var pressed = (ushort)(raw & DPad & ~previous);
+            if (pressed != 0)
+            {
+                used = true;
+                withStart |= pressed;
+                command = (pressed & Up) != 0 ? "volumeUp" : (pressed & Down) != 0 ? "volumeDown" : (pressed & Left) != 0 ? "mute" : null;
+                nextRepeat = now + RepeatDelayMs;
+            }
+            else if ((raw & withStart & (Up | Down)) != 0 && now >= nextRepeat)
+            {
+                command = (raw & withStart & Up) != 0 ? "volumeUp" : "volumeDown";
+                repeat = true;
+                nextRepeat = now + RepeatEveryMs;
+            }
+        }
+        if (!start && startDown) { startDown = false; tap = !used; }
+        withStart &= raw;   // a direction let go is free again
+        previous = raw;
+        var buttons = (ushort)(raw & ~withStart & ~Start);
+        if (tap) buttons |= Start;
+        return (buttons, command, repeat);
+    }
+}
+
+/// <summary>
 /// Reads the controller through XInput directly, including the Home (Guide) button, which only
 /// the undocumented XInputGetStateEx (ordinal 100) reports. Works whichever window has focus.
 /// Raises Pressed on a background thread: D-pad and left stick repeat while held; Home fires
 /// HomeDown the moment it goes down (standby wakes on that), then Home on a short press or
-/// HomeHold as soon as it has been held for 0.5 s.
+/// HomeHold as soon as it has been held for 0.5 s. Start + D-pad raises Chord instead (the
+/// volume, StartChord); Start alone then comes as it is let go.
 /// </summary>
 sealed class ControllerService : IDisposable
 {
@@ -65,6 +123,7 @@ sealed class ControllerService : IDisposable
 
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
+    public event Action<string, bool>? Chord;         // Start + D-pad (StartChord): (volumeUp|volumeDown|mute, isRepeat)
 
     /// <summary>
     /// Poll every 25 ms instead of 8 ms (standby: fewer CPU wake-ups). Not slower: at 80 ms a
@@ -140,6 +199,7 @@ sealed class ControllerService : IDisposable
     long homeDown = -1;
     bool homeHeld, ltDown, rtDown;
     long nextScan, nextBattery;
+    StartChord chord = new();
 
     void Run()
     {
@@ -158,9 +218,12 @@ sealed class ControllerService : IDisposable
 
             var pad = state.Pad;
             LastState = new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY);
-            Mapper?.Update(LastState, now, enabled: !WakeMode);
+            // Start + D-pad is the volume: the map and the launcher get the buttons without it.
+            var (seen, command, repeat) = chord.Update(pad.Buttons, now);
+            if (command is not null) RaiseChord(command, repeat);
+            Mapper?.Update(LastState with { Buttons = seen }, now, enabled: !WakeMode);
 
-            var buttons = pad.Buttons;
+            var buttons = seen;
             // The left stick counts as the D-pad.
             if (pad.LY > StickThreshold) buttons |= 0x0001;
             if (pad.LY < -StickThreshold) buttons |= 0x0002;
@@ -227,6 +290,7 @@ sealed class ControllerService : IDisposable
             {
                 Log.Info($"Controller connected in slot {slot}");
                 currentSlot = slot;
+                chord = new StartChord();
                 if (WakeMode) RumbleWake(); // switched on in standby: that wakes the box
                 nextBattery = 0;
                 // Buttons already down at connect (the Home press that switched the controller
@@ -259,6 +323,12 @@ sealed class ControllerService : IDisposable
     {
         try { Pressed?.Invoke(pad, repeat); }
         catch (Exception e) { Log.Error($"Handling {pad}", e); }
+    }
+
+    void RaiseChord(string command, bool repeat)
+    {
+        try { Chord?.Invoke(command, repeat); }
+        catch (Exception e) { Log.Error($"Handling Start + {command}", e); }
     }
 
     void SetStatus(bool connected, string? battery)

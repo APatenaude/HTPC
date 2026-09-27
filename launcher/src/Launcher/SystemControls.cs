@@ -31,14 +31,25 @@ sealed class AudioVolume
         catch (Exception e) { Warn($"Setting volume: {e.Message}"); }
     }
 
-    /// <summary>Up or down by a step (the controller's and keyboard's volume buttons: no Windows flyout); the new level.</summary>
+    /// <summary>
+    /// Up or down by a step (the controller's and keyboard's volume buttons, 5; Start + D-pad,
+    /// 2: no Windows flyout); the new level.
+    /// </summary>
     public int? Step(int delta)
     {
         if (Get() is not { } now) return null;
-        var level = Math.Clamp((now + delta) / 5 * 5, 0, 100); // keeps to multiples of 5
-        if (delta > 0 && level <= now) level = Math.Min(100, now + 5);
+        var level = NextLevel(now, delta);
         Set(level);
         if (delta > 0 && Muted == true) Muted = false; // turning it up means hearing it
+        return level;
+    }
+
+    /// <summary>The level a step leads to, kept to multiples of the step (47 up by 5: 50).</summary>
+    public static int NextLevel(int now, int delta)
+    {
+        var size = Math.Max(1, Math.Abs(delta));
+        var level = Math.Clamp((now + delta) / size * size, 0, 100);
+        if (delta > 0 && level <= now) level = Math.Min(100, now + size);
         return level;
     }
 
