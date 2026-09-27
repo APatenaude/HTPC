@@ -26,7 +26,7 @@ sealed class AlertsForm : Form
     /// <summary>One card: tone info | warn | bad; key + action = the button hint ("Home", "+15 min").</summary>
     public sealed record Alert(string Id, string Title, string? Body, string Glyph, string Tone, string? Key, string? Action);
 
-    readonly WebView2 web = new() { Dock = DockStyle.Fill };
+    WebView2 web = new() { Dock = DockStyle.Fill };   // replaced by ReleaseWebView
     readonly List<(Alert Alert, DateTime? Until)> shown = new();
     readonly System.Windows.Forms.Timer expiry = new() { Interval = 250 };
     bool ready, suppressed;
@@ -66,7 +66,20 @@ sealed class AlertsForm : Form
         base.WndProc(ref m);
     }
 
-    /// <summary>Loads the alerts page in the launcher's WebView2 environment (once, at start).</summary>
+    /// <summary>
+    /// Closes its WebView2 so the launcher can move to a newer WebView2 runtime (in standby,
+    /// when alerts are hidden anyway); Init loads the page again, and the alerts still due show.
+    /// </summary>
+    public void ReleaseWebView()
+    {
+        ready = false;
+        Controls.Remove(web);
+        web.Dispose();
+        web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
+        Controls.Add(web);
+    }
+
+    /// <summary>Loads the alerts page in the launcher's WebView2 environment (at start, and after ReleaseWebView).</summary>
     public async Task Init(CoreWebView2Environment environment, string uiDir)
     {
         _ = Handle; // WebView2 needs the window to exist; it stays hidden until there is an alert

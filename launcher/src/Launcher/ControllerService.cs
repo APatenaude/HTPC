@@ -109,6 +109,9 @@ sealed class ControllerService : IDisposable
 
     public void Start() => thread.Start();
 
+    /// <summary>The polling thread is running (part of "healthy" after a launcher update).</summary>
+    public bool Alive => thread.IsAlive && !stopping;
+
     public void Dispose() => stopping = true;
 
     /// <summary>Applies the button map of the app in front (Mouse, Keyboard presets) at every poll.</summary>

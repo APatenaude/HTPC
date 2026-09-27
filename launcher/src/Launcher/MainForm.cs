@@ -16,7 +16,7 @@ sealed partial class MainForm : Form
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     readonly Options options;
-    readonly WebView2 web = new() { Dock = DockStyle.Fill };
+    WebView2 web = new() { Dock = DockStyle.Fill };   // replaced for a newer WebView2 runtime (MainForm.Updates.cs)
     readonly AppManager apps;
     readonly ControllerService controller = new();
     readonly AudioVolume audio = new();
@@ -97,6 +97,8 @@ sealed partial class MainForm : Form
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+        // A launcher update or a restart for Windows updates left word (MainForm.Updates.cs).
+        var handoff = TakeHandoffAtStart();
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         apps.Adopt(); // apps left open by a previous launcher
@@ -118,10 +120,13 @@ sealed partial class MainForm : Form
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
         // SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
         // launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
+        // Not after an update or a quiet restart: nobody asked for the TV then.
         await tv.Discover();
         var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
-        if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
+        if (handoff is { QuietBoot: true } or { Standby: true } or { Reason: "launcher-update" }) Log.Info($"After {handoff.Reason}: the TV is left as it is");
+        else if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
         else Log.Info($"Box up {uptime.TotalHours:0.#} h: the TV is left as it is");
+        ResumeAfterHandoff();
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
