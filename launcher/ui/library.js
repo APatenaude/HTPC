@@ -113,7 +113,7 @@
       const rows = [['opt-move', 'move', 'Move'], ['opt-rename', 'pencil', 'Rename'], ['opt-icon', 'image', 'Change icon']];
       el('tileopts').innerHTML =
         '<aside class="to-panel">' +
-          `<div class="to-head">${appIcon(t, 40)}${esc(t.name)}</div>` +
+          `<div class="to-head">${appIcon(t, 40)}<span class="to-name">${esc(t.name)}</span></div>` +
           rows.map(([act, glyph, label]) => `<button class="to-item" data-nav data-id="${act}" data-act="${act}">${icon(glyph, 32, 2)}${label}</button>`).join('') +
           '<div class="to-sep"></div>' +
           `<button class="to-item danger" data-nav data-id="opt-remove" data-act="opt-remove">${icon('trash', 32, 2)}Remove from home</button>` +
@@ -232,10 +232,20 @@
         : lib.tab === 'library'
           ? [['A', 'Install or add'], ['X', 'Uninstall'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']]
           : [['A', 'Add to home'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
+      // The tab's list keeps its scroll through a redraw (install progress, the clock).
+      const old = el('addtile').querySelector('.at-main');
+      const top = old && el('addtile').dataset.tab === lib.tab ? old.scrollTop : 0;
       el('addtile').innerHTML =
         '<header class="at-header"><h1>Add a tile</h1>' + `<nav class="at-tabs" aria-label="Tile source">${tabs}</nav></header>` +
         `<main class="at-main">${body}</main>` +
         `<footer class="hints">${hints(hintList)}</footer>`;
+      el('addtile').dataset.tab = lib.tab;
+      el('addtile').querySelector('.at-main').scrollTop = top;
+    },
+    // The tab's list scrolls to the focus, with room for its ring, above the hints.
+    focused(node) {
+      const main = node.closest('.at-main');
+      if (main) { scrollIntoBox(node, main, 40); listEdges(main); }
     },
     press(button, node) {
       if (button === 'lb') { switchTab(-1); return true; }
@@ -491,7 +501,7 @@
   hostMessage('library.', (msg) => {
     switch (msg.type) {
       case 'library.available': state.libraryAvailable = !!msg.available; break;
-      case 'library.catalog':
+      case 'library.catalog': {
         lib.catalog = { apps: msg.apps || [], sites: msg.sites || [] };
         // Out of the queue and still to install: it did not.
         for (const id of lib.finished) {
@@ -502,6 +512,7 @@
         if (state.view === 'addtile' && lib.tab === 'library') { render(); focusBodyIfNeeded(); }
         else if (state.view === 'installing' || state.view === 'home') render();
         break;
+      }
       case 'library.programs':
         lib.programs = msg.list || [];
         if (state.view === 'addtile' && lib.tab === 'onbox') { render(); focusBodyIfNeeded(); }
@@ -540,7 +551,7 @@
     const rows = KB_ROWS.map((row) =>
       `<div class="kbi-row">${row.map((c) =>
         `<button class="kbi-key" data-nav data-id="${mode}-k-${c}" data-act="${keyAct}" data-arg="${c}">${c === '/' ? '&#47;' : esc(c)}</button>`).join('')}</div>`).join('');
-    const extras = mode === 'website' ? ['/', ':'] : [];
+    const extras = mode === 'website' ? [':'] : [];   // '/' is on the row above
     const doneAct = mode === 'rename' ? 'renameDone' : 'addsite';
     const spaceAct = mode === 'rename' ? 'renameSpace' : 'space';
     const delAct = mode === 'rename' ? 'renameDel' : 'del';
@@ -594,6 +605,14 @@
       { name: 'Task Manager', launchable: true, onHome: false },
       { name: 'Windows Media Player', launchable: false, note: 'Windows Installer shortcut' },
     ];
+    // #addtile?many=1, #addtile/onbox?many=1: lists longer than the screen (scrolling, rings).
+    if (/[?&]many=1/.test(location.hash)) {
+      const more = (list, n, f) => Array.from({ length: n }, (_, i) => f(list[i % list.length], i));
+      lib.catalog.apps = lib.catalog.apps.concat(more(lib.catalog.apps, 13, (a, i) =>
+        ({ ...a, id: `${a.id}${i}`, name: `${a.name} ${i + 2}`, state: 'install', logo: null })));
+      lib.catalog.sites = lib.catalog.sites.concat(more(lib.catalog.sites, 7, (s, i) => ({ ...s, id: `${s.id}${i}`, name: `${s.name} ${i + 2}`, logo: null })));
+      lib.programs = more(lib.programs, 26, (p, i) => ({ ...p, name: `${p.name} ${i + 1}` }));
+    }
   }
 
   // Demo: index.html#home?installing=1, tiles for an app installing and one that did not.

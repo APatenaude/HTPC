@@ -75,6 +75,26 @@ function renderNotices() {
     if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
     before = el.nextSibling;
   }
+  noticeAvoid(typeof focusedEl === 'function' ? focusedEl() : null);
+}
+
+// The cards never cover the focus (the status bar's Settings and Power, a tile at the top
+// right): over it, only the newest shows, on one line; still over it, at the bottom right,
+// above the hints; until the focus moves on.
+function noticeAvoid(el) {
+  const box = $('toasts');
+  if (!box) return;
+  box.classList.remove('compact', 'low');
+  if (!el || !box.children.length) return;
+  const over = () => {
+    const a = box.getBoundingClientRect(), r = el.getBoundingClientRect(), g = 8 * ($('stage').getBoundingClientRect().width / 1920 || 1);
+    return r.left - g < a.right && r.right + g > a.left && r.top - g < a.bottom && r.bottom + g > a.top;
+  };
+  if (!over()) return;
+  box.classList.add('compact');
+  if (!over()) return;
+  box.classList.add('low');
+  if (over()) box.classList.remove('low');
 }
 
 // Home pressed while an actionable card is on screen: the menu opens on its row.

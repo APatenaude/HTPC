@@ -118,8 +118,8 @@
   back();
 
   // The crowded menu: 6 apps and an alert row fit without scrolling.
-  const panel = $('menu-panel');
-  check('menu: 6 apps + an alert row fit', panel.scrollHeight <= panel.clientHeight + 1, `${panel.scrollHeight} > ${panel.clientHeight}`);
+  const panel = $('menu-panel'), rowsBox = panel.querySelector('.panel-scroll');
+  check('menu: 6 apps + an alert row fit', rowsBox.scrollHeight <= rowsBox.clientHeight + 1, `${rowsBox.scrollHeight} > ${rowsBox.clientHeight}`);
   const settingsQuick = panel.querySelector('[data-id="q-settings"]');
   const hintsBox = panel.querySelector('.hints').getBoundingClientRect();
   check('menu: the last row is above the button hints', settingsQuick.getBoundingClientRect().bottom <= hintsBox.top + 1);

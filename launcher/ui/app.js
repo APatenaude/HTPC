@@ -130,6 +130,18 @@ function renderTiles() {
   updateHomeHints();
 }
 
+// More tiles than fit: the grid scrolls (the clock and the hints stay) so the focused tile shows
+// whole, its zoom and ring too, with the next row peeking. By layout offsets (from .tiles-wrap,
+// scroll aside), not the screen: a tile still sliding (move mode) counts where it lands.
+function keepTileInView(el) {
+  const wrap = el.closest('.tiles-wrap');
+  if (!wrap) return;
+  const room = 36, top = el.offsetTop - room, bottom = el.offsetTop + el.offsetHeight + room;
+  if (top < wrap.scrollTop) wrap.scrollTop = top;
+  else if (bottom > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = bottom - wrap.clientHeight;
+  listEdges(wrap);
+}
+
 // Tiles whose place changed slide there from where they were (FLIP), instead of jumping. Not
 // while the home screen is hidden (nothing to see, no size).
 function slideTiles(before) {
@@ -174,7 +186,9 @@ function renderMenu() {
   // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
   $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
   // In place (patchHtml): the volume changing redraws its value, not the focused row's ring.
-  patchHtml($('menu-panel'),
+  // Everything but the hints is in .panel-scroll: with many apps and alerts it scrolls to the
+  // focus (setFocus), the hints stay at the bottom.
+  patchHtml($('menu-panel'), '<div class="panel-scroll">' +
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
     noticeRowsHtml() + // alerts with something to do (notices.js)
@@ -192,7 +206,7 @@ function renderMenu() {
       `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 34)}Timer</div>` +
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
-    '</div>' +
+    '</div></div>' +
     `<footer class="hints">${hints([['A', 'Select'], ['X', 'Close app'], ['B', 'Back']])}</footer>`);
   // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that
   // showed for a few seconds when an app opened).
@@ -419,7 +433,10 @@ function render() {
   for (const v of [state.view, under]) if (EXT.views[v]) EXT.views[v].render();
   sectionHooks();
   const home = $('home'), wasBehind = home.classList.contains('behind');
-  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) $(v).classList.toggle('on', v === state.view || v === under);
+  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) {
+    $(v).classList.toggle('on', v === state.view || v === under);
+    $(v).classList.toggle('under', v === under);   // its hints hide: one hint bar, the overlay's
+  }
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
@@ -446,7 +463,7 @@ function setFocus(el, chosen = true) {
   if (!el) return;
   el.classList.add('focused');
   if (chosen) state.memory[state.view] = el.dataset.id;
-  if (state.view === 'home') updateHomeHints();
+  if (state.view === 'home') { updateHomeHints(); keepTileInView(el); }
   // Settings: moving through the section list shows each section right away.
   if (el.dataset.section && el.dataset.section !== state.section) {
     state.section = el.dataset.section;
@@ -454,6 +471,13 @@ function setFocus(el, chosen = true) {
     return;
   }
   if (state.view === 'settings') settingsFocused(el);
+  const view = EXT.views[state.view];
+  if (view && view.focused) view.focused(el);
+  // Anything in a box that scrolls (a list, a panel, a dialog's list) comes into view, ring and
+  // all. (The home grid: keepTileInView, by layout, as its tiles slide.)
+  const box = state.view !== 'home' && scrollerOf(el);
+  if (box) scrollIntoBox(el, box, 16);
+  noticeAvoid(el);   // the alerts' cards move off it (notices.js)
 }
 
 function restoreFocus(id) {
@@ -471,13 +495,21 @@ function restoreFocus(id) {
 // The closest element in a direction from cur, among list; null when there is none. across:
 // left and right take only what is beside cur (wholly past its edge, and overlapping its
 // height or within 45 degrees), not a button under a wide row or far down another column.
+// Something scrolled out of its own list (a tile above the home grid's top, under the status
+// bar) is not a place to go from outside that list; within it, it is (the list scrolls to it).
 function nearest(cur, dir, list = items(), across = false) {
   const r = cur.getBoundingClientRect();
   const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const ownBox = scrollerOf(cur);
   let best = null, bestScore = Infinity;
   for (const el of list) {
     if (el === cur) continue;
     const q = el.getBoundingClientRect();
+    const box = scrollerOf(el);
+    if (box && box !== ownBox) {
+      const b = box.getBoundingClientRect(), x = q.left + q.width / 2, y = q.top + q.height / 2;
+      if (x < b.left || x > b.right || y < b.top || y > b.bottom) continue;
+    }
     const dx = q.left + q.width / 2 - cx, dy = q.top + q.height / 2 - cy;
     let main, side;
     if (dir === 'right') { main = dx; side = dy; } else if (dir === 'left') { main = -dx; side = dy; }
@@ -493,28 +525,18 @@ function nearest(cur, dir, list = items(), across = false) {
   return best;
 }
 
+// The box that clips el and scrolls it (a list, a pane: overflow not visible), or null.
+function scrollerOf(el) {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) if (getComputedStyle(p).overflowY !== 'visible') return p;
+  return null;
+}
+
+// Nothing wraps round, anywhere: past the end of a row, a list or a grid the focus stays.
 function move(dir) {
   const cur = focusedEl();
   if (!cur) { restoreFocus(); return; }
-  const view = EXT.views[state.view];
-  const best = nearest(cur, dir) || (view && view.wrap === false ? null : wrapTarget(cur, dir));
+  const best = nearest(cur, dir);
   if (best) setFocus(best);
-}
-
-// Past the end of a row or a list: the far end of the same row or column.
-function wrapTarget(cur, dir) {
-  const r = cur.getBoundingClientRect();
-  const horizontal = dir === 'left' || dir === 'right';
-  let far = null, farDist = 0;
-  for (const el of items()) {
-    if (el === cur) continue;
-    const q = el.getBoundingClientRect();
-    const inLine = horizontal ? (q.top < r.bottom && q.bottom > r.top) : (q.left < r.right && q.right > r.left);
-    if (!inLine) continue;
-    const dist = dir === 'right' ? r.left - q.left : dir === 'left' ? q.left - r.left : dir === 'down' ? r.top - q.top : q.top - r.top;
-    if (dist > farDist) { farDist = dist; far = el; }
-  }
-  return far;
 }
 
 // Settings, two columns: the section list and the section's pane. Up/down stay in their column
@@ -602,16 +624,23 @@ function settingsHints(el) {
 }
 
 // Scrolls box (overflow hidden: only this scrolls it) so el shows whole, with room around it
-// for the focus ring; the first element takes it back to the top, the last to the bottom (the
+// for the focus ring; the first element takes it back to the top, the lowest to the bottom (the
 // notes under it show). The stage is scaled: screen pixels are turned back into the box's own.
 function scrollIntoBox(el, box, room) {
   const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
   const scale = b.height / box.offsetHeight || 1;
-  const all = box.querySelectorAll('[data-nav]');
+  const all = [...box.querySelectorAll('[data-nav]')];
+  const lowest = all.reduce((low, e) => (e.getBoundingClientRect().bottom > low.getBoundingClientRect().bottom ? e : low), el);
   if (all[0] === el) box.scrollTop = 0;
-  else if (all[all.length - 1] === el) box.scrollTop = Math.min(box.scrollHeight, box.scrollTop + (r.top - b.top) / scale - room);
+  else if (lowest === el) box.scrollTop = Math.min(box.scrollHeight, box.scrollTop + (r.top - b.top) / scale - room);
   else if (r.bottom > b.bottom - room * scale) box.scrollTop += (r.bottom - b.bottom) / scale + room;
   else if (r.top < b.top + room * scale) box.scrollTop -= (b.top - r.top) / scale + room;
+}
+
+// A box that scrolls says where there is more (.more-up, .more-down: its ends fade there).
+function listEdges(box) {
+  box.classList.toggle('more-up', box.scrollTop > 2);
+  box.classList.toggle('more-down', box.scrollTop + box.clientHeight < box.scrollHeight - 2);
 }
 
 // ---- Added screens ------------------------------------------------------------------------
@@ -630,7 +659,7 @@ function scrollIntoBox(el, box, room) {
 //   addView('maps', { render(), press(button, el) -> handled, focus(items) -> element,
 //                     overlay (drawn over the view it opened from), demo(arg),
 //                     layout() (once it is on screen, to place things by their size),
-//                     wrap: false (moving past an end stays there, as in Settings) })
+//                     focused(el) (the focus moved to el: to scroll a list to it) })
 //                                    a <section id="maps" class="view"> of its own; go('maps')
 //   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
 //   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")
@@ -949,6 +978,9 @@ if (host) {
     { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B' },
     { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A' }
   ].map(demoLogo), settings: { controller: true, battery: 'full' } });
+  // ?tiles=18 in the hash: that many tiles (more than fit: the grid scrolls), e.g. #home?tiles=18.
+  const more = /[?&]tiles=(\d+)/.exec(location.hash);
+  if (more) state.tiles = Array.from({ length: Number(more[1]) }, (_, i) => ({ ...state.tiles[i % 6], id: `${state.tiles[i % 6].id}${i || ''}`, name: `${state.tiles[i % 6].name}${i >= 6 ? ' ' + (i + 1) : ''}`, running: i === 3 }));
 }
 
 // Demo (no host) with ?logos=1: an item's logo is logos/<id>.png beside the page.

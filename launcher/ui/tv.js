@@ -304,16 +304,16 @@ if (typeof settingsSection === 'function') (() => {
   // "How should the box control this TV?": the TVs found, the brands, no control.
   addView('tvmethod', {
     overlay: true,
-    wrap: false,   // a list, from Settings: it stops at its ends
-
     render() {
       const tv = state.tv;
       const found = TvUi.foundRows(tv, 'tv-mrow');
+      // The TVs and brands scroll inside the dialog (to the focus) when there are many.
       $('tvmethod').innerHTML = '<div class="tv-dialog">' +
         `<h2>How should the box control ${esc((tv.profile && tv.profile.name) || tv.screen || 'this TV')}?</h2>` +
         `<p>${found ? 'Pick your TV. Detected: it says it shows this box’s input.' : 'No TV found on the network yet. Pick your TV’s brand to see what to turn on, or skip TV control.'}</p>` +
-        (found ? `<span class="tv-label">TVs on your network</span>${found}<span class="tv-label">Not listed?</span>` : '') +
-        TvUi.methodRows(tv, 'tv-mrow', hint) +
+        '<div class="tv-list">' +
+          (found ? `<span class="tv-label">TVs on your network</span>${found}<span class="tv-label">Not listed?</span>` : '') +
+          TvUi.methodRows(tv, 'tv-mrow', hint) + '</div>' +
         `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Choose'], ['B', 'Cancel']])}</div></div>`;
     },
     focus: (list) => list.find((e) => e.classList.contains('picked')) || list[0],
