@@ -261,7 +261,7 @@ settingsSection('display', {
     const d = more.decode || {};
     const r = d.result;
     const adapter = r && r.adapter && r.adapter.name ? `${r.adapter.name} · driver ${r.adapter.driverVersion}` : '';
-    return '<header><h1>Display</h1><p>Brightness for every app, and whether video is decoded by the graphics chip.</p></header>' +
+    return '<header><h1>Display</h1><p>Brightness for every app, and which video formats the graphics chip decodes.</p></header>' +
       sliderRow('brightness', 'Brightness', 'Dims everything on screen, in every app. Can only go darker than the TV’s own setting.', true) +
       '<div class="srow decode">' +
         '<div class="text"><span class="label">Hardware video decoding</span>' +
@@ -270,7 +270,7 @@ settingsSection('display', {
         `<div class="sbutton" data-nav data-id="decode-check" data-act="decode-check">${d.running ? 'Checking…' : 'Check now'}</div>` +
       '</div>' +
       codecList(r) +
-      '<p class="snote">What the graphics driver can decode in 4K. Playing test clips comes with the link player.</p>';
+      '<p class="snote">Check now asks the graphics driver which of these formats it can decode in 4K. It reads what the driver says; it does not play a video.</p>';
   },
   demo() {
     state.brightness = 100;

@@ -182,6 +182,9 @@ function renderMenu() {
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
     '</div>' +
     `<footer class="hints">${hints([['A', 'Select'], ['X', 'Close app'], ['B', 'Back']])}</footer>`);
+  // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that
+  // showed for a few seconds when an app opened).
+  if ($('menu-app')) patchHtml($('menu-app'), typeof menuAppCard === 'function' ? menuAppCard() : '');
 }
 
 const POWER = [
@@ -690,6 +693,12 @@ function demoRoute(hash) {
   if (EXT.views[view] && EXT.views[view].demo) EXT.views[view].demo(arg);
   // #timer/video: the sleep timer set to "when this video ends", 23 minutes left.
   if (view === 'timer' && arg === 'video') state.timer = { label: 'This video ends', endsAt: 'video', minutesLeft: 23 };
+  // #menu/twitch: the Home menu over that app, open (its buttons beside the panel).
+  if (view === 'menu' && arg) {
+    const t = state.tiles.find((x) => x.id === arg);
+    if (t) { t.running = true; state.current = arg; }
+    if (typeof mapsDemo === 'function') mapsDemo();
+  }
   go(view);
 }
 

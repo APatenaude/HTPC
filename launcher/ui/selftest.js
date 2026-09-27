@@ -465,6 +465,18 @@
   check('Editor: B closes the choice, back on the button', !maps.picking && focusId() === 'b-start', focusId());
   reset('home');
 
+  // ---- The Home menu over an app says what its buttons do ---------------------------------------
+  state.tiles.find((t) => t.id === 'twitch').running = true;
+  state.current = 'twitch';
+  go('menu');
+  const card = $('menu-app').textContent;
+  check('Menu over an app: its buttons beside the panel, and how to go back', /Twitch/.test(card) && /Enter/.test(card) && /Back to Twitch/.test(card) && /This menu/.test(card), card.slice(0, 80));
+  back();
+  state.current = null;
+  go('menu');
+  check('Menu over the home screen: no app card', $('menu-app').textContent === '');
+  reset('home');
+
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
   console.log = log;

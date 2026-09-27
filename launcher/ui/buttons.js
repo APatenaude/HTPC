@@ -17,6 +17,7 @@ const maps = {
   combo: null,       // { mods: [], key } while building a key combination
   row: 'b-a',        // the row to come back to after picking
   choosingPreset: false,   // the preset's choice is open in the side panel
+  asked: 0,          // when the maps were last asked for or came (the Home menu's card asks again)
 };
 
 // Rows of the editor, two columns, pairs side by side: [control, badge]. Home is last, fixed.
@@ -146,8 +147,43 @@ function openEditor(id) {
 
 hostMessage('maps.data', (m) => {
   maps.data = m;
-  if (state.view === 'maps' || state.view === 'buttons') render();
+  maps.asked = Date.now();
+  if (state.view === 'maps' || state.view === 'buttons' || state.view === 'menu') render();
 });
+
+// ---- The Home menu over an app: what its buttons do -----------------------------------------
+// Beside the menu's panel while it is up over an app (app.js's renderMenu draws it into
+// #menu-app), instead of a hint over the app each time it opens: the same buttons (the sticks,
+// A B X Y, LB RB, Start, R3, Home) from the app's map, how to go back to it and where to change
+// them. The maps come from the host, asked again after a minute.
+const MENU_CARD_CONTROLS = ['leftStick', 'rightStick', 'a', 'b', 'x', 'y', 'lb', 'rb', 'start', 'r3'];
+
+function menuAppCard() {
+  const id = state.current;
+  const tile = id && state.tiles.find((t) => t.id === id);
+  if (!tile) return '';
+  if (!maps.data || Date.now() - (maps.asked || 0) > 60000) { maps.asked = Date.now(); send({ type: 'maps.get' }); }
+  const app = mapApp(id);
+  if (!app) return '';
+  let rows, how;
+  if (app.map.preset === 'controller') {
+    how = `${app.name} reads the controller itself`;
+    rows = id === 'moonlight' ? [['Home', 'To the game PC'], ['Hold Home', 'This menu']]
+      : [['Home', 'This menu'], ['Hold Home', 'Power'], ['R3', 'On-screen keyboard']];
+  } else {
+    how = `${PRESET_NAMES[app.map.preset] || app.map.preset} preset${Object.keys(app.map.changes).length ? ', changed' : ''}`;
+    rows = MENU_CARD_CONTROLS.map((c) => [(MAP_CONTROLS.find(([k]) => k === c) || [c, c])[1], valueOf(app, c), c])
+      .filter(([, v]) => v && v !== 'none').map(([badge, v, c]) => [badge, actionLabel(c, v)]);
+    rows.push(['Home', 'This menu']);
+  }
+  return '<div class="ma-card">' +
+    `<div class="ma-head"><span style="display:flex;color:${esc(tile.color || 'inherit')}">${icon(tile.glyph, 40)}</span>` +
+      `<b>${esc(app.name)}</b><span class="ma-how">${esc(how)}</span></div>` +
+    `<div class="ma-grid">${rows.map(([b, l]) =>
+      `<div class="ma-row"><span class="key${b.length > 1 ? ' wide' : ''}">${esc(b)}</span><span>${esc(l)}</span></div>`).join('')}</div>` +
+    `<div class="ma-foot"><span><span class="key">B</span>Back to ${esc(app.name)}</span>` +
+      `<span>${icon('controller', 26)}Change them with Buttons, in this menu</span></div></div>`;
+}
 
 // The focused element of a scrolling list stays in view, clear of the list's faded ends (the
 // list scrolls, nothing around it: app.js's scrollIntoBox); the ends fade only where there is
