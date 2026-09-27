@@ -56,15 +56,14 @@ No newer Intel driver is needed for decoding; what is missing is the HEVC extens
 
 | | |
 |---|---|
-| Box | Ethernet, 1 Gbps (Realtek). Wi-Fi (Realtek 8821CE) unused. Network profile: Public |
-| Box's TV (per the user) | Bedroom TV: TCL 43S425-CA Roku TV, Roku OS 15.3.4, on Wi-Fi |
-| Other Roku on the network | Living room TV: TCL 65S41-CA. Not to be used for tests |
-| EDID on the box's HDMI | Maker TCL, name `65S41CA`, product code 0000, 2022 |
-| Discovery | SSDP `ST: roku:ecp` finds both TVs, though the bedroom TV missed the first search; ECP on port 8060 |
+| Box | Ethernet, 1 Gbps (Realtek). Wi-Fi (Realtek 8821CE) unused. Network profile: Private (setup) |
+| Box's TV | The 65" TCL 65S41-CA, whose Roku name is "Living room tv" (Roku OS 15.3.4), on HDMI 1. Corrected 26 Sept 2026: the user first said "bedroom", then confirmed this TV and allowed on/off tests on it |
+| Other Roku on the network | Roku name "Bedroom TV": TCL 43S425-CA. Not ours: never sent a command |
+| EDID on the box's HDMI | Maker TCL, name `65S41CA`, product code 0000, 2022; its CEC physical address 1.0.0.0 = HDMI 1 |
+| Discovery | SSDP `ST: roku:ecp` on the physical adapter (Hyper-V's vEthernet swallows the multicast otherwise); ECP on port 8060 |
 | Power features | `supports-warm-standby` and `supports-wake-on-wlan` true on both |
-| ECP mode | **limited** on both: `query/device-info` and `query/active-app` answer, `query/apps` is refused ("ECP command not allowed in Limited mode") |
+| ECP mode | The box's TV: **enabled** ("Control by mobile apps" set to Enabled by the user; Limited refuses key presses). Fast TV start turned on by the user |
 
-The EDID names the living room model while the user says the box is on the bedroom TV, so
-either TCL reuses EDID names across models or the cabling differs from what we think. Either way,
-matching a TV profile by EDID alone (SPEC N7) may not tell two TCL Roku TVs apart; the TV step in
-first-run setup should confirm the match, for example by checking which TV reports the box's input as active.
+The Roku names don't match the rooms; the EDID (65S41CA) matches the box's TV. TCL's EDID has
+product code 0000 and serial 0, so two TVs of the same model would share one key: the TV step in
+first-run setup binds a TV only on positive evidence (it reports the box's HDMI input as active).

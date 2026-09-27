@@ -1,0 +1,21 @@
+/* Wi-Fi rows and the join form (design: Settings: Wi-Fi). Also used by the first-run Wi-Fi step. */
+
+.wifi-row { gap: 24px; }
+.wifi-glyph { display: flex; color: var(--text-2); }
+.wifi-row.current .wifi-glyph, .wifi-row .ok { color: #7FD1AE; }
+.wifi-row.warn .wifi-glyph, .wifi-row.warn .label { color: var(--warn); }
+.wifi-lock { display: flex; color: var(--muted); }
+.wifi-note { margin: 18px 0 0; display: flex; align-items: center; gap: 16px; font-size: 23px; color: var(--muted); }
+.wifi-note.error { color: var(--warn); }
+.wifi-field .text { gap: 12px; }
+.wifi-field input {
+  width: 100%; max-width: 900px; height: 60px; box-sizing: border-box; padding: 0 20px; border: 0; border-radius: 14px;
+  background: var(--bg); color: var(--text); font: 28px 'Atkinson Hyperlegible', sans-serif; outline: none; caret-color: var(--accent);
+}
+.wifi-field.focused input { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Many networks: the list scrolls inside the pane (the focused row is scrolled into view:
+   settings-network.js), the rest of the section stays put. */
+.spane main:has(.wifi-scroll) { min-height: 0; overflow: hidden; }
+.wifi-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 14px; padding: 6px; margin: -6px; }
+.wifi-scroll > .srow { flex-shrink: 0; }

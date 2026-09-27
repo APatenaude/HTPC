@@ -437,34 +437,21 @@ function Expand-ZipSafely([string]$Zip, [string]$To) {
 
 # --- Progress for the launcher ------------------------------------------------------------------
 
-# The job's progress file (the job runner picks where: state\, admin-write, user-read). The
-# launcher follows it: phase start|download|install|ready|verify|done|failed, percent, message,
-# and for multi-step jobs step, n (1-based) of m.
-$script:JobProgressFile = $null
-$script:JobProgressBase = @{}
+# Progress for the launcher: phase start|download|install|restorepoint|scan|ready|verify|done|
+# failed, percent, message ("Installing 2 of 5: ..."). Inside the \HTPC\Jobs runner this is the
+# runner's own progress file (Job-Common.ps1's Write-JobProgress, state\library-progress.json);
+# tests and dev runs set $UpdateProgressFile instead, or just read the console.
+$UpdateProgressFile = $null
 
-function Set-JobProgressFile([string]$Path, [hashtable]$Base) {
-    $script:JobProgressFile = $Path
-    $script:JobProgressBase = if ($Base) { $Base } else { @{} }
-}
-
-function Write-JobProgress {
-    param(
-        [Parameter(Mandatory)][string]$Phase,
-        [int]$Percent = 0,
-        [string]$Message = '',
-        [hashtable]$Extra
-    )
-    if (-not $script:JobProgressFile) { return }
-    $o = [ordered]@{}
-    foreach ($k in $script:JobProgressBase.Keys) { $o[$k] = $script:JobProgressBase[$k] }
-    $o.phase = $Phase
-    $o.percent = [Math]::Max(0, [Math]::Min(100, $Percent))
-    $o.message = $Message
-    if ($Extra) { foreach ($k in $Extra.Keys) { $o[$k] = $Extra[$k] } }
-    $o.updated = [DateTime]::UtcNow.ToString('o')
-    try { Write-AtomicText $script:JobProgressFile ($o | ConvertTo-Json -Depth 5 -Compress) }
-    catch { Write-Host "  ! progress not written: $($_.Exception.Message)" }
+function Write-UpdateProgress([string]$Phase, [int]$Percent = 0, [string]$Message = '') {
+    Write-Host "  [$Phase $Percent%] $Message"
+    if (Get-Command Write-JobProgress -CommandType Function -ErrorAction SilentlyContinue) {
+        Write-JobProgress $Phase ([Math]::Max(0, [Math]::Min(100, $Percent))) $Message
+        return
+    }
+    if (-not $UpdateProgressFile) { return }
+    $o = [ordered]@{ phase = $Phase; percent = [Math]::Max(0, [Math]::Min(100, $Percent)); message = $Message; at = (Get-Date).ToString('s') }
+    try { Write-AtomicText $UpdateProgressFile ($o | ConvertTo-Json -Compress) } catch { }
 }
 
 # --- Restore points ---------------------------------------------------------------------------------
@@ -486,6 +473,15 @@ function New-VerifiedRestorePoint([string]$Description) {
 }
 
 # --- Low priority -----------------------------------------------------------------------------------
+
+# The start of every update job: the box must not go to sleep in the middle (the launcher never
+# lets Windows sleep on its own, but its "real sleep after hours of standby" could), and the job
+# runs at low priority so a video can keep playing.
+function Enter-UpdateJob {
+    Initialize-UpdateNative
+    [void][HtpcUpdate.Native]::SetThreadExecutionState(0x80000001)   # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+    Set-LowPriority
+}
 
 # Below-normal priority and EcoQoS for a process (default: this one), so an update can run
 # while a video plays (the same as the library's installs).

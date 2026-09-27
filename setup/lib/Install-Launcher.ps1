@@ -49,4 +49,19 @@ if ($from -ne $keep) {
     Write-Same "setup scripts already in $keep"
 }
 
+# The install/uninstall job runner and the catalog it trusts live beside the launcher in Program
+# Files (admin-write only), so a standard process cannot tamper with what the elevated \HTPC\Jobs
+# task runs or the ids it trusts. The launcher reads this catalog too.
+$jobLib = Join-Path $installDir 'lib'
+$jobDir = Join-Path $installDir 'jobs'
+New-Item -ItemType Directory -Force $jobLib | Out-Null
+New-Item -ItemType Directory -Force $jobDir | Out-Null
+# All of lib\: the job verbs use the update scripts too (UpdateCore, LauncherUpdate,
+# WindowsUpdate, AppUpdaters, Install-Winget), and a launcher update replaces this folder with
+# its release's lib\ as a whole (lib\LauncherUpdate.ps1), so both keep the same set.
+Copy-Item (Join-Path $from 'lib\*.ps1') $jobLib -Force
+if (Test-Path (Join-Path $from 'jobs')) { Copy-Item (Join-Path $from 'jobs\*') $jobDir -Force }
+Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
+Write-Change "job runner and trusted catalog in $installDir"
+
 Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' 'HTPC launcher' "`"$target`"" -Type String

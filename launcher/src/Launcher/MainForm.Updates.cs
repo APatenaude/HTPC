@@ -13,26 +13,19 @@ namespace Htpc.Launcher;
 ///   - leaving for an update (exit code 75, which the watchdog does not count as a crash) and
 ///     restarting the box for Windows updates, with a handoff so the next launcher starts
 ///     quietly (no TV on, back to standby);
-///   - a newer WebView2 runtime: in standby, the three WebViews (this window, the keyboard, the
-///     alerts; one environment) are closed and opened again on it, without a restart.
+///   - a newer WebView2 runtime: in standby, the WebViews (this window and the keyboard,
+///     one environment) are closed and opened again on it, without a restart.
 /// </summary>
 sealed partial class MainForm
 {
     UpdateService? updates;
-    TaskJobLane? updateLane;
     EventWaitHandle? healthySignal;
     LauncherHandoff? startHandoff;
-    IAlerts? updateAlerts;
     CoreWebView2Environment? watchedEnvironment;
     bool webViewUpdatePending;
     bool refreshingWebViews;
     bool leaving;
 
-    /// <summary>
-    /// The alerts updates raise (the pill "N updates", results). A stand-in until the alerts
-    /// work merges (AlertsShim.cs); then this returns its IAlerts. Calls come from any thread.
-    /// </summary>
-    IAlerts UpdateAlerts => updateAlerts ??= new UiThreadAlerts(this, new PillAlerts(Post));
 
     /// <summary>MainForm.OnLoad, before the TV is turned on: what the launcher before this one left.</summary>
     LauncherHandoff? TakeHandoffAtStart() => startHandoff = options.Setup ? null : LauncherHandoff.TakeAtStart();
@@ -59,8 +52,8 @@ sealed partial class MainForm
     {
         if (updates is not null) return;
         var scripts = UpdateService.FindScriptsDir(options.CatalogPath);
-        updateLane = new TaskJobLane(scripts);
-        updates = new UpdateService(updateLane, UpdateAlerts, options.CatalogPath, scripts)
+        // The library's queue is the box's one job lane: installs and updates, one at a time.
+        updates = new UpdateService(library, alerts, options.CatalogPath, scripts)
         {
             // Called from the lane's thread and timers: asked on the UI thread.
             AtHomeOrStandby = () => OnUiThread(() => standby.Active || (LauncherActive && !keyboard.Visible && apps.ForegroundApp() is null)),
@@ -83,7 +76,7 @@ sealed partial class MainForm
             if (active && webViewUpdatePending) _ = RefreshWebViewsSoon();
             if (!active) RestoreHandedOverApps();
         };
-        standby.HoldOffRealSleep = () => updateLane.Busy;
+        standby.HoldOffRealSleep = () => library.Busy;
         var minute = -1;
         clock.Tick += (_, _) =>
         {
@@ -117,7 +110,7 @@ sealed partial class MainForm
                         if (e.GetString() is { } appId && apps.IsRunning(appId)) apps.Close(appId);
                 why = updates.UpdateAll();
                 break;
-            case "updates.windowsScan": updates.ScanWindows(); break;
+            case "updates.windowsScan": why = updates.ScanWindows(); break;
             case "updates.windowsCancel": if (!updates.CancelWindowsScan()) why = "It could not be stopped"; break;
             case "updates.windowsInstall": updates.InstallWindows(tonight: Str("when") == "tonight"); break;
             case "updates.restart": updates.Restart(tonight: Str("when") == "tonight"); break;
@@ -231,7 +224,6 @@ sealed partial class MainForm
             Log.Info("Closing the WebViews for the new WebView2 runtime");
             uiReady = false;
             keyboard.ReleaseWebView();
-            alerts.ReleaseWebView();
             Controls.Remove(web);
             web.Dispose();
             web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
@@ -247,14 +239,4 @@ sealed partial class MainForm
         catch (Exception e) { Log.Error("Moving to the new WebView2 runtime", e); }
         finally { refreshingWebViews = false; }
     }
-}
-
-/// <summary>An IAlerts whose calls may come from any thread, passed on to the UI thread.</summary>
-sealed class UiThreadAlerts(Control ui, IAlerts inner) : IAlerts
-{
-    void OnUi(Action a) { if (ui.IsHandleCreated && !ui.IsDisposed) ui.BeginInvoke(a); }
-    public void Raise(AlertSpec alert, Action? onAction = null) => OnUi(() => inner.Raise(alert, onAction));
-    public void Update(string id, Func<AlertSpec, AlertSpec> change) => OnUi(() => inner.Update(id, change));
-    public void Clear(string id) => OnUi(() => inner.Clear(id));
-    public bool ClaimsHome() => inner.ClaimsHome();
 }

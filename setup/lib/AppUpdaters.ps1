@@ -1,10 +1,8 @@
-# App updates that are not plain "winget upgrade", and the apps' own updaters turned off.
-# Dot-source it after UpdateCore.ps1:
-#   Disable-AppSelfUpdate   machine part: files that make an app update itself, removed from
-#                           its folder (install and upgrade use the same function, on the
-#                           staging copy, before it goes in place)
+# App updates that are not plain "winget upgrade" (run as SYSTEM through jobs\upgrade.ps1).
+# Dot-source it after UpdateCore.ps1 and AppCore.ps1:
 #   Update-GithubApp        a GitHub-zip app (VacuumTube) to its latest release: download,
-#                           check, unpack, disable its updater, swap folders (run as SYSTEM)
+#                           check, unpack, turn its own updater off (AppCore's
+#                           Disable-AppSelfUpdate, the same as a fresh install), swap folders
 #   Get-GithubAppLatest     the latest tag of such an app, with no API call (for the checks)
 #
 # The catalog says what to turn off, per app (install.selfUpdate):
@@ -13,25 +11,11 @@
 #                installer that would try to run when the app quits)
 #   userDirs     per-user leftovers the launcher deletes as the user (a SYSTEM job never writes
 #                in a user's folders): VacuumTube's %LOCALAPPDATA%\vacuumtube-updater
-# Stremio's own "update available" notice is off through its launch arguments (catalog:
-# launch.args, --autoupdater-endpoint to a local port where nothing answers).
 
 # The GitHub API, only for the asset list and digests when an app is actually updated (the
 # daily checks read tags without it: 60 API calls an hour is GitHub's limit without a token).
 $GithubApiSource = New-UpdateSource -Repo 'x/x' -BaseUrl 'https://api.github.com' -AllowedHosts @('api.github.com')
 
-function Disable-AppSelfUpdate($App, [string]$Dir) {
-    $su = $App.install.PSObject.Properties['selfUpdate']
-    if (-not $su) { return }
-    foreach ($relative in @($su.Value.removeFiles | Where-Object { $_ })) {
-        if ($relative -match '(^|\\|/)\.\.(\\|/|$)' -or [IO.Path]::IsPathRooted($relative)) { throw "selfUpdate.removeFiles must stay inside the app folder: $relative" }
-        $path = Join-Path $Dir $relative
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Force
-            Write-Host "  + $($App.name): removed $relative (the app's own updater)"
-        }
-    }
-}
 
 # Latest tag and the installed version of a GitHub-zip app. Version strings are compared as
 # numbers (major.minor.patch); anything else is "unknown" and never offered as an update.
@@ -73,14 +57,14 @@ function Update-GithubApp {
     $exe = Join-Path $dir $i.exe
     Assert-TrustedPath $dir $ProgramFilesDir
 
-    Write-JobProgress 'download' 2 "Looking for a new $($App.name)"
+    Write-UpdateProgress 'download' 2 "Looking for a new $($App.name)"
     $repoSource = Get-RepoSource $Source $i.repo
     $tag = Get-LatestTag $repoSource
     $latest = ConvertTo-SemVer $tag
     $installed = Get-FileSemVer $exe
     if (-not $latest -or -not $installed) { throw (New-UpdateError 'failed' "$($App.name): cannot compare versions (installed $installed, latest $tag)") }
     if ($latest -le $installed) {
-        Write-JobProgress 'done' 100 "$($App.name) is up to date ($(Format-SemVer $installed))"
+        Write-UpdateProgress 'done' 100 "$($App.name) is up to date ($(Format-SemVer $installed))"
         return
     }
 
@@ -94,10 +78,10 @@ function Update-GithubApp {
         $zip = Join-Path $stage $asset.Name
         Save-ReleaseAsset -Source $repoSource -Tag $tag -Name $asset.Name -Size $asset.Size -Sha256 $asset.Sha256 -OutFile $zip -OnProgress {
             param($bytes, $size)
-            Write-JobProgress 'download' ([int](5 + 70 * $bytes / [Math]::Max($size, 1))) ("Downloading {0} {1} ({2:N0} of {3:N0} MB)" -f $App.name, $tag, ($bytes / 1MB), ($size / 1MB))
+            Write-UpdateProgress 'download' ([int](5 + 70 * $bytes / [Math]::Max($size, 1))) ("Downloading {0} {1} ({2:N0} of {3:N0} MB)" -f $App.name, $tag, ($bytes / 1MB), ($size / 1MB))
         }
 
-        Write-JobProgress 'install' 78 "Unpacking $($App.name) $tag"
+        Write-UpdateProgress 'install' 78 "Unpacking $($App.name) $tag"
         $unpacked = Join-Path $stage 'unpacked'
         Expand-ZipSafely $zip $unpacked
         $top = @(Get-ChildItem -LiteralPath $unpacked)
@@ -114,7 +98,7 @@ function Update-GithubApp {
         foreach ($p in $new, $old) { if (Test-Path -LiteralPath $p) { Assert-TrustedPath $p $ProgramFilesDir; Remove-Item -LiteralPath $p -Recurse -Force } }
         Copy-Item -LiteralPath $from $new -Recurse
 
-        Write-JobProgress 'install' 90 "Installing $($App.name) $tag"
+        Write-UpdateProgress 'install' 90 "Installing $($App.name) $tag"
         Stop-AppFromFolder $dir
         Move-WriteThrough $dir $old
         try {
@@ -124,7 +108,7 @@ function Update-GithubApp {
             throw
         }
         Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
-        Write-JobProgress 'done' 100 "$($App.name) updated to $(Format-SemVer $latest)" @{ version = (Format-SemVer $latest) }
+        Write-UpdateProgress 'done' 100 "$($App.name) updated to $(Format-SemVer $latest)"
     } finally {
         Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     }

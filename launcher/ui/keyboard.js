@@ -3,7 +3,8 @@
 // focus, over the app, and sends it the controller; what it types goes to the app through
 // Windows input.
 //   From the host: {type:'open', field, password} {type:'input', button}
-//   To the host:   {type:'ready'} {type:'type', text} {type:'key', key: backspace|enter|left|right} {type:'close'}
+//   To the host:   {type:'ready'} {type:'type', text} {type:'close'}
+//                  {type:'key', key: backspace|enter|left|right|tab|refresh|zoomIn|zoomOut|fullscreen|volumeUp|volumeDown|mute}
 
 const host = window.chrome && window.chrome.webview;
 const send = (msg) => host ? host.postMessage(msg) : console.log('to host', msg);
@@ -39,6 +40,17 @@ function rows() {
       { id: 'right', icon: 'chevright', aria: 'Cursor right' },
       { id: 'enter', w: 170, label: 'Enter', primary: true },
     ],
+    // Keys a controller has no button for (website apps): sent by the launcher.
+    [
+      { id: 'extra', key: 'tab', w: 110, label: 'Tab' },
+      { id: 'extra', key: 'refresh', w: 132, label: 'Refresh' },
+      { id: 'extra', key: 'zoomOut', w: 110, label: 'Zoom −', aria: 'Zoom out' },
+      { id: 'extra', key: 'zoomIn', w: 110, label: 'Zoom +', aria: 'Zoom in' },
+      { id: 'extra', key: 'fullscreen', w: 150, label: 'Full screen' },
+      { id: 'extra', key: 'volumeDown', w: 110, label: 'Vol −', aria: 'Volume down' },
+      { id: 'extra', key: 'volumeUp', w: 110, label: 'Vol +', aria: 'Volume up' },
+      { id: 'extra', key: 'mute', w: 110, label: 'Mute' },
+    ],
   ];
 }
 
@@ -51,6 +63,7 @@ function render() {
       const cls = ['kb-key'];
       if (k.w) cls.push('w' + k.w);
       if (k.primary) cls.push('primary');
+      if (k.id === 'extra') cls.push('extra');
       if (r === focus.row && c === focus.col) cls.push('on');
       if (k.id === 'shift' && shift === 'once') cls.push('latched');
       if (k.id === 'shift' && shift === 'lock') cls.push('locked');
@@ -91,6 +104,7 @@ function press(k) {
     case 'symbols': symbols = !symbols; break;
     case 'left': case 'right': send({ type: 'key', key: k.id }); break;
     case 'enter': send({ type: 'key', key: 'enter' }); break;
+    case 'extra': send({ type: 'key', key: k.key }); break;
   }
 }
 

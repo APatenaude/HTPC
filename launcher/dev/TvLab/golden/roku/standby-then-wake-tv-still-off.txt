@@ -1,0 +1,35 @@
++   0.0s roku GET /query/device-info -> 200
++   0.0s roku GET /query/active-app -> 200
++   0.0s -- standby
++   0.0s roku POST /keypress/PowerOff -> 200
++   5.0s roku GET /query/device-info -> 200
++  10.0s roku GET /query/device-info -> 200
++  15.0s roku GET /query/device-info -> 200
++  20.0s roku GET /query/device-info -> 200
++  25.0s roku GET /query/device-info -> 200
++  30.0s roku GET /query/device-info -> 200
++  35.0s roku GET /query/device-info -> 200
++  40.0s roku GET /query/device-info -> 200
++  45.0s roku GET /query/device-info -> 200
++  50.0s roku GET /query/device-info -> 200
++  55.0s roku GET /query/device-info -> 200
++  60.0s roku GET /query/device-info -> 200
++  60.0s -- wake
++  60.0s roku GET /query/device-info -> 200
++  60.0s roku POST /keypress/PowerOn -> 200
++  61.0s roku GET /query/device-info -> 200
++  62.0s roku GET /query/device-info -> 200
++  63.0s roku GET /query/device-info -> 200
++  63.0s roku GET /query/active-app -> 200
++  68.0s roku GET /query/device-info -> 200
++  68.0s roku GET /query/active-app -> 200
++  73.0s roku GET /query/device-info -> 200
++  73.0s roku GET /query/active-app -> 200
++  78.0s roku GET /query/device-info -> 200
++  78.0s roku GET /query/active-app -> 200
++  83.0s roku GET /query/device-info -> 200
++  83.0s roku GET /query/active-app -> 200
++  88.0s roku GET /query/device-info -> 200
++  88.0s roku GET /query/active-app -> 200
++  93.0s roku GET /query/device-info -> 200
++  93.0s roku GET /query/active-app -> 200

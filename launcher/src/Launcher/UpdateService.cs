@@ -49,7 +49,7 @@ sealed class UpdatesSaved
 ///   - The launcher's own update is swapped in only at Home or in standby, never with an app in
 ///     front, and needs the watchdog (which starts the new launcher).
 ///   - Everything that installs runs in the one job lane, at low priority, so a video can keep
-///     playing (IJobLane).
+///     playing (LibraryService, the box's one job lane: library installs and updates alike).
 /// Trust: the launcher only reads here; the SYSTEM job (setup\lib\LauncherUpdate.ps1) downloads
 /// and checks again on its own, from the pinned repository.
 /// </summary>
@@ -65,7 +65,7 @@ sealed class UpdateService
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
     static readonly TimeSpan CheckEvery = TimeSpan.FromHours(20);
 
-    readonly IJobLane lane;
+    readonly LibraryService lane;
     readonly IAlerts alerts;
     readonly string catalogPath;
     readonly string scriptsDir;
@@ -89,7 +89,7 @@ sealed class UpdateService
     /// <summary>Open Settings › Updates (the pill's action).</summary>
     public Action? OpenUpdates { get; set; }
 
-    public UpdateService(IJobLane lane, IAlerts alerts, string catalogPath, string scriptsDir)
+    public UpdateService(LibraryService lane, IAlerts alerts, string catalogPath, string scriptsDir)
     {
         this.lane = lane;
         this.alerts = alerts;
@@ -232,7 +232,7 @@ sealed class UpdateService
         foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Catalog", catalogPath })
             psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
-        TaskJobLane.LowPriority(p);
+        LowPriority(p);
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -292,8 +292,24 @@ sealed class UpdateService
         AppUpdateInfo? app;
         lock (gate) app = saved.Apps.FirstOrDefault(a => a.Id == id);
         if (app is null || !app.Update) return "No update for that app";
-        lane.Enqueue(new LaneJob(Token(app), $"Updating {app.Name}", app.Scope == "user" || app.Source == "winget-self" ? JobScope.User : JobScope.Machine));
-        return null;
+        return Queue(app);
+    }
+
+    // An app's update in the lane: catalog apps through the library's own upgrade (it knows their
+    // scope), winget itself as a box job run as the user.
+    string? Queue(AppUpdateInfo app)
+    {
+        string error;
+        var ok = app.Source == "winget-self"
+            ? lane.EnqueueBoxJob(new LibraryJob("", "winget-update", false) { BoxJob = true, AsUser = true, Label = "Updating winget" }, out error)
+            : lane.Enqueue(app.Id, "upgrade", false, out error);
+        return ok ? null : error;
+    }
+
+    string? QueueBox(string verb, string arg, string label, TimeSpan? stall = null, Func<bool>? waitUntil = null)
+    {
+        var job = new LibraryJob(arg, verb, false) { BoxJob = true, Label = label, Stall = stall, WaitUntil = waitUntil };
+        return lane.EnqueueBoxJob(job, out var error) ? null : error;
     }
 
     /// <summary>The launcher itself: needs the watchdog, swaps only at Home or in standby.</summary>
@@ -306,12 +322,7 @@ sealed class UpdateService
             return $"Version {r.Version} needs setup to run again";
         if (Process.GetProcessesByName("HtpcWatchdog").Length == 0)
             return "Updating the launcher needs the watchdog. Run setup again.";
-        lane.Enqueue(new LaneJob(LauncherToken(), $"Updating the TV launcher to {r.Version}", JobScope.Machine)
-        {
-            WaitUntil = AtHomeOrStandby,
-            WaitingText = "Waits until you are back at Home",
-        });
-        return null;
+        return QueueBox("launcher-update", r.Version, $"Updating the TV launcher to {r.Version}", waitUntil: AtHomeOrStandby);
     }
 
     /// <summary>Update all: a restore point (checked) first, then every app, then the launcher, last.</summary>
@@ -327,10 +338,10 @@ sealed class UpdateService
             batch.Add("restorepoint");
             foreach (var a in apps) batch.Add(Token(a));
         }
-        lane.Enqueue(new LaneJob("restorepoint", "Saving a restore point", JobScope.Machine));
+        if (QueueBox("restorepoint", "", "Saving a restore point") is { } noPoint) return noPoint;
         // Machine-wide apps first, then per-user ones, winget itself last of the apps.
         foreach (var a in apps.OrderBy(a => a.Source == "winget-self").ThenBy(a => a.Scope == "user"))
-            lane.Enqueue(new LaneJob(Token(a), $"Updating {a.Name}", a.Scope == "user" || a.Source == "winget-self" ? JobScope.User : JobScope.Machine));
+            if (Queue(a) is { } why) lock (gate) results[Token(a)] = ("failed", why);
         if (launcher)
         {
             var why = UpdateLauncher();
@@ -340,7 +351,11 @@ sealed class UpdateService
         return null;
     }
 
-    public void ScanWindows() => lane.Enqueue(new LaneJob("windows-scan", "Looking for Windows updates", JobScope.Machine));
+    // 30 minutes at most in the job itself; the lane gives up a little later.
+    public string? ScanWindows() => QueueBox("windows-scan", "", "Looking for Windows updates", TimeSpan.FromMinutes(35));
+
+    // Each update may take up to 90 minutes without a word from Windows Update.
+    string? QueueWindowsInstall() => QueueBox("windows-install", "", "Installing Windows updates", TimeSpan.FromMinutes(100));
 
     public bool CancelWindowsScan() => lane.Cancel("windows-scan");
 
@@ -355,7 +370,7 @@ sealed class UpdateService
             Changed?.Invoke();
             return;
         }
-        lane.Enqueue(new LaneJob("windows-install", "Installing Windows updates", JobScope.Machine));
+        if (QueueWindowsInstall() is { } why) Log.Warn($"Updates: Windows install not queued: {why}");
     }
 
     /// <summary>After an install: restart now, or tonight in standby (quietly).</summary>
@@ -376,16 +391,17 @@ sealed class UpdateService
 
     // --- Following the lane ---------------------------------------------------------------------------------
 
-    void OnProgress(LaneJob job, LaneProgress p)
+    void OnProgress(LibraryJob job, JobProgress p)
     {
         // The SYSTEM job has the new launcher ready: this launcher leaves now (exit code 75).
-        if (job.Token.StartsWith("launcher-update:") && p.Phase == "ready")
-            LauncherReady?.Invoke(job.Token["launcher-update:".Length..]);
+        if (job.BoxJob && job.Action == "launcher-update" && p.Phase == "ready")
+            LauncherReady?.Invoke(job.Id);
     }
 
-    void OnFinished(LaneJob job, bool ok, LaneProgress p)
+    void OnFinished(LibraryJob job, bool ok, string message)
     {
-        lock (gate) results[job.Token] = (ok ? "done" : "failed", p.Message);
+        var p = new { Message = message };
+        lock (gate) results[job.Token] = (ok ? "done" : "failed", message);
         if (job.Token == "restorepoint" && !ok)
         {
             // No restore point, no "Update all": the rest of it is dropped.
@@ -406,7 +422,7 @@ sealed class UpdateService
                 Save();
                 CleanUserLeftovers();
             }
-            else alerts.Raise(new AlertSpec { Id = "updates-result", Title = $"{job.Label.Replace("Updating ", "")} was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
+            else alerts.Raise(new AlertSpec { Id = "updates-result", Title = $"{(job.Label ?? job.Id).Replace("Updating ", "")} was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
         }
         else if (job.Token.StartsWith("windows-"))
         {
@@ -459,7 +475,7 @@ sealed class UpdateService
         {
             Log.Info("Updates: installing Windows updates (tonight)");
             tonightRunning = true;
-            lane.Enqueue(new LaneJob("windows-install", "Installing Windows updates", JobScope.Machine));
+            if (QueueWindowsInstall() is not null) tonightRunning = false;
         }
         else if (plan.Restart)
         {
@@ -559,14 +575,19 @@ sealed class UpdateService
     public object Describe(IEnumerable<CatalogApp> catalog)
     {
         var current = lane.Current;
-        var progress = lane.CurrentProgress;
-        var waiting = lane.Waiting;
+        var (progress, waiting) = lane.Snapshot();
+        if (progress is not null && current is not null && progress.Id != current.Token && progress.Id != current.Id) progress = null;
         object? Row(string token)
         {
             if (current?.Token == token)
             {
-                var waitingForHome = current.WaitUntil is not null && progress?.Phase == "start";
-                return new { status = waitingForHome ? "waiting" : "running", percent = progress?.Percent ?? 0, message = progress?.Message ?? "" };
+                var waitingForHome = current.WaitUntil is not null && progress?.Phase is null or "start";
+                return new
+                {
+                    status = waitingForHome ? "waiting" : "running",
+                    percent = progress?.Percent ?? 0,
+                    message = waitingForHome ? "Waits until you are back at Home" : progress?.Message ?? "",
+                };
             }
             if (waiting.Any(j => j.Token == token))
                 return new { status = "queued", percent = 0, message = current?.Token.StartsWith("windows-") == true ? "Waiting for Windows updates" : "Waiting" };
@@ -616,12 +637,12 @@ sealed class UpdateService
                     rebootRequired = w?.RebootRequired ?? false,
                     checkedAt = w?.CheckedUtc,
                     lastInstalled = w?.LastInstalledUtc,
-                    job = windowsJob is null ? null : new { token = windowsJob, phase = progress?.Phase, percent = progress?.Percent ?? 0, message = progress?.Message ?? "", n = progress?.Int("n"), m = progress?.Int("m"), step = progress?.Str("step") },
+                    job = windowsJob is null ? null : new { token = windowsJob, phase = progress?.Phase, percent = progress?.Percent ?? 0, message = progress?.Message ?? "", step = progress?.Phase },
                     queued = waiting.Where(j => j.Token.StartsWith("windows-")).Select(j => j.Token).ToList(),
                     tonight = saved.Tonight is null ? null : new { install = saved.Tonight.Install, restart = saved.Tonight.Restart },
                     last = Row("windows-install") ?? Row("windows-scan"),
                 },
-                lane = current is null ? null : new { label = current.Label, percent = progress?.Percent ?? 0, message = progress?.Message ?? "" },
+                lane = current is null ? null : new { label = current.Label ?? progress?.Name ?? "", percent = progress?.Percent ?? 0, message = progress?.Message ?? "" },
             };
         }
     }
@@ -646,6 +667,13 @@ sealed class UpdateService
     void ForgetDoneResults()
     {
         foreach (var t in results.Where(r => r.Value.Status == "done").Select(r => r.Key).ToList()) results.Remove(t);
+    }
+
+    /// <summary>Below-normal priority and EcoQoS: a check can run while a video plays.</summary>
+    static void LowPriority(Process p)
+    {
+        try { p.PriorityClass = ProcessPriorityClass.BelowNormal; Native.SetEcoQos(p.Handle, true); }
+        catch (Exception) { } // already gone
     }
 
     // --- Saved state ---------------------------------------------------------------------------------------

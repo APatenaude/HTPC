@@ -33,12 +33,17 @@ sealed partial class MainForm
 
     void RegisterUiHandlers()
     {
-        foreach (var method in typeof(MainForm).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        foreach (var method in typeof(MainForm).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
         {
-            foreach (var a in method.GetCustomAttributes<UiMessagesAttribute>())
-                uiHandlers.Add((a.Prefix, method.CreateDelegate<Action<string, JsonElement>>(this)));
-            if (method.GetCustomAttribute<UiReadyAttribute>() is not null)
-                uiReadyHandlers.Add((method.Name, method.CreateDelegate<Action>(this)));
+            // A wrong signature is logged and left out, not a launcher that cannot start.
+            try
+            {
+                foreach (var a in method.GetCustomAttributes<UiMessagesAttribute>())
+                    uiHandlers.Add((a.Prefix, method.CreateDelegate<Action<string, JsonElement>>(this)));
+                if (method.GetCustomAttribute<UiReadyAttribute>() is not null)
+                    uiReadyHandlers.Add((method.Name, method.CreateDelegate<Action>(this)));
+            }
+            catch (ArgumentException e) { Log.Error($"UI handler {method.Name}: needs void (string type, JsonElement message), or void () for [UiReady]", e); }
         }
         uiHandlers.Sort((a, b) => b.Prefix.Length.CompareTo(a.Prefix.Length));
         Log.Info($"UI messages: {string.Join(", ", uiHandlers.Select(h => h.Prefix + "*"))}");

@@ -38,7 +38,8 @@ $dotnet = @(
 if (-not $dotnet) { $dotnet = (Get-Command dotnet.exe -ErrorAction Stop).Source }
 
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
-$lockedArg = if ($Locked) { @('-p:RestoreLockedMode=true') } else { @() }
+$lockedArg = @()
+if ($Locked) { $lockedArg += '-p:RestoreLockedMode=true' }
 & $dotnet publish $project -c Release -r win-x64 --self-contained true -nologo -v quiet `
     -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true `
     -p:DebugType=none @lockedArg -o $work

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone remote: logic tests</title>
+</head>
+<body>
+<!-- Tests for launcher\phone\phone-logic.js (live-typing differences, touchpad gestures). Open in a
+     browser, or headless: msedge --headless=new --dump-dom file:///.../launcher/dev/phone-test.html
+     and look for "ALL PASSED". -->
+<pre id="results"></pre>
+<script src="../phone/phone-logic.js"></script>
+<script>
+'use strict';
+const out = [];
+let failed = 0;
+function check(ok, what) { if (!ok) failed++; out.push(`${ok ? 'PASS' : 'FAIL'}  ${what}`); }
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const { diff, typeMessages, graphemes, Gestures, clock } = PhoneLogic;
+
+// Live typing.
+check(same(diff('', 'hello'), { back: 0, text: 'hello' }), 'typing at the end');
+check(same(diff('hello', 'help'), { back: 2, text: 'p' }), 'change near the end: delete the tail, type again');
+check(same(diff('hello', ''), { back: 5, text: '' }), 'clear');
+check(same(diff('teh', 'the '), { back: 2, text: 'he ' }), 'autocorrect swapping a word');
+check(same(diff('I like thiss', 'I like this '), { back: 1, text: ' ' }), 'autocorrect fixing the last letters');
+check(same(diff('hi 👍🏽', 'hi '), { back: 1, text: '' }), 'emoji with skin tone is one Backspace');
+check(same(diff('🇫🇷', ''), { back: 1, text: '' }), 'flag is one Backspace');
+check(same(diff('👨‍👩‍👧', ''), { back: 1, text: '' }), 'family emoji (ZWJ) is one Backspace');
+check(same(diff('café', 'caf'), { back: 1, text: '' }), 'e + combining accent is one Backspace');
+check(same(diff('ab', 'a😀b'), { back: 1, text: '😀b' }), 'insert in the middle: retype from there');
+check(graphemes('a👍🏽b').length === 3, 'graphemes');
+
+let msgs = typeMessages('', 'x'.repeat(600));
+check(msgs.length === 3 && msgs.every((m) => m.text.length <= 256) && msgs.map((m) => m.text).join('') === 'x'.repeat(600), 'a long paste goes in parts of 256 at most');
+msgs = typeMessages('y'.repeat(300), '');
+check(msgs.length === 2 && msgs[0].back === 256 && msgs[1].back === 44 && msgs.every((m) => m.back <= 256), '300 Backspaces in two messages');
+msgs = typeMessages('abc', 'abd');
+check(msgs.length === 1 && msgs[0].back === 1 && msgs[0].text === 'd', 'one message for a small change');
+check(typeMessages('same', 'same').length === 0, 'nothing when nothing changed');
+msgs = typeMessages('', '😀'.repeat(200));
+check(msgs.every((m) => m.text.length <= 256) && msgs.map((m) => m.text).join('') === '😀'.repeat(200), 'parts never split an emoji');
+
+// Touchpad gestures.
+let g = new Gestures();
+g.down(1, 10, 10, 0);
+check(same(g.up(1, 100), [{ t: 'tap', b: 'left' }]), 'quick tap clicks');
+g = new Gestures();
+g.down(1, 0, 0, 0); g.move(1, 30, 5, 16); g.move(1, 50, 5, 32);
+let m = g.take();
+check(m.dx === 50 && m.dy === 5 && m.sx === 0, 'one finger moves the pointer');
+check(same(g.up(1, 120), []), 'a move is no tap');
+g = new Gestures();
+g.down(1, 0, 0, 0);
+check(same(g.tick(300), []), 'no drag before the hold time');
+check(same(g.tick(460), [{ t: 'drag', down: true }]), 'held still: drag starts');
+g.move(1, 40, 0, 500);
+check(g.take().dx === 40, 'drag moves the pointer');
+check(same(g.up(1, 700), [{ t: 'drag', down: false }]), 'lift: drag ends');
+g = new Gestures();
+g.down(1, 0, 0, 0); g.move(1, 20, 0, 50);
+check(same(g.tick(600), []), 'moved first: no drag later');
+g = new Gestures();
+g.down(1, 0, 0, 0); g.down(2, 50, 0, 20);
+check(same(g.tick(600), []), 'two fingers never drag');
+check(same(g.up(1, 150), []) && same(g.up(2, 170), [{ t: 'tap', b: 'right' }]), 'two-finger tap right-clicks');
+g = new Gestures();
+g.down(1, 0, 0, 0); g.down(2, 50, 0, 5);
+g.move(1, 0, 20, 30); g.move(2, 50, 20, 30);
+m = g.take();
+check(m.sy === 20 && m.dx === 0 && m.dy === 0, 'two fingers scroll by their average');
+check(same(g.up(1, 200), []) && same(g.up(2, 210), []), 'a scroll is no tap');
+g = new Gestures();
+g.down(1, 0, 0, 0); g.tick(500);
+check(same(g.cancel(), [{ t: 'drag', down: false }]), 'cancel lets go of a drag');
+g = new Gestures();
+g.down(1, 0, 0, 0);
+check(same(g.up(1, 400), []), 'a slow tap (400 ms) is no click');
+
+check(clock(65) === '1:05' && clock(3725) === '1:02:05' && clock(NaN) === '0:00', 'clock');
+
+out.push(failed ? `${failed} FAILED` : 'ALL PASSED');
+document.getElementById('results').textContent = out.join('\n');
+</script>
+</body>
+</html>

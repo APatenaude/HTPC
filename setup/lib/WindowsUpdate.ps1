@@ -132,10 +132,10 @@ function Invoke-WindowsScan {
         Save-WindowsResult $Paths @{ result = 'busy'; message = (Get-StuckMessage) }
         throw (New-UpdateError 'busy' (Get-StuckMessage))
     }
-    Write-JobProgress 'scan' 5 'Looking for Windows updates'
+    Write-UpdateProgress 'scan' 5 'Looking for Windows updates'
     $r = Invoke-WuaChild -Paths $Paths -Mode Scan -Limit $Limit -Overall $Limit -OnLine {
         param($line)
-        if ($line.event -eq 'found') { Write-JobProgress 'scan' 80 ("Found {0}" -f @($line.updates).Count) }
+        if ($line.event -eq 'found') { Write-UpdateProgress 'scan' 80 ("Found {0}" -f @($line.updates).Count) }
     }
     if (-not $r.ok) {
         if ($r.kind -eq 'timeout') {
@@ -153,7 +153,7 @@ function Invoke-WindowsScan {
     Save-WindowsResult $Paths @{ result = 'ok'; message = ''; updates = $updates; rebootRequired = $reboot; lastInstalledUtc = $r.lastInstalled }
     $counted = @($updates | Where-Object { $_.counted }).Count
     $text = if ($updates.Count -eq 0) { 'Windows is up to date' } elseif ($counted -eq 0) { 'Only security definitions to install' } else { "$counted Windows update$(if ($counted -ne 1) { 's' }) ready" }
-    Write-JobProgress 'done' 100 $text @{ counted = $counted; total = $updates.Count }
+    Write-UpdateProgress 'done' 100 $text
 }
 
 function Invoke-WindowsInstall {
@@ -162,12 +162,12 @@ function Invoke-WindowsInstall {
     if (Test-WindowsUpdateStuck) { throw (New-UpdateError 'busy' (Get-StuckMessage)) }
 
     if (-not $NoRestorePoint) {
-        Write-JobProgress 'restorepoint' 2 'Saving a restore point' @{ step = 'restorepoint' }
+        Write-UpdateProgress 'restorepoint' 2 'Saving a restore point'
         $point = New-VerifiedRestorePoint 'HTPC: before Windows updates'
-        Write-JobProgress 'restorepoint' 5 "Restore point saved ($($point.Created.ToString('HH:mm')))" @{ step = 'restorepoint'; restorePoint = $point.Sequence }
+        Write-UpdateProgress 'restorepoint' 5 "Restore point saved ($($point.Created.ToString('HH:mm')))"
     }
 
-    Write-JobProgress 'install' 6 'Looking for Windows updates' @{ step = 'search' }
+    Write-UpdateProgress 'install' 6 'Looking for Windows updates'
     # The search gets the scan limit; each download and install its own (set per line).
     $r = Invoke-WuaChild -Paths $Paths -Mode Install -Limit $ScanLimit -LimitFor {
         param($line)
@@ -179,8 +179,8 @@ function Invoke-WindowsInstall {
         $share = 90.0 / $line.m
         $base = 6 + $share * ($line.n - 1)
         switch ($line.event) {
-            'downloading' { Write-JobProgress 'install' ([int]$base) "Downloading $($line.n) of $($line.m): $($line.title)" @{ step = 'download'; n = $line.n; m = $line.m } }
-            'installing'  { Write-JobProgress 'install' ([int]($base + $share * 0.4)) "Installing $($line.n) of $($line.m): $($line.title)" @{ step = 'install'; n = $line.n; m = $line.m } }
+            'downloading' { Write-UpdateProgress 'install' ([int]$base) "Downloading $($line.n) of $($line.m): $($line.title)" }
+            'installing'  { Write-UpdateProgress 'install' ([int]($base + $share * 0.4)) "Installing $($line.n) of $($line.m): $($line.title)" }
         }
     }
     if (-not $r.ok -and $r.kind -eq 'timeout') {
@@ -200,5 +200,5 @@ function Invoke-WindowsInstall {
     $text = if ($failed.Count) { "$done installed, $($failed.Count) failed" } elseif ($done -eq 0) { 'Nothing to install' } else { "$done installed" }
     if ($reboot) { $text += '. Restart to finish.' }
     $phase = if ($failed.Count -and $done -eq 0) { 'failed' } else { 'done' }
-    Write-JobProgress $phase 100 $text @{ installed = $done; failedCount = $failed.Count; rebootRequired = $reboot }
+    Write-UpdateProgress $phase 100 $text
 }

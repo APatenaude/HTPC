@@ -31,10 +31,16 @@ const ICONS = {
   phone: 'M7 2h10v20H7zM11 18.5h2',
   chevleft: 'M15 5l-7 7 7 7',
   chevright: 'M9 5l7 7-7 7',
+  move: 'M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3',
+  pencil: 'M4 20h4L19 9l-4-4L4 16zM13 7l4 4',
+  image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15.5 9h0',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  search: 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM16 16l4.5 4.5',
   backspace: 'M9 5h12v14H9l-6-7zM12 9l6 6M18 9l-6 6',
   shift: 'M12 4l8 8h-4v8H8v-8H4z',
   enter: 'M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4',
-  keyboard: 'M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10'
+  keyboard: 'M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10',
+  pencil: 'M4 20h4L19.5 8.5a2.1 2.1 0 0 0-4-4L4 16zM13.5 6.5l4 4'
 };
 
 function icon(name, size, weight) {

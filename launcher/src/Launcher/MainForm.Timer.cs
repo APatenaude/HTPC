@@ -9,22 +9,29 @@ namespace Htpc.Launcher;
 sealed partial class MainForm
 {
     readonly MediaWatcher media = new();
-    readonly AlertsForm alerts = new();
+    readonly AlertsForm overlay = new();   // what the alerts paint on, over apps
     SleepTimer sleepTimer = null!;
 
     void InitTimer()
     {
+        overlay.IconsFile = Path.Combine(options.UiDir, "icons.js");
+        overlay.Avoid = () => keyboard.Visible ? keyboard.Bounds : Rectangle.Empty;
+        keyboard.VisibleChanged += (_, _) => overlay.Relayout();
         sleepTimer = new SleepTimer(() => media.Sessions, on => media.Want("timer", on));
         sleepTimer.Changed += () =>
         {
-            if (!sleepTimer.Warned) alerts.Hide("sleep");
+            if (!sleepTimer.Warned) alerts.Clear("sleep");
             PushState();
         };
-        // Over apps too; Home is +15 min while it shows (OnPad).
-        sleepTimer.Warning += reason => alerts.Show("sleep", "Sleeping in 1 minute", reason, "timer", "warn", "Home", "+15 min");
+        // Over apps too; while it shows, Home is +15 min (OnPad asks the alerts).
+        sleepTimer.Warning += reason => alerts.Raise(new AlertSpec
+        {
+            Id = "sleep", Title = "Sleeping in 1 minute", Body = reason, Glyph = "timer", Tone = AlertTone.Warn,
+            Action = "+15 min", Urgent = true, ClaimsHome = true,
+        }, () => sleepTimer.Extend());
         sleepTimer.Expired += reason =>
         {
-            alerts.Hide("sleep");
+            alerts.Clear("sleep");
             standby.Sleep(reason);
         };
         media.AppOf = AppOfSession;
@@ -77,15 +84,19 @@ sealed partial class MainForm
         {
             case "volumeUp":
             case "volumeDown":
-                if (audio.Step(command == "volumeUp" ? 5 : -5) is { } level)
-                    alerts.Show("volume", $"Volume {level}", null, "speaker", "info", timeout: TimeSpan.FromSeconds(1.5));
+                if (audio.Step(command == "volumeUp" ? 5 : -5) is { } level) VolumeAlert($"Volume {level}");
                 break;
             case "mute":
                 var muted = !(audio.Muted ?? false);
                 audio.Muted = muted;
-                alerts.Show("volume", muted ? "Sound off" : "Sound on", null, "speaker", "info", timeout: TimeSpan.FromSeconds(1.5));
+                VolumeAlert(muted ? "Sound off" : "Sound on");
                 break;
         }
         PushState();
     }
+
+    void VolumeAlert(string title) => alerts.Raise(new AlertSpec
+    {
+        Id = "volume", Title = title, Glyph = "speaker", Duration = TimeSpan.FromSeconds(1.5), Urgent = true,
+    });
 }

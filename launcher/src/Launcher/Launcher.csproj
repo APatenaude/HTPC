@@ -15,6 +15,10 @@
     <!-- The version is in Directory.Build.props (one number for the whole release). -->
     <!-- Published for win-x64 only: named here so packages.lock.json covers that restore too. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- NuGet packages pinned by packages.lock.json for the published build (Release: what
+         Publish-Setup makes; the release restores it in locked mode). Debug builds leave it alone:
+         publishing self-contained adds packages a plain build does not. -->
+    <RestorePackagesWithLockFile Condition="'$(Configuration)' == 'Release'">true</RestorePackagesWithLockFile>
     <!-- The WebView2 package also carries its WPF control, whose WindowsBase reference
          conflicts with WinForms' copy. Harmless: the WPF control is not used. -->
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
@@ -30,7 +34,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The phone remote's web app (served by PhoneServer, nothing else is), with the UI's fonts. -->
+    <None Include="..\..\phone\**\*" LinkBase="phone" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\ui\fonts\*.woff2" LinkBase="phone\fonts" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <!-- Kestrel for the phone remote (PhoneServer.cs says why not HttpListener). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <!-- setup\VERSION: the kept setup scripts say which release they came with (the update job

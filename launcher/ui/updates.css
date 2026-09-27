@@ -38,5 +38,3 @@
 #updrestart h1 { font-size: 56px; }
 #updrestart p { margin: 0; font-size: 28px; color: var(--text-2); }
 
-/* Screenshots of the demo (index.html?shot): headless Edge captures before animations run. */
-html.no-anim *, html.no-anim *::before, html.no-anim *::after { animation: none !important; transition: none !important; }

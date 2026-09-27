@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The phone remote's tests: "dotnet run" in this folder (exit code 0 = all passed). Builds the launcher's phone files with a console Log in place of the launcher's
+       (so nothing reaches launcher.log); the server runs on 127.0.0.1 with a fake launcher. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Htpc.Launcher</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Launcher\PhoneProtocol.cs;..\..\src\Launcher\PhoneLinks.cs;..\..\src\Launcher\PhonePointer.cs;..\..\src\Launcher\PhoneRouting.cs;..\..\src\Launcher\PhonePairing.cs;..\..\src\Launcher\PhoneNetwork.cs;..\..\src\Launcher\PhoneServer.cs;..\..\src\Launcher\ButtonMap.cs;..\..\src\Launcher\Input.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

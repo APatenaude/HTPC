@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0D0E11">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TV">
+<meta name="format-detection" content="telephone=no">
+<title>TV remote</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="stylesheet" href="phone.css">
+</head>
+<body>
+<div id="app" data-tab="remote">
+  <header class="top">
+    <div class="title">
+      <h1 id="title">TV</h1>
+      <span class="status" id="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="status-text">Connecting…</span></span>
+    </div>
+    <button type="button" class="round" id="power" aria-label="Sleep the TV box" data-icon="power"></button>
+    <span class="pill" id="media-app" hidden></span>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden>
+    <span data-icon="timer" aria-hidden="true"></span><span class="grow" id="banner-text"></span>
+    <button type="button" id="banner-action"></button>
+  </div>
+
+  <main id="main">
+    <section class="tab" id="tab-remote" aria-label="Remote">
+      <div class="seg" role="radiogroup" aria-label="Touchpad or arrows">
+        <button type="button" role="radio" id="seg-touchpad" aria-checked="true">Touchpad</button>
+        <button type="button" role="radio" id="seg-arrows" aria-checked="false">Arrows</button>
+      </div>
+      <div class="pad-area">
+        <div class="touchpad" id="touchpad" role="application" aria-roledescription="touchpad"
+             aria-label="Touchpad. Swipe to move the pointer, tap to click. With a screen reader, use Arrows instead.">
+          <span class="pad-icon" data-icon="touchpad" data-size="40" data-weight="1.75" aria-hidden="true"></span>
+          <span class="pad-hint" id="pad-hint">Swipe to move the pointer</span>
+          <span class="pad-sub" id="pad-sub">Tap to click · two fingers to scroll</span>
+        </div>
+        <div class="dpad-wrap" id="dpad-wrap" hidden>
+          <div class="dpad" role="group" aria-label="Arrows">
+            <button type="button" class="dir up" data-key="up" aria-label="Up" data-icon="chevup" data-size="32" data-weight="2.25"></button>
+            <button type="button" class="dir left" data-key="left" aria-label="Left" data-icon="chevleft" data-size="32" data-weight="2.25"></button>
+            <button type="button" class="ok" data-key="ok" aria-label="OK">OK</button>
+            <button type="button" class="dir right" data-key="right" aria-label="Right" data-icon="chevright" data-size="32" data-weight="2.25"></button>
+            <button type="button" class="dir down" data-key="down" aria-label="Down" data-icon="chevdown" data-size="32" data-weight="2.25"></button>
+          </div>
+        </div>
+      </div>
+      <div class="row3">
+        <button type="button" class="tile" data-key="back"><span data-icon="back" aria-hidden="true"></span>Back</button>
+        <button type="button" class="tile" id="home" aria-label="Home. Hold for Power."><span data-icon="home" aria-hidden="true"></span>Home</button>
+        <button type="button" class="tile" data-key="options"><span data-icon="menu" aria-hidden="true"></span>Options</button>
+      </div>
+      <div class="volume" role="group" aria-label="Volume">
+        <span class="label" aria-hidden="true">Volume</span>
+        <button type="button" data-step="-1" aria-label="Volume down" data-icon="voldown"></button>
+        <button type="button" id="mute" aria-label="Mute" aria-pressed="false" data-icon="mute"></button>
+        <button type="button" data-step="1" aria-label="Volume up" data-icon="volup"></button>
+      </div>
+      <label class="slider">
+        <span data-icon="sun" aria-hidden="true"></span>
+        <input type="range" id="brightness" min="10" max="100" step="1" value="100" aria-label="Brightness">
+        <output id="brightness-value" for="brightness">100</output>
+      </label>
+    </section>
+
+    <section class="tab" id="tab-type" aria-label="Type" hidden>
+      <p class="lead" id="type-lead">Letters appear on the TV as you type, in whatever is selected there: a search box, an address, Twitch chat.</p>
+      <label class="field">Text
+        <input id="text" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">
+      </label>
+      <div class="keys">
+        <button type="button" class="primary" id="enter"><span data-icon="enter" data-size="20" data-weight="2.25" aria-hidden="true"></span>Enter</button>
+        <button type="button" id="delete"><span data-icon="backspace" data-size="20" aria-hidden="true"></span>Delete</button>
+        <button type="button" id="clear"><span data-icon="close" data-size="20" aria-hidden="true"></span>Clear</button>
+        <button type="button" id="shift-tab" aria-label="Shift Tab: previous field"><span data-icon="shifttab" data-size="20" aria-hidden="true"></span>Back tab</button>
+        <button type="button" id="tab" aria-label="Tab: next field"><span data-icon="tab" data-size="20" aria-hidden="true"></span>Tab</button>
+      </div>
+      <h2 class="section" id="link-title">Play a link on the TV</h2>
+      <form class="link" id="link-form" action="#" aria-labelledby="link-title">
+        <input id="link" type="url" placeholder="Paste a link" aria-label="Link" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
+        <button type="submit" class="primary">Play</button>
+      </form>
+      <p class="note">YouTube opens in YouTube, Twitch in Twitch, anything else in the browser.</p>
+      <button type="button" class="kbd-space" id="kbd-space">Your phone’s keyboard opens here</button>
+    </section>
+
+    <section class="tab" id="tab-playing" aria-label="Playing" hidden>
+      <div class="art" id="art">
+        <span data-icon="film" data-size="48" data-weight="1.75" aria-hidden="true"></span>
+        <img id="art-img" alt="" hidden>
+      </div>
+      <div class="meta">
+        <span class="media-title" id="media-title">Nothing playing</span>
+        <span class="media-sub" id="media-sub"></span>
+      </div>
+      <div class="seek">
+        <input type="range" id="seek" min="0" max="100" step="1" value="0" aria-label="Position">
+        <div class="times"><span id="pos">0:00</span><span id="dur">0:00</span></div>
+      </div>
+      <div class="transport">
+        <button type="button" class="small" id="prev" aria-label="Previous" data-icon="skipprev"></button>
+        <button type="button" class="mid" id="back10" aria-label="Back 10 seconds" data-icon="rewind" data-size="26"></button>
+        <button type="button" class="big" id="playpause" aria-label="Play or pause" data-icon="pause" data-size="34" data-weight="2.5"></button>
+        <button type="button" class="mid" id="fwd10" aria-label="Forward 10 seconds" data-icon="forward" data-size="26"></button>
+        <button type="button" class="small" id="next" aria-label="Next" data-icon="skipnext"></button>
+      </div>
+      <label class="slider">
+        <span data-icon="speaker" aria-hidden="true"></span>
+        <input type="range" id="volume" min="0" max="100" step="1" value="50" aria-label="Volume">
+        <output id="volume-value" for="volume">50</output>
+      </label>
+      <button type="button" class="timer" id="timer-button">
+        <span data-icon="timer" aria-hidden="true"></span><span class="grow" id="timer-text">Sleep timer: off</span><span class="soft" id="timer-action">Set</span>
+      </button>
+    </section>
+
+    <div class="cover" id="asleep" hidden>
+      <span data-icon="moon" data-size="48" data-weight="1.75" aria-hidden="true"></span>
+      <h2>The TV box is asleep</h2>
+      <p>Wake it here, or hold Home on the controller.</p>
+      <button type="button" class="primary wide" id="wake">Wake it</button>
+    </div>
+  </main>
+
+  <nav class="tabs" aria-label="Remote sections">
+    <button type="button" data-tab="remote"><span data-icon="controller" data-size="24" aria-hidden="true"></span>Remote</button>
+    <button type="button" data-tab="type"><span data-icon="keyboard" data-size="24" aria-hidden="true"></span>Type</button>
+    <button type="button" data-tab="playing"><span data-icon="play" data-size="24" aria-hidden="true"></span>Playing</button>
+  </nav>
+
+  <div class="pair" id="pair" hidden>
+    <span data-icon="phone" data-size="44" data-weight="1.75" aria-hidden="true"></span>
+    <h2>Pair this phone with the TV</h2>
+    <p id="pair-lead">Tap the button: a 4-digit code shows on the TV. Type it here.</p>
+    <button type="button" class="primary wide" id="pair-start">Show a code on the TV</button>
+    <form id="pair-form" action="#" hidden>
+      <label class="field">Code on the TV
+        <input id="pair-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="one-time-code" enterkeyhint="done">
+      </label>
+      <button type="submit" class="primary wide">Pair</button>
+    </form>
+    <p class="pair-error" id="pair-error" role="alert"></p>
+    <p class="note">Or scan the code in Settings › Phone remote on the TV.</p>
+  </div>
+
+  <div class="sheet-wrap" id="sheet" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <h2 id="sheet-title"></h2>
+      <p id="sheet-text"></p>
+      <div class="sheet-options" id="sheet-options"></div>
+      <button type="button" class="wide" id="sheet-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+<pre class="errors" id="errors" hidden></pre>
+<script src="phone-logic.js"></script>
+<script src="phone.js"></script>
+</body>
+</html>

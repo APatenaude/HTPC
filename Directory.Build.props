@@ -11,12 +11,4 @@
     <Version>0.1.0</Version>
   </PropertyGroup>
 
-  <!--
-    NuGet packages are pinned by packages.lock.json next to each project; the release build
-    restores in locked mode, so it builds exactly what was tested here.
-  -->
-  <PropertyGroup>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-  </PropertyGroup>
-
 </Project>

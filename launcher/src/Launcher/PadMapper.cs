@@ -15,17 +15,26 @@ readonly record struct PadState(ushort Buttons, byte LT, byte RT, short LX, shor
 sealed class PadMapper
 {
     /// <summary>Stick motion as last polled, for the frame thread; swapped whole.</summary>
-    sealed record Motion(StickRole Left, StickRole Right, short LX, short LY, short RX, short RY, bool Precise);
+    sealed record Motion(StickRole Left, StickRole Right, short LX, short LY, short RX, short RY, bool Precise, Speeds Speed);
+
+    /// <summary>
+    /// Settings › Controller: pointer, precise pointer (RT) and scroll speed as factors of the
+    /// defaults below (1 = default). Handed to the frame thread inside Motion.
+    /// </summary>
+    public sealed record Speeds(double Pointer, double Precise, double Scroll)
+    {
+        public static readonly Speeds Default = new(1, 1, 1);
+    }
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")] static extern int DwmFlush();
 
-    // XInput button bits, in PadControl order up to L3 (triggers are handled apart).
+    // XInput button bits, in PadControl order up to R3 (triggers are handled apart).
     static readonly (PadControl Control, ushort Bit)[] Bits =
     {
         (PadControl.A, 0x1000), (PadControl.B, 0x2000), (PadControl.X, 0x4000), (PadControl.Y, 0x8000),
         (PadControl.Up, 0x0001), (PadControl.Down, 0x0002), (PadControl.Left, 0x0004), (PadControl.Right, 0x0008),
         (PadControl.LB, 0x0100), (PadControl.RB, 0x0200), (PadControl.Select, 0x0020), (PadControl.Start, 0x0010),
-        (PadControl.L3, 0x0040),
+        (PadControl.L3, 0x0040), (PadControl.R3, 0x0080),
     };
 
     const int Deadzone = 8000;            // stick travel ignored around the centre (XInput suggests 7849)
@@ -39,6 +48,7 @@ sealed class PadMapper
     volatile ButtonMap? map;
     ButtonMap? active;
     uint down;                            // PadControl bits currently down (as last applied)
+    uint inherited;                       // down when the map took over: not pressed, so not released either
     readonly long[] nextRepeat = new long[16];
     double pointerX, pointerY, scrollX, scrollY;   // sub-pixel and sub-unit remainders (frame thread)
     readonly int screenHeight = Screen.PrimaryScreen?.Bounds.Height ?? 1080;
@@ -48,11 +58,19 @@ sealed class PadMapper
 
     public PadMapper()
     {
+        Feed = new PointerFeed(() => moving.Set());
         new Thread(Frames) { IsBackground = true, Name = "Pointer frames", Priority = ThreadPriority.AboveNormal }.Start();
     }
 
+    /// <summary>The phone's touchpad: moved on the frame thread too, whatever the map (one writer for the pointer).</summary>
+    public PointerFeed Feed { get; }
+
     /// <summary>The map for the app in front; set from any thread.</summary>
     public ButtonMap? Map { get => map; set => map = value; }
+
+    /// <summary>Pointer and scroll speed (Settings › Controller); set from any thread.</summary>
+    public Speeds Speed { get => speed; set => speed = value; }
+    volatile Speeds speed = Speeds.Default;
 
     /// <summary>Called by the controller thread at every poll; enabled = false in standby.</summary>
     public void Update(in PadState s, long now, bool enabled)
@@ -65,7 +83,7 @@ sealed class PadMapper
             if (current is not null) Log.Info($"Buttons: {current.Name} preset");
             // Whatever is already held when a map takes over is not a new press: the A that
             // opened the app from the launcher must not click inside it.
-            down = current is null ? 0 : Controls(s, current, 0);
+            down = inherited = current is null ? 0 : Controls(s, current, 0);
             SetMotion(null);
             return;
         }
@@ -76,6 +94,11 @@ sealed class PadMapper
         for (var c = 0; c < 16; c++)
         {
             var bit = 1u << c;
+            if ((inherited & bit) != 0)
+            {
+                if ((nowDown & bit) == 0) inherited &= ~bit; // let go: a normal button from now on
+                continue;
+            }
             if (!current.Buttons.TryGetValue((PadControl)c, out var action)) continue;
             if ((changed & bit) != 0)
             {
@@ -95,7 +118,7 @@ sealed class PadMapper
             if (action is PreciseAction && (down & (1u << (int)control)) != 0) precise = true;
         bool Tilted(StickRole role, short x, short y) => role is StickRole.Pointer or StickRole.Scroll && Curve(x, y) != (0, 0);
         var tilted = Tilted(current.LeftStick, s.LX, s.LY) || Tilted(current.RightStick, s.RX, s.RY);
-        SetMotion(tilted ? new Motion(current.LeftStick, current.RightStick, s.LX, s.LY, s.RX, s.RY, precise) : null);
+        SetMotion(tilted ? new Motion(current.LeftStick, current.RightStick, s.LX, s.LY, s.RX, s.RY, precise, speed) : null);
     }
 
     void SetMotion(Motion? m)
@@ -118,10 +141,10 @@ sealed class PadMapper
         {
             moving.Wait();
             var m = motion;
-            if (m is null)
+            if (m is null && !Feed.Pending)
             {
                 moving.Reset();
-                if (motion is not null) moving.Set(); // moved again meanwhile
+                if (motion is not null || Feed.Pending) moving.Set(); // moved again meanwhile
                 pointerX = pointerY = scrollX = scrollY = 0;
                 last = -1;
                 continue;
@@ -135,17 +158,21 @@ sealed class PadMapper
             last = now;
             try
             {
-                Stick(m.Left, m.LX, m.LY, dt, m.Precise);
-                Stick(m.Right, m.RX, m.RY, dt, m.Precise);
+                if (m is not null)
+                {
+                    Stick(m.Left, m.LX, m.LY, dt, m);
+                    Stick(m.Right, m.RX, m.RY, dt, m);
+                }
+                Feed.Frame();
             }
             catch (Exception e) { Log.Error("Pointer frame", e); }
         }
     }
 
-    void Stick(StickRole role, short x, short y, double dt, bool precise)
+    void Stick(StickRole role, short x, short y, double dt, Motion m)
     {
-        if (role == StickRole.Pointer) MovePointer(x, y, dt, precise);
-        else if (role == StickRole.Scroll) Scroll(x, y, dt);
+        if (role == StickRole.Pointer) MovePointer(x, y, dt, m.Precise ? PreciseFactor * m.Speed.Precise : m.Speed.Pointer);
+        else if (role == StickRole.Scroll) Scroll(x, y, dt * m.Speed.Scroll);
     }
 
     /// <summary>The map's controls that are down: buttons, triggers (with hysteresis), sticks used as arrows.</summary>
@@ -182,11 +209,11 @@ sealed class PadMapper
         return (x * scale, y * scale);
     }
 
-    void MovePointer(short x, short y, double dt, bool precise)
+    void MovePointer(short x, short y, double dt, double factor)
     {
         var (cx, cy) = Curve(x, y);
         if (cx == 0 && cy == 0) { pointerX = pointerY = 0; return; }
-        var speed = PointerSpeed * screenHeight * dt * (precise ? PreciseFactor : 1);
+        var speed = PointerSpeed * screenHeight * dt * factor;
         pointerX += cx * speed;
         pointerY -= cy * speed; // stick up is positive, screen up is negative
         int dx = (int)pointerX, dy = (int)pointerY;
@@ -229,9 +256,9 @@ sealed class PadMapper
     {
         if (active is not null)
             for (var c = 0; c < 16; c++)
-                if ((down & (1u << c)) != 0 && active.Buttons.TryGetValue((PadControl)c, out var action))
+                if ((down & ~inherited & (1u << c)) != 0 && active.Buttons.TryGetValue((PadControl)c, out var action))
                     Release(action);
-        down = 0;
+        down = inherited = 0;
         SetMotion(null);
     }
 }

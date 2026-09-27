@@ -18,6 +18,8 @@ sealed partial class MainForm : Form
     readonly Options options;
     WebView2 web = new() { Dock = DockStyle.Fill };   // replaced for a newer WebView2 runtime (MainForm.Updates.cs)
     readonly AppManager apps;
+    LibraryService library = null!;   // created in the constructor, after apps
+    List<InstalledProgram> lastScan = new();
     readonly ControllerService controller = new();
     readonly AudioVolume audio = new();
     readonly Dimmer dimmer = new();
@@ -55,8 +57,13 @@ sealed partial class MainForm : Form
         Controls.Add(web);
 
         setupMode = options.Setup;
-        apps = new AppManager(options.CatalogPath, settings.Tiles);
+        apps = new AppManager(options.CatalogPath);
+        apps.SetCustom(settings.CustomTiles, settings.TileEdits);   // added websites and programs, tile edits
+        if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        library = new LibraryService(apps, settings, options.CatalogPath);
+        library.Changed += () => OnUi(PushLibraryProgress);
+        library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
         closeSoon.Tick += (_, _) =>
@@ -72,9 +79,7 @@ sealed partial class MainForm : Form
             if (connected && standby.Active) standby.Wake("controller reconnected");
             PushState();
         });
-        tv = new TvService(settings) { HandsOff = options.NoTv };
-        tv.Changed += () => BeginInvoke(() => Post(new { type = "tv", tv = tv.Describe() }));
-        tv.TvStateChanged += (on, showingBox) => BeginInvoke(() => OnTvState(on, showingBox));
+        tv = CreateTv(); // MainForm.Tv.cs
         clock.Tick += async (_, _) =>
         {
             CheckSleepTimer();
@@ -88,9 +93,10 @@ sealed partial class MainForm : Form
         {
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
         };
-        mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
+        mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         Directory.CreateDirectory(captureDir);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
+        InitAlerts();   // MainForm.Alerts.cs
         InitSettings(); // MainForm.Settings.cs
     }
 
@@ -111,6 +117,7 @@ sealed partial class MainForm : Form
             // UI thread would deadlock the awaits inside.
             Task.Run(() => tv.TurnOff()).Wait(3000);
         };
+        AlertsLoaded(); // MainForm.Alerts.cs
         var (hasS3, hasS4) = Standby.Capabilities();
         Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
         controller.Start();
@@ -118,15 +125,11 @@ sealed partial class MainForm : Form
         mouseWatch.Start();
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
-        // SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
-        // launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
-        // Not after an update or a quiet restart: nobody asked for the TV then.
-        await tv.Discover();
-        var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
-        if (handoff is { QuietBoot: true } or { Standby: true } or { Reason: "launcher-update" }) Log.Info($"After {handoff.Reason}: the TV is left as it is");
-        else if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
-        else Log.Info($"Box up {uptime.TotalHours:0.#} h: the TV is left as it is");
-        ResumeAfterHandoff();
+        StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
+        // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
+        // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
+        await StartTv(leaveTvAlone: handoff is not null);
+        ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
@@ -165,6 +168,9 @@ sealed partial class MainForm : Form
         core.Settings.IsPinchZoomEnabled = false;
         core.Settings.IsSwipeNavigationEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
+        // Nothing typed in the launcher (a Wi-Fi password) is kept or offered by WebView2.
+        core.Settings.IsPasswordAutosaveEnabled = false;
+        core.Settings.IsGeneralAutofillEnabled = false;
         core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += OnWebMessage;
@@ -177,8 +183,6 @@ sealed partial class MainForm : Form
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
-        try { await alerts.Init(env, options.UiDir); }
-        catch (Exception e) { Log.Error("Alerts failed to start", e); }
     }
 
     // --- Messages from the UI ----------------------------------------------------------------
@@ -213,35 +217,15 @@ sealed partial class MainForm : Form
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
-                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 } });
                 RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
-            case "tvChoose": tv.Choose(Str("id")!); break;
-            case "tvRefresh": _ = tv.Discover(); break;
-            case "tvTest":
-                _ = Task.Run(async () =>
-                {
-                    var ok = await tv.Test();
-                    BeginInvoke(() => Post(new { type = "toast", text = ok ? "The TV went off and came back" : "The TV did not respond", kind = ok ? "info" : "warn" }));
-                });
-                break;
-            case "tvSetting":
-                if (tv.Profile is { } profile)
-                {
-                    var on = m.GetProperty("value").GetBoolean();
-                    switch (Str("key"))
-                    {
-                        case "offWithBox": profile.OffWithBox = on; break;
-                        case "onWithBox": profile.OnWithBox = on; break;
-                        case "sleepWithTv": profile.SleepWithTv = on; break;
-                    }
-                    settings.Save();
-                    Post(new { type = "tv", tv = tv.Describe() });
-                }
-                break;
+            case "home": break; // the page reports going home; nothing to do here
+            // The TV's messages ("tv.*"): MainForm.Tv.cs.
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
+                ApplySettings();
                 break;
             case "launch": Open(Str("id")!); break;
             case "switchTo": case "resume": SwitchTo(Str("id")!); break;
@@ -261,7 +245,7 @@ sealed partial class MainForm : Form
         if (uiReady) web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, Json));
     }
 
-    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id) }).ToList();
+    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id), custom = t.Custom }).ToList();
 
     object StateObject() => new
     {
@@ -271,7 +255,8 @@ sealed partial class MainForm : Form
         brightness,
         controller = controller.Connected,
         battery = controller.BatteryLevel,
-        timer = sleepTimer.Describe()
+        timer = sleepTimer.Describe(),
+        phone = PhoneSummary() // MainForm.Phone.cs: { url, paired, pairingOpen }, null while the remote is off
     };
 
     void PushState() => Post(StateObject());
@@ -286,14 +271,18 @@ sealed partial class MainForm : Form
     bool foregroundIsOurs;
 
     /// <summary>
-    /// Picks the button map for the app in front (its catalog preset). None while the launcher
-    /// is in front or in standby. A window that belongs to none of the catalog's apps (the
-    /// desktop, a window an app opened) gets the Mouse preset, so it can still be used.
+    /// Picks the button map for the app in front (its tile's map: preset and changes). None
+    /// while the launcher is in front or in standby. A window that belongs to none of the
+    /// catalog's apps (the desktop, a window an app opened) gets Other windows' map (Mouse
+    /// unless changed), so it can still be used.
     /// </summary>
     void UpdateMapper()
     {
         ButtonMap? map = null;
-        if (!standby.Active && !LauncherActive)
+        string? preset = null;
+        // In setup nothing gets a button map: an installer's window in front must not get
+        // clicks from the controller (the wizard reads the controller itself).
+        if (!setupMode && !standby.Active && !LauncherActive)
         {
             var window = Native.GetForegroundWindow();
             if (window != lastForeground)
@@ -303,12 +292,16 @@ sealed partial class MainForm : Form
                 foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
             }
             if (window != IntPtr.Zero && !foregroundIsOurs)
-                map = foregroundApp is null ? ButtonMap.Mouse : ButtonMap.For(foregroundApp.Preset);
+            {
+                map = MapFor(foregroundApp);
+                preset = PresetFor(foregroundApp);
+            }
         }
-        // Text fields are watched (for the keyboard to pop up) only while an app with a button map
-        // is in front: Chromium-based apps build their accessibility tree while anyone listens.
-        // Apps on the Controller preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard.
-        textFields.Enabled = map is not null;
+        // Text fields are watched (for the keyboard to pop up) only while a Mouse or Keyboard
+        // preset app is in front, and only if the keyboard is to pop up by itself: Chromium-based
+        // apps build their accessibility tree while anyone listens. Apps on the Controller
+        // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard.
+        textFields.Enabled = settings.ShowKeyboardAutomatically && preset is "mouse" or "keyboard";
         if (keyboard.Visible) map = null; // the controller drives the keyboard
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
@@ -328,8 +321,6 @@ sealed partial class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) return;
-        // The sleep timer's last minute: Home is +15 min (the warning says so), wherever the box is.
-        if (pad == Pad.Home && sleepTimer.Warned) { sleepTimer.Extend(); return; }
         if (keyboard.Visible)
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
@@ -346,6 +337,8 @@ sealed partial class MainForm : Form
         if (mapper.Map is null) cursor.Hide();
         // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
         var moonlight = app?.Id == "moonlight";
+        // An alert that takes Home (the sleep timer's last minute: +15 min) gets it first.
+        if ((pad == Pad.Home && !moonlight || pad == Pad.HomeHold && moonlight) && alerts.ClaimsHome()) return;
 
         switch (pad)
         {
@@ -360,9 +353,13 @@ sealed partial class MainForm : Form
                 return;
         }
 
-        // R3: the on-screen keyboard, for the text field that has the focus (not in Moonlight:
-        // R3 is a game button there).
-        if (pad == Pad.R3 && !active && !moonlight)
+        // A launcher action on one of the map's buttons (Home menu, keyboard, volume...).
+        if (!active && RunMappedCommand(pad, app)) return;
+
+        // R3 in apps without a map (Controller preset): the on-screen keyboard, for the text
+        // field that has the focus (not in Moonlight: R3 is a game button there). Where there
+        // is a map, R3 does what the map says (the keyboard unless changed).
+        if (pad == Pad.R3 && !active && !moonlight && mapper.Map is null)
         {
             var field = lastField is { } f && f.ProcessId == Native.ProcessOf(Native.GetForegroundWindow()) ? f : null;
             OpenKeyboard(field, auto: false);
@@ -378,6 +375,7 @@ sealed partial class MainForm : Form
         Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
         Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
         Pad.LB => "lb", Pad.RB => "rb", Pad.LT => "lt", Pad.RT => "rt",
+        Pad.R3 => "r3", // the launcher's own text fields: the on-screen keyboard
         _ => null
     };
 
@@ -409,6 +407,7 @@ sealed partial class MainForm : Form
         // Someone typing on a real keyboard needs no keyboard on screen: it pops up by itself
         // only while the controller is in use. (R3 still opens it.)
         if (DateTime.Now - controller.LastActivity > TimeSpan.FromMinutes(1)) return;
+        if (PhoneActivity > controller.LastActivity) return; // the phone is in use: it has its own keyboard
         if (keyboard.Visible && SameField(keyboardField, field)) return; // still typing there
         OpenKeyboard(field, auto: true);
     }
@@ -419,7 +418,9 @@ sealed partial class MainForm : Form
         keyboardAuto = auto;
         mapper.Map = null; // at once: the controller now drives the keyboard
         keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false, field?.Bounds ?? Rectangle.Empty);
-        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")} \"{field.Name}\"")})");
+        // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
+        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"";
+        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")}{label}")})");
     }
 
     void CloseKeyboard(string reason)
@@ -434,15 +435,16 @@ sealed partial class MainForm : Form
         switch (m.GetProperty("type").GetString())
         {
             case "type":
-                Input.Type(m.GetProperty("text").GetString() ?? "");
+                TypeText(m.GetProperty("text").GetString() ?? "");
                 break;
             case "key":
                 switch (m.GetProperty("key").GetString())
                 {
-                    case "backspace": Input.Tap(0x08); break;
-                    case "left": Input.Tap(0x25); break;
-                    case "right": Input.Tap(0x27); break;
-                    case "enter": Input.Tap(0x0D); CloseKeyboard("Enter"); break;
+                    case "backspace": TypeKey("backspace"); break;
+                    case "left": TypeKey("left"); break;
+                    case "right": TypeKey("right"); break;
+                    case "enter": TypeKey("enter"); CloseKeyboard("Enter"); break;
+                    case var extra: KeyboardExtraKey(extra); break;
                 }
                 break;
             case "close":
@@ -456,22 +458,24 @@ sealed partial class MainForm : Form
 
     void PostSetupInit()
     {
-        // Apps setup can install (Spotify must be installed without admin rights: later, from
-        // the library) and websites (nothing to install, just a tile).
-        var list = apps.All.Where(a => (a.Installable && !a.AsUser) || a.Type == "website")
+        // Apps setup can install (Spotify refuses to install elevated: later, from the library) and
+        // websites (nothing to install, just a tile).
+        var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated) || a.IsWebsite)
             // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
             .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
-        Post(new { type = "init", apps = list, tv = tv.Describe(), controller = controller.Connected, battery = controller.BatteryLevel,
-            canInstall = SetupRunner.FindSetupDir() is not null });
+        Post(new { type = "init", apps = list, tv = TvUiState.Describe(tv), controller = controller.Connected, battery = controller.BatteryLevel,
+            canInstall = SetupRunner.FindSetupDir() is not null, wired = TvNet.Wired() });
     }
 
     void StartSetup(JsonElement m)
     {
         var picked = m.GetProperty("apps").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
         var tiles = m.GetProperty("tiles").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
-        settings.Tiles = tiles;
+        // Keep any custom tiles (added websites, programs) when setup is re-run from Settings.
+        var customIds = settings.CustomTiles.Select(c => c.Id).Where(id => !tiles.Contains(id));
+        settings.Tiles = tiles.Concat(customIds).ToList();
         settings.Save();
-        apps.SetTiles(tiles);
+        apps.SetTiles(settings.Tiles);
         Log.Info($"Setup: install {string.Join(", ", picked)}; tiles {string.Join(", ", tiles)}");
 
         var dir = SetupRunner.FindSetupDir();
@@ -503,7 +507,8 @@ sealed partial class MainForm : Form
                 Reveal(); // installers may have put windows over the launcher
             };
         }
-        if (!setup.Start(picked, SetupRunner.SelfContainedExe())) Post(new { type = "declined" });
+        // Start waits for Windows' permission prompt: the wizard stays on the apps step until then.
+        Post(setup.Start(picked, SetupRunner.SelfContainedExe()) ? new { type = "setupStarted" } : new { type = "declined" });
     }
 
     /// <summary>
@@ -525,6 +530,7 @@ sealed partial class MainForm : Form
             catch (Exception e) { Log.Error("Starting the installed launcher", e); }
         }
         setupMode = false;
+        tv.InSetup = false;
         uiReady = false;
         Log.Info("Setup finished: home screen");
         web.CoreWebView2?.Navigate("https://launcher.htpc/index.html");
@@ -539,7 +545,7 @@ sealed partial class MainForm : Form
         var name = apps.Get(id)?.Name ?? id;
         if (!apps.Launch(id))
         {
-            Post(new { type = "opened", id, ok = false, text = $"{name} could not be started" });
+            AppDidntOpen(id, $"{name} didn’t open", "It isn’t installed, or its program wasn’t found.", retry: false);
             return;
         }
         _ = BringUpWhenReady(id, name);
@@ -556,7 +562,7 @@ sealed partial class MainForm : Form
             await Task.Delay(250);
             // Edge started on a profile that is already open hands over to it and exits.
             if (!apps.IsRunning(id)) apps.Adopt(id);
-            if (!apps.IsRunning(id)) { Post(new { type = "opened", id, ok = false, text = $"{name} closed right away" }); return; }
+            if (!apps.IsRunning(id)) { AppDidntOpen(id, $"{name} didn’t open", "It closed while starting.", retry: true); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
             if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
@@ -566,7 +572,7 @@ sealed partial class MainForm : Form
             Log.Info($"{id} window up after {waited + 250} ms");
             return;
         }
-        Post(new { type = "opened", id, ok = false, text = $"{name} is taking long to open" });
+        AppDidntOpen(id, $"{name} is taking long to open", "It may still appear. Home comes back here.", retry: false);
     }
 
     void SwitchTo(string id)
@@ -603,6 +609,7 @@ sealed partial class MainForm : Form
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
     void ShowOver(CatalogApp? app, string view)
     {
+        var focus = LauncherComingForward(view); // alerts off the app before the capture
         string? backdrop = null;
         if (app is not null)
         {
@@ -617,7 +624,7 @@ sealed partial class MainForm : Form
             }
             catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
         }
-        Post(new { type = "show", view, current = app?.Id, backdrop });
+        Post(new { type = "show", view, current = app?.Id, backdrop, focus });
         PushState();
         Reveal();
     }
@@ -626,10 +633,10 @@ sealed partial class MainForm : Form
     {
         PushState();
         if (started) return;
-        // An app closed by itself (or crashed) while in front: come back to the home screen.
+        // An app closed by itself (or crashed) while in front: come back to the home screen, on its tile.
         if (!LauncherActive && apps.ForegroundApp() is null)
         {
-            Post(new { type = "show", view = "home" });
+            Post(new { type = "show", view = "home", focus = $"tile:{id}" });
             Reveal();
         }
     }
@@ -645,8 +652,12 @@ sealed partial class MainForm : Form
                 // In the mode chosen in Settings (standby by default).
                 standby.Sleep("Power menu");
                 break;
-            case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
-            case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
+            case "restart": apps.MarkAllClosing("restart"); System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
+            case "shutdown":
+                apps.MarkAllClosing("shut down");
+                tv.TurnOffBeforeShutdown(); // the TV goes off with a shut down (not with a restart)
+                System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0");
+                break;
             case "desktop": WindowState = FormWindowState.Minimized; break;
         }
     }
@@ -660,7 +671,7 @@ sealed partial class MainForm : Form
     void OnStandbyChanged(bool active)
     {
         Log.Info(active ? "In standby" : "Awake");
-        alerts.Suppress(active);
+        overlay.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.
         if (!tvChangedItself) _ = active ? tv.TurnOff() : tv.TurnOn();
         tvChangedItself = false;

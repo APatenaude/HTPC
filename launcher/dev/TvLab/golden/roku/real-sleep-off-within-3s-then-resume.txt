@@ -1,0 +1,23 @@
++   0.0s roku GET /query/device-info -> 200
++   0.0s roku GET /query/active-app -> 200
++   0.0s roku POST /keypress/PowerOff -> 200
++   0.0s host GoingDown TurnOff done within 3 s
++1800.0s -- resume
++1800.0s roku GET /query/device-info -> 200
++1800.0s roku POST /keypress/PowerOn -> 200
++1801.0s roku GET /query/device-info -> 200
++1802.0s roku GET /query/device-info -> 200
++1803.0s roku GET /query/device-info -> 200
++1803.0s roku GET /query/active-app -> 200
++1808.0s roku GET /query/device-info -> 200
++1808.0s roku GET /query/active-app -> 200
++1813.0s roku GET /query/device-info -> 200
++1813.0s roku GET /query/active-app -> 200
++1818.0s roku GET /query/device-info -> 200
++1818.0s roku GET /query/active-app -> 200
++1823.0s roku GET /query/device-info -> 200
++1823.0s roku GET /query/active-app -> 200
++1828.0s roku GET /query/device-info -> 200
++1828.0s roku GET /query/active-app -> 200
++1833.0s roku GET /query/device-info -> 200
++1833.0s roku GET /query/active-app -> 200

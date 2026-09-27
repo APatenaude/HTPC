@@ -15,6 +15,8 @@
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
       Launcher      the launcher (-LauncherExe) into Program Files, started at sign-in
+      Library       lock ProgramData\HTPC and register the \HTPC\Jobs task (install from the TV)
+      PhoneRemote   firewall: phones on the home network reach the remote and YouTube casting
       DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
@@ -76,6 +78,8 @@ $Steps = [ordered]@{
         if (-not $LauncherExe) { Write-Same 'no launcher given (-LauncherExe); skipped'; return }
         & "$lib\Install-Launcher.ps1" -Exe $LauncherExe -SetupDir $PSScriptRoot
     }
+    Library      = { & "$lib\Register-AppInstaller.ps1" }
+    PhoneRemote  = { & "$lib\Set-PhoneRemote.ps1" }
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
@@ -119,7 +123,7 @@ if (Test-AppDataRedirected) {
     Write-Host 'Relaunching setup outside this app (its AppData writes are redirected)...'
     # Already admin: the task runs elevated too, so no second UAC prompt.
     $runLevel = if (Test-Admin) { 'Highest' } else { 'Limited' }
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
+    $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel $runLevel
     Register-ScheduledTask -TaskName $RelaunchTask -Action $action -Principal $principal -Force | Out-Null
     Start-ScheduledTask -TaskName $RelaunchTask
@@ -129,7 +133,7 @@ if (Test-AppDataRedirected) {
 
 if (-not (Test-Admin)) {
     Write-Host 'Asking for admin rights (UAC)...'
-    Start-Process powershell.exe -Verb RunAs -ArgumentList (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
+    Start-Process (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -ArgumentList (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     exit 0
 }
 

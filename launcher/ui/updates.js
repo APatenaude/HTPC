@@ -311,8 +311,3 @@ if (new URLSearchParams(location.search).get('upd') === 'restarting') {
   addEventListener('DOMContentLoaded', () => { upd.restarting = '0.2.0'; setTimeout(() => go('updrestart'), 0); });
 }
 
-// index.html?shot (a plain browser only): no animations, so a headless screenshot shows the
-// finished screen rather than its first frame.
-if (!(window.chrome && window.chrome.webview) && new URLSearchParams(location.search).has('shot')) {
-  document.documentElement.classList.add('no-anim');
-}

@@ -22,35 +22,87 @@ sealed class LauncherSettings
     /// <summary>No idle sleep while something plays, even with the controller untouched.</summary>
     public bool StayAwakeWhilePlaying { get; set; } = true;
 
-    /// <summary>The home screen's tiles, in order (catalog ids); null = the catalog's defaults.</summary>
+    /// <summary>
+    /// The home screen's tiles, in order (catalog ids and custom-tile ids); null = the catalog's
+    /// defaults. Custom tiles (added websites and programs) live in <see cref="CustomTiles"/>.
+    /// </summary>
     public List<string>? Tiles { get; set; }
+
+    /// <summary>Tiles the user added on the TV that are not catalog apps (added websites, programs).</summary>
+    public List<CustomTile> CustomTiles { get; set; } = new();
+
+    /// <summary>Per-tile renames and icon changes (SPEC W1), keyed by tile id.</summary>
+    public Dictionary<string, TileEdit> TileEdits { get; set; } = new();
 
     /// <summary>TV profiles by HDMI identity (EDID key): each TV the box meets gets its own.</summary>
     public Dictionary<string, TvProfile> Tvs { get; set; } = new();
 
+    /// <summary>
+    /// Button maps per tile (SPEC N13): { tile id: { "preset": ..., "start": "key:F", ... } }.
+    /// Kept as raw JSON and read leniently by ButtonMapStore, so a bad entry never costs the
+    /// other settings.
+    /// </summary>
+    public JsonElement? ButtonMaps { get; set; }
+
+    /// <summary>Pointer, precise pointer (RT) and scroll speed, 1 to 10 (5 = the tuned default).</summary>
+    public int PointerSpeed { get; set; } = 5;
+    public int PreciseSpeed { get; set; } = 5;
+    public int ScrollSpeed { get; set; } = 5;
+
+    /// <summary>The on-screen keyboard pops up by itself on text fields (SPEC N11).</summary>
+    public bool ShowKeyboardAutomatically { get; set; } = true;
 
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
+    static readonly string BackupPath = FilePath + ".bak";
+
+    // Several threads save (the UI thread on a settings change, the library job thread when a tile
+    // is added): one save at a time, and one never sees another half-written file.
+    static readonly object Gate = new();
 
     public static LauncherSettings Load()
     {
-        try
+        lock (Gate)
         {
-            if (File.Exists(FilePath)) return JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(FilePath), Json) ?? new();
+            foreach (var path in new[] { FilePath, BackupPath })
+            {
+                try
+                {
+                    if (!File.Exists(path)) continue;
+                    var loaded = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), Json);
+                    if (loaded is not null)
+                    {
+                        if (path == BackupPath) Log.Warn("Settings read from the backup copy (settings.json was unreadable)");
+                        return loaded;
+                    }
+                }
+                catch (Exception e) { Log.Warn($"Settings unreadable at {path}: {e.Message}"); }
+            }
+            return new();
         }
-        catch (Exception e) { Log.Warn($"Settings unreadable, using defaults: {e.Message}"); }
-        return new();
     }
 
+    /// <summary>
+    /// Writes settings.json atomically: a full temp file is written, the current file is kept as
+    /// settings.json.bak, and the temp file replaces it in one step (File.Replace). A crash mid-save
+    /// leaves either the old file or the backup intact, never a half-written one.
+    /// </summary>
     public void Save()
     {
-        try
+        lock (Gate)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                var json = JsonSerializer.Serialize(this, Json);
+                var temp = FilePath + ".tmp";
+                File.WriteAllText(temp, json);
+                if (File.Exists(FilePath)) File.Replace(temp, FilePath, BackupPath);
+                else File.Move(temp, FilePath);
+            }
+            catch (Exception e) { Log.Error("Saving settings", e); }
         }
-        catch (Exception e) { Log.Error("Saving settings", e); }
     }
 
     /// <summary>Applies one value sent by the Settings screen; false for an unknown key or value.</summary>
@@ -66,6 +118,10 @@ sealed class LauncherSettings
                 break;
             case "sleepAfterStandbyHours": SleepAfterStandbyHours = value.GetInt32(); break;
             case "stayAwakeWhilePlaying": StayAwakeWhilePlaying = value.GetBoolean(); break;
+            case "pointerSpeed": PointerSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "preciseSpeed": PreciseSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "scrollSpeed": ScrollSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "showKeyboardAutomatically": ShowKeyboardAutomatically = value.GetBoolean(); break;
             default: return false;
         }
         Save();
@@ -113,6 +169,9 @@ sealed class Standby
     public bool Active { get; private set; }
     public event Action<bool>? Changed;
 
+    /// <summary>The phone remote's last input (its heartbeat does not count): keeps the box awake like the controller.</summary>
+    public DateTime PhoneActivity { get; set; }
+
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
 
@@ -155,6 +214,7 @@ sealed class Standby
         controller.Slow = true;
         controller.WakeMode = true;
         await media.PauseAllAsync();
+        if (!Active) return; // woken while pausing: nothing more to do
         // And whatever starts playing meanwhile (an autoplay countdown running out).
         media.Want("standby", true);
         // The launcher goes in front first: bringing a window forward can inject a key press,
@@ -162,6 +222,7 @@ sealed class Standby
         // (the TV sees no signal), and again a moment later in case something woke it.
         Changed?.Invoke(true);
         await Task.Delay(300);
+        if (!Active) return;
         display.Off();
         _ = Task.Delay(3000).ContinueWith(_ => { if (Active) display.Off(); });
 
@@ -215,6 +276,7 @@ sealed class Standby
     {
         if (Active)
         {
+            WarnIdle(false);
             if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep && HoldOffRealSleep?.Invoke() != true &&
                 DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
             {
@@ -223,13 +285,34 @@ sealed class Standby
             }
             return;
         }
-        if (settings.IdleMinutes <= 0) return;
+        if (settings.IdleMinutes <= 0) { WarnIdle(false); return; }
         var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
         var controllerIdle = DateTime.Now - controller.LastActivity;
         if (controllerIdle < idle) idle = controllerIdle;
-        if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
-        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) return;
+        var phoneIdle = DateTime.Now - PhoneActivity;
+        if (phoneIdle < idle) idle = phoneIdle;
+        var left = TimeSpan.FromMinutes(settings.IdleMinutes) - idle;
+        if (left > IdleWarningTime) { WarnIdle(false); return; }
+        if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) { WarnIdle(false); return; }
+        // The last minute: say so first (any button keeps the box awake), then sleep.
+        if (left > TimeSpan.Zero) { WarnIdle(true); return; }
+        WarnIdle(false);
         Sleep($"idle {settings.IdleMinutes} min");
+    }
+
+    /// <summary>The idle sleep warning comes this long before (the Tick runs every 5 s, so 55 to 60 s).</summary>
+    public static readonly TimeSpan IdleWarningTime = TimeSpan.FromMinutes(1);
+
+    bool idleWarned;
+
+    /// <summary>Idle sleep is a minute away (true), or no longer coming (false): the warning alert.</summary>
+    public event Action<bool>? IdleWarning;
+
+    void WarnIdle(bool on)
+    {
+        if (on == idleWarned) return;
+        idleWarned = on;
+        IdleWarning?.Invoke(on);
     }
 
     static Guid? ActivePlan()
