@@ -172,8 +172,6 @@ sealed partial class MainForm : Form
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
-        try { await alerts.Init(env, options.UiDir); }
-        catch (Exception e) { Log.Error("Alerts failed to start", e); }
     }
 
     // --- Messages from the UI ----------------------------------------------------------------
@@ -323,8 +321,6 @@ sealed partial class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) return;
-        // The sleep timer's last minute: Home is +15 min (the warning says so), wherever the box is.
-        if (pad == Pad.Home && sleepTimer.Warned) { sleepTimer.Extend(); return; }
         if (keyboard.Visible)
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
@@ -341,6 +337,8 @@ sealed partial class MainForm : Form
         if (mapper.Map is null) cursor.Hide();
         // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
         var moonlight = app?.Id == "moonlight";
+        // An alert that takes Home (the sleep timer's last minute: +15 min) gets it first.
+        if ((pad == Pad.Home && !moonlight || pad == Pad.HomeHold && moonlight) && alerts.ClaimsHome()) return;
 
         switch (pad)
         {
@@ -655,7 +653,7 @@ sealed partial class MainForm : Form
     void OnStandbyChanged(bool active)
     {
         Log.Info(active ? "In standby" : "Awake");
-        alerts.Suppress(active);
+        overlay.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.
         if (!tvChangedItself) _ = active ? tv.TurnOff() : tv.TurnOn();
         tvChangedItself = false;
