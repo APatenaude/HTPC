@@ -174,10 +174,11 @@ addEventListener('DOMContentLoaded', () => {
   hostMessage('text.', (msg) => { if (msg.type === 'text.insert') textInsert(msg.text); else if (msg.type === 'text.key') textKey(msg.key); });
   if (host || !location.hash) return;
   const route = location.hash.slice(1);
-  if (route === 'selftest') {
-    const s = document.createElement('script');
-    s.src = 'selftest.js';
-    document.body.appendChild(s);
-  } else if (!noticeDemo(route)) return;
+  // #selftest: the self-test, the UI audit (audit.js) at its end; #audit, #audit?page=...: the
+  // audit alone. In order (async off); loaded before the page's load event, which waits for them.
+  const load = (src) => { const s = document.createElement('script'); s.src = src; s.async = false; document.body.appendChild(s); };
+  if (route === 'selftest') { load('audit.js'); load('selftest.js'); }
+  else if (route.startsWith('audit')) { window.auditRoute = route; load('audit.js'); }
+  else if (!noticeDemo(route)) return;
   history.replaceState(null, '', location.pathname + location.search);
 });

@@ -642,8 +642,12 @@
   reset('home');
   check('Sounds: headless (no host, no real key): the audio device is never opened', sounds.ctx === null);
 
-  // ---- Report -------------------------------------------------------------------------------------
+  // ---- The UI audit: every page walked with the D-pad (audit.js) ---------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
+  if (typeof runAudit === 'function') await runAudit(check);
+  else check('audit: audit.js is loaded', false);
+
+  // ---- Report -------------------------------------------------------------------------------------
   console.log = log;
   const failed = results.filter((r) => !r.ok);
   const pre = document.createElement('pre');
