@@ -4,7 +4,7 @@
 // one WebSocket; the launcher decides where each button goes (the TV's own screens, the
 // on-screen keyboard or the app in front). Messages: PhoneProtocol.cs.
 //
-// ?demo=remote|link|arrows|type|playing|live|pair|asleep|sleep|timer shows a screen with made-up data and
+// ?demo=remote|link|linksheet|arrows|type|playing|live|pair|asleep|sleep|timer shows a screen with made-up data and
 // no box (screenshots). It sends nothing.
 
 const PROTOCOL = 1;
@@ -46,6 +46,7 @@ const ICONS = {
   timer: 'M12 8a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM12 12v3.5l2.5 1.5M10 3h4M12 3v5',
   controller: 'M6 8h12a4 4 0 0 1 4 4v2a3 3 0 0 1-5.4 1.8L15 14H9l-1.6 1.8A3 3 0 0 1 2 14v-2a4 4 0 0 1 4-4zM7 10.5v3M5.5 12h3M15.5 11.5h0M17.5 13h0',
   keyboard: 'M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
   phone: 'M7 2h10v20H7zM11 18.5h2',
   share: 'M12 3v12M8 7l4-4 4 4M5 11v9h14v-9',
@@ -205,7 +206,7 @@ function renderTab() {
   $('app').dataset.tab = tab;
   $('title').textContent = TITLES[tab];
   for (const t of ['remote', 'type', 'playing']) $('tab-' + t).hidden = t !== tab;
-  for (const b of document.querySelectorAll('.tabs button')) {
+  for (const b of document.querySelectorAll('.tabs button[data-tab]')) {
     if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   }
   // As on the design: the power button on Remote, the playing app's name on Playing.
@@ -376,7 +377,7 @@ for (const b of document.querySelectorAll('[data-step]')) {
 }
 pressable($('mute'), () => send({ t: 'mute' }));
 
-for (const b of document.querySelectorAll('.tabs button')) {
+for (const b of document.querySelectorAll('.tabs button[data-tab]')) {
   b.addEventListener('click', () => {
     state.tab = b.dataset.tab;
     store.set('tab', state.tab);
@@ -499,7 +500,59 @@ pressable($('tab'), () => { syncText(); key('tab'); startOver(); });
 pressable($('shift-tab'), () => { syncText(); key('shiftTab'); startOver(); });
 $('kbd-space').addEventListener('click', () => text.focus());
 
-// ---- Send a link (Remote tab) -------------------------------------------------------------------
+// ---- Send a link (a sheet from the tab bar's "Send link") ----------------------------------------
+// It closes by a swipe down, a tap outside, Escape, or once sent. The phone's keyboard: iOS keeps
+// the page's size and covers its bottom, so the sheet is lifted by what the keyboard covers
+// (visualViewport); Android shrinks the page instead (nothing to lift).
+function openLinkSheet() {
+  syncLinkbar();
+  $('linksheet').hidden = false;
+  liftLinkSheet();
+}
+function closeLinkSheet() {
+  $('linkbar-url').blur();
+  $('linksheet').hidden = true;
+  $('linkbar').style.transform = '';
+  $('linkbar-note').textContent = linkNote;
+}
+function liftLinkSheet() {
+  const vv = window.visualViewport;
+  const covered = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+  $('linksheet').style.paddingBottom = covered ? covered + 'px' : '';
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', liftLinkSheet);
+  visualViewport.addEventListener('scroll', liftLinkSheet);
+}
+$('link-open').addEventListener('click', openLinkSheet);
+$('linksheet').addEventListener('click', (e) => { if (e.target === $('linksheet')) closeLinkSheet(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('linksheet').hidden) closeLinkSheet(); });
+// Swipe down (from anywhere on the sheet but the field and buttons): past 70 px it closes.
+{
+  let startY = null;
+  const sheet = $('linkbar');
+  sheet.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('input, button')) return;
+    startY = e.clientY;
+    sheet.setPointerCapture(e.pointerId);
+    sheet.classList.add('dragging');
+  });
+  sheet.addEventListener('pointermove', (e) => {
+    if (startY === null) return;
+    sheet.style.transform = `translateY(${Math.max(0, e.clientY - startY)}px)`;
+  });
+  const end = (e) => {
+    if (startY === null) return;
+    const moved = e.clientY - startY;
+    startY = null;
+    sheet.classList.remove('dragging');
+    sheet.style.transform = '';
+    if (moved > 70) closeLinkSheet();
+  };
+  sheet.addEventListener('pointerup', end);
+  sheet.addEventListener('pointercancel', end);
+}
+
 // A field and Paste; once it holds something, Send (one tap). The box finds the link in what was
 // pasted and opens it where it belongs. Reading the clipboard takes HTTPS (Android's secure
 // remote); over plain HTTP (iPhone) Paste puts the cursor in the field, where the phone's own
@@ -531,12 +584,11 @@ $('linkbar').addEventListener('submit', (e) => {
   const url = field.value.trim();
   if (!url) { field.focus(); return; }
   send({ t: 'open', url: url.slice(0, 2048) });
-  toast('Sent to the TV');
   field.value = '';
-  field.blur();
-  syncLinkbar();
+  closeLinkSheet();
+  toast('Sent to the TV');
 });
-$('linkbar-more').addEventListener('click', () => openSend());
+$('linkbar-more').addEventListener('click', () => { closeLinkSheet(); openSend(); });
 
 // ---- Playing ------------------------------------------------------------------------------------------
 
@@ -820,7 +872,10 @@ function runDemo(view) {
   if (view === 'sendkey') onBox({ t: 'shortcutKey', token: 'demo-Qm9vc3RlZC1kZW1vLWtleS1ub3QtcmVhbA', url: 'http://tv.local/api/open' });
   if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
   if (view === 'lost') $('lost').hidden = false;
-  syncLinkbar();
+  // &kbd=300: as if iOS's keyboard covered the bottom 300 px (what visualViewport then reports).
+  const kbd = Number(params.get('kbd'));
+  if (kbd > 0) window.visualViewport = { height: innerHeight - kbd, offsetTop: 0 };
+  if (view === 'link' || view === 'linksheet') openLinkSheet();
 }
 
 boot();

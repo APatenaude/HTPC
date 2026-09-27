@@ -52,7 +52,7 @@ to tv.local by itself where the phone can open it (some Android phones cannot).
 
 | Tab | Controls |
 |---|---|
-| Remote | Send a link to the TV, first on the screen: a field with Paste (reading the clipboard takes HTTPS; over HTTP, Paste puts the cursor in the field for the phone's own Paste), then Send; YouTube videos open in the YouTube tile (VacuumTube, started with the link; see below), Twitch in the Twitch tile, anything else in a new tab of the browser tile ("From other apps" opens the Share-sheet setup). Touchpad (drag = pointer with acceleration, tap = click, two-finger tap = right-click, two-finger drag = scroll, press and hold then drag = drag) or Arrows (D-pad, OK). Back, Home (hold = Power), Options. Volume −/mute/+ (steps of 2), brightness. Power button: sleep (asks first); wake while asleep. |
+| Remote | Send link (in the tab bar, on every tab): a sheet pulled up from the bottom (closed by a swipe down, a tap outside or sending; lifted above iOS's keyboard with visualViewport) with a field and Paste (reading the clipboard takes HTTPS; over HTTP, Paste puts the cursor in the field for the phone's own Paste), then Send; YouTube videos open in the YouTube tile (VacuumTube, started with the link; see below), Twitch in the Twitch tile, anything else in a new tab of the browser tile ("From other apps" opens the Share-sheet setup). Touchpad (drag = pointer with acceleration, tap = click, two-finger tap = right-click, two-finger drag = scroll, press and hold then drag = drag) or Arrows (D-pad, OK). Back, Home (hold = Power), Options. Volume −/mute/+ (steps of 2), brightness. Power button: sleep (asks first); wake while asleep. |
 | Type | Live typing into the focused field on the TV (Backspaces for what changed, then the text), Enter, Delete, Clear, Tab, Shift+Tab. |
 | Playing | What plays, ±10 s, play/pause, previous/next, seek bar, volume; a live stream (no timeline, an endless one, or one that grows as it plays, as Twitch channels report: `LiveGuess` in MediaWatcher.cs) shows LIVE instead, with no bar and no seeking; sleep timer (the 1-minute warning reaches the phone, with +15 min). |
 
@@ -87,7 +87,7 @@ must be http(s) with nothing that could become a command-line switch, and apps g
 separate arguments after `--` (VacuumTube only the checked video id). The remote at
 http://tv.local is not encrypted on the home network (SPEC: HTTPS only for Android's Share).
 
-Send to TV from other apps (SPEC N9; the phone's Remote tab › From other apps, or the
+Send to TV from other apps (SPEC N9; the phone's tab bar › Send link › From other apps, or the
 second QR code in Settings › Phone remote, which opens /send and pairs):
 - **Android:** the Share target of the installed web app, over HTTPS. The box is its own
   certificate authority (`PhoneCertificates.cs`), in two steps: a root, which phones install,

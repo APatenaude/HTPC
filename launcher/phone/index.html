@@ -34,18 +34,6 @@
 
   <main id="main">
     <section class="tab" id="tab-remote" aria-label="Remote">
-      <form class="linkbar" id="linkbar" action="#" aria-labelledby="linkbar-title">
-        <div class="linkbar-head">
-          <span class="linkbar-title" id="linkbar-title"><span data-icon="share" data-size="16" data-weight="2.25" aria-hidden="true"></span>Send a link to the TV</span>
-          <button type="button" class="linkbar-more" id="linkbar-more">From other apps</button>
-        </div>
-        <div class="linkbar-row">
-          <input id="linkbar-url" type="url" placeholder="Paste a link here" aria-label="Link to send" aria-describedby="linkbar-note" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">
-          <button type="button" id="linkbar-paste">Paste</button>
-          <button type="submit" class="primary" id="linkbar-send" hidden>Send</button>
-        </div>
-        <p class="linkbar-note" id="linkbar-note">YouTube opens in YouTube, Twitch in Twitch, anything else in the Browser.</p>
-      </form>
       <div class="seg" role="radiogroup" aria-label="Touchpad or arrows">
         <button type="button" role="radio" id="seg-touchpad" aria-checked="true">Touchpad</button>
         <button type="button" role="radio" id="seg-arrows" aria-checked="false">Arrows</button>
@@ -150,6 +138,7 @@
     <button type="button" data-tab="remote"><span data-icon="controller" data-size="24" aria-hidden="true"></span>Remote</button>
     <button type="button" data-tab="type"><span data-icon="keyboard" data-size="24" aria-hidden="true"></span>Type</button>
     <button type="button" data-tab="playing"><span data-icon="play" data-size="24" aria-hidden="true"></span>Playing</button>
+    <button type="button" id="link-open" aria-haspopup="dialog"><span data-icon="link" data-size="24" aria-hidden="true"></span>Send link</button>
   </nav>
 
   <div class="pair" id="pair" hidden>
@@ -198,6 +187,20 @@
       </ol>
       <p class="note">Android then says the network may be monitored: that is this certificate. It works only for tv.local and addresses on home networks, never for other sites.</p>
     </section>
+  </div>
+
+  <div class="sheet-wrap" id="linksheet" hidden>
+    <form class="sheet linksheet" id="linkbar" action="#" role="dialog" aria-modal="true" aria-labelledby="linkbar-title">
+      <span class="grabber" aria-hidden="true"></span>
+      <h2 id="linkbar-title">Send a link to the TV</h2>
+      <div class="linkbar-row">
+        <input id="linkbar-url" type="url" placeholder="Paste a link here" aria-label="Link to send" aria-describedby="linkbar-note" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">
+        <button type="button" id="linkbar-paste">Paste</button>
+        <button type="submit" class="primary" id="linkbar-send" hidden>Send</button>
+      </div>
+      <p class="linkbar-note" id="linkbar-note">YouTube opens in YouTube, Twitch in Twitch, anything else in the Browser.</p>
+      <button type="button" class="send-link" id="linkbar-more"><span data-icon="share" aria-hidden="true"></span><span class="grow">From other apps</span><span data-icon="chevright" aria-hidden="true"></span></button>
+    </form>
   </div>
 
   <div class="sheet-wrap" id="sheet" hidden>
