@@ -113,6 +113,16 @@ Decisions of 26 September 2026, evening (with the agents' plans):
 | TVs | Roku, LG webOS, Google/Android TV, Sony Bravia, Samsung Tizen (on/off only), the non-Roku ones marked beta until tested on a real TV; no CEC for now. The HDMI input is read from the TV's EDID; a TV is bound only on positive evidence. The TV turns off at sleep and shut down (not restart); polled every 5 s for a fast wake. One user and one setup per box. First-run setup keeps its separate install step |
 | Updates | Quiet daily check, installs only when asked; releases published from v* tags on the public repo, unsigned, trusted by pinned repo + HTTPS + hashes (no signing key); automatic rollback; apps' own updaters off; Windows updates from the TV (now or tonight), quiet boot after a night restart; restore points before Update all and Windows updates; Defender definitions stay manual |
 
+Decisions of 27 September 2026 (after the night's merges):
+
+| Topic | Decision |
+|---|---|
+| TVs | LG webOS and Google/Android TV built first (Sony and Samsung later) and offered in setup and Settings › TV marked beta, tested only against simulated TVs so far. A TV is never bound automatically: the user picks it by name. An LG that was factory-reset may show its "allow this device?" prompt once; the user pairs again from Settings › TV |
+| Power menu | Shut down asks first ("Shut down the box?", the focus on Cancel): the controller cannot turn the box back on |
+| Bluetooth | The box keeps Windows' generic Bluetooth driver when Windows Update has none for its chip (this box's Realtek 0BDA:C821); a keyboard pairs only with a PIN. The launcher follows one controller (the 8BitDo); others work in games |
+| Stremio | Its update notice is off (`--autoupdater-endpoint` pointed nowhere; checked in the VM) |
+| Next | The box gets the new build in a session with the user at the TV (one Windows permission prompt); the shell switch stays for the end of development |
+
 ## Controller map
 
 Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power · in Moonlight tap goes to the game PC, hold 0.5 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
