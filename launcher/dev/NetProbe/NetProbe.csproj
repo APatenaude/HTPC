@@ -13,7 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="$(Src)WlanNative.cs;$(Src)WifiProfile.cs;$(Src)Wifi.cs" />
+    <Compile Include="$(Src)WlanNative.cs;$(Src)WifiProfile.cs;$(Src)Wifi.cs;$(Src)Bluetooth.cs;$(Src)SoundSwitch.cs" />
   </ItemGroup>
 
 </Project>

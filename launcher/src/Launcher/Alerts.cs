@@ -125,7 +125,10 @@ sealed class AlertCenter : IAlerts
     bool moonlight;
     DateTime? holdUntil;                    // after standby: waiting for the screen
     OverlayView lastOverlay = OverlayViews.Empty;
-    OverlayHint? hint;
+    OverlayHint? hint;          // the in-app hint: waiting for its app to be in front, or showing
+    TimeSpan hintFor;           // how long it shows, counted from when it first does
+    DateTime? hintUntil;        // set once it shows
+    DateTime hintDeadline;      // not in front by then: dropped
     string lastWeb = "";
 
     /// <param name="overlay">The layer over apps.</param>
@@ -196,7 +199,7 @@ sealed class AlertCenter : IAlerts
         {
             holdUntil = now + ScreenOnFallback; // until the TV reports on
         }
-        if (newPlace == AlertPlace.Launcher) hint = null;
+        if (newPlace == AlertPlace.Launcher && hintUntil is not null) { hint = null; hintUntil = null; } // Home ends it
         Refresh();
     }
 
@@ -241,10 +244,17 @@ sealed class AlertCenter : IAlerts
         Refresh();
     }
 
-    /// <summary>The in-app hint over the app (phase D); null takes it away.</summary>
-    public void SetHint(OverlayHint? value)
+    /// <summary>
+    /// The in-app hint (AppHint), for an app that is coming to the front: it shows once the
+    /// app is (the launcher steps aside a moment later), for `showFor` from then; Home (the
+    /// launcher coming forward) or standby ends it. Null takes it away.
+    /// </summary>
+    public void ShowHint(OverlayHint? value, TimeSpan? showFor = null)
     {
-        hint = place == AlertPlace.App ? value : null;
+        hint = value;
+        hintFor = showFor ?? AppHint.ShowFor;
+        hintUntil = null;
+        hintDeadline = clock() + TimeSpan.FromSeconds(10);
         Refresh();
     }
 
@@ -344,6 +354,13 @@ sealed class AlertCenter : IAlerts
         }
 
         var cards = entries.Where(e => OnScreen(e, now)).Reverse().ToList();
+        // The hint: its time starts when its app is first in front; over by then, or never got there.
+        if (hint is not null)
+        {
+            if (place == AlertPlace.App && hintUntil is null) hintUntil = now + hintFor;
+            if ((hintUntil is { } hu && now >= hu) || (hintUntil is null && now > hintDeadline)) { hint = null; hintUntil = null; }
+        }
+        var shownHint = place == AlertPlace.App ? hint : null;
 
         // Over an app: the overlay; on the launcher: the page's own cards.
         if (place == AlertPlace.App)
@@ -352,7 +369,7 @@ sealed class AlertCenter : IAlerts
             var view = new OverlayView(
                 cards.Take(MaxOverApp).Select(e => new OverlayCard(e.Spec.Id, e.Spec.Title, e.Spec.Small ? null : e.Spec.Body,
                     e.Spec.Glyph, e.Spec.Tone, e.Spec.Action is null ? null : key, e.Spec.Action)).ToList(),
-                hint);
+                shownHint);
             if (!Same(view, lastOverlay))
             {
                 lastOverlay = view;

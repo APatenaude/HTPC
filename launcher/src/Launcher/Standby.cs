@@ -52,6 +52,9 @@ sealed class LauncherSettings
     /// <summary>The on-screen keyboard pops up by itself on text fields (SPEC N11).</summary>
     public bool ShowKeyboardAutomatically { get; set; } = true;
 
+    /// <summary>The app's buttons over it for 4 s each time it is opened (design: Inside an app).</summary>
+    public bool ShowAppHints { get; set; } = true;
+
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
@@ -122,6 +125,7 @@ sealed class LauncherSettings
             case "preciseSpeed": PreciseSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "scrollSpeed": ScrollSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "showKeyboardAutomatically": ShowKeyboardAutomatically = value.GetBoolean(); break;
+            case "showAppHints": ShowAppHints = value.GetBoolean(); break;
             default: return false;
         }
         Save();

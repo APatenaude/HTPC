@@ -45,10 +45,11 @@ sealed partial class MainForm
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.
-            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; WifiPlaceChanged(); });
+            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; WifiPlaceChanged(); BluetoothPlaceChanged(); });
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUiQueued(() => internetRules.Woke(DateTime.Now));
         };
         Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => apps.MarkAllClosing("Windows is signing out or shutting down");
+        InitBluetooth(); // MainForm.Bluetooth.cs
     }
 
     /// <summary>OnLoad, once standby exists and the window has its handle.</summary>
@@ -110,6 +111,7 @@ sealed partial class MainForm
             if (alertPlace == AlertPlace.Standby) Awake();
             alertPlace = place;
             WifiPlaceChanged(); // MainForm.Wifi.cs: scans only with the launcher in front
+            BluetoothPlaceChanged();
         }
         alertCenter.SetPlace(place, moonlight);
     }
@@ -136,10 +138,20 @@ sealed partial class MainForm
         alertCenter.SetPlace(AlertPlace.Launcher);
         alertPlace = AlertPlace.Launcher;
         WifiPlaceChanged();
+        BluetoothPlaceChanged();
         alertOverlay.ClearForCapture();
         return focus;
     }
 
+    /// <summary>
+    /// An app was opened from the launcher: its buttons over it for 4 s (design: Inside an app;
+    /// the user's choice: every time). Off in Settings › Controller.
+    /// </summary>
+    void ShowAppHint(string id)
+    {
+        if (!settings.ShowAppHints || apps.Get(id) is not { } app) return;
+        alertCenter.ShowHint(AppHint.For(app.Name, MapFor(app), app.Id == "moonlight"));
+    }
     void AlertsTick()
     {
         alertCenter.Tick();

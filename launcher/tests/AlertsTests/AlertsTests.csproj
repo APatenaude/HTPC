@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="$(Src)Alerts.cs;$(Src)AlertsForm.cs;$(Src)AppExits.cs;$(Src)InternetWatch.cs;$(Src)WifiProfile.cs" />
+    <Compile Include="$(Src)Alerts.cs;$(Src)AlertsForm.cs;$(Src)AppExits.cs;$(Src)InternetWatch.cs;$(Src)WifiProfile.cs;$(Src)AppHint.cs;$(Src)ButtonMap.cs;$(Src)ButtonMapStore.cs;$(Src)Input.cs;$(Src)ControllerService.cs;$(Src)PadMapper.cs;$(Src)PhonePointer.cs;$(Src)Bluetooth.cs;$(Src)SoundSwitch.cs" />
   </ItemGroup>
 
 </Project>
