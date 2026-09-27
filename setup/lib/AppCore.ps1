@@ -132,14 +132,36 @@ function Expand-UserPath([string]$Path, [string]$Profile) {
     [Environment]::ExpandEnvironmentVariables($Path)
 }
 
+# The interactive (console) user, resolved by SYSTEM: SID (for that user's registry hive) and
+# profile folder (user-scoped firewall paths, the user's Startup folder). $null when nobody is
+# signed in (the task's run at Windows start).
+function Get-ConsoleUser {
+    $sid = $null
+    $owner = (Get-CimInstance Win32_ComputerSystem).UserName
+    if ($owner) {
+        try { $sid = (New-Object Security.Principal.NTAccount($owner)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { }
+    }
+    if (-not $sid) {
+        # Windows may name nobody while the launcher is the shell (no Explorer): the owner of the
+        # running watchdog or launcher is the TV user.
+        foreach ($name in 'HtpcWatchdog.exe', 'HtpcLauncher.exe') {
+            $process = Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $process) { continue }
+            $result = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction SilentlyContinue
+            if ($result -and $result.Sid) { $sid = $result.Sid; break }
+        }
+    }
+    if (-not $sid) { return $null }
+    try {
+        $profilePath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath
+        [pscustomobject]@{ Sid = $sid; Profile = $profilePath }
+    } catch { $null }
+}
+
 # The interactive (console) user's profile folder, resolved by SYSTEM for user-scoped firewall paths.
 function Get-ConsoleUserProfile {
-    $owner = (Get-CimInstance Win32_ComputerSystem).UserName
-    if (-not $owner) { return $null }
-    try {
-        $sid = (New-Object Security.Principal.NTAccount($owner)).Translate([Security.Principal.SecurityIdentifier]).Value
-        (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath
-    } catch { $null }
+    $user = Get-ConsoleUser
+    if ($user) { $user.Profile } else { $null }
 }
 
 $FirewallPrefix = 'HTPC block inbound'

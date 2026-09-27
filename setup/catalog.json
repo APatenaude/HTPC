@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog, App library). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = glyph and colour shown until the app's own logo is cached (the launcher takes it from the installed program or the website: AppLogos). desc = one line on the library card. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window. Every app opens filling the screen: through its own switch where it has one (args), else launch.fill = the launcher makes its window cover the screen without a frame, and again whenever it stops doing so while in front. install.scope = how the launcher installs it from the TV: machine (through the elevated \\HTPC\\Jobs task) or user (the launcher runs winget without elevation). install.wingetScope = the --scope handed to winget when it differs from install.scope (Kodi ships only a user-scoped installer but writes to Program Files, so it is installed as machine with --scope user). install.elevated = false marks an app that refuses to install elevated (Spotify): setup's Apps step skips it and it is offered only from the library, never in the setup pick list.",
+  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog, App library). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = glyph and colour shown until the app's own logo is cached (the launcher takes it from the installed program or the website: AppLogos). desc = one line on the library card. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window. Every app opens filling the screen: through its own switch where it has one (args), else launch.fill = the launcher makes its window cover the screen without a frame, and again whenever it stops doing so while in front. install.scope = how the launcher installs it from the TV: machine (through the elevated \\HTPC\\Jobs task) or user (the launcher runs winget without elevation). install.wingetScope = the --scope handed to winget when it differs from install.scope (Kodi ships only a user-scoped installer but writes to Program Files, so it is installed as machine with --scope user). install.elevated = false marks an app that refuses to install elevated (Spotify): setup's Apps step skips it and it is offered only from the library, never in the setup pick list. autostart = what the app sets up to start or run by itself, beyond what runs from its launch.exe folder (found anyway): run (Run/RunOnce value names), startup (Startup-folder file names), tasks (scheduled task names, \\ first for a full path) and services (set to Manual; only these, never others) take * as a wildcard; prefs = key=value lines (in an .ini section when given) set in its own settings file, as the user, so it does not start itself again or update itself in the background (setup/lib/AppAutostart.ps1, launcher AutostartGuard.cs). launch.env = variables it is started with, for the same (Feishin's updater).",
   "apps": [
     {
       "id": "youtube",
@@ -83,7 +83,8 @@
         "exe": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
         "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-fullscreen --no-first-run --no-default-browser-check --enable-features=WebContentsForceDark https://www.google.com"
       },
-      "install": { "source": "builtin" }
+      "install": { "source": "builtin" },
+      "autostart": { "run": [ "MicrosoftEdgeAutoLaunch_*" ] }
     },
     {
       "id": "kodi",
@@ -119,7 +120,10 @@
       "desc": "Plex's app made for TVs",
       "icon": { "glyph": "play", "color": "#F5B82E" },
       "launch": { "exe": "%ProgramFiles%\\Plex\\Plex HTPC\\Plex HTPC.exe", "fill": true },
-      "install": { "source": "winget", "scope": "machine", "id": "Plex.PlexHTPC" }
+      "install": { "source": "winget", "scope": "machine", "id": "Plex.PlexHTPC" },
+      "autostart": {
+        "prefs": [ { "file": "%LOCALAPPDATA%\\Plex HTPC\\plex.ini", "section": "debug", "set": { "disableUpdater": "true" } } ]
+      }
     },
     {
       "id": "spotify",
@@ -130,7 +134,11 @@
       "desc": "Music streaming",
       "icon": { "glyph": "music", "color": "#1ED760" },
       "launch": { "exe": "%APPDATA%\\Spotify\\Spotify.exe", "fill": true },
-      "install": { "source": "winget", "scope": "user", "elevated": false, "id": "Spotify.Spotify" }
+      "install": { "source": "winget", "scope": "user", "elevated": false, "id": "Spotify.Spotify" },
+      "autostart": {
+        "run": [ "Spotify" ],
+        "prefs": [ { "file": "%APPDATA%\\Spotify\\prefs", "set": { "app.autostart-configured": "true", "app.autostart-mode": "\"off\"" } } ]
+      }
     },
     {
       "id": "feishin",
@@ -140,7 +148,7 @@
       "preset": "mouse",
       "desc": "Music from your Navidrome server",
       "icon": { "glyph": "music", "color": "#FF7AB6" },
-      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\feishin\\Feishin.exe", "fill": true },
+      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\feishin\\Feishin.exe", "fill": true, "env": { "DISABLE_AUTO_UPDATES": "1" } },
       "install": { "source": "winget", "scope": "user", "id": "jeffvli.Feishin" }
     },
     { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com", "default": false, "preset": "mouse", "desc": "Films and series", "icon": { "glyph": "play", "color": "#FF4B55" } },

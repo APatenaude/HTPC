@@ -12,10 +12,19 @@
     Tamper Protection as managed by the organisation.
 
     Edge keeps updating itself (decision: Edge auto, apps on demand).
+
+    Nothing of Edge runs while no Edge window is open (the box has few resources): no startup
+    boost (Edge's processes started at sign-in, ready for a faster first window; the Browser and
+    website tiles open a little slower without it) and no background mode (extensions and
+    apps kept running after the last window closes). The startup boost's own start at sign-in,
+    HKCU Run MicrosoftEdgeAutoLaunch_<hash>, is removed (the catalog's "autostart" for the Browser:
+    the launcher and the jobs keep it away if it comes back).
 #>
 param()
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\AppCore.ps1"
+. "$PSScriptRoot\AppAutostart.ps1"
 Assert-Admin
 
 $edge = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
@@ -81,6 +90,12 @@ Set-RegValue $edge 'PrimaryPasswordSetting' 0
 Write-Host '  TV playback: autoplay and hardware acceleration on'
 Set-RegValue $edge 'AutoplayAllowed' 1
 Set-RegValue $edge 'HardwareAccelerationModeEnabled' 1
+
+Write-Host '  Nothing of Edge running with no window open: no startup boost, no background mode'
+Set-RegValue $edge 'StartupBoostEnabled' 0
+Set-RegValue $edge 'BackgroundModeEnabled' 0
+$browser = @(Get-AutostartCatalog (Join-Path $PSScriptRoot '..\catalog.json') | Where-Object { $_.id -eq 'edge' })
+[void](Invoke-AppAutostartGuard -Apps $browser -Kinds run -Context 'Edge')
 
 Write-Host '  Fake MDM enrollment (so Edge honours the search policies)'
 $fake = 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF'

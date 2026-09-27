@@ -21,9 +21,9 @@ answer file runs it with `-Unattended` at the first sign-in.
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
 | Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store) |
-| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead |
+| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
-| Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
+| Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos; nothing of Edge running with no window open (`StartupBoostEnabled` and `BackgroundModeEnabled` 0, the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed) |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual (from the TV: now or tonight), no driver swaps, no Windows update notifications or restart warnings over the TV, Store apps on demand; Edge and WebView2 update themselves |
 | Bluetooth | `lib/Install-BluetoothDriver.ps1` | the Bluetooth adapter's own driver from Windows Update, matched by its exact hardware ID and class, whatever the chipset; nothing if there is none (this box's Realtek 8821CE has none there) or its maker's driver is in already. `-Check` only searches |
@@ -65,7 +65,7 @@ run as SYSTEM, take no argument unless shown, and first put right an interrupted
 |---|---|
 | `launcher-update:<x.y.z>` | release v<x.y.z> of APatenaude/HTPC replaces the launcher, `lib\`, `jobs\`, `catalog.json` and the kept setup (`lib/LauncherUpdate.ps1`) |
 | `launcher-rollback` | back to the launcher before the last update (support only: the update rolls back by itself) |
-| `reconcile` | finishes or undoes an interrupted launcher update, from its journal (`state\launcher-update.json`) and the files |
+| `reconcile` | finishes or undoes an interrupted launcher update, from its journal (`state\launcher-update.json`) and the files; then the autostart guard for every catalog app (at every Windows start) |
 | `windows-scan` | the waiting Windows updates, into `state\windows-updates.json` (`lib/WindowsUpdate.ps1`, `lib/WuaChild.ps1`) |
 | `windows-install` | a restore point (checked), then those updates one at a time |
 | `restorepoint` | a restore point, checked with `Get-ComputerRestorePoint` (before "Update all") |
@@ -78,6 +78,70 @@ remote's rule must name that exe too, before the build first runs (else Windows 
     powershell -ExecutionPolicy Bypass -File setup\lib\Set-PhoneRemote.ps1 -Program "C:\Program Files\HTPC\Launcher\HtpcLauncher.exe","<repo>\launcher\src\Launcher\bin\Debug\net10.0-windows10.0.19041.0\HtpcLauncher.exe"
 
 (as admin; setup.ps1 -Only PhoneRemote does the installed exe only).
+
+## Apps that start by themselves
+
+The box has few resources: an installed app must not start at sign-in, keep an agent or a service
+running, or update itself in the background. `lib/AppAutostart.ps1` (the guard) finds what the
+catalog's apps set up and takes it away:
+
+| Entry | Done | When it is an app's |
+|---|---|---|
+| HKLM / HKCU `Run` and `RunOnce` values (and WOW6432Node) | removed, with Explorer's `StartupApproved` record of it | its command runs from the app's folder (`launch.exe`'s) or its exe, or its name is in the app's `autostart.run` |
+| Startup-folder files (the user's and all users') | removed, likewise | a shortcut to the app's folder, or a name in `autostart.startup` |
+| scheduled tasks | disabled (kept, for the app's own uninstaller) | a program in the app's folder, or a name in `autostart.tasks` |
+| services | set to Manual (starts when something asks), never Disabled or stopped | only a name in `autostart.services`; one from the app's folder that is not listed is logged and left |
+| the app's own settings file | key=value lines set, as the user (`autostart.prefs`, in an .ini `section` when given) | Spotify's autostart off, Plex HTPC's updater off |
+
+Never touched, whatever the catalog says: ours (`HTPC launcher`, tasks under `\HTPC\` or named
+`HTPC...`, anything in `Program Files\HTPC`), Windows' own (`SecurityHealth`, tasks under
+`\Microsoft\`, programs in the Windows folder), Edge's updater (`\MicrosoftEdgeUpdateTask*`, the
+user's choice) and `CoworkVMService` (the Claude desktop app's, a dev tool). A folder too broad to
+mean one app (Program Files itself, AppData itself) is never used, nor a declared name with fewer
+than 4 characters besides `*`. What no catalog app claims is left alone and logged.
+
+It runs:
+- **as SYSTEM** at the end of every `install:` and `upgrade:` job (that app) and in `reconcile`
+  (every catalog app, at every Windows start): HKLM, the signed-in user's hive (`HKU\<SID>`, the
+  user the jobs already resolve for firewall paths; only while it is loaded: a hive is never
+  loaded by hand), both Startup folders (no junction followed in the user's profile), tasks,
+  services. SYSTEM never writes in a user's folders, so no prefs. Log:
+  `C:\ProgramData\HTPC\state\autostart.log`;
+- **as the user** at the end of per-user `install:` / `upgrade:` jobs and `winget-update`: HKCU,
+  the user's Startup folder, prefs. Log: `C:\ProgramData\HTPC\logs\autostart.log`;
+- **in setup**: the Apps step (every catalog app, as admin and as the TV user: all of the above),
+  the Edge step (Edge's Run values only);
+- **in the launcher** (`launcher/src/Launcher/AutostartGuard.cs`): HKCU's Run and RunOnce at start,
+  a few seconds after each app ends (Spotify writes its value back while it runs) and after the
+  library installs or updates one, and the prefs of the apps not running; registry reads and one
+  small file, no process scan. Logged in `launcher.log` ("Autostart").
+
+Without Explorer (the launcher as the shell) `Run` and Startup-folder programs do not start
+anyway, except in desktop mode; tasks, services and in-app updaters do.
+
+What each catalog app does, from its installer's source or on this box (27 Sept 2026), and what is
+done about it:
+
+| App | Starts or runs by itself / changes | Done |
+|---|---|---|
+| Spotify (per user) | HKCU Run `Spotify` = `Spotify.exe --autostart --minimized`, written at its first start and again while it runs unless its prefs say otherwise; `spotify:` links (HKCU) | Run value removed (`autostart.run`); `%APPDATA%\Spotify\prefs`: `app.autostart-configured=true`, `app.autostart-mode="off"` (key names found in Spotify.dll 1.3.1; the "off" value is the one documented by users) |
+| Browser (Edge, built in) | startup boost (HKCU Run `MicrosoftEdgeAutoLaunch_<hash>`, Edge started at sign-in), background mode; its updater's services and tasks | Edge step policies, Run value removed (`autostart.run`); updater kept |
+| Stremio (per user, Inno Setup) | starts at the end of its silent install; a desktop shortcut; `stremio:` links, and `magnet:` / `.torrent` for this user when no other app had them (HKCU, `RegisteredApplications\Stremio5`); closing its window hides it to the tray (built in, no setting) with its streaming server; its updater checks every 12 h and downloads | closed after the install (`Stop-StartedByInstaller`); updater off (`launch.args` endpoint); the launcher's Close ends it after 4 s when it only hides (no tray without Explorer); link handlers left (they only act on a link opened on the box) |
+| Jellyfin Media Player (machine, WiX) | a desktop shortcut; at start, asks GitHub for a newer version and shows a notice (Download opens the browser; `main.checkForUpdates` in `%LOCALAPPDATA%\JellyfinMediaPlayer\jellyfinmediaplayer.conf`, JSON); no service, Run value, link handler or firewall rule | nothing: nothing runs in the background |
+| Moonlight (machine, WiX) | inbound firewall Allow rule "Moonlight Game Streaming Client" for Moonlight.exe on every network type; a desktop shortcut; an update notice at start (cannot be turned off, downloads nothing) | left: the rule lets it find the PCs and take the stream without a prompt, and the box's networks are always Private (System step) |
+| VLC (machine, NSIS) | file types (`VLC.*` ProgIDs and HKLM defaults; this user's own choices stay: `UserChoice`, Windows Media Player on this box), disc AutoPlay handlers, `RegisteredApplications\VLC`, its ActiveX control, a desktop shortcut, "Play with VLC" menus (not on this box); update checks while it runs | `install.firstRun` answers the first-run question with no update checks (`qt-updates-notif=0`); the rest only shows in desktop mode |
+| Plex HTPC (machine, NSIS) | its own updater downloads and installs new versions (as Plex Media Player's did: first check 5 minutes after start, then every 3 h, applied at the next start); no service or Run value known | `%LOCALAPPDATA%\Plex HTPC\plex.ini` `[debug] disableUpdater=true` (`autostart.prefs`; Plex's forum; not tried: not installed on this box) |
+| Kodi (NSIS) | Start-menu shortcuts only, settings in HKCU; its version-check add-on only shows a notice | nothing |
+| Feishin (per user, electron-builder) | a desktop shortcut; a tray icon while it runs (closing still quits); its updater downloads new versions and installs them when it quits | started with `DISABLE_AUTO_UPDATES=1` (`launch.env`), which turns its updater off |
+| YouTube (VacuumTube, zip) | its updater (electron-updater) looks at every start | `install.selfUpdate`: `resources\app-update.yml` removed |
+
+Not from catalog apps, left for the user to decide: `IntelGraphicsSoftwareService` (Intel Arc
+Software, a Store app, automatic and running). Desktop shortcuts only show in desktop mode.
+
+Checks: `test/Test-Autostart.ps1` (no admin needed) runs the guard against fakes under
+`%TEMP%\htpc-autotest`: a fake registry (a JSON file), fake Startup folders and profile, fake
+tasks and services; the real ones are never read or changed. `launcher\tests\LauncherTests`
+checks the launcher's side the same way (a fake registry).
 
 ## The launcher as the shell
 

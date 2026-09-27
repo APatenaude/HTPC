@@ -6,7 +6,7 @@ namespace Htpc.Launcher;
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
-    bool InstallElevated = true)
+    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -97,7 +97,28 @@ sealed class AppManager
             installable ? Str(install, "wingetScope") : null,
             installable ? Str(install, "source") : null,
             Custom: false,
-            InstallElevated: !(installable && install.TryGetProperty("elevated", out var el) && el.ValueKind == JsonValueKind.False));
+            InstallElevated: !(installable && install.TryGetProperty("elevated", out var el) && el.ValueKind == JsonValueKind.False),
+            Env: launch.ValueKind == JsonValueKind.Object ? LaunchEnv(launch) : null);
+    }
+
+    /// <summary>
+    /// launch.env: variables the app is started with, where that is how its own background work
+    /// is turned off (Feishin's updater: DISABLE_AUTO_UPDATES). Plain names only.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? LaunchEnv(JsonElement launch)
+    {
+        if (!launch.TryGetProperty("env", out var env) || env.ValueKind != JsonValueKind.Object) return null;
+        var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in env.EnumerateObject())
+            if (v.Value.ValueKind == JsonValueKind.String && System.Text.RegularExpressions.Regex.IsMatch(v.Name, "^[A-Za-z_][A-Za-z0-9_]{0,63}$"))
+                vars[v.Name] = v.Value.GetString()!;
+        return vars.Count > 0 ? vars : null;
+    }
+
+    static void ApplyEnv(CatalogApp app, ProcessStartInfo psi)
+    {
+        foreach (var (name, value) in app.Env ?? new Dictionary<string, string>())
+            psi.Environment[name] = Environment.ExpandEnvironmentVariables(value);
     }
 
     /// <summary>A custom tile (added website or program) as a CatalogApp, so it launches like any app.</summary>
@@ -305,6 +326,7 @@ sealed class AppManager
         psi.UseShellExecute = false;
         psi.WorkingDirectory = Path.GetDirectoryName(psi.FileName)!;
         UserEnvironment.Apply(psi); // PATH and variables as they are now, not as at sign-in
+        ApplyEnv(app, psi);
 
         try
         {
@@ -457,6 +479,7 @@ sealed class AppManager
             psi.ArgumentList.Add(page.AbsoluteUri);
         }
         psi.WorkingDirectory = Path.GetDirectoryName(psi.FileName)!;
+        ApplyEnv(app, psi);
         try
         {
             var process = Process.Start(psi)!;
