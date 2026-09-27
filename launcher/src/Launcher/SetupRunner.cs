@@ -97,7 +97,9 @@ sealed class SetupRunner
         {
             if (File.Exists(ProgressFile) && File.GetLastWriteTime(ProgressFile) >= startedAt)
             {
-                var text = File.ReadAllText(ProgressFile);
+                // Shared read: setup.ps1 may be writing it this very moment.
+                using var stream = new FileStream(ProgressFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var text = new StreamReader(stream).ReadToEnd();
                 if (text != lastProgress && text.Length > 0)
                 {
                     lastProgress = text;

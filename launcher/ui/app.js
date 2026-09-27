@@ -153,10 +153,12 @@ const POWER = [
   { id: 'shutdown', glyph: 'power', label: 'Shut down', caption: '' },
   { id: 'desktop', glyph: 'desktop', label: 'Desktop mode', caption: 'Normal Windows desktop, for maintenance' }
 ];
+// While the Windows desktop is up (desktop mode, state.desktop from the host), its card leads back.
+const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close the Windows desktop and taskbar' };
 
 function renderPower() {
   POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
-  $('power-cards').innerHTML = POWER.map((p) =>
+  $('power-cards').innerHTML = POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
       `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join('');
   $('power-note').innerHTML = '';
@@ -525,7 +527,11 @@ function activate(el) {
     case 'home': state.current = null; state.backdrop = null; send({ type: 'home' }); reset('home'); break;
     case 'view': go(arg); break;
     case 'power': go('power'); break;
-    case 'power-action': send({ type: 'power', action: arg }); break;
+    case 'power-action':
+      if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
+        text: 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.' });
+      else send({ type: 'power', action: arg });
+      break;
     case 'timer': {
       const o = TIMER[Number(arg)];
       state.timer = o.minutes === 0 ? null : { label: o.label, endsAt: o.minutes === 'video' ? 'video' : Date.now() + o.minutes * 60000 };
@@ -650,9 +656,9 @@ function onHost(msg) {
       if (msg.running) {
         for (const t of state.tiles) t.running = msg.running.includes(t.id);
         // The app the menu was opened over has closed: B and Home now lead home, not to it.
-        if (state.current && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
+        if (state.current && state.current !== 'desktop' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
-      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone']) if (k in msg) state[k] = msg[k];
+      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone', 'desktop']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;

@@ -26,7 +26,7 @@ const BUTTONS = [['a', 'A'], ['b', 'B'], ['x', 'X'], ['y', 'Y'], ['lb', 'LB'], [
 const STEP_NAMES = { RestorePoint: 'Restore point', Winget: 'App installer', Apps: 'Apps', Codecs: 'Video codecs',
   Edge: 'Edge settings', Power: 'Power and sleep', Updates: 'Windows updates', System: 'No pop-ups, network, time',
   AutoLogon: 'Sign-in without a password', Launcher: 'Home screen', Library: 'Installing from the TV', PhoneRemote: 'Phone remote',
-  DecodeCheck: 'Video decoding check' };
+  Shell: 'Start straight into the home screen', DecodeCheck: 'Video decoding check' };
 
 const state = {
   step: 'welcome',
@@ -147,7 +147,9 @@ function views() {
   lines.push(['ok', `${state.picked.size} apps on the home screen`]);
   for (const [name, v] of failed) lines.push(['warn', `${STEP_NAMES[name] || name}: ${String(v).replace(/^FAILED: /, '')}`]);
   const restart = r.restartNeeded && r.restartNeeded.length;
-  if (restart) lines.push(['warn', 'Restart the box once to finish (the name change)']);
+  if (restart) lines.push(['warn', r.restartNeeded.includes('shell')
+    ? 'Restart the box once to finish: from then on it starts straight into this home screen'
+    : 'Restart the box once to finish (the name change)']);
   return {
     main: `<div class="su-col"><h1 class="big">${failed.length ? 'Almost set' : 'All set'}</h1>` +
       `<div class="su-summary">${lines.map(([k, text]) =>

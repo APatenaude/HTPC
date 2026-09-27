@@ -13,7 +13,8 @@
 
     Two changes make that safe:
       1. C:\ProgramData\HTPC is locked: inheritance off, SYSTEM and Administrators full control,
-         Users read only. Two sub-folders stay user-writable - logs\ (the launcher's log) and user\
+         Users read only. Three sub-folders stay user-writable - logs\ (the launcher's log), tv\ (the TV
+         code's address cache) and user\
          (progress for per-user installs the launcher runs itself). state\ is admin-write, user-read
          (SYSTEM writes machine-job progress and staging there; the launcher only reads it).
          Without this, any standard process could plant files where SYSTEM or an elevated setup
@@ -44,12 +45,12 @@ $SidAdmins = New-Sid 'S-1-5-32-544'
 $SidUsers  = New-Sid 'S-1-5-32-545'
 $Inherit = 'ContainerInherit,ObjectInherit'
 
-foreach ($sub in @('', 'logs', 'user', 'state')) {
+foreach ($sub in @('', 'logs', 'user', 'state', 'tv')) {
     $path = if ($sub) { Join-Path $HtpcData $sub } else { $HtpcData }
     New-Item -ItemType Directory -Force $path | Out-Null
 }
 
-# Root and state\: Users read only. logs\ and user\: Users may write.
+# Root and state\: Users read only. logs\, user\ and tv\: Users may write.
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)   # inheritance off, drop inherited rules
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($SidSystem, 'FullControl', $Inherit, 'None', 'Allow')))
@@ -65,8 +66,9 @@ if (-not $current.AreAccessRulesProtected) {
     Write-Same "$HtpcData already locked"
 }
 
-# logs\ and user\ get Users Modify back (the launcher writes there at standard rights).
-foreach ($sub in @('logs', 'user')) {
+# logs\, user\ and tv\ get Users Modify back (the launcher writes there at standard rights; tv\ is
+# the TV code's address cache and its own files, which nothing elevated reads).
+foreach ($sub in @('logs', 'user', 'tv')) {
     $path = Join-Path $HtpcData $sub
     $subAcl = Get-Acl -LiteralPath $path
     $hasWrite = $subAcl.Access | Where-Object { $_.IdentityReference -eq $SidUsers.Translate([Security.Principal.NTAccount]) -and $_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify -and -not $_.IsInherited }

@@ -139,6 +139,7 @@ sealed partial class MainForm
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, args) { UseShellExecute = false });
+            Environment.ExitCode = 75; // planned: the watchdog does not count it as a crash
             Close(); // the new one waits for this one's single-instance lock
         }
         catch (Exception e) { Log.Error("Restarting the launcher", e); Post(new { type = "toast", text = "The launcher could not restart", kind = "warn" }); }

@@ -26,6 +26,8 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `ui/app.js` (added screens), `src/Launcher/MainForm.Messages.cs` | How features plug in: `settingsSection`, `addView`, `onAction`, `hostMessage`, `ask` in app.js; `[UiMessages("prefix.")]` and `[UiReady]` methods in any MainForm part. |
 | `src/Launcher/MainForm.Library.cs`, `LibraryService.cs`, `TileStore.cs`, `StartMenuScanner.cs`, `ui/library.*` | App library and tile editing (SPEC W1, W5). The Add tile screen (Library / On this box / Website), Tile options (Start on a home tile: move, rename, change icon, remove), and installing/uninstalling from the TV. `LibraryService` owns the install queue and starts the `\HTPC\Jobs` scheduled task (machine-scope apps, elevated as SYSTEM, no prompt on the TV) or runs winget itself for per-user apps; it never lets a standard process run anything but an install/uninstall of a catalog id. Custom tiles (added websites, programs) and per-tile edits live in `settings.json` (`CustomTiles`, `TileEdits`); AppManager merges them so they launch like catalog apps. `library.js` registers its screens through app.js's addView / onAction / hostMessage registry; `MainForm.Library.cs` handles the `library.*` / `tile.*` messages through the UiMessages registry. |
 | `phone/`, `src/Launcher/Phone*.cs`, `MainForm.Phone.cs`, `ui/phone-settings.*`, `ui/qr.js` | The phone remote (SPEC N8), below. |
+| `src/Watchdog/Watchdog.cs` | HtpcWatchdog.exe, the Windows shell of the TV account (setup's Shell step): starts the launcher, starts it again after a crash, a kill or a 60 s hang; box restart once, then the Windows desktop, after repeated fast exits; pauses; a "One moment…" screen while it restarts. .NET Framework (Windows' own csc.exe, C# 5, built by Launcher.csproj), a few MB. Log: `C:\ProgramData\HTPC\logs\watchdog.log`. |
+| `src/Launcher/Shell.cs`, `MainForm.Shell.cs` | Desktop mode (Power menu, confirmed): Explorer for maintenance, Home still works over it; Back to TV (Power menu, or `HtpcLauncher.exe --tv`, the desktop shortcut) closes it. `--restarted` (from the watchdog) leaves the TV as it is. Apps start with the user's environment built afresh (PATH after installs). WebView2 that cannot start: the launcher exits for the watchdog to start it again. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
 dimmed behind it, and the app keeps running underneath. B or the app's row returns to it.
@@ -183,10 +185,11 @@ parser, alerts overlay), `launcher\tests\TileTests` (website addresses and tile 
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
 `-NoTv` never sends the TV a key (no on at start, no off in standby): for working on the box
-while nobody is watching.
+while nobody is watching. It pauses the installed watchdog (if any) for 15 minutes, or until
+the dev build is up, so the installed launcher does not come back meanwhile.
 Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 
 ## Not built yet
 
-Running as the shell with a watchdog (the launcher's own update waits for it). Phone: Share to TV and HTTPS with the box's
+Phone: Share to TV and HTTPS with the box's
 own certificate (SPEC N9), the link player.

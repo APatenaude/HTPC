@@ -14,9 +14,10 @@
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
-      Launcher      the launcher (-LauncherExe) into Program Files, started at sign-in
+      Launcher      the launcher (-LauncherExe) and its watchdog into Program Files, started at sign-in
       Library       lock ProgramData\HTPC and register the \HTPC\Jobs task (install from the TV)
       PhoneRemote   firewall: phones on the home network reach the remote and YouTube casting
+      Shell         the launcher replaces the Windows desktop for this account (-Skip Shell keeps Explorer)
       DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
@@ -80,6 +81,7 @@ $Steps = [ordered]@{
     }
     Library      = { & "$lib\Register-AppInstaller.ps1" }
     PhoneRemote  = { & "$lib\Set-PhoneRemote.ps1" }
+    Shell        = { & "$lib\Set-Shell.ps1" }
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
@@ -157,8 +159,14 @@ Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format
 $progressFile = Join-Path $logDir 'setup-progress.json'
 $planned = @($Steps.Keys | Where-Object { -not (($Only -and $Only -notcontains $_) -or $Skip -contains $_) })
 function Save-Progress([string]$Running, [bool]$Done = $false) {
-    [ordered]@{ steps = $planned; running = $Running; results = $results; done = $Done; log = $log } |
-        ConvertTo-Json | Out-File $progressFile -Encoding ascii
+    $json = [ordered]@{ steps = $planned; running = $Running; results = $results; done = $Done; log = $log } | ConvertTo-Json
+    # The setup exe reads this file every 0.7 s; a write that meets its read is tried again
+    # (it once stopped setup with "being used by another process").
+    for ($try = 1; $try -le 20; $try++) {
+        try { [IO.File]::WriteAllText($progressFile, $json); return }
+        catch [IO.IOException] { Start-Sleep -Milliseconds 100 }
+    }
+    Write-Attention "progress not saved ($progressFile busy)"
 }
 
 $results = [ordered]@{}
@@ -179,6 +187,7 @@ $activeName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Computer
 $pendingName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
 if ($activeName -ne $pendingName) { $restart += "computer name $pendingName" }
 if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $restart += 'Windows servicing' }
+if ($results['Shell'] -eq 'OK' -and (& "$lib\Set-Shell.ps1" -Pending)) { $restart += 'shell' }
 
 Write-Host "`n== Summary"
 foreach ($name in $results.Keys) { Write-Host ('  {0,-13} {1}' -f $name, $results[$name]) }
