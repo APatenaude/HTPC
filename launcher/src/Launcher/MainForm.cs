@@ -194,8 +194,8 @@ sealed class MainForm : Form
                 uiReady = true;
                 PostSetupInit();
                 break;
-            case "install": StartSetup(m); break;
-            case "finish": FinishSetup(); break;
+            case "install" when setupMode: StartSetup(m); break;
+            case "finish" when setupMode: FinishSetup(); break;
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();

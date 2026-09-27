@@ -61,6 +61,10 @@ foreach ($protocol in 'ms-gamebar', 'ms-gamebarservices', 'ms-gamingoverlay') {
     Set-RegValue "$key\shell\open\command" '(default)' "`"$env:SystemRoot\System32\systray.exe`"" 'String'
 }
 
+Write-Host '  Dark mode (Windows and apps that follow it: Edge, the website apps, dialogs)'
+Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'AppsUseLightTheme' 0
+Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'SystemUsesLightTheme' 0
+
 Write-Host '  Less background work (lower power, especially in standby)'
 # A TV box has no files to index and no app launch patterns worth prefetching.
 foreach ($service in 'WSearch', 'SysMain') {

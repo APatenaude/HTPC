@@ -294,7 +294,7 @@ if (host) {
     { id: 'stremio', name: 'Stremio', glyph: 'film', color: '#7C8CFF', default: true },
     { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', color: '#3DC0F0', default: true },
     { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B', default: true },
-    { id: 'edge', name: 'Edge', glyph: 'globe', color: '#3CCB9A', default: true },
+    { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A', default: true },
     { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF' },
     { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F' },
   ], tv: { screen: 'TCL 65S41CA', profile: { deviceId: 'x', name: 'Living room tv', input: 2 }, found: [{ id: 'x', name: 'Living room tv', model: '65S41-CA' }] } });
