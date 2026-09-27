@@ -123,7 +123,7 @@ if (Test-AppDataRedirected) {
     Write-Host 'Relaunching setup outside this app (its AppData writes are redirected)...'
     # Already admin: the task runs elevated too, so no second UAC prompt.
     $runLevel = if (Test-Admin) { 'Highest' } else { 'Limited' }
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
+    $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel $runLevel
     Register-ScheduledTask -TaskName $RelaunchTask -Action $action -Principal $principal -Force | Out-Null
     Start-ScheduledTask -TaskName $RelaunchTask
@@ -133,7 +133,7 @@ if (Test-AppDataRedirected) {
 
 if (-not (Test-Admin)) {
     Write-Host 'Asking for admin rights (UAC)...'
-    Start-Process powershell.exe -Verb RunAs -ArgumentList (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
+    Start-Process (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -ArgumentList (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     exit 0
 }
 

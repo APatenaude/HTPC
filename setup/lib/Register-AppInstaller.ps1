@@ -81,13 +81,15 @@ $taskPath = '\HTPC\'
 $taskName = 'Jobs'
 $argument = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $installerScript + '" -Job "$(Arg0)"'
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
+# By full path: a bare name would be looked up through PATH, as SYSTEM.
+$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$action = New-ScheduledTaskAction -Execute $powershell -Argument $argument
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
 $existing = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
-if ($existing -and $existing.Actions[0].Arguments -eq $argument) {
+if ($existing -and $existing.Actions[0].Arguments -eq $argument -and $existing.Actions[0].Execute -eq $powershell) {
     Write-Same "scheduled task $taskPath$taskName already registered"
 } else {
     Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Principal $principal -Settings $settings -Force | Out-Null
