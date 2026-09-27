@@ -39,7 +39,7 @@ sealed class ButtonMap
     // Virtual-key codes.
     const ushort Back = 0x08, Tab = 0x09, Enter = 0x0D, Shift = 0x10, Ctrl = 0x11, Esc = 0x1B, Space = 0x20,
         PageUp = 0x21, PageDown = 0x22, End = 0x23, HomeKey = 0x24, LeftKey = 0x25, UpKey = 0x26, RightKey = 0x27, DownKey = 0x28,
-        Apps = 0x5D, F11 = 0x7A, BrowserBack = 0xA6;
+        Apps = 0x5D, Alt = 0x12, PlayPause = 0xB3;
 
     static KeyAction Key(params ushort[] keys) => new(keys);
     static KeyAction Held(ushort key) => new(new[] { key }, Repeat: true);
@@ -50,7 +50,11 @@ sealed class ButtonMap
         [PadControl.Left] = Held(LeftKey), [PadControl.Right] = Held(RightKey),
     };
 
-    /// <summary>Edge, Twitch, Stremio, website tiles: the controller as a mouse, plus a few keys.</summary>
+    /// <summary>
+    /// Browser, Twitch, Stremio, website tiles: the controller as a mouse, plus a few keys.
+    /// Defaults picked with the user (26 Sept 2026): website apps have no tabs, so LB/RB move
+    /// through the page history; X clicks and A is Enter; Start is play/pause for any player.
+    /// </summary>
     public static readonly ButtonMap Mouse = new()
     {
         Name = "mouse",
@@ -58,16 +62,17 @@ sealed class ButtonMap
         RightStick = StickRole.Scroll,
         Buttons = new Dictionary<PadControl, PadAction>(Arrows())
         {
-            [PadControl.A] = new ClickAction(Input.Button.Left),   // held = drag
-            [PadControl.B] = Key(BrowserBack),
-            [PadControl.X] = Key(Enter),
+            [PadControl.X] = new ClickAction(Input.Button.Left),   // held = drag
+            [PadControl.A] = Key(Enter),
+            [PadControl.B] = Key(Esc),
             [PadControl.Y] = Key(Space),
-            [PadControl.LB] = Key(Ctrl, Shift, Tab),                // previous tab
-            [PadControl.RB] = Key(Ctrl, Tab),                       // next tab
+            [PadControl.LB] = Key(Alt, LeftKey),                    // back
+            [PadControl.RB] = Key(Alt, RightKey),                   // forward
             [PadControl.LT] = new ClickAction(Input.Button.Right),
             [PadControl.RT] = new PreciseAction(),
             [PadControl.Select] = Key(Esc),
-            [PadControl.Start] = Key(F11),
+            [PadControl.Start] = Key(PlayPause),
+            [PadControl.L3] = new ClickAction(Input.Button.Middle),
         },
     };
 
