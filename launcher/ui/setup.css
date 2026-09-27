@@ -89,3 +89,6 @@
 .su-summary { display: flex; flex-direction: column; gap: 18px; }
 .su-line { display: flex; align-items: center; gap: 18px; font-size: 32px; }
 .su-line .ok { color: #7FD1AE; display: flex; } .su-line .warn { color: var(--warn); display: flex; }
+
+/* The Wi-Fi step: the network list (wifi.js's .wifi-scroll) scrolls inside the step, clear of Back / Next. */
+#su-wifi { display: flex; flex-direction: column; max-height: 470px; min-height: 0; }
