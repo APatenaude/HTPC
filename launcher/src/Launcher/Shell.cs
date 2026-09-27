@@ -35,6 +35,14 @@ sealed class DesktopMode
 
     static IntPtr Taskbar() => FindWindow("Shell_TrayWnd", null);
 
+    /// <summary>This account's shell setting names the watchdog and no Explorer desktop is up.</summary>
+    public static bool WatchdogIsShell()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Policies\System");
+        return key?.GetValue("Shell") is string shell && shell.Contains("HtpcWatchdog.exe", StringComparison.OrdinalIgnoreCase)
+            && Taskbar() == IntPtr.Zero;
+    }
+
     static bool IsShellSession() => Watchdogs().Any(p => Native.ProcessInfo(p.Id).CommandLine?.Contains("--shell") ?? false);
 
     static List<Process> Watchdogs()
@@ -65,6 +73,7 @@ sealed class DesktopMode
     /// still names it; only this account's own setting names the watchdog).</summary>
     public void Enter()
     {
+        keepGone?.Cancel(); // Back to TV moments ago: its watch must not end this Explorer
         if (Taskbar() != IntPtr.Zero) { Log.Info("Desktop mode: Explorer is already running"); return; }
         var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
         var psi = new ProcessStartInfo(explorer) { UseShellExecute = false, WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) };
@@ -90,15 +99,20 @@ sealed class DesktopMode
         for (var waited = 0; waited < 5000 && Explorers().Count > 0; waited += 250) await Task.Delay(250);
         EndExplorers("did not exit");
         ResetWorkArea();
-        _ = KeepGone();
+        keepGone?.Cancel();
+        keepGone = new CancellationTokenSource();
+        _ = KeepGone(keepGone.Token);
     }
 
-    // Windows restarts an Explorer that stops unexpectedly (AutoRestartShell): watch for 30 s.
-    async Task KeepGone()
+    CancellationTokenSource? keepGone;
+
+    // Windows restarts an Explorer that stops unexpectedly (AutoRestartShell): watch for 30 s,
+    // unless desktop mode starts it again meanwhile.
+    async Task KeepGone(CancellationToken cancel)
     {
         for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(1000);
+            try { await Task.Delay(1000, cancel); } catch (OperationCanceledException) { return; }
             if (Explorers().Count == 0) continue;
             if (Taskbar() == IntPtr.Zero) continue; // a folder window an app opened: left alone
             EndExplorers("came back");

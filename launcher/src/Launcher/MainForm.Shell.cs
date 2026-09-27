@@ -41,7 +41,13 @@ sealed partial class MainForm
     void StartInstalled(string installed)
     {
         var watchdog = Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe");
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(File.Exists(watchdog) ? watchdog : installed) { UseShellExecute = true });
+        var psi = File.Exists(watchdog)
+            // As the shell (setup run again on a finished box whose watchdog had gone): --shell,
+            // as at sign-in. Not in a session Explorer started (the first one after setup).
+            ? new System.Diagnostics.ProcessStartInfo(watchdog, DesktopMode.WatchdogIsShell() ? "--shell" : "")
+            : new System.Diagnostics.ProcessStartInfo(installed);
+        psi.UseShellExecute = true;
+        System.Diagnostics.Process.Start(psi);
         WatchdogPause.Clear();
         Environment.ExitCode = 75;
     }

@@ -42,9 +42,11 @@ $installDir = Join-Path $env:ProgramFiles 'HTPC\Launcher'
 $launcher = Join-Path $installDir 'HtpcLauncher.exe'
 $watchdog = Join-Path $installDir 'HtpcWatchdog.exe'
 if (-not (Test-Path -LiteralPath $Exe)) { throw "Launcher not found: $Exe" }
+# The setup exe's own (in its bundle, beside its setup folder) first; a copy beside $Exe (a build,
+# launcher\dist) may be an older one left in that folder.
 $watchdogFrom = @(
-    (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $Exe).Path) 'HtpcWatchdog.exe'),
-    (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $SetupDir).Path) 'HtpcWatchdog.exe')
+    (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $SetupDir).Path) 'HtpcWatchdog.exe'),
+    (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $Exe).Path) 'HtpcWatchdog.exe')
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 # Setup run again from ProgramData\HTPC\setup has no watchdog of its own: the installed one stays.
 if (-not $watchdogFrom -and (Test-Path -LiteralPath $watchdog)) { $watchdogFrom = $watchdog }
@@ -114,7 +116,8 @@ try {
         if ($restartWatchdog) { Write-Change 'old watchdog ended' }
     }
     if ($launcherChanged) {
-        $old = Get-Running 'HtpcLauncher'
+        # Only the installed one (also renamed aside): a dev build of the launcher keeps running.
+        $old = @(Get-Running 'HtpcLauncher' | Where-Object { $_.Path -and (Split-Path -Parent $_.Path) -eq $installDir })
         foreach ($p in $old) { Stop-Process -Id $p.Id -Force }
         if ($old) {
             Write-Change 'old launcher ended (the watchdog starts the new one)'

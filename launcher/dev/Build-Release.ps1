@@ -28,7 +28,8 @@
 .PARAMETER MinimumFrom
     The oldest launcher that may update to this release by itself (older ones: run setup again).
 .PARAMETER Watchdog
-    HtpcWatchdog.exe to ship as well (role "watchdog"), once the watchdog is built.
+    HtpcWatchdog.exe to ship as well (role "watchdog"). By default the one this build makes
+    (Publish-Setup puts it beside the exe); it must carry the same version.
 #>
 param(
     [string]$Out,
@@ -63,6 +64,7 @@ New-Item -ItemType Directory -Force $work | Out-Null
 try {
     # --- The launcher ---------------------------------------------------------------------------
     & (Join-Path $PSScriptRoot 'Publish-Setup.ps1') -Out $work -Locked
+    if (-not $Watchdog) { $Watchdog = Join-Path $work 'HtpcWatchdog.exe' }
     $exe = Join-Path $Out 'TV-Box-Setup.exe'
     Copy-Item -LiteralPath (Join-Path $work 'TV Box Setup.exe') $exe
     $said = (& $exe --version | Out-String).Trim()
@@ -94,7 +96,7 @@ try {
         $writer.Dispose()
     } finally { $archive.Dispose() }
 
-    # --- The watchdog (when built) -----------------------------------------------------------------
+    # --- The watchdog ---------------------------------------------------------------------------------
     $files = @(
         @{ name = 'TV-Box-Setup.exe'; role = 'launcher'; path = $exe }
         @{ name = 'setup.zip'; role = 'setup'; path = $zip }

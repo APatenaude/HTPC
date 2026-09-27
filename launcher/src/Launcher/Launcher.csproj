@@ -60,18 +60,23 @@
   </Target>
 
   <!-- The watchdog (..\Watchdog) is built for the .NET Framework that comes with Windows, with
-       its own compiler, and ships next to the launcher (also inside the setup exe). -->
+       its own compiler, and ships next to the launcher (also inside the setup exe). It carries the
+       release version too (a generated Version.cs): a box checks it before installing it. -->
   <PropertyGroup>
     <WatchdogSource>..\Watchdog\Watchdog.cs</WatchdogSource>
+    <WatchdogVersionFile>$(BaseIntermediateOutputPath)watchdog\Version.cs</WatchdogVersionFile>
     <WatchdogExe>$(BaseIntermediateOutputPath)watchdog\HtpcWatchdog.exe</WatchdogExe>
     <FrameworkCsc>$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe</FrameworkCsc>
   </PropertyGroup>
   <ItemGroup>
     <None Include="$(WatchdogExe)" Link="HtpcWatchdog.exe" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-  <Target Name="BuildWatchdog" BeforeTargets="BeforeBuild" Inputs="$(WatchdogSource)" Outputs="$(WatchdogExe)">
+  <!-- Rebuilt when the source, this project or the version (Directory.Build.props) changes. -->
+  <Target Name="BuildWatchdog" BeforeTargets="BeforeBuild" Inputs="$(WatchdogSource);$(MSBuildProjectFullPath);$(DirectoryBuildPropsPath)" Outputs="$(WatchdogExe)">
     <MakeDir Directories="$(BaseIntermediateOutputPath)watchdog" />
-    <Exec Command="&quot;$(FrameworkCsc)&quot; /nologo /target:winexe /optimize+ /warnaserror+ /out:&quot;$(WatchdogExe)&quot; &quot;$(WatchdogSource)&quot;" />
+    <WriteLinesToFile File="$(WatchdogVersionFile)" Overwrite="true"
+      Lines="[assembly: System.Reflection.AssemblyVersion(&quot;$(Version)&quot;)];[assembly: System.Reflection.AssemblyFileVersion(&quot;$(Version)&quot;)];[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(Version)&quot;)]" />
+    <Exec Command="&quot;$(FrameworkCsc)&quot; /nologo /target:winexe /optimize+ /warnaserror+ /out:&quot;$(WatchdogExe)&quot; &quot;$(WatchdogSource)&quot; &quot;$(WatchdogVersionFile)&quot;" />
   </Target>
 
 </Project>

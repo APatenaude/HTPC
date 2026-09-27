@@ -47,7 +47,7 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("HtpcWatchdog")]
 [assembly: AssemblyProduct("HTPC")]
 [assembly: AssemblyDescription("Keeps the TV launcher running")]
-[assembly: AssemblyVersion("0.1.0.0")]
+// The version comes from Directory.Build.props (Launcher.csproj generates it for csc).
 
 namespace Htpc.Watchdog
 {
@@ -64,6 +64,7 @@ namespace Htpc.Watchdog
         static readonly TimeSpan HangCheckEvery = TimeSpan.FromSeconds(10);
         static readonly TimeSpan HangLimit = TimeSpan.FromSeconds(60);
         static readonly TimeSpan AutoRestartAtMostEvery = TimeSpan.FromHours(6);
+        static readonly TimeSpan RestartGivesUpAfter = TimeSpan.FromMinutes(3);
         static readonly TimeSpan[] RetryAfter = { TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(10) };
 
         static readonly string Dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
@@ -162,7 +163,12 @@ namespace Htpc.Watchdog
                 if (retries < 0 && fastExits >= FastExitsBeforeFallback)
                 {
                     Log.Warn("The launcher ended " + fastExits + " times within " + Seconds(FastExit) + " of starting");
-                    if (TryAutoRestart()) { ending.WaitOne(); return; }
+                    if (TryAutoRestart())
+                    {
+                        if (ending.WaitOne(RestartGivesUpAfter)) return;
+                        // An app held the restart up and someone cancelled it: never no screen at all.
+                        Log.Warn("The restart did not happen within " + Seconds(RestartGivesUpAfter) + ": the desktop instead");
+                    }
                     EnterFallback();
                     retries = 0;
                 }
@@ -329,7 +335,10 @@ namespace Htpc.Watchdog
                 Directory.CreateDirectory(Path.GetDirectoryName(RestartMarker));
                 File.WriteAllText(RestartMarker, DateTime.UtcNow.ToString("o"));
                 Log.Warn("Restarting the box once");
-                using (Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), "/r /t 0") { UseShellExecute = false, CreateNoWindow = true })) { }
+                using (var p = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), "/r /t 0") { UseShellExecute = false, CreateNoWindow = true }))
+                {
+                    if (p.WaitForExit(30000) && p.ExitCode != 0) { Log.Error("Restart refused (shutdown.exe exit code " + p.ExitCode + ")"); return false; }
+                }
                 return true;
             }
             catch (Exception e)
@@ -652,44 +661,37 @@ namespace Htpc.Watchdog
         }
 
         // A one-shot task for the signed-in user, not elevated, normal priority, no time limit.
+        // Registered through Task Scheduler's COM interface, not a task file: nothing on disk that
+        // a non-elevated program could swap between writing and registering it.
         public static bool RelaunchAsUser(bool asShell)
         {
             try
             {
                 var exe = Assembly.GetExecutingAssembly().Location;
-                var user = WindowsIdentity.GetCurrent().User.Value;
-                var xml = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
-                    "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">" +
-                    "<Principals><Principal id=\"User\"><UserId>" + user + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>" +
-                    "<Settings><MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" +
-                    "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>4</Priority></Settings>" +
-                    "<Actions Context=\"User\"><Exec><Command>" + Escape(exe) + "</Command><Arguments>--relaunched" + (asShell ? " --shell" : "") + "</Arguments>" +
-                    "<WorkingDirectory>" + Escape(Path.GetDirectoryName(exe)) + "</WorkingDirectory></Exec></Actions></Task>";
-                var file = Path.Combine(Path.GetTempPath(), "htpc-watchdog-task.xml");
-                File.WriteAllText(file, xml, Encoding.Unicode);
-                var schtasks = Path.Combine(Environment.SystemDirectory, "schtasks.exe");
-                return Run(schtasks, "/Create /TN \"HTPC watchdog\" /XML \"" + file + "\" /F") == 0
-                    && Run(schtasks, "/Run /TN \"HTPC watchdog\"") == 0;
+                dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service", true));
+                service.Connect();
+                dynamic task = service.NewTask(0);
+                task.Principal.UserId = WindowsIdentity.GetCurrent().Name;
+                task.Principal.LogonType = 3;             // TASK_LOGON_INTERACTIVE_TOKEN: in this session
+                task.Principal.RunLevel = 0;              // TASK_RUNLEVEL_LUA: not elevated
+                task.Settings.MultipleInstances = 0;      // TASK_INSTANCES_PARALLEL
+                task.Settings.DisallowStartIfOnBatteries = false;
+                task.Settings.StopIfGoingOnBatteries = false;
+                task.Settings.ExecutionTimeLimit = "PT0S"; // no limit (the default ends it after 3 days)
+                task.Settings.Priority = 4;                // normal, not Task Scheduler's below normal
+                dynamic action = task.Actions.Create(0);  // TASK_ACTION_EXEC
+                action.Path = exe;
+                action.Arguments = "--relaunched" + (asShell ? " --shell" : "");
+                action.WorkingDirectory = Path.GetDirectoryName(exe);
+                dynamic registered = service.GetFolder("\\").RegisterTaskDefinition("HTPC watchdog", task,
+                    6 /* TASK_CREATE_OR_UPDATE */, null, null, 3 /* TASK_LOGON_INTERACTIVE_TOKEN */, null);
+                registered.Run(null);
+                return true;
             }
             catch (Exception e)
             {
                 Log.Error("Relaunch failed: " + e.Message);
                 return false;
-            }
-        }
-
-        static string Escape(string s)
-        {
-            return s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
-        }
-
-        static int Run(string exe, string arguments)
-        {
-            using (var p = Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = false, CreateNoWindow = true }))
-            {
-                p.WaitForExit();
-                if (p.ExitCode != 0) Log.Warn(Path.GetFileName(exe) + " " + arguments + ": exit code " + p.ExitCode);
-                return p.ExitCode;
             }
         }
 
