@@ -32,6 +32,12 @@ static class SonySamsungChecks
         return what();
     }
 
+    static bool HasMac(NewHost h, string screen, string mac)
+    {
+        try { return h.Profiles[screen].Macs.Contains(mac); }
+        catch (KeyNotFoundException) { return false; } // no profile yet
+    }
+
     static bool NotLogged(string? secret) => secret is not null && !Log.Lines.Any(l => l.Contains(secret));
 
     public static async Task RunAll()
@@ -219,7 +225,9 @@ static class SonySamsungChecks
         Check.That(cookie is not null && cookie == sony.Cookie && NotLogged(cookie) && NotLogged(sony.Pin), "Sony: its cookie kept; cookie and PIN never logged");
 
         await h.Tv.Poll();
-        Check.That(h.Profiles[SonyScreen.Key].Macs.Contains(sony.Mac), "Sony: MACs from the paired TV");
+        // The MAC comes from a read the poll starts, not one it waits for: on a busy box it could
+        // land just after the poll (this check failed about one run in three).
+        Check.That(await Eventually(() => HasMac(h, SonyScreen.Key, sony.Mac)), "Sony: MACs from the paired TV");
         await h.Sleep();
         Check.That(!sony.On, "Sony: off when the box sleeps (setPowerStatus false)");
         await w.RunFor(10);
@@ -273,7 +281,7 @@ static class SonySamsungChecks
         Check.That(token?.Value == sam.Token && token?.Scheme == "wss" && NotLogged(token?.Value), "Samsung: its token kept (wss), never logged");
 
         await h.Tv.Poll();
-        Check.That(h.Profiles[SamScreen.Key].Macs.Contains(sam.Mac), "Samsung: MAC from its identity-checked info");
+        Check.That(await Eventually(() => HasMac(h, SamScreen.Key, sam.Mac)), "Samsung: MAC from its identity-checked info");
         await h.Sleep();
         Check.That(await Eventually(() => !sam.On) && sam.Keys == 1, "Samsung: KEY_POWER when the box sleeps (it read on)");
         await w.RunFor(10);
