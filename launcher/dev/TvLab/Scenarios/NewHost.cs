@@ -45,7 +45,7 @@ sealed class NewHost : IRokuHost, IDisposable
     public string? BoundId(string edidKey) => Profiles.TryGetValue(edidKey, out var p) ? p.DeviceId : null;
     public bool StandbyActive => standbyActive;
 
-    public Task Boot(TimeSpan uptime) => Tv.Startup(uptime, restarted: false);
+    public Task Boot(TimeSpan uptime) => Tv.Startup(uptime, startedAgain: null);
     public Task Sleep() => StandbyChanged(true);
     public Task Wake() => StandbyChanged(false);
 

@@ -128,7 +128,7 @@ sealed partial class MainForm : Form
         StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
         // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
         // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
-        await StartTv(leaveTvAlone: handoff is not null);
+        await StartTv(handoff);
         ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
     }
 
