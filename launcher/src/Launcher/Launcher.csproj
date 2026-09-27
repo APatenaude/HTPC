@@ -8,6 +8,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- launcher\art\icon*.svg, built by launcher\dev\Build-Icon.ps1. -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>HtpcLauncher</AssemblyName>
     <RootNamespace>Htpc.Launcher</RootNamespace>
     <Version>0.1.0</Version>
@@ -26,7 +28,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The phone remote's web app (served by PhoneServer, nothing else is), with the UI's fonts. -->
+    <None Include="..\..\phone\**\*" LinkBase="phone" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\ui\fonts\*.woff2" LinkBase="phone\fonts" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <!-- Kestrel for the phone remote (PhoneServer.cs says why not HttpListener). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <!-- The watchdog (..\Watchdog) is built for the .NET Framework that comes with Windows, with

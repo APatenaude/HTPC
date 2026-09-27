@@ -201,7 +201,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 /* Hidden launcher (an app is in front, or standby): nothing to draw (opacity 0, above) */
 
 /* Confirmation over the Home menu */
-#confirm { align-items: center; justify-content: center; }
+#confirm, #ask { align-items: center; justify-content: center; }
 .dialog {
   width: 760px; box-sizing: border-box; padding: 48px; border-radius: 32px; background: var(--row);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; gap: 20px;

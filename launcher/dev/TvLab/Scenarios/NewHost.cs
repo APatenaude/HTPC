@@ -1,0 +1,82 @@
+using Htpc.Launcher;
+
+namespace Htpc.TvLab;
+
+/// <summary>
+/// MainForm's part for the current TV code: the same calls as BaselineHost (MainForm's standby,
+/// real sleep, resume and OnTvState logic did not change), into TvService built from fakes: the
+/// real RokuDriver over FakeNet, a virtual clock, a temporary folder for the TV files.
+/// </summary>
+sealed class NewHost : IRokuHost, IDisposable
+{
+    readonly Trace trace;
+    bool standbyActive;
+    bool tvChangedItself;
+
+    public TvService Tv { get; }
+    public FakeNet Net { get; }
+    public FakeNotices Notices { get; }
+    public Dictionary<string, TvProfile> Profiles { get; } = new();
+    public int ProfileSaves;
+    public string FilesDir { get; }
+    public Edid? Screen = new(RokuWorld.EdidKey, "TCL", "65S41CA", 1);
+    public DateTime LastUserInput = DateTime.MinValue;
+    public bool ScreenOn => !standbyActive;
+
+    public NewHost(RokuWorld world, bool handsOff = false, IReadOnlyList<ITvDriver>? drivers = null, string? filesDir = null)
+    {
+        FilesDir = filesDir ?? Path.Combine(Path.GetTempPath(), "tvlab-" + Guid.NewGuid().ToString("N")[..8]);
+        trace = world.Trace;
+        Net = new FakeNet(world.Trace, world.Fakes);
+        Notices = new FakeNotices(world.Trace);
+        Tv = new TvService(new TvParts(Profiles, () => ProfileSaves++, drivers ?? new ITvDriver[] { new RokuDriver(Net, clock: world.Clock) }, Net, world.Clock,
+            new TvFiles(FilesDir), () => Screen, Notices))
+        {
+            HandsOff = handsOff,
+            ScreenOn = () => ScreenOn,
+            LastUserInput = () => LastUserInput,
+        };
+        Tv.TvStateChanged += OnTvState;
+    }
+
+    public void Bind(FakeRoku fake, int input, string edidKey) =>
+        Profiles[edidKey] = new TvProfile { DeviceId = fake.Serial, Name = fake.Name, Model = fake.Model, Input = input };
+
+    public string? BoundId(string edidKey) => Profiles.TryGetValue(edidKey, out var p) ? p.DeviceId : null;
+    public bool StandbyActive => standbyActive;
+
+    public Task Boot(TimeSpan uptime) => Tv.Startup(uptime, restarted: false);
+    public Task Sleep() => StandbyChanged(true);
+    public Task Wake() => StandbyChanged(false);
+
+    public Task SleepS3()
+    {
+        var done = Task.Run(() => Tv.TurnOff()).Wait(3000);
+        trace.Add($"host GoingDown TurnOff {(done ? "done within 3 s" : "NOT done within 3 s")}");
+        return Task.CompletedTask;
+    }
+
+    public Task Resume() => Tv.TurnOn();
+
+    async Task StandbyChanged(bool active)
+    {
+        standbyActive = active;
+        if (!tvChangedItself) await (active ? Tv.TurnOff() : Tv.TurnOn());
+        tvChangedItself = false;
+    }
+
+    void OnTvState(bool on, bool showingBox)
+    {
+        trace.Add($"event TvStateChanged(on={on}, showingBox={showingBox})");
+        if (!on && !standbyActive) { tvChangedItself = true; _ = StandbyChanged(true); }
+        else if (on && showingBox && standbyActive) { tvChangedItself = true; _ = StandbyChanged(false); }
+    }
+
+    public Task Tick() => Tv.Poll();
+    public Task<bool> Test() => Tv.Test();
+
+    public void Dispose()
+    {
+        try { Directory.Delete(FilesDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+}

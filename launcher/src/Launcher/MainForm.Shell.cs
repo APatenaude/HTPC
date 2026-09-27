@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Htpc.Launcher;
 
 // The launcher as the Windows shell (Shell.cs): desktop mode and Back to TV, and giving up to
@@ -11,11 +13,37 @@ sealed partial class MainForm
     /// As the shell, the watchdog is what brings the launcher back after a crash: if it is gone
     /// (ended in Task Manager, say), the launcher starts it again. Checked every 30 s.
     /// </summary>
-    void WatchTheWatchdog()
+    bool shellStarted;
+
+    [UiReady]
+    void StartShellParts()
     {
+        if (shellStarted) return; // each time the UI is ready; this once
+        shellStarted = true;
+        // Started by the Back to TV shortcut with no launcher running: close the desktop.
+        if (options.BackToTv) BackToTv();
         if (setupMode || !desktop.ShellSession) return;
         watchdogCheck.Tick += (_, _) => DesktopMode.EnsureWatchdog();
         watchdogCheck.Start();
+    }
+
+    /// <summary>The setup wizard's Done screen: Restart now (the name change, the shell).</summary>
+    [UiMessages("restart")]
+    void OnRestartMessage(string type, JsonElement m)
+    {
+        if (type == "restart") Power("restart");
+    }
+
+    /// <summary>
+    /// Setup done: the installed launcher takes over, through the watchdog when there is one (it
+    /// keeps the launcher running from now on). This copy's exit is planned (75), not a crash.
+    /// </summary>
+    void StartInstalled(string installed)
+    {
+        var watchdog = Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe");
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(File.Exists(watchdog) ? watchdog : installed) { UseShellExecute = true });
+        WatchdogPause.Clear();
+        Environment.ExitCode = 75;
     }
 
     /// <summary>
@@ -62,10 +90,8 @@ sealed partial class MainForm
             try
             {
                 await InitWebView();
-                WatchTheWatchdog();
-                // Started by the Back to TV shortcut with no launcher running: close the desktop.
-                if (options.BackToTv) BackToTv();
                 return;
+
             }
             catch (Exception ex) when (attempt < 3)
             {

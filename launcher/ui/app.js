@@ -20,10 +20,12 @@ const state = {
   memory: {},              // last focused item per view
   stack: [],               // views to go back to
   backdrop: null,
+  moving: null,            // id of the tile being moved (Tile options > Move)
+  libraryAvailable: true,  // whether installing from the TV is set up (the host reports it)
   section: 'sleep',        // Settings section shown
   prefs: { idleMinutes: 30, sleepMode: 'standby', sleepAfterStandbyHours: 0, stayAwakeWhilePlaying: true },
   power: { sleep: true, hibernate: true },  // sleep states this PC has (from the host)
-  tv: { screen: null, profile: null, found: [] }   // the screen's TV, its profile, TVs on the network
+  tv: { screen: null, profile: null, found: [], methods: [], profiles: [], caps: {}, status: 'unbound', port: 0 }   // tv.js: the screen's TV, its profile, TVs on the network
 };
 
 const $ = (id) => document.getElementById(id);
@@ -50,7 +52,11 @@ function dateText(d) { return d.toLocaleDateString('en-GB', { weekday: 'long', d
 
 function timerText() {
   if (!state.timer) return '';
-  if (state.timer.endsAt === 'video') return 'Sleep after this video';
+  // "When this video ends": nothing played yet, or the video's minutes left if its app says.
+  if (state.timer.endsAt === 'video') {
+    if (state.timer.waiting) return 'Sleep after the next video';
+    return state.timer.minutesLeft ? `Sleep after this video · ${state.timer.minutesLeft} min` : 'Sleep after this video';
+  }
   const min = Math.max(0, Math.ceil((state.timer.endsAt - Date.now()) / 60000));
   return `Sleep in ${min} min`;
 }
@@ -67,7 +73,7 @@ function renderStatus() {
     `<div class="clock"><span class="time">${timeText(now)}</span><span class="date">${esc(dateText(now))}</span></div>` +
     '<div class="pills">' +
       (state.timer ? `<div class="pill timer">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
-      (state.alert ? `<div class="pill alert">${icon(state.alert.glyph || 'info', 28, 2)}<span>${esc(state.alert.text)}</span></div>` : '') +
+      noticePillsHtml() + // alerts (notices.js)
       `<div class="pill"${low ? ' style="color: var(--warn)"' : ''}>${icon('controller', 32)}<b>${esc(batteryText())}</b></div>` +
       `<div class="round" data-nav data-id="settings" data-act="settings" aria-label="Settings">${icon('sliders', 28, 2)}</div>` +
       `<div class="round" data-nav data-id="power" data-act="power" aria-label="Power">${icon('power', 28, 2)}</div>` +
@@ -78,21 +84,34 @@ function renderStatus() {
 // replay on every refresh.
 let tilesHtml = '';
 function renderTiles() {
-  const html = state.tiles.map((t) =>
-    `<div class="tile" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
+  const tiles = state.tiles.map((t) =>
+    `<div class="tile${state.moving === t.id ? ' moving' : ''}" data-nav data-id="tile:${esc(t.id)}" data-act="launch" data-arg="${esc(t.id)}">` +
       (t.running ? '<span class="badge">Running</span>' : '') +
       `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
       `<span class="name">${esc(t.name)}</span>` +
     '</div>').join('');
+  // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen.
+  const add = state.moving ? '' :
+    '<div class="tile add" data-nav data-id="tile:+add" data-act="addtile" aria-label="Add tile">' +
+      `<span style="display:flex">${icon('plus', 80, 2)}</span><span class="name">Add tile</span></div>`;
+  const html = tiles + add;
   if (html !== tilesHtml) { $('tiles').innerHTML = html; tilesHtml = html; }
   updateHomeHints();
 }
 
-// "X Close app" only while the focused tile's app is running.
+// Hints change with the focused tile and with move mode.
 function updateHomeHints() {
+  if (state.moving) {
+    $('home-hints').innerHTML = hints([['←→↑↓', 'Move'], ['A', 'Place here'], ['B', 'Cancel']]);
+    return;
+  }
   const f = $('home').querySelector('.tile.focused');
+  const isAdd = f && f.dataset.act === 'addtile';
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
-  $('home-hints').innerHTML = hints([['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Home', 'Menu'], ['Hold Home', 'Power']]);
+  const list = isAdd
+    ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu']];
+  $('home-hints').innerHTML = hints(list);
 }
 
 function renderMenu() {
@@ -105,18 +124,21 @@ function renderMenu() {
           (t.id === state.current ? '<span class="tag">Now</span>' : '') +
         '</div>').join('')
     : '<div class="empty">No apps open</div>';
+  // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
+  $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
   $('menu-panel').innerHTML =
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
+    noticeRowsHtml() + // alerts with something to do (notices.js)
     `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 38, 2)}Home screen</div>` +
-    `<span class="section">Open apps</span>${apps}` +
-    '<span class="section">Quick</span>' +
+    `<span class="section">Open apps</span><div class="apps">${apps}</div>` +
+    '<span class="section quick-label">Quick</span>' +
     `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 34)}` +
       `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
     `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 34)}` +
       `<div class="track"><div class="fill white" style="width:${state.brightness}%"></div></div><span class="value">${state.brightness}</span></div>` +
     '<div class="quicks">' +
-      `<div class="quick" data-nav data-id="q-buttons" data-act="soon" data-arg="Button maps">${icon('controller', 34)}Buttons</div>` +
+      `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 34)}Buttons</div>` +
       `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 34)}Timer</div>` +
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
@@ -131,7 +153,7 @@ const POWER = [
   { id: 'shutdown', glyph: 'power', label: 'Shut down', caption: '' },
   { id: 'desktop', glyph: 'desktop', label: 'Desktop mode', caption: 'Normal Windows desktop, for maintenance' }
 ];
-// While the Windows desktop is up (desktop mode), its card leads back instead.
+// While the Windows desktop is up (desktop mode, state.desktop from the host), its card leads back.
 const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close the Windows desktop and taskbar' };
 
 function renderPower() {
@@ -181,9 +203,9 @@ const CHOICES = {
 const SLEEP_MODES = {
   standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Tap Home on the controller to wake it.',
              wake: 'Tap Home on the controller to wake' },
-  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller can’t wake it: use the power button, the keyboard or the phone.',
+  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller and the phone can’t wake it: use the power button or the keyboard.',
            wake: 'Wake with the power button or the keyboard' },
-  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button, the keyboard or the phone.',
+  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button or the keyboard.',
                wake: 'Wake with the power button' }
 };
 
@@ -226,44 +248,9 @@ function renderSleepSection() {
     '</div>';
 }
 
-// TV toggles live in the TV's profile, not in prefs.
-const TV_TOGGLES = ['offWithBox', 'onWithBox', 'sleepWithTv'];
-
 function toggle(on) { return `<div class="toggle${on ? ' on' : ''}"><span></span></div>`; }
 
-function renderTvSection() {
-  const t = state.tv;
-  const p = t.profile;
-  const current = p && t.found.find((x) => x.id === p.deviceId);
-  let body = '<header><h1>TV</h1><p>The box turns the TV it is plugged into on and off and picks its input. ' +
-    'Each TV gets its own settings.</p></header>';
-  if (!t.found.length) {
-    body += '<div class="srow"><div class="text"><span class="label">No TV found</span>' +
-      '<span class="caption">None on the network that the box can control (Roku TVs for now). Other brands come later.</span></div></div>';
-  } else {
-    const label = current ? current.name : 'Pick your TV';
-    const caption = current
-      ? `${current.model}${p.input ? ' · HDMI ' + p.input : ''}${t.screen ? ' · this screen: ' + t.screen : ''}`
-      : `Which TV is this box plugged into?${t.screen ? ' This screen reports itself as ' + t.screen + '.' : ''}`;
-    body += `<div class="srow" data-nav data-id="tv-device" data-setting="tvDevice">` +
-      `<div class="text"><span class="label">${esc(label)}</span><span class="caption">${esc(caption)}</span></div>` +
-      (t.found.length > 1 || !current ? `<div class="value">${icon('chevleft', 28, 2)}Change${icon('chevright', 28, 2)}</div>` : '') + '</div>';
-    if (current && current.locked) {
-      body += '<div class="srow"><div class="text"><span class="label" style="color:var(--warn)">This TV blocks control</span>' +
-        '<span class="caption">On the TV: Settings › System › Advanced system settings › Control by mobile apps, set Network access to Enabled. ' +
-        'Also Settings › System › Power › Fast TV start: On.</span></div></div>';
-    }
-    if (p) {
-      body += settingRow('tv.offWithBox', 'Turn off when the box sleeps', 'The TV goes to standby with the box', toggle(p.offWithBox)) +
-        settingRow('tv.onWithBox', 'Turn on when the box wakes', 'And switch to the box’s input', toggle(p.onWithBox)) +
-        settingRow('tv.sleepWithTv', 'Follow the TV’s remote', 'Turning the TV off puts the box to sleep; turning it back on wakes the box', toggle(p.sleepWithTv));
-    }
-  }
-  body += '<div class="sbuttons">' +
-    (current && !current.locked ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: off and back on</div>' : '') +
-    '<div class="sbutton" data-nav data-id="tv-refresh" data-act="tv-refresh">Search again</div></div>';
-  return body;
-}
+// Settings › TV: tv.js (a Settings section added through settingsSection).
 
 let shownSection = null;   // the section's content animates in only when the section changes
 function renderSettings() {
@@ -272,8 +259,9 @@ function renderSettings() {
       `<div class="sitem${id === state.section ? ' on' : ''}" data-nav data-id="s-${id}" data-section="${id}">${icon(glyph, 32)}${esc(label)}</div>`).join('') +
     '</nav>';
   const title = SECTIONS.find(([id]) => id === state.section)[2];
+  const added = EXT.sections[state.section];
   const body = state.section === 'sleep' ? renderSleepSection()
-    : state.section === 'tv' ? renderTvSection()
+    : added ? added.render()
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
   const entering = state.section !== shownSection;
   shownSection = state.section;
@@ -282,22 +270,7 @@ function renderSettings() {
 }
 
 function changeSetting(key, step) {
-  if (key === 'tvDevice') {
-    // Step through the TVs found on the network.
-    const ids = state.tv.found.map((x) => x.id);
-    if (!ids.length) return;
-    const cur = state.tv.profile ? ids.indexOf(state.tv.profile.deviceId) : -1;
-    send({ type: 'tvChoose', id: ids[(cur + step + ids.length) % ids.length] });
-    return;
-  }
-  if (key.startsWith('tv.')) {
-    const name = key.slice(3);
-    if (!state.tv.profile) return;
-    state.tv.profile[name] = !state.tv.profile[name];
-    send({ type: 'tvSetting', key: name, value: state.tv.profile[name] });
-    render();
-    return;
-  }
+  if (key.startsWith('phone.') && typeof phoneSetting === 'function') { phoneSetting(key); return; }   // phone-settings.js
   const list = key === 'sleepMode' ? availableModes() : CHOICES[key];
   const i = list.findIndex(([v]) => v === state.prefs[key]);
   const next = list[(Math.max(i, 0) + step + list.length) % list.length][0];
@@ -308,13 +281,10 @@ function changeSetting(key, step) {
 
 function renderConfirm() {
   const c = state.confirm;
-  const [title, text, ok] = c.kind === 'desktop'
-    ? ['Switch to the Windows desktop?', 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.', 'Desktop mode']
-    : [`Close ${esc(c.name)}?`, 'It stops, and anything playing in it ends.', 'Close'];
   $('confirm-box').innerHTML =
-    `<h2>${title}</h2><p>${text}</p>` +
+    `<h2>Close ${esc(c.name)}?</h2><p>It stops, and anything playing in it ends.</p>` +
     '<div class="buttons">' +
-      `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">${ok}</div>` +
+      `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">Close</div>` +
       '<div class="button" data-nav data-id="confirm-cancel" data-act="cancel">Cancel</div>' +
     '</div>' +
     `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`;
@@ -323,15 +293,19 @@ function renderConfirm() {
 function render() {
   const keep = state.memory[state.view];
   // A confirmation sits over the view it was opened from, which stays visible under it.
-  const under = state.view === 'confirm' ? state.stack[state.stack.length - 1] : null;
+  const over = state.view === 'confirm' || (EXT.views[state.view] && EXT.views[state.view].overlay);
+  const under = over ? state.stack[state.stack.length - 1] : null;
   renderStatus();
   renderTiles();
+  for (const f of EXT.home) f();
   if (state.view === 'menu' || under === 'menu') renderMenu();
   if (state.view === 'power') renderPower();
   if (state.view === 'timer') renderTimer();
   if (state.view === 'confirm') renderConfirm();
-  if (state.view === 'settings') renderSettings();
-  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings']) $(v).classList.toggle('on', v === state.view || v === under);
+  if (state.view === 'settings' || under === 'settings') renderSettings();
+  for (const v of [state.view, under]) if (EXT.views[v]) EXT.views[v].render();
+  sectionHooks();
+  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) $(v).classList.toggle('on', v === state.view || v === under);
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
@@ -365,8 +339,10 @@ function restoreFocus(id) {
   const list = items();
   const kept = list.find((e) => e.dataset.id === id) || list.find((e) => e.dataset.id === state.memory[state.view]);
   if (kept) { setFocus(kept); return; }
-  setFocus((state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
-    (state.view === 'settings' ? list.find((e) => e.classList.contains('srow')) : null) ||
+  const view = EXT.views[state.view];
+  setFocus((view && view.focus ? view.focus(list) : null) ||
+    (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
+    (state.view === 'settings' ? list.find((e) => e.classList.contains('srow')) || list.find((e) => e.dataset.section === state.section) : null) ||
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
@@ -433,6 +409,93 @@ function settingsPress(button, el) {
   return false;
 }
 
+// ---- Added screens ------------------------------------------------------------------------
+// Other scripts, loaded after this one (index.html), add Settings sections, views of their
+// own, actions and host messages here; this file calls them when it renders, handles a button
+// or gets a message. They may use everything above and below (state, send, render, go, back,
+// hints, icon, esc, setFocus, toast...), when called.
+//
+//   settingsSection('wifi', {
+//     render() -> html               the section's pane (a <header> and rows, as renderSleepSection)
+//     press(button, el) -> handled   buttons while the focus is in the pane, before the usual
+//     shown(), left()                the section came into view / went out of it (ask the host
+//                                    for data, stop something live)
+//     demo()                         sample data for index.html#settings/wifi in a browser
+//   })
+//   addView('maps', { render(), press(button, el) -> handled, focus(items) -> element,
+//                     overlay (drawn over the view it opened from), demo(arg) })
+//                                    a <section id="maps" class="view"> of its own; go('maps')
+//   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
+//   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")
+//   ask({ title, text, yes, onYes })          the shared yes / cancel dialog, over any view
+//   onHome(fn)                                runs with each render, to draw an extra on the home
+//                                             screen (the phone remote card, phone-card.js)
+
+const EXT = { sections: {}, views: {}, actions: {}, host: {}, home: [] };
+
+function onHome(fn) { EXT.home.push(fn); }
+
+function settingsSection(id, section) { EXT.sections[id] = section; }
+
+function addView(id, view) {
+  if (!$(id)) {
+    const el = document.createElement('section');
+    el.id = id;
+    el.className = 'view' + (view.overlay ? ' overlay' : '');
+    $('stage').insertBefore(el, $('opening'));   // under the "opening" layer and the toasts
+  }
+  EXT.views[id] = view;
+}
+
+function onAction(name, fn) { EXT.actions[name] = fn; }
+function hostMessage(type, fn) { EXT.host[type] = fn; }
+
+// shown / left for the Settings section in view (none while Settings is not).
+let sectionInView = null;
+function sectionHooks() {
+  // The TV method dialog over Settings is still the TV section (its list keeps refreshing).
+  const now = state.view === 'settings' || state.view === 'tvmethod' ? state.section : null;
+  if (now === sectionInView) return;
+  const was = EXT.sections[sectionInView];
+  sectionInView = now;
+  if (was && was.left) was.left();
+  if (EXT.sections[now] && EXT.sections[now].shown) EXT.sections[now].shown();
+}
+
+// The shared dialog: A on the first button runs onYes; B or Cancel closes it.
+let asking = null;
+function ask(q) { asking = q; go('ask'); }
+addView('ask', {
+  overlay: true,
+  render() {
+    const q = asking || {};
+    $('ask').innerHTML = '<div class="dialog">' +
+      `<h2>${esc(q.title || '')}</h2>${q.text ? `<p>${esc(q.text)}</p>` : ''}` +
+      '<div class="buttons">' +
+        `<div class="button" data-nav data-id="ask-yes" data-act="ask-yes">${esc(q.yes || 'OK')}</div>` +
+        '<div class="button" data-nav data-id="ask-no" data-act="cancel">Cancel</div>' +
+      '</div>' +
+      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`;
+  },
+  focus: (list) => list.find((e) => e.dataset.id === 'ask-no'),
+});
+onAction('ask-yes', () => { const q = asking; back(); if (q && q.onYes) q.onYes(); });
+
+// index.html#view or #view/arg in a plain browser: #settings/wifi opens that section (with
+// its demo data), #maps or #buttons/twitch an added view.
+function demoRoute(hash) {
+  // "?..." after the route is the screen's own demo options (#settings/tv?demo=paused): theirs to read.
+  const [view, arg] = hash.split('?')[0].split('/');
+  if (view === 'settings' && arg) {
+    state.section = arg;
+    if (EXT.sections[arg] && EXT.sections[arg].demo) EXT.sections[arg].demo();
+  }
+  if (EXT.views[view] && EXT.views[view].demo) EXT.views[view].demo(arg);
+  // #timer/video: the sleep timer set to "when this video ends", 23 minutes left.
+  if (view === 'timer' && arg === 'video') state.timer = { label: 'This video ends', endsAt: 'video', minutesLeft: 23 };
+  go(view);
+}
+
 // ---- Actions ------------------------------------------------------------------------------
 
 // go: open a view on top of the current one (B comes back). reset: start over at a view.
@@ -447,13 +510,8 @@ function showOpening(t) {
 }
 function hideOpening() { $('opening').classList.remove('on'); }
 
-function toast(text, kind) {
-  const el = document.createElement('div');
-  el.className = 'toast' + (kind === 'warn' ? ' warn' : '');
-  el.innerHTML = icon(kind === 'warn' ? 'warn' : 'info', 30, 2) + `<span>${esc(text)}</span>`;
-  $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 5000);
-}
+// A short message from the page, drawn with the alerts (notices.js).
+function toast(text, kind) { if (text) noticeOwn(text, kind); }
 
 function activate(el) {
   if (!el) return;
@@ -470,8 +528,8 @@ function activate(el) {
     case 'view': go(arg); break;
     case 'power': go('power'); break;
     case 'power-action':
-      // Desktop mode leaves the TV screens for the Windows desktop: asked once first.
-      if (arg === 'desktop') { state.confirm = { kind: 'desktop' }; go('confirm'); }
+      if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
+        text: 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.' });
       else send({ type: 'power', action: arg });
       break;
     case 'timer': {
@@ -481,15 +539,11 @@ function activate(el) {
       render();
       break;
     }
-    case 'confirm-close':
-      send(state.confirm.kind === 'desktop' ? { type: 'power', action: 'desktop' } : { type: 'close', id: state.confirm.id });
-      back();
-      break;
-    case 'tv-test': toast('Turning the TV off and back on…'); send({ type: 'tvTest' }); break;
-    case 'tv-refresh': toast('Searching for TVs…'); send({ type: 'tvRefresh' }); break;
+    case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
     case 'cancel': back(); break;
     case 'settings': go('settings'); break;
     case 'soon': toast(`${arg} come in a later update`); break;
+    default: if (EXT.actions[act]) EXT.actions[act](el, arg);
   }
 }
 
@@ -513,7 +567,16 @@ function back() {
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
   const el = focusedEl();
-  if (state.view === 'settings' && settingsPress(button, el)) return;
+  // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
+  if (state.moving && EXT.actions['tile-move'] && EXT.actions['tile-move'](el, button)) return;
+  // Added views and Settings sections first (their own buttons), then the usual.
+  const view = EXT.views[state.view];
+  if (view && view.press && view.press(button, el)) return;
+  if (state.view === 'settings') {
+    const section = EXT.sections[state.section];
+    if (section && section.press && !(el && el.dataset.section) && section.press(button, el)) return;
+    if (settingsPress(button, el)) return;
+  }
   switch (button) {
     case 'up': case 'down': move(button); break;
     case 'left': case 'right':
@@ -526,6 +589,8 @@ function press(button) {
       break;
     case 'b': back(); break;
     case 'x': {
+      // An alert's row: dismisses it, and nothing else (never on to the close below).
+      if (el && el.dataset.alert) { noticeDismiss(el.dataset.alert); break; }
       // Home screen: the focused tile, if it is running. Menu: the focused app row, else the
       // app the menu was opened over.
       let id = null;
@@ -537,18 +602,32 @@ function press(button) {
       break;
     }
     case 'home':
-      if (state.view === 'home') { state.current = null; state.backdrop = null; go('menu'); }
+      if (state.view === 'home') {
+        state.current = null; state.backdrop = null;
+        // An actionable alert on screen: the menu opens on its row; otherwise where it was left.
+        const f = noticeHomeFocus();
+        if (f) state.memory.menu = f;
+        go('menu');
+      }
       else back();
       break;
     case 'homeHold': if (state.view !== 'power') go('power'); break;
+    case 'r3': { const f = textField(); if (f) openKeyboardFor(f); break; }  // textinput.js
+    case 'start':
+      // Home screen: options for the focused tile (Move, Rename, Change icon, Remove).
+      if (state.view === 'home' && el && el.dataset.arg && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
+      break;
   }
 }
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
-  Escape: 'b', Backspace: 'b', x: 'x', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb' };
+  Escape: 'b', Backspace: 'b', x: 'x', y: 'y', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb', o: 'start' };
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }
+  // A text field has the focus: the key is the field's (Backspace deletes, x types an x), only
+  // Enter and Escape still confirm and cancel (textinput.js).
+  if (keyGuard(e)) return;
   const b = KEYS[e.key];
   if (!b) return;
   e.preventDefault();
@@ -564,14 +643,14 @@ function onHost(msg) {
       Object.assign(state, msg.settings || {});
       if (msg.prefs) Object.assign(state.prefs, msg.prefs);
       if (msg.power) state.power = msg.power;
-      if (msg.tv) state.tv = msg.tv;
+      if ('libraryAvailable' in msg) state.libraryAvailable = msg.libraryAvailable;
       render();
       break;
+    case 'tiles': state.tiles = msg.tiles; render(); break;
     case 'blank': $('stage').classList.add('blank'); break;
-    case 'tv': state.tv = msg.tv; if (state.view === 'settings') render(); break;
     case 'opened':
       hideOpening();
-      if (!msg.ok) toast(msg.text, 'warn');
+      if (!msg.ok && msg.text) toast(msg.text, 'warn'); // failures come as alerts now
       break;
     case 'state':
       if (msg.running) {
@@ -579,7 +658,7 @@ function onHost(msg) {
         // The app the menu was opened over has closed: B and Home now lead home, not to it.
         if (state.current && state.current !== 'desktop' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
-      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'desktop']) if (k in msg) state[k] = msg[k];
+      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone', 'desktop']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;
@@ -589,6 +668,10 @@ function onHost(msg) {
       const apply = () => {
         state.current = msg.current || null;
         state.backdrop = msg.backdrop || null;
+        // focus: the element to land on (an alert's row, the tile of an app that just closed);
+        // section: the Settings section to open (an alert's action).
+        if (msg.focus) state.memory[msg.view] = msg.focus;
+        if (msg.section) state.section = msg.section;
         reset(msg.view);
         $('stage').classList.remove('blank');
       };
@@ -604,6 +687,11 @@ function onHost(msg) {
       break;
     }
     case 'toast': toast(msg.text, msg.kind); break;
+    default: {
+      // Added scripts' messages: by type ("wifi.list"), else by prefix ("wifi.").
+      const handler = EXT.host[msg.type] || EXT.host[String(msg.type).split('.')[0] + '.'];
+      if (handler) handler(msg);
+    }
   }
 }
 
@@ -617,18 +705,22 @@ if (host) {
     { id: 'stremio', name: 'Stremio', glyph: 'film', color: '#7C8CFF' },
     { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', color: '#3DC0F0', running: true },
     { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B' },
-    { id: 'edge', name: 'Edge', glyph: 'globe', color: '#3CCB9A' }
+    { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A' }
   ], settings: { controller: true, battery: 'full' } });
 }
 
 fit();
 render();
-// Demo only: index.html#settings (or #menu, #power...) opens that view, for screenshots.
-if (!host && location.hash) go(location.hash.slice(1));
 // Redraw when the minute (or the timer countdown) changes; render() keeps the focus.
 let shown = '';
 setInterval(() => {
   const now = timeText(new Date()) + timerText();
   if (now !== shown) { shown = now; render(); }
 }, 1000);
-send({ type: 'ready' });
+// Once the scripts after this one have added their screens: the host's first messages may
+// be theirs. Demo only: index.html#settings (or #menu, #settings/sound, #maps...) opens that
+// view, for screenshots.
+addEventListener('DOMContentLoaded', () => {
+  if (!host && location.hash) demoRoute(location.hash.slice(1));
+  send({ type: 'ready' });
+});

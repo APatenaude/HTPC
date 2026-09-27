@@ -1,0 +1,51 @@
+/* Alerts on the launcher (design: Alerts): cards 680 px wide at the top right, never over the
+   middle of the screen; Home menu rows; status bar pills. Tones: info blue, warn amber, bad red. */
+
+:root { --bad: #FF8A7A; --bad-bg: #33201E; }
+
+#toasts { top: 48px; right: 96px; width: 680px; gap: 14px; align-items: stretch; }
+
+.notice {
+  display: flex; align-items: flex-start; gap: 22px; padding: 16px 24px; box-sizing: border-box; border-radius: 24px;
+  background: #1D2025; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), inset 0 0 0 1px #2B2F36; animation: toast-in 0.2s ease-out;
+}
+.notice .badge {
+  display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; flex-shrink: 0;
+  border-radius: 28px; background: var(--accent-bg); color: var(--accent);
+}
+.notice.warn .badge { background: var(--warn-bg); color: var(--warn); }
+.notice.bad .badge { background: var(--bad-bg); color: var(--bad); }
+.notice .text { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.notice .title { font-size: 28px; font-weight: 700; }
+.notice .body { font-size: 24px; color: var(--text-2); }
+.notice .action { align-self: center; display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-size: 22px; color: #D9D8D4; }
+.notice .action .key { min-width: 40px; height: 40px; font-size: 20px; }
+.notice .action .key.wide { padding: 0 14px; font-size: 18px; }
+
+/* Home menu: alerts with something to do, at the top */
+.row.alert-row { height: auto; min-height: 88px; padding: 12px 24px; gap: 18px; font-size: 26px; }
+.alert-row .badge {
+  display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; flex-shrink: 0;
+  border-radius: 24px; background: var(--accent-bg); color: var(--accent);
+}
+.alert-row.warn .badge { background: var(--warn-bg); color: var(--warn); }
+.alert-row.bad .badge { background: var(--bad-bg); color: var(--bad); }
+.alert-row .grow { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.alert-row .t { font-weight: 700; }
+.alert-row .b { font-size: 21px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-row .chip { display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-size: 22px; color: #D9D8D4; }
+.alert-row .chip .key { min-width: 40px; height: 40px; font-size: 20px; }
+
+/* Many open apps (and alert rows): two columns of shorter rows, and the panel scrolls if it
+   still does not fit, with the button hints kept at the bottom. */
+#menu-panel { overflow-y: auto; scrollbar-width: none; }
+#menu-panel .apps { display: flex; flex-direction: column; gap: 14px; }
+#menu-panel.crowded .apps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+#menu-panel.crowded .apps .row { height: 72px; padding: 0 20px; gap: 14px; font-size: 26px; }
+#menu-panel.crowded .apps .row .grow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#menu-panel.crowded .quick-label { display: none; }
+#menu-panel .hints { position: sticky; bottom: 0; background: var(--panel); flex-shrink: 0; }
+
+/* Status bar pills */
+.pill.alert.bad { background: var(--bad-bg); color: var(--bad); }
+.pill.alert.info { background: var(--accent-bg); color: var(--accent); }

@@ -18,7 +18,7 @@ static class Log
         {
             foreach (var line in Queue.GetConsumingEnumerable())
             {
-                try { File.AppendAllText(FilePath, line); } catch (IOException) { }
+                try { File.AppendAllText(FilePath, line); } catch (Exception) { } // IO, or access while setup re-locks the folder
             }
         }) { IsBackground = true, Name = "Log", Priority = ThreadPriority.BelowNormal }.Start();
     }

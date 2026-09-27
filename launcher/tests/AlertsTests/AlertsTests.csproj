@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Checks for alerts (AlertCenter, app exits, internet rules) and Wi-Fi profiles: "dotnet run"
+       in this folder (exit code 0 = all passed). The launcher's own files with fakes around
+       them (Harness.cs: an in-memory Log, a fake clock and overlay). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Htpc.Launcher</RootNamespace>
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <Src>..\..\src\Launcher\</Src>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(Src)Alerts.cs;$(Src)AlertsForm.cs;$(Src)AppExits.cs;$(Src)InternetWatch.cs;$(Src)WifiProfile.cs" />
+  </ItemGroup>
+
+</Project>

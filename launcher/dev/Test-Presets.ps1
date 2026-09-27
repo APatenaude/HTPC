@@ -89,7 +89,7 @@ if ($Keyboard) {
     # The password field: 1418,427 on the page's 1920x1080 layout (Edge fills the screen).
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     [void][HtpcDev.Test]::SetCursorPos([int]($screen.Width * 1418 / 1920), [int]($screen.Height * 427 / 1080))
-    Pad -Press A
+    Pad -Press X                     # X clicks
     # The keyboard opens when Edge reports the focused field (the first time takes Edge a few
     # seconds: it turns its accessibility on).
     $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -143,15 +143,15 @@ $afterPrecise = Cursor
 $results['Pointer, precise (RT) left 0.5 s (px)'] = $afterPrecise.X - $afterFull.X
 Pad -LY 12000 -HoldMs 500
 $results['Pointer, light tilt up 0.5 s (px)'] = (Cursor).Y - $afterPrecise.Y
-Pad -Press A
-Pad -LT 255
-Pad -Press Select   # Esc: closes the context menu, if one opened
+Pad -Press X        # click
+Pad -LT 255         # right-click
+Pad -Press B        # Esc: closes the context menu
 Pad -RY -32767 -HoldMs 400
-Pad -Press X
-Pad -Press Y
+Pad -Press A        # Enter
+Pad -Press Y        # Space
 Pad -Press Down -HoldMs 700    # held: repeats
-Pad -Press LB
-Pad -Press B
+Pad -Press L3       # middle click
+Pad -Press LB       # back (Alt+Left)
 Pad -Release
 Start-Sleep -Milliseconds 400
 

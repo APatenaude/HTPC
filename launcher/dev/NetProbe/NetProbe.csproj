@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Dev: what the launcher's Wi-Fi code sees on this box, read-only (never joins, forgets or
+       switches anything). Network names are masked. Run it as the launcher runs (not elevated):
+       launcher\dev\Run-NetProbe.ps1. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Htpc.Launcher</RootNamespace>
+    <Src>..\..\src\Launcher\</Src>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(Src)WlanNative.cs;$(Src)WifiProfile.cs;$(Src)Wifi.cs" />
+  </ItemGroup>
+
+</Project>

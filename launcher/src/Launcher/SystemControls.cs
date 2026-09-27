@@ -21,7 +21,7 @@ sealed class AudioVolume
         [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object endpoint);
     }
 
-    // Methods in vtable order up to the ones used.
+    // Methods in vtable order up to the ones used (endpointvolume.h).
     [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IAudioEndpointVolume
     {
@@ -32,6 +32,12 @@ sealed class AudioVolume
         [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid context);
         [PreserveSig] int GetMasterVolumeLevel(out float levelDb);
         [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig] int SetChannelVolumeLevel(uint channel, float levelDb, ref Guid context);
+        [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
+        [PreserveSig] int GetChannelVolumeLevel(uint channel, out float levelDb);
+        [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+        [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
+        [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
     }
 
     static IAudioEndpointVolume Endpoint()
@@ -43,6 +49,15 @@ sealed class AudioVolume
         return (IAudioEndpointVolume)endpoint;
     }
 
+    // Without an audio device (the TV off on an HDMI-only box) every read fails: once a minute in the log is enough.
+    static DateTime quietUntil;
+    static void Warn(string message)
+    {
+        if (DateTime.Now < quietUntil) return;
+        quietUntil = DateTime.Now.AddMinutes(1);
+        Log.Warn(message);
+    }
+
     /// <summary>0 to 100, or null when there is no audio device.</summary>
     public int? Get()
     {
@@ -51,7 +66,7 @@ sealed class AudioVolume
             Marshal.ThrowExceptionForHR(Endpoint().GetMasterVolumeLevelScalar(out var level));
             return (int)Math.Round(level * 100);
         }
-        catch (Exception e) { Log.Warn($"Reading volume: {e.Message}"); return null; }
+        catch (Exception e) { Warn($"Reading volume: {e.Message}"); return null; }
     }
 
     public void Set(int percent)
@@ -61,7 +76,41 @@ sealed class AudioVolume
             var context = Guid.Empty;
             Marshal.ThrowExceptionForHR(Endpoint().SetMasterVolumeLevelScalar(Math.Clamp(percent, 0, 100) / 100f, ref context));
         }
-        catch (Exception e) { Log.Warn($"Setting volume: {e.Message}"); }
+        catch (Exception e) { Warn($"Setting volume: {e.Message}"); }
+    }
+
+    /// <summary>Up or down by a step (the controller's and keyboard's volume buttons: no Windows flyout); the new level.</summary>
+    public int? Step(int delta)
+    {
+        if (Get() is not { } now) return null;
+        var level = Math.Clamp((now + delta) / 5 * 5, 0, 100); // keeps to multiples of 5
+        if (delta > 0 && level <= now) level = Math.Min(100, now + 5);
+        Set(level);
+        if (delta > 0 && Muted == true) Muted = false; // turning it up means hearing it
+        return level;
+    }
+
+    /// <summary>Muted or not; null when there is no audio device.</summary>
+    public bool? Muted
+    {
+        get
+        {
+            try
+            {
+                Marshal.ThrowExceptionForHR(Endpoint().GetMute(out var mute));
+                return mute;
+            }
+            catch (Exception e) { Warn($"Reading mute: {e.Message}"); return null; }
+        }
+        set
+        {
+            try
+            {
+                var context = Guid.Empty;
+                Marshal.ThrowExceptionForHR(Endpoint().SetMute(value ?? false, ref context));
+            }
+            catch (Exception e) { Warn($"Setting mute: {e.Message}"); }
+        }
     }
 }
 

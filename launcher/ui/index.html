@@ -4,6 +4,23 @@
 <meta charset="utf-8">
 <title>TV</title>
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="notices.css">
+<link rel="stylesheet" href="wifi.css">
+<link rel="stylesheet" href="settings-more.css">
+<link rel="stylesheet" href="library.css">
+<link rel="stylesheet" href="tv.css">
+<link rel="stylesheet" href="phone-card.css">
+<script>
+// Demo only (a plain browser, for headless screenshots): show a script error on the page. Never
+// attaches under the launcher's WebView, so nothing extra ships on the box.
+if (!(window.chrome && window.chrome.webview)) {
+  addEventListener('error', function (e) {
+    var d = document.getElementById('jserr');
+    if (!d) { d = document.createElement('div'); d.id = 'jserr'; d.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;background:#b00020;color:#fff;font:15px monospace;padding:10px;max-width:100vw;white-space:pre-wrap'; (document.body || document.documentElement).appendChild(d); }
+    d.textContent += (e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno + (e.error && e.error.stack ? '\n' + e.error.stack : '') + '\n');
+  });
+}
+</script>
 </head>
 <body>
 <div id="stage">
@@ -47,10 +64,25 @@
     <div class="dialog" id="confirm-box"></div>
   </section>
 
+  <!-- The library and tile-editing screens (addtile, tileopts, rename, changeicon, installing)
+       are added by library.js through addView(), so no sections for them here. -->
+
   <div id="opening"></div>
   <div id="toasts"></div>
 </div>
 <script src="icons.js"></script>
+<script src="notices.js"></script>
+<script src="textinput.js"></script>
 <script src="app.js"></script>
+<!-- Screens added to app.js (settingsSection, addView): -->
+<script src="settings-more.js"></script>
+<script src="buttons.js"></script>
+<script src="library.js"></script>
+<script src="qr.js"></script>
+<script src="phone-settings.js"></script>
+<script src="tv.js"></script>
+<script src="phone-card.js"></script>
+<script src="wifi.js"></script>
+<script src="settings-network.js"></script>
 </body>
 </html>
