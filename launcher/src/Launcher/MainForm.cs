@@ -11,7 +11,7 @@ namespace Htpc.Launcher;
 /// Apps open on top of this window. The Home button brings it back: a capture of the app's
 /// screen becomes the backdrop behind the Home menu while the app keeps running underneath.
 /// </summary>
-sealed class MainForm : Form
+sealed partial class MainForm : Form
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -44,9 +44,6 @@ sealed class MainForm : Form
 
     bool uiReady;
     int brightness = 100;
-    DateTime? sleepAt;
-    string? sleepLabel;
-    bool sleepWarned;
 
     public MainForm(Options options)
     {
@@ -100,6 +97,8 @@ sealed class MainForm : Form
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
         Directory.CreateDirectory(captureDir);
+        RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
+        InitSettings(); // MainForm.Settings.cs
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -108,7 +107,7 @@ sealed class MainForm : Form
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
         apps.Adopt(); // apps left open by a previous launcher
-        standby = new Standby(controller, settings);
+        standby = new Standby(controller, settings, media);
         standby.Changed += OnStandbyChanged;
         standby.GoingDown += () =>
         {
@@ -180,6 +179,8 @@ sealed class MainForm : Form
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
+        try { await alerts.Init(env, options.UiDir); }
+        catch (Exception e) { Log.Error("Alerts failed to start", e); }
     }
 
     // --- Messages from the UI ----------------------------------------------------------------
@@ -214,7 +215,8 @@ sealed class MainForm : Form
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
-                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe(), libraryAvailable = library.Available });
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
+                RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "tvChoose": tv.Choose(Str("id")!); break;
@@ -250,35 +252,13 @@ sealed class MainForm : Form
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
             case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
-            // App library and tile editing (SPEC W1, W5): all "library.*" and "tile.*" messages go
-            // through one handler, so the shared message registry (button-maps agent) can dispatch
-            // this whole feature by type prefix with a single registration.
-            default: HandleLibraryMessage(Str("type") ?? "", m); break;
+            default:
+                if (!DispatchUiMessage(Str("type"), m)) Log.Warn($"UI message {Str("type")} not handled");
+                break;
         }
     }
 
     void OnUi(Action a) { if (IsHandleCreated && !IsDisposed) BeginInvoke(a); }
-
-    /// <summary>Handles every "library.*" / "tile.*" message from the UI. Returns false for others.</summary>
-    bool HandleLibraryMessage(string type, JsonElement m)
-    {
-        string? Str(string name) => m.TryGetProperty(name, out var v) ? v.ToString() : null;
-        switch (type)
-        {
-            case "library.list": PushLibraryCatalog(); return true;
-            case "library.install": StartLibraryJob(Str("id")!, "install", m.TryGetProperty("addToHome", out var ah) && ah.GetBoolean()); return true;
-            case "library.uninstall": StartLibraryJob(Str("id")!, "uninstall", false); return true;
-            case "library.upgrade": StartLibraryJob(Str("id")!, "upgrade", false); return true;
-            case "library.startMenu": PushStartMenu(); return true;
-            case "library.addProgram": AddProgramTile(Str("name")!); return true;
-            case "library.addWebsite": AddWebsiteTile(Str("name"), Str("url")); return true;
-            case "tile.order": SetTileOrder(m.GetProperty("ids")); return true;
-            case "tile.rename": RenameTile(Str("id")!, Str("name")); return true;
-            case "tile.icon": IconTile(Str("id")!, Str("glyph"), Str("color")); return true;
-            case "tile.remove": RemoveTile(Str("id")!); return true;
-            default: return false;
-        }
-    }
 
     void Post(object message)
     {
@@ -295,7 +275,7 @@ sealed class MainForm : Form
         brightness,
         controller = controller.Connected,
         battery = controller.BatteryLevel,
-        timer = sleepAt is null ? null : new { label = sleepLabel, endsAt = new DateTimeOffset(sleepAt.Value).ToUnixTimeMilliseconds() }
+        timer = sleepTimer.Describe()
     };
 
     void PushState() => Post(StateObject());
@@ -352,6 +332,8 @@ sealed class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) return;
+        // The sleep timer's last minute: Home is +15 min (the warning says so), wherever the box is.
+        if (pad == Pad.Home && sleepTimer.Warned) { sleepTimer.Extend(); return; }
         if (keyboard.Visible)
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
@@ -684,6 +666,7 @@ sealed class MainForm : Form
     void OnStandbyChanged(bool active)
     {
         Log.Info(active ? "In standby" : "Awake");
+        alerts.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.
         if (!tvChangedItself) _ = active ? tv.TurnOff() : tv.TurnOn();
         tvChangedItself = false;
@@ -734,220 +717,7 @@ sealed class MainForm : Form
         base.WndProc(ref m);
     }
 
-    void SetSleepTimer(JsonElement minutes)
-    {
-        sleepWarned = false;
-        if (minutes.ValueKind == JsonValueKind.Number && minutes.GetInt32() > 0)
-        {
-            var m = minutes.GetInt32();
-            sleepAt = DateTime.Now.AddMinutes(m);
-            sleepLabel = m switch { 60 => "1 hour", 90 => "1 h 30", 120 => "2 hours", _ => $"{m} min" };
-            Log.Info($"Sleep timer: {sleepLabel}");
-        }
-        else
-        {
-            if (minutes.ValueKind == JsonValueKind.String)
-                Post(new { type = "toast", text = "“When this video ends” comes in a later update", kind = "warn" });
-            sleepAt = null;
-            sleepLabel = null;
-        }
-        PushState();
-    }
-
-    void CheckSleepTimer()
-    {
-        if (sleepAt is null) return;
-        var left = sleepAt.Value - DateTime.Now;
-        if (!sleepWarned && left <= TimeSpan.FromMinutes(1))
-        {
-            sleepWarned = true;
-            Post(new { type = "toast", text = "Going to sleep in 1 minute" });
-        }
-        if (left <= TimeSpan.Zero)
-        {
-            sleepAt = null;
-            sleepLabel = null;
-            PushState();
-            standby.Sleep("sleep timer");
-        }
-    }
-
-    // --- App library and tile editing (SPEC W1, W5) --------------------------------------------
-
-    void PushTiles() => Post(new { type = "tiles", tiles = TileList() });
-
-    // The home row starts from the catalog's defaults until the user changes it; the first change
-    // writes those ids down so the order can be edited.
-    void EnsureTiles()
-    {
-        settings.Tiles ??= apps.Tiles.Select(t => t.Id).ToList();
-    }
-
-    void ApplyTiles()
-    {
-        apps.SetCustom(settings.CustomTiles, settings.TileEdits);
-        if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
-        settings.Save();
-        PushTiles();
-    }
-
-    void PushLibraryCatalog()
-    {
-        var appCards = apps.Catalog.Where(a => !a.IsWebsite).Select(LibraryCard).ToList();
-        var siteCards = apps.Catalog.Where(a => a.IsWebsite).Select(LibraryCard).ToList();
-        Post(new { type = "libraryCatalog", apps = appCards, sites = siteCards, available = library.Available });
-    }
-
-    object LibraryCard(CatalogApp a) => new
-    {
-        id = a.Id,
-        name = a.Name,
-        glyph = a.Glyph,
-        color = a.Color,
-        desc = a.Desc ?? "",
-        type = a.Type,
-        state = LibraryState(a),
-        canUninstall = a.Installable && a.InstallSource != "builtin"
-    };
-
-    // home = already a tile; installed = on the box, A adds a tile; install = not there yet;
-    // installing = a job is running; add = a website (nothing to install, A just adds the tile).
-    string LibraryState(CatalogApp a)
-    {
-        if (library.IsQueued(a.Id)) return "installing";
-        var onHome = apps.Tiles.Any(t => t.Id == a.Id);
-        if (a.IsWebsite) return onHome ? "home" : "add";
-        if (onHome) return "home";
-        return apps.IsInstalled(a.Id) ? "installed" : "install";
-    }
-
-    void PushStartMenu()
-    {
-        lastScan = StartMenuScanner.Scan();
-        var onHome = new HashSet<string>(apps.Tiles.Where(t => t.Custom).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
-        var list = lastScan.Select(p => new { name = p.Name, launchable = p.Launchable, note = p.Note, onHome = onHome.Contains(p.Name) });
-        Post(new { type = "programs", list });
-    }
-
-    void AddProgramTile(string name)
-    {
-        var program = lastScan.FirstOrDefault(p => p.Name == name);
-        if (program is null) { toastWarn("That program is no longer listed"); return; }
-        if (!program.Launchable || program.Target is null) { toastWarn($"{TileStore.CleanName(name)} can't be added: {program.Note ?? "not a program"}"); return; }
-        var tile = new CustomTile
-        {
-            Id = TileStore.NewId("program"),
-            Kind = "program",
-            Name = TileStore.CleanName(name),
-            Exe = program.Target,
-            Args = program.Args,
-            Glyph = "app",
-            Color = "#8CC2FF",
-            Preset = "mouse",
-        };
-        settings.CustomTiles.Add(tile);
-        EnsureTiles();
-        settings.Tiles!.Add(tile.Id);
-        ApplyTiles();
-        Log.Info($"Added program tile {tile.Name} ({program.Target})");
-        Post(new { type = "programAdded", name = tile.Name });
-    }
-
-    void AddWebsiteTile(string? name, string? url)
-    {
-        if (!TileStore.TryWebsiteUrl(url, out var clean, out var error))
-        {
-            Post(new { type = "websiteResult", ok = false, error });
-            return;
-        }
-        var tileName = TileStore.CleanName(name);
-        if (tileName.Length == 0) tileName = TileStore.CleanName(TileStore.SuggestWebsiteName(clean));
-        var tile = new CustomTile
-        {
-            Id = TileStore.NewId("website"),
-            Kind = "website",
-            Name = tileName,
-            Url = clean,
-            Glyph = "globe",
-            Color = "#8CC2FF",
-            Preset = "mouse",
-        };
-        settings.CustomTiles.Add(tile);
-        EnsureTiles();
-        settings.Tiles!.Add(tile.Id);
-        ApplyTiles();
-        Log.Info($"Added website tile {tile.Name} ({clean})");
-        Post(new { type = "websiteResult", ok = true, name = tile.Name });
-    }
-
-    void SetTileOrder(JsonElement ids)
-    {
-        var order = ids.EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
-        if (order.Count == 0) return;
-        settings.Tiles = order;
-        ApplyTiles();
-    }
-
-    void RenameTile(string id, string? name)
-    {
-        if (apps.Get(id) is null) return;
-        var clean = TileStore.CleanName(name);
-        var edit = settings.TileEdits.TryGetValue(id, out var e) ? e : settings.TileEdits[id] = new TileEdit();
-        edit.Name = clean.Length == 0 ? null : clean;
-        // A custom tile keeps its own name too, so removing the edit later still reads well.
-        if (apps.Get(id) is { Custom: true } && settings.CustomTiles.FirstOrDefault(c => c.Id == id) is { } custom && clean.Length > 0)
-            custom.Name = clean;
-        ApplyTiles();
-    }
-
-    void IconTile(string id, string? glyph, string? color)
-    {
-        if (apps.Get(id) is null) return;
-        var edit = settings.TileEdits.TryGetValue(id, out var e) ? e : settings.TileEdits[id] = new TileEdit();
-        if (TileStore.ValidGlyph(glyph)) edit.Glyph = glyph;
-        if (TileStore.ValidColor(color)) edit.Color = color;
-        ApplyTiles();
-    }
-
-    void RemoveTile(string id)
-    {
-        EnsureTiles();
-        settings.Tiles!.RemoveAll(t => t == id);
-        // A custom tile's details would be lost, so it is dropped from the store too (the user is
-        // asked first in the UI). Its Edge profile folder (website sign-in) is left on disk.
-        settings.CustomTiles.RemoveAll(c => c.Id == id);
-        settings.TileEdits.Remove(id);
-        ApplyTiles();
-    }
-
-    void StartLibraryJob(string id, string action, bool addToHome)
-    {
-        if (!library.Enqueue(id, action, addToHome, out var error))
-        {
-            toastWarn(error);
-            return;
-        }
-        PushLibraryCatalog();
-        PushLibraryProgress();
-    }
-
-    void PushLibraryProgress()
-    {
-        var (cur, pendingJobs) = library.Snapshot();
-        var running = cur is null ? null : new { id = cur.Id, name = cur.Name, action = cur.Action, phase = cur.Phase, percent = cur.Percent, message = cur.Message };
-        Post(new { type = "libraryProgress", current = running, pending = pendingJobs.Select(j => new { id = j.Id, action = j.Action }).ToList() });
-    }
-
-    void OnJobFinished(LibraryJob job, bool ok, string text)
-    {
-        toast(text, ok ? null : "warn");
-        PushLibraryProgress();
-        PushLibraryCatalog();
-        PushTiles();
-    }
-
-    void toast(string text, string? kind) => Post(new { type = "toast", text, kind });
-    void toastWarn(string text) => toast(text, "warn");
+    // The sleep timer (SetSleepTimer, CheckSleepTimer): MainForm.Settings.cs and SleepTimer.cs.
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

@@ -19,8 +19,15 @@
 .to-sep { height: 1px; margin: 8px 20px; background: var(--track); }
 .to-confirm { margin: 0 20px 8px; font-size: 24px; line-height: 1.4; color: var(--text-2); }
 
+/* Overlay views keep their hints at the bottom (like Power and Sleep timer). */
+#tileopts .hints, #installing .hints { position: absolute; left: 0; bottom: 0; }
+
+/* Full-screen library views are opaque (the dimmed home must not show through) and stack their
+   content above a bottom hint bar. */
+#addtile, #rename, #changeicon { flex-direction: column; background: var(--bg); }
+.lib-center { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px; }
+
 /* ---- Add tile (Library / On this box / Website) ---- */
-#addtile { flex-direction: column; background: var(--bg); }
 .at-header { padding: 56px 96px 0; display: flex; flex-direction: column; gap: 24px; }
 .at-header h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; letter-spacing: -0.02em; }
 .at-tabs { display: flex; gap: 48px; font-size: 30px; }

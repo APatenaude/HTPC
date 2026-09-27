@@ -19,10 +19,16 @@
 
 .PARAMETER Job
     The token, e.g. install:vlc, uninstall:kodi, firewall:stremio, upgrade:plex.
+.PARAMETER DryRun
+    Validate the token and print what it would do, without installing anything (for tests).
+.PARAMETER Catalog
+    Only with -DryRun: read this catalog instead of the trusted one in Program Files (for tests).
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$Job
+    [Parameter(Mandatory)][string]$Job,
+    [switch]$DryRun,
+    [string]$Catalog
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +48,19 @@ $arg = $Matches['arg']
 
 $verbScript = Join-Path $root "jobs\$verb.ps1"
 if (-not (Test-Path -LiteralPath $verbScript)) { throw "Refused: no job handler for '$verb'" }
+
+if ($DryRun) {
+    if ($Catalog) { $script:TrustedCatalog = $Catalog }
+    # Verbs that name a catalog app validate the id against the catalog; firewall/restorepoint too.
+    if ($verb -in 'install', 'uninstall', 'upgrade', 'firewall') {
+        $app = Get-JobApp $arg
+        $scope = Get-AppRunScope $app
+        Write-Host "OK: $verb '$($app.id)' ($($app.install.source), scope $scope)"
+    } else {
+        Write-Host "OK: $verb$(if ($arg) { " '$arg'" })"
+    }
+    exit 0
+}
 
 Set-JobContext $Job $verb
 $temp = $null

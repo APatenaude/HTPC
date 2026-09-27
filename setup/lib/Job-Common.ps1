@@ -48,7 +48,8 @@ function Get-JobReporter { { param($phase, $percent, $message) Write-JobProgress
 # a website (nothing to install) or the builtin Browser tile.
 function Get-JobApp([string]$Id) {
     if (-not (Test-Path $script:TrustedCatalog)) { throw "trusted catalog not found ($script:TrustedCatalog)" }
-    $app = (Get-Content $script:TrustedCatalog -Raw | ConvertFrom-Json).apps | Where-Object { $_.id -eq $Id } | Select-Object -First 1
+    # Case-sensitive: catalog ids are lower-case, so "VLC" is not "vlc" (the C# side matches the same way).
+    $app = (Get-Content $script:TrustedCatalog -Raw | ConvertFrom-Json).apps | Where-Object { $_.id -ceq $Id } | Select-Object -First 1
     if (-not $app) { throw "'$Id' is not a catalog app" }
     if (-not $app.install) { throw "'$Id' is a website; there is nothing to install" }
     if ($app.install.source -eq 'builtin') { throw "'$Id' is part of Windows" }

@@ -21,17 +21,40 @@ answer file runs it with `-Unattended` at the first sign-in.
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
 | Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store) |
-| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service) |
+| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
-| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, these scripts kept in `ProgramData\HTPC\setup`, started at sign-in |
+| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; started at sign-in |
+| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\` and `user\` stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 30-min limit, the TV user may run it) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
-`catalog.json` is the one app list for setup now and the launcher's library later.
+`catalog.json` is the one app list for setup and the launcher's library.
+
+## Installing from the TV (SPEC W5)
+
+The launcher runs at standard rights (the TV account is an Administrator, but its processes are
+medium integrity). To install or uninstall a machine-wide app it hands the `\HTPC\Jobs` task one
+token, `install:<id>` / `uninstall:<id>` / `upgrade:<id>` / `firewall:<id>`. The task runs
+`lib/Invoke-AppJob.ps1` as SYSTEM, which dispatches to `jobs/<verb>.ps1` (a table other parts of
+the box add to: launcher and Windows updates later). Nothing but that one catalog id reaches a
+command:
+
+- the token must match `^(verb)(:[A-Za-z0-9][A-Za-z0-9._-]{0,60})?$`, the verb must be a known
+  `jobs/<verb>.ps1`, and the id must be in the trusted catalog in Program Files (case-sensitive);
+- the winget id, GitHub asset, install folder and firewall paths all come from that catalog, never
+  from the token;
+- as SYSTEM the job stages downloads in a fresh admin-only folder, resolves `winget.exe` from its
+  signed package, checks the GitHub SHA-256, and reads or writes nothing user-writable.
+
+Per-user apps (Stremio, Feishin, Spotify: winget only offers a per-user installer) install without
+elevation, run by the launcher itself; their firewall Block rules still need elevation, so a
+`firewall:<id>` job adds them through the task first (resolving the interactive user's profile so
+`%LOCALAPPDATA%` points at the real user, not SYSTEM). `Invoke-AppJob.ps1 -DryRun -Catalog <path>`
+validates a token and prints what it would do without installing anything (for tests).
 
 `tools/Test-HwDecode.ps1` also runs on its own (`-Json` for the launcher): it lists the
 driver's decoders and, when mpv or ffmpeg is present, plays the 4K clips in
