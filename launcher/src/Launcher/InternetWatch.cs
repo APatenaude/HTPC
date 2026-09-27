@@ -79,7 +79,27 @@ sealed class InternetWatch
 
     public static bool IsOnline()
     {
-        var profile = NetworkInformation.GetInternetConnectionProfile();
-        return profile?.GetNetworkConnectivityLevel() == NetworkConnectivityLevel.InternetAccess;
+        var level = NetworkInformation.GetInternetConnectionProfile()?.GetNetworkConnectivityLevel();
+        if (level == NetworkConnectivityLevel.InternetAccess) return true;
+        // Windows' own check (a probe to msftconnecttest.com) can be blocked by a DNS filter or a
+        // firewall while the internet works: with the local network up, try a real site before
+        // saying there is none. At most every 30 s.
+        return level is NetworkConnectivityLevel.LocalAccess or NetworkConnectivityLevel.ConstrainedInternetAccess && Reachable();
+    }
+
+    static DateTime lastReach;
+    static bool lastReachable;
+
+    static bool Reachable()
+    {
+        if (DateTime.Now - lastReach < TimeSpan.FromSeconds(30)) return lastReachable;
+        lastReach = DateTime.Now;
+        try
+        {
+            using var tcp = new System.Net.Sockets.TcpClient();
+            lastReachable = tcp.ConnectAsync("www.youtube.com", 443).Wait(3000) && tcp.Connected;
+        }
+        catch (Exception) { lastReachable = false; }
+        return lastReachable;
     }
 }

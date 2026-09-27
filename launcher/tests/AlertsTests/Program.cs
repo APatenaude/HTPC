@@ -54,6 +54,7 @@ static class WifiChecks
         T.Check("profile: raw 64-digit key is a networkKey", WifiProfile.Build("x", WifiSecurity.Wpa2Psk, WifiProfile.CipherCcmp, new string('b', 64), false).Contains("<keyType>networkKey</keyType>"));
         T.Check("profile: 33-byte name refused", Throws(() => WifiProfile.Build(new string('n', 33), WifiSecurity.Open, 0, null, false)));
         T.Equal("name that is not UTF-8: shown in hex", "0xFF00", WifiProfile.SsidText(new byte[] { 0xFF, 0x00 }));
+        T.Check("... and joined with its own bytes", WifiProfile.Build("0xFF00", WifiSecurity.Open, 0, null, false, ssidBytes: new byte[] { 0xFF, 0x00 }).Contains("<hex>FF00</hex>"));
 
         T.Group("Wi-Fi: wording and decisions");
         T.Equal("signal 80: strong", "strong signal", WifiProfile.SignalWords(80));

@@ -6,8 +6,8 @@ using Windows.Networking.Connectivity;
 
 namespace Htpc.Launcher;
 
-/// <summary>A Wi-Fi network in range (one entry per name, strongest signal).</summary>
-sealed record WifiNetwork(string Ssid, int Signal, WifiSecurity Security, int Cipher, bool Saved, bool Connected, bool Connectable, string? ProfileName);
+/// <summary>A Wi-Fi network in range (one entry per name, strongest signal). SsidBytes: the name as the router sends it (not always UTF-8; Ssid is how it shows).</summary>
+sealed record WifiNetwork(string Ssid, int Signal, WifiSecurity Security, int Cipher, bool Saved, bool Connected, bool Connectable, string? ProfileName, byte[] SsidBytes);
 
 /// <summary>The network cable: its adapter's name, link speed, up or not, and whether the internet goes through it.</summary>
 sealed record WiredLink(string Name, long SpeedBitsPerSecond, bool Up, bool CarriesInternet);
@@ -153,7 +153,8 @@ sealed class WifiService : IDisposable
                     g.Any(n => (n.Flags & WlanNative.FlagHasProfile) != 0),
                     g.Any(n => (n.Flags & WlanNative.FlagConnected) != 0),
                     g.Any(n => n.Connectable != 0),
-                    string.IsNullOrEmpty(withProfile.ProfileName) ? null : withProfile.ProfileName);
+                    string.IsNullOrEmpty(withProfile.ProfileName) ? null : withProfile.ProfileName,
+                    g.First().Ssid.Value);
             })
             .OrderByDescending(n => n.Connected).ThenByDescending(n => n.Saved).ThenByDescending(n => n.Signal)
             .ToList();
@@ -210,7 +211,7 @@ sealed class WifiService : IDisposable
         {
             if (WifiProfile.NeedsPassword(security) && WifiProfile.CheckKey(security, password ?? "") is { } bad)
                 return new(ssid, false, "wrong-password", bad);
-            try { xml = WifiProfile.Build(ssid, security, cipher, password, hidden); }
+            try { xml = WifiProfile.Build(ssid, security, cipher, password, hidden, ssidBytes: known?.SsidBytes); }
             catch (ArgumentException e) { return new(ssid, false, "unsupported", e.Message); }
             mode = "temporary profile";
             p = new WlanNative.ConnectionParameters

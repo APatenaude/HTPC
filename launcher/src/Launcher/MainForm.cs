@@ -440,7 +440,9 @@ sealed partial class MainForm : Form
         keyboardAuto = auto;
         mapper.Map = null; // at once: the controller now drives the keyboard
         keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false, field?.Bounds ?? Rectangle.Empty);
-        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")} \"{field.Name}\"")})");
+        // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
+        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"";
+        Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")}{label}")})");
     }
 
     void CloseKeyboard(string reason)

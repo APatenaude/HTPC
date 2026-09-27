@@ -27,7 +27,10 @@ if (typeof ICONS === 'object') Object.assign(ICONS, {
 const WifiUI = (() => {
   let st = null;                 // the host's last wifi.state
   let opts = {};
-  let form = null;               // { ssid, hidden, security, error, busy, reveal } while joining
+  // While joining: { ssid, hidden, security, error, busy, reveal, name, password, caret, focused }.
+  // The typed name and password live here, not only in the inputs: the page redraws the pane
+  // (the clock, state pushes, Show password) and afterRender puts them back, with the focus.
+  let form = null;
   let wantField = false;         // afterRender: put the focus in the field
   const HIDDEN_SECURITY = [['wpa2psk', 'WPA2'], ['wpa3sae', 'WPA3'], ['open', 'None (open)']];
 
@@ -78,7 +81,7 @@ const WifiUI = (() => {
     let h = `<span class="section">${f.hidden ? 'Hidden network' : 'Join ' + esc(f.ssid)}</span>`;
     if (f.hidden) {
       h += `<div class="srow wifi-field" data-nav data-id="wifi-name"><div class="text"><span class="label">Network name</span>` +
-        `<input id="wifi-name-input" type="text" autocomplete="off" spellcheck="false" aria-label="Network name" maxlength="32" value="${esc(f.ssid)}"></div></div>`;
+        `<input id="wifi-name-input" type="text" autocomplete="off" spellcheck="false" aria-label="Network name" maxlength="32"></div></div>`;
       h += `<div class="srow" data-nav data-id="wifi-security" data-wifi-step="1"><div class="text"><span class="label">Security</span></div>` +
         `<div class="value">${icon('chevleft', 28, 2)}${esc(HIDDEN_SECURITY.find(([v]) => v === f.security)[1])}${icon('chevright', 28, 2)}</div></div>`;
     }
@@ -98,7 +101,7 @@ const WifiUI = (() => {
   const field = (id) => document.getElementById(id);
 
   function openForm(f, focusId) {
-    form = { error: null, busy: false, reveal: false, ...f };
+    form = { error: null, busy: false, reveal: false, name: '', password: '', caret: null, focused: null, ...f };
     wantField = true;
     changed(focusId);
   }
@@ -113,12 +116,10 @@ const WifiUI = (() => {
   function join() {
     const f = form;
     if (!f || f.busy) return;
-    const name = f.hidden ? (field('wifi-name-input') || {}).value || '' : f.ssid;
-    const pw = field('wifi-password-input');
-    if (f.hidden) f.ssid = name.trim();
+    if (f.hidden) f.ssid = f.name.trim();
     if (!f.ssid) { f.error = 'Type the network’s name.'; changed('wifi-name'); return; }
     const msg = { type: 'wifi.join', ssid: f.ssid };
-    if (pw) msg.password = pw.value;
+    if (field('wifi-password-input')) msg.password = f.password;
     if (f.hidden) { msg.hidden = true; msg.security = f.security; }
     f.busy = true;
     f.error = null;
@@ -163,8 +164,7 @@ const WifiUI = (() => {
           if (msg.ok) { closeForm('wifi-current'); say(msg.text); }
           else {
             form.error = msg.text;
-            const pw = field('wifi-password-input');
-            if (pw && msg.reason === 'wrong-password') pw.value = '';
+            if (msg.reason === 'wrong-password') { form.password = ''; form.caret = 0; }
             changed(msg.reason === 'wrong-password' ? 'wifi-password' : 'wifi-go');
           }
         } else say(msg.text, msg.ok ? 'info' : 'warn');
@@ -176,9 +176,24 @@ const WifiUI = (() => {
     afterRender() {
       if (!form) return;
       const pw = field('wifi-password-input'), name = field('wifi-name-input');
-      for (const el of [pw, name]) if (el && !el.dataset.wired) {
-        el.dataset.wired = '1';
-        el.addEventListener('textsubmit', join);
+      for (const [el, key] of [[pw, 'password'], [name, 'name']]) {
+        if (!el) continue;
+        el.value = form[key] || '';
+        if (!el.dataset.wired) {
+          el.dataset.wired = '1';
+          el.addEventListener('textsubmit', join);
+          // Only into the form this field was drawn for: a late event from an earlier form's
+          // field (a queued 'select') must not fill this one.
+          const owner = form;
+          const keep = () => { if (form === owner) { form[key] = el.value; form.caret = el.selectionStart; form.focused = key; } };
+          for (const type of ['input', 'keyup', 'focus', 'select']) el.addEventListener(type, keep);
+        }
+        // The field had the focus before the redraw: again, with the caret where it was.
+        if (form.focused === key && !wantField) {
+          el.focus();
+          const at = Math.min(form.caret ?? el.value.length, el.value.length);
+          el.setSelectionRange(at, at);
+        }
       }
       if (wantField) {
         wantField = false;
@@ -238,8 +253,8 @@ const WifiUI = (() => {
       if (name === 'location') { st.location = 'denied'; st.networks = []; }
       if (name === 'noadapter') st.adapter = false;
       if (name === 'off') st.radio = 'off';
-      if (name === 'password') form = { ssid: '[Network name 2]', hidden: false, error: 'Wrong password. Check it and try again.', busy: false, reveal: false };
-      if (name === 'hidden') form = { ssid: '', hidden: true, security: 'wpa3sae', error: null, busy: false, reveal: false };
+      if (name === 'password') form = { ssid: '[Network name 2]', hidden: false, error: 'Wrong password. Check it and try again.', busy: false, reveal: false, name: '', password: '', caret: null, focused: null };
+      if (name === 'hidden') form = { ssid: '', hidden: true, security: 'wpa3sae', error: null, busy: false, reveal: false, name: '', password: '', caret: null, focused: null };
     },
     get joining() { return !!form; },
   };

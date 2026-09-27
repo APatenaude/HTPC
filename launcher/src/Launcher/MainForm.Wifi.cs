@@ -48,9 +48,14 @@ sealed partial class MainForm
                 break;
             case "wifi.forget":
                 var forget = Str("ssid") ?? "";
-                _ = Task.Run(() => Wifi.Forget(forget)).ContinueWith(t => OnUiQueued(() =>
-                    Post(new { type = "wifi.result", ssid = forget, ok = t.Result, reason = t.Result ? "forgotten" : "failed",
-                        text = t.Result ? $"{forget} forgotten" : "Windows did not forget it" })));
+                _ = Task.Run(() =>
+                {
+                    bool ok;
+                    try { ok = Wifi.Forget(forget); }
+                    catch (Exception e) { Log.Error("Wi-Fi: forgetting a network", e); ok = false; }
+                    OnUiQueued(() => Post(new { type = "wifi.result", ssid = forget, ok, reason = ok ? "forgotten" : "failed",
+                        text = ok ? $"{forget} forgotten" : "Windows did not forget it" }));
+                });
                 break;
             case "wifi.radio":
                 var on = Bool("on");
@@ -67,15 +72,19 @@ sealed partial class MainForm
         }
     }
 
-    // Scanning only while the page shows the list and the box is awake.
-    void WifiWatch() => Wifi.Watch(wifiWanted && standby is { Active: false });
+    // Scanning only while the page shows the list and the launcher is in front: never in standby,
+    // never behind an app (a scan is a short Wi-Fi outage: Moonlight over Wi-Fi would stutter).
+    void WifiWatch() => Wifi.Watch(wifiWanted && alertPlace == AlertPlace.Launcher && standby is { Active: false });
 
-    /// <summary>Standby started or ended (MainForm.Alerts.cs's place changes): scans stop and resume.</summary>
-    void WifiStandby() { if (wifiService is not null) WifiWatch(); }
+    /// <summary>What is in front changed (MainForm.Alerts.cs): scans stop or resume.</summary>
+    void WifiPlaceChanged() { if (wifiService is not null) WifiWatch(); }
 
     async Task JoinWifi(string ssid, string? password, bool hidden, WifiSecurity? security)
     {
-        var result = await Task.Run(() => Wifi.Join(ssid, password, hidden, security));
+        WifiJoinResult result;
+        // Whatever goes wrong, the page hears back: it waits on "Joining…" until it does.
+        try { result = await Task.Run(() => Wifi.Join(ssid, password, hidden, security)); }
+        catch (Exception e) { Log.Error("Wi-Fi: joining", e); result = new(ssid, false, "failed", "Something went wrong joining it. Try again."); }
         OnUiQueued(() =>
         {
             Post(new { type = "wifi.result", ssid = result.Ssid, ok = result.Ok, reason = result.Reason, text = result.Text });

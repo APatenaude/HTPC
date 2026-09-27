@@ -101,10 +101,12 @@ static class WifiProfile
     /// The profile XML for joining (and, once that worked, keeping) a personal or open network.
     /// hidden: the router does not broadcast its name (nonBroadcast, so Windows probes for it).
     /// </summary>
-    public static string Build(string ssid, WifiSecurity security, int cipher, string? key, bool hidden, bool autoConnect = true)
+    /// ssidBytes: the name's bytes as the router sends them (a name that is not UTF-8); else ssid in UTF-8.
+    public static string Build(string ssid, WifiSecurity security, int cipher, string? key, bool hidden, bool autoConnect = true, byte[]? ssidBytes = null)
     {
         if (Refusal(security) is { } why) throw new ArgumentException(why);
-        if (Encoding.UTF8.GetByteCount(ssid) is 0 or > 32) throw new ArgumentException("A network name has 1 to 32 bytes.");
+        var bytes = ssidBytes ?? Encoding.UTF8.GetBytes(ssid);
+        if (bytes.Length is 0 or > 32) throw new ArgumentException("A network name has 1 to 32 bytes.");
         if (NeedsPassword(security) && CheckKey(security, key ?? "") is { } bad) throw new ArgumentException(bad);
         var (auth, encryption) = security switch
         {
@@ -118,7 +120,7 @@ static class WifiProfile
         xml.Append("<?xml version=\"1.0\"?>");
         xml.Append("<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">");
         xml.Append($"<name>{SecurityElement.Escape(ssid)}</name>");
-        xml.Append($"<SSIDConfig><SSID><hex>{Hex(ssid)}</hex><name>{SecurityElement.Escape(ssid)}</name></SSID>");
+        xml.Append($"<SSIDConfig><SSID><hex>{Convert.ToHexString(bytes)}</hex><name>{SecurityElement.Escape(ssid)}</name></SSID>");
         xml.Append($"<nonBroadcast>{(hidden ? "true" : "false")}</nonBroadcast></SSIDConfig>");
         xml.Append("<connectionType>ESS</connectionType>");
         xml.Append($"<connectionMode>{(autoConnect ? "auto" : "manual")}</connectionMode>");

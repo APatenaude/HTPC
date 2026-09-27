@@ -45,7 +45,7 @@ sealed partial class MainForm
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.
-            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; });
+            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; WifiPlaceChanged(); });
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUiQueued(() => internetRules.Woke(DateTime.Now));
         };
         Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => apps.MarkAllClosing("Windows is signing out or shutting down");
@@ -56,8 +56,8 @@ sealed partial class MainForm
     {
         standby.IdleWarning += on => OnUiQueued(() => OnIdleWarning(on));
         List<Action> early;
-        lock (beforeHandle) { early = beforeHandle.ToList(); beforeHandle.Clear(); }
-        foreach (var a in early) BeginInvoke(a);
+        lock (beforeHandle) { early = beforeHandle.ToList(); beforeHandle.Clear(); uiQueueOpen = true; }
+        foreach (var a in early) OnUi(a);
         internet.Check();
         if (options.Dev)
         {
@@ -72,11 +72,20 @@ sealed partial class MainForm
         }
     }
 
-    /// <summary>Runs on the UI thread, later; before the window exists, once it does.</summary>
+    bool uiQueueOpen;   // AlertsLoaded has run: straight to the UI thread from now on
+
+    /// <summary>
+    /// Runs on the UI thread, later. Before OnLoad it waits in a list (AlertsLoaded hands it on;
+    /// deciding and adding under one lock, so nothing is left behind). After: as OnUi, which
+    /// drops it quietly once the window is closing.
+    /// </summary>
     void OnUiQueued(Action action)
     {
-        if (IsHandleCreated) { BeginInvoke(action); return; }
-        lock (beforeHandle) beforeHandle.Add(action);
+        lock (beforeHandle)
+        {
+            if (!uiQueueOpen) { beforeHandle.Add(action); return; }
+        }
+        OnUi(action);
     }
 
     // --- Where the box is --------------------------------------------------------------------------
@@ -100,7 +109,7 @@ sealed partial class MainForm
             if (place == AlertPlace.Standby) { internet.Paused = true; if (foreignWindows is not null) foreignWindows.Paused = true; }
             if (alertPlace == AlertPlace.Standby) Awake();
             alertPlace = place;
-            WifiStandby(); // MainForm.Wifi.cs: no scans in standby
+            WifiPlaceChanged(); // MainForm.Wifi.cs: scans only with the launcher in front
         }
         alertCenter.SetPlace(place, moonlight);
     }
@@ -126,6 +135,7 @@ sealed partial class MainForm
         var focus = view == "menu" ? alertCenter.FocusOnHome() : null;
         alertCenter.SetPlace(AlertPlace.Launcher);
         alertPlace = AlertPlace.Launcher;
+        WifiPlaceChanged();
         alertOverlay.ClearForCapture();
         return focus;
     }
@@ -197,6 +207,9 @@ sealed partial class MainForm
         var now = DateTime.Now;
         var inFront = lastFrontApp == e.Id && now - lastFrontSeen < TimeSpan.FromSeconds(1.5);
         var kind = exitClassifier.Classify(e, inFront, now);
+        // Ended quickly by handing over to its own copy already running (an Edge profile open
+        // elsewhere): the app is there, nothing failed.
+        if (kind == AppExitKind.DidntOpen) { apps.Adopt(e.Id); if (apps.IsRunning(e.Id)) kind = AppExitKind.Quiet; }
         Log.Info($"{e.Id} ended: {kind} (exit code {AppExitClassifier.Describe(e.ExitCode)}, up {e.Uptime.TotalSeconds:0} s" +
             $"{(e.ClosedBy is null ? "" : $", {e.ClosedBy}")}{(e.Adopted ? ", adopted" : "")}{(inFront ? ", in front" : "")})");
         var name = apps.Get(e.Id)?.Name ?? e.Id;

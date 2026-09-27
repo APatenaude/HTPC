@@ -5,7 +5,8 @@
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
 // X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu.
 
-(function () {
+(async function () {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
   const results = [];
   const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail || '' });
 
@@ -155,7 +156,7 @@
   const pw = document.getElementById('wifi-password-input');
   check('Wi-Fi: a locked network opens the password form', WifiUI.joining && pw && pw.type === 'password' && pw.autocomplete === 'off');
   check('Wi-Fi: ... and the keyboard for its field', lastSent('text.keyboard') && lastSent('text.keyboard').password === true);
-  pw.value = 'hunter22';
+  pw.focus(); textInsert('hunter22');   // as the on-screen keyboard and the phone do
   WifiUI.press('a', node('wifi-go'));
   const j = lastSent('wifi.join');
   check('Wi-Fi: Join sends the name and the password', j && j.ssid === '[Network name 2]' && j.password === 'hunter22' && !j.hidden);
@@ -167,8 +168,8 @@
   WifiUI.press('a', node('wifi-hidden'));
   draw();
   WifiUI.press('right', node('wifi-security'));
-  document.getElementById('wifi-name-input').value = '[Hidden]';
-  document.getElementById('wifi-password-input').value = 'abcdefgh';
+  document.getElementById('wifi-name-input').focus(); textInsert('[Hidden]');
+  document.getElementById('wifi-password-input').focus(); textInsert('abcdefgh');
   WifiUI.press('a', node('wifi-go'));
   const h = lastSent('wifi.join');
   check('Wi-Fi: a hidden network: name, security, password', h && h.hidden === true && h.ssid === '[Hidden]' && h.security === 'wpa3sae' && h.password === 'abcdefgh');
@@ -181,6 +182,37 @@
   WifiUI.stop();
   check('Wi-Fi: hidden, the host stops scanning', lastSent('wifi.watch').on === false);
   box.remove();
+
+  // In Settings itself: what is typed survives the pane being redrawn (a state push, the clock).
+  WifiUI.demo('ethernet');
+  state.section = 'wifi';
+  reset('settings');
+  setFocus($('settings').querySelector('[data-id="wifi-net:0"]'));
+  press('a');
+  await tick();
+  const typed = () => document.getElementById('wifi-password-input');
+  check('Settings › Wi-Fi: A on a locked network: the password field, focused', typed() && document.activeElement === typed());
+  textInsert('secret1');
+  onHost({ type: 'state', volume: 40 });          // a host push: app.js redraws the pane
+  render();                                        // the minute clock
+  await tick();
+  check('Settings › Wi-Fi: typed text survives a state push and the clock', typed() && typed().value === 'secret1', typed() && typed().value);
+  check('Settings › Wi-Fi: ... and the field keeps the focus (keyboard and phone text land there)', document.activeElement === typed());
+  textInsert('!');
+  setFocus($('settings').querySelector('[data-id="wifi-reveal"]'));
+  press('a');                                      // Show password: redraws with type=text
+  await tick();
+  check('Settings › Wi-Fi: Show password keeps the text', typed() && typed().type === 'text' && typed().value === 'secret1!', typed() && typed().value);
+  WifiUI.handle({ type: 'wifi.state', adapter: true, radio: 'on', location: 'ok', wired: null, current: null, networks: [], wifiInternet: false, askRadioOff: false });
+  await tick();
+  check('Settings › Wi-Fi: a Wi-Fi state push while typing keeps the text', typed() && typed().value === 'secret1!');
+  setFocus($('settings').querySelector('[data-id="wifi-go"]'));
+  sent.length = 0;
+  press('a');
+  check('Settings › Wi-Fi: Join sends what was typed', lastSent('wifi.join') && lastSent('wifi.join').password === 'secret1!');
+  press('b');
+  reset('home');
+  await tick();
 
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
