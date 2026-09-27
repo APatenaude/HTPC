@@ -72,7 +72,7 @@ static partial class Program
         return (tags, ips);
     }
 
-    // The thumbprints of a name's intermediates in the user's and the machine's CA stores.
+    // The thumbprints of a name's intermediates (and look-alikes) in the user's and the machine's CA stores.
     static HashSet<string> IntermediatesInStore(string name)
     {
         var found = new HashSet<string>();
@@ -80,9 +80,23 @@ static partial class Program
         {
             using var store = new X509Store(StoreName.CertificateAuthority, location);
             store.Open(OpenFlags.ReadOnly);
-            foreach (var c in store.Certificates) if (c.Subject.Contains($"CN={name} phone remote,")) found.Add(c.Thumbprint);
+            foreach (var c in store.Certificates) if (c.Subject.Contains($"CN={name} phone remote")) found.Add(c.Thumbprint);
         }
         return found;
+    }
+
+    // A public-only CA certificate with this subject, as a leftover in the user's CA store.
+    static X509Certificate2 Leftover(string subject)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest(new X500DistinguishedName(subject), key, HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        using var made = request.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+        var cert = X509CertificateLoader.LoadCertificate(made.RawData);
+        using var store = new X509Store(StoreName.CertificateAuthority, StoreLocation.CurrentUser);
+        store.Open(OpenFlags.ReadWrite);
+        store.Add(cert);
+        return cert;
     }
 
     static void CertificateTests()
@@ -153,6 +167,23 @@ static partial class Program
         Check(certs.Authority!.Thumbprint != root.Thumbprint, "after 10 years: a new root (phones install it again)");
         Check(!IntermediatesInStore(testName).Contains(inter.Thumbprint) && IntermediatesInStore(testName).Contains(certs.Intermediate!.Thumbprint),
             "the new pair removed the old intermediate from the CA store, kept its own");
+
+        // Every start, not only a new pair: this box's other intermediates go, whichever order the
+        // subject's CN and O are in; the current one and other subjects stay.
+        var leftovers = new[] { $"CN={testName} phone remote, O=HTPC TV box", $"O=HTPC TV box, CN={testName} phone remote" }.Select(Leftover).ToList();
+        var others = new[] { $"CN={testName} phone remote, O=Someone else", $"CN={testName} phone remote + O=HTPC TV box" }.Select(Leftover).ToList();
+        Check(leftovers[0].Subject.StartsWith("CN=") && leftovers[1].Subject.StartsWith("O="), $"leftovers in both orders ({leftovers[0].Subject} | {leftovers[1].Subject})");
+        certs = new PhoneCertificates(folder, store, () => now, testName);
+        Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a restart with the same pair: nothing made");
+        var inStore = IntermediatesInStore(testName);
+        Check(!leftovers.Any(l => inStore.Contains(l.Thumbprint)) && inStore.Contains(certs.Intermediate!.Thumbprint),
+            "at every start this box's older intermediates leave the CA store (CN and O in either order); the current one stays");
+        Check(others.All(o => inStore.Contains(o.Thumbprint)), "another O, or CN and O in one multi-valued name: left alone");
+        using (var user = new X509Store(StoreName.CertificateAuthority, StoreLocation.CurrentUser))
+        {
+            user.Open(OpenFlags.ReadWrite);
+            foreach (var o in others) user.Remove(o);
+        }
 
         // What the single CA of an earlier build left goes too, and only that.
         var legacy = new MemoryKeyStore();

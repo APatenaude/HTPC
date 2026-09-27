@@ -95,9 +95,9 @@ second QR code in Settings › Phone remote, which opens /send and pairs):
   it ends; the handshake sends it with the intermediate (for that, Windows adds the intermediate
   to the "Intermediate Certification Authorities" store: the user's, or the machine's when the
   launcher runs as administrator). Root and intermediate end together after 10 years: then the box
-  makes a new pair and each phone installs the new root once more; making a pair removes this
-  box's older intermediates from those stores (matched by name, the new one kept) and an earlier
-  build's single CA ("HTPC phone remote CA" key, ca.cer). Public certificates in
+  makes a new pair and each phone installs the new root once more. At every start the launcher
+  removes this box's older intermediates from those stores (matched by the subject's CN and O,
+  in either order; the current one kept; logged) and an earlier build's single CA ("HTPC phone remote CA" key, ca.cer). Public certificates in
   `%LOCALAPPDATA%\HTPC\certs`; nothing about the keys is logged. Kestrel adds port
   443 (a failure leaves HTTP running).
   The phone downloads the root from /ca.crt over plain HTTP, so it checks what it got: card 2 on

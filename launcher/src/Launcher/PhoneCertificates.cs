@@ -186,6 +186,7 @@ sealed class PhoneCertificates
         {
             var dns = names.Select(n => n.ToLowerInvariant().TrimEnd('.')).Where(n => n.EndsWith(".local")).Distinct().ToList();
             var ips = addresses.Where(IsPrivate).Distinct().OrderBy(a => a.ToString()).ToList();
+            // The first Ensure of every start: load (or make) the pair, then clear what older ones left.
             if (root is null || intermediate is null)
             {
                 LoadOrCreateAuthorities(dns);
@@ -286,21 +287,22 @@ sealed class PhoneCertificates
             }
             var oldCert = Path.Combine(folder, "ca.cer");
             if (File.Exists(oldCert)) File.Delete(oldCert);
-            var removed = RemoveIntermediates(name, intermediate?.Thumbprint);
-            if (removed > 0) Log.Info($"Phone remote: {removed} older intermediate certificate(s) of this box removed from the CA store");
+            if (intermediate is not null) RemoveIntermediates(name, intermediate.Thumbprint);
         }
         catch (Exception e) { Log.Warn($"Phone remote: cleaning up older certificates: {e.Message}"); }
     }
 
     /// <summary>
-    /// Removes this box's intermediates (CN "&lt;name&gt; phone remote", O=HTPC TV box) but the one to
-    /// keep from the user's CA store, and from the machine's where allowed. Returns how many went.
+    /// Removes this box's intermediates (CN "&lt;name&gt; phone remote" and O=HTPC TV box, in either
+    /// order) but the one to keep from the user's CA store, and from the machine's where allowed;
+    /// logs how many went from which. Returns how many went.
     /// </summary>
     public static int RemoveIntermediates(string name, string? keep)
     {
-        var removed = 0;
+        var total = 0;
         foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
         {
+            var removed = 0;
             try
             {
                 using var store = new X509Store(StoreName.CertificateAuthority, location);
@@ -313,8 +315,10 @@ sealed class PhoneCertificates
                 }
             }
             catch (CryptographicException) { } // the machine's store is read-only without admin rights
+            if (removed > 0) Log.Info($"Phone remote: {removed} older intermediate certificate(s) of this box removed from {location}\\CA");
+            total += removed;
         }
-        return removed;
+        return total;
     }
 
     static bool IsOurs(X509Certificate2 cert, string commonName)
@@ -322,6 +326,7 @@ sealed class PhoneCertificates
         string? cn = null, o = null;
         foreach (var rdn in cert.SubjectName.EnumerateRelativeDistinguishedNames())
         {
+            if (rdn.HasMultipleElements) return false; // not a subject this launcher makes
             if (rdn.GetSingleElementType().Value == "2.5.4.3") cn = rdn.GetSingleElementValue();
             if (rdn.GetSingleElementType().Value == "2.5.4.10") o = rdn.GetSingleElementValue();
         }
