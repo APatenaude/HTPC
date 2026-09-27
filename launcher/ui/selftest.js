@@ -3,7 +3,8 @@
 // (#selftest-results) and the title ("SELFTEST PASS" / "SELFTEST FAIL n"), for headless Edge:
 //   msedge --headless=new --dump-dom file:///.../launcher/ui/index.html#selftest
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
-// X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu.
+// X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
+// moving around Settings and changing a value there only once A has picked its row.
 
 (async function () {
   const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -238,6 +239,99 @@
   press('b');
   reset('home');
   check('Bluetooth: left, the host stops', lastSent('bt.watch').on === false);
+
+  // ---- Settings: opening, moving, changing a value ----------------------------------------------
+  const sNode = (id) => $('settings').querySelector(`[data-id="${id}"]`);
+  const focusId = () => focusedEl() && focusedEl().dataset.id;
+  EXT.sections.sound.demo();
+  state.section = 'sound';
+  state.memory.settings = 'set-volume';
+  reset('home');
+  activate({ dataset: { act: 'settings' } });                 // the Settings button
+  check('Settings opens on the section list, on the last section', focusId() === 's-sound', focusId());
+  press('right');
+  check('Settings: right from the list goes into the section', focusId() === 'snd-output', focusId());
+  press('up');
+  check('Settings: up on the first row stays there', focusId() === 'snd-output', focusId());
+  setFocus(sNode('snd-test'));
+  press('down');
+  check('Settings: down on the last row stays there', focusId() === 'snd-test', focusId());
+  const vol = state.volume;
+  setFocus(sNode('set-volume'));
+  press('right');
+  check('Settings: right on a slider not picked changes nothing', state.volume === vol && focusId() === 'set-volume', `${state.volume} ${focusId()}`);
+  press('left');
+  check('Settings: left on a slider not picked goes back to the list, unchanged', state.volume === vol && focusId() === 's-sound', `${state.volume} ${focusId()}`);
+  setFocus(sNode('set-volume'));
+  press('a');
+  check('Settings: A picks the slider', sNode('set-volume').classList.contains('editing') && /Done/.test($('settings-hints').textContent));
+  press('left'); press('left');
+  check('Settings: picked, left lowers the volume', state.volume === vol - 10 && focusId() === 'set-volume', `${state.volume} ${focusId()}`);
+  press('b');
+  check('Settings: B puts the slider down, the value kept, the focus stays', state.volume === vol - 10 && focusId() === 'set-volume' && !sNode('set-volume').classList.contains('editing'));
+  press('left');
+  check('Settings: ... then left goes to the list again', focusId() === 's-sound', focusId());
+  setFocus(sNode('snd-output'));
+  sent.length = 0;
+  press('right');
+  check('Settings: the output is not switched by moving over it', !lastSent('sound.output'));
+  press('a'); press('right');
+  check('Settings: picked with A, right switches the output', lastSent('sound.output') && lastSent('sound.output').id === '2');
+  press('a');
+  press('up');
+  check('Settings: up on the first row of a section stays in it', focusId() === 'snd-output', focusId());
+  setFocus(sNode('s-sleep'));
+  press('up');
+  check('Settings: up on the first section stays there', focusId() === 's-sleep' && state.section === 'sleep', focusId());
+
+  // Sleep & power: a stepper waits for A; the toggle flips with A only.
+  setFocus(sNode('set-idleMinutes'));
+  const idle = state.prefs.idleMinutes;
+  press('right');
+  check('Sleep: right on a stepper not picked changes nothing', state.prefs.idleMinutes === idle, String(state.prefs.idleMinutes));
+  setFocus(sNode('set-idleMinutes'));
+  press('a'); press('right');
+  check('Sleep: A then right steps the stepper', state.prefs.idleMinutes !== idle && lastSent('setting').key === 'idleMinutes');
+  press('a');
+  const awake = state.prefs.stayAwakeWhilePlaying;
+  setFocus(sNode('set-stayAwakeWhilePlaying'));
+  press('right');
+  check('Sleep: right on a toggle does not flip it', state.prefs.stayAwakeWhilePlaying === awake);
+  setFocus(sNode('set-stayAwakeWhilePlaying'));
+  press('a');
+  check('Sleep: A flips the toggle', state.prefs.stayAwakeWhilePlaying === !awake);
+
+  // Controller: two columns; left from the right column goes beside it, not to the list.
+  EXT.sections.controller.demo();
+  setFocus(sNode('s-controller'));
+  const speed = prefValue('pointerSpeed', 5), kbd = prefValue('showKeyboardAutomatically', true);
+  setFocus(sNode('set-pointerSpeed'));
+  press('left');
+  check('Controller: left on a speed not picked goes beside it, unchanged', prefValue('pointerSpeed', 5) === speed && focusId() === 'pad-test', focusId());
+  press('left');
+  check('Controller: ... left again, nothing beside: the list', focusId() === 's-controller', focusId());
+  setFocus(sNode('set-showKeyboardAutomatically'));
+  press('right');
+  check('Controller: right on a toggle does not flip it', prefValue('showKeyboardAutomatically', true) === kbd);
+
+  // TV: buttons side by side are reached with left and right.
+  state.tv = TvUi.demo('roku');
+  setFocus(sNode('s-tv'));
+  setFocus(sNode('tv-test'));
+  press('right');
+  check('TV: right from Test goes to Find it again', focusId() === 'tv-refresh', focusId());
+  press('left');
+  check('TV: left comes back to Test', focusId() === 'tv-test', focusId());
+  press('left');
+  check('TV: left from Test (nothing beside it) goes to the list', focusId() === 's-tv', focusId());
+  setFocus(sNode('tv-test'));
+  const main = $('settings').querySelector('.spane main');
+  const ring = sNode('tv-test').getBoundingClientRect(), paneBox = main.getBoundingClientRect();
+  check('TV: the focused bottom button shows whole above the hints', ring.bottom + 4 <= paneBox.bottom, `${ring.bottom} > ${paneBox.bottom}`);
+  setFocus(sNode('tv-input'));
+  press('right');
+  check('TV: the input is not changed by moving over it', state.tv.profile.input === 1);
+  reset('home');
 
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign

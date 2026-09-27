@@ -217,7 +217,10 @@ function choiceLabel(key) {
 }
 
 function settingRow(key, label, caption, control) {
-  return `<div class="srow" data-nav data-id="set-${key}" data-setting="${key}">` +
+  // A value (a choice, a stepper) changes with left/right only once A has picked the row
+  // (data-edit, editPress below); a toggle just flips with A.
+  const edit = control.includes('class="toggle') ? '' : ' data-edit';
+  return `<div class="srow" data-nav data-id="set-${key}" data-setting="${key}"${edit}>` +
     `<div class="text"><span class="label">${esc(label)}</span><span class="caption">${esc(caption)}</span></div>${control}</div>`;
 }
 
@@ -253,6 +256,7 @@ function toggle(on) { return `<div class="toggle${on ? ' on' : ''}"><span></span
 // Settings › TV: tv.js (a Settings section added through settingsSection).
 
 let shownSection = null;   // the section's content animates in only when the section changes
+let editing = null;        // data-id of the Settings row whose value left/right change (editPress)
 function renderSettings() {
   const nav = `<nav class="snav"><div class="snav-title">${icon('chevleft', 36, 2)}<span>Settings</span></div>` +
     SECTIONS.map(([id, glyph, label]) =>
@@ -265,8 +269,15 @@ function renderSettings() {
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
   const entering = state.section !== shownSection;
   shownSection = state.section;
+  // The pane keeps its scroll through a redraw (a host push, the clock), not into another section.
+  const old = $('settings').querySelector('.spane main');
+  const top = old && !entering ? old.scrollTop : 0;
+  // The hints follow the focus (settingsFocused).
   $('settings').innerHTML = nav + `<div class="spane"><main${entering ? ' class="enter"' : ''}>${body}</main>` +
-    `<footer class="hints">${hints([['A', 'Change'], ['←→', 'Adjust'], ['LB', 'Sections'], ['RB', 'Options'], ['B', 'Back']])}</footer></div>`;
+    '<footer class="hints" id="settings-hints"></footer></div>';
+  $('settings').querySelector('.spane main').scrollTop = top;
+  const row = editing && $('settings').querySelector(`.spane [data-id="${CSS.escape(editing)}"]`);
+  if (row) row.classList.add('editing'); else editing = null;
 }
 
 function changeSetting(key, step) {
@@ -295,6 +306,7 @@ function render() {
   // A confirmation sits over the view it was opened from, which stays visible under it.
   const over = state.view === 'confirm' || (EXT.views[state.view] && EXT.views[state.view].overlay);
   const under = over ? state.stack[state.stack.length - 1] : null;
+  if (state.view !== 'settings') editing = null;
   renderStatus();
   renderTiles();
   for (const f of EXT.home) f();
@@ -332,7 +344,9 @@ function setFocus(el, chosen = true) {
   if (el.dataset.section && el.dataset.section !== state.section) {
     state.section = el.dataset.section;
     render();
+    return;
   }
+  if (state.view === 'settings') settingsFocused(el);
 }
 
 function restoreFocus(id) {
@@ -342,17 +356,19 @@ function restoreFocus(id) {
   const view = EXT.views[state.view];
   setFocus((view && view.focus ? view.focus(list) : null) ||
     (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
-    (state.view === 'settings' ? list.find((e) => e.classList.contains('srow')) || list.find((e) => e.dataset.section === state.section) : null) ||
+    // Settings opens on the section list, on the section last shown (A or right goes into it).
+    (state.view === 'settings' ? list.find((e) => e.dataset.section === state.section) : null) ||
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
-function move(dir) {
-  const cur = focusedEl();
-  if (!cur) { restoreFocus(); return; }
+// The closest element in a direction from cur, among list; null when there is none. across:
+// left and right take only what is beside cur (wholly past its edge, and overlapping its
+// height or within 45 degrees), not a button under a wide row or far down another column.
+function nearest(cur, dir, list = items(), across = false) {
   const r = cur.getBoundingClientRect();
   const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
   let best = null, bestScore = Infinity;
-  for (const el of items()) {
+  for (const el of list) {
     if (el === cur) continue;
     const q = el.getBoundingClientRect();
     const dx = q.left + q.width / 2 - cx, dy = q.top + q.height / 2 - cy;
@@ -360,10 +376,20 @@ function move(dir) {
     if (dir === 'right') { main = dx; side = dy; } else if (dir === 'left') { main = -dx; side = dy; }
     else if (dir === 'down') { main = dy; side = dx; } else { main = -dy; side = dx; }
     if (main <= 8) continue;
+    if (across && (dir === 'left' || dir === 'right')) {
+      if (dir === 'left' ? q.right > r.left + 8 : q.left < r.right - 8) continue;
+      if (Math.abs(side) > main && (q.bottom <= r.top || q.top >= r.bottom)) continue;
+    }
     const score = main + Math.abs(side) * 2;
     if (score < bestScore) { bestScore = score; best = el; }
   }
-  if (!best) best = wrapTarget(cur, dir);
+  return best;
+}
+
+function move(dir) {
+  const cur = focusedEl();
+  if (!cur) { restoreFocus(); return; }
+  const best = nearest(cur, dir) || wrapTarget(cur, dir);
   if (best) setFocus(best);
 }
 
@@ -383,30 +409,100 @@ function wrapTarget(cur, dir) {
   return far;
 }
 
-// Settings, two columns: LB (or left, off a value) goes to the section list, RB (or right) into
-// the section's options; B from the options also returns to the list. Up/down in the list
-// changes section.
+// Settings, two columns: the section list and the section's pane. Up/down stay in their column
+// and stop at its ends (up/down in the list changes section). In the pane, left and right go to
+// what is beside the focus; left with nothing there, B or LB go back to the list. Right, A or RB
+// from the list go into the pane.
 function settingsPress(button, el) {
   const inNav = el && el.dataset.section;
   const navItem = () => $('settings').querySelector(`[data-section="${state.section}"]`);
-  const firstOption = () => $('settings').querySelector('.spane [data-nav]');
+  const pane = () => [...$('settings').querySelectorAll('.spane [data-nav]')];
+  const firstOption = () => pane()[0];
+  const focusTo = (to) => { if (to) setFocus(to); return true; };
   switch (button) {
-    case 'lb': setFocus(navItem()); return true;
-    case 'rb': if (firstOption()) setFocus(firstOption()); return true;
+    case 'lb': return focusTo(navItem());
+    case 'rb': return focusTo(firstOption());
+    case 'up': case 'down': {
+      if (!el) return false;
+      const column = inNav ? [...$('settings').querySelectorAll('.snav [data-nav]')] : pane();
+      return focusTo(nearest(el, button, column));
+    }
     case 'a':
-      if (inNav) { if (firstOption()) setFocus(firstOption()); return true; }
-      return false;
+      return inNav ? focusTo(firstOption()) : false;
     case 'right':
-      if (inNav) { if (firstOption()) setFocus(firstOption()); return true; }
-      return false;
+      if (inNav) return focusTo(firstOption());
+      return el ? focusTo(nearest(el, 'right', pane(), true)) : false;
     case 'left':
-      if (!inNav && !(el && el.dataset.setting)) { setFocus(navItem()); return true; }
-      return inNav; // nothing to the left of the list
+      if (inNav) return true;   // nothing to the left of the list
+      return focusTo((el && nearest(el, 'left', pane(), true)) || navItem());
     case 'b':
-      if (!inNav) { setFocus(navItem()); return true; }
-      return false;
+      return inNav ? false : focusTo(navItem());
   }
   return false;
+}
+
+// Rows with a value left/right change (steppers, choices, sliders: data-edit): moving over one
+// never changes it. A picks the row (it shows it: .editing), then left/right change the value
+// as it goes; A or B puts the row down, the value kept, and up/down move on from it. Toggles
+// have no data-edit: A flips them. True when the button was the row's.
+function editPress(button, el) {
+  if (!el || el.dataset.edit === undefined) return false;
+  if (editing !== el.dataset.id) {
+    if (button !== 'a') return false;
+    setEditing(el);
+    return true;
+  }
+  switch (button) {
+    case 'left': case 'right': {
+      const section = EXT.sections[state.section];
+      if (section && section.press && section.press(button, el)) return true;
+      if (el.dataset.slider) adjust(el, button === 'right' ? 5 : -5);
+      else if (el.dataset.setting) changeSetting(el.dataset.setting, button === 'right' ? 1 : -1);
+      return true;
+    }
+    case 'a': case 'b': setEditing(null); return true;
+    case 'up': case 'down': setEditing(null); return false;
+  }
+  return true;   // nothing else while a value is being changed
+}
+
+function setEditing(el) {
+  editing = el ? el.dataset.id : null;
+  for (const r of $('settings').querySelectorAll('.editing')) r.classList.remove('editing');
+  if (el) el.classList.add('editing');
+  const f = focusedEl();
+  if (f) settingsFocused(f);
+}
+
+// The focus in Settings: a row being changed is put down when the focus leaves it; the pane
+// scrolls to the focus (its ring clear of the button hints); the hints say what the buttons do.
+function settingsFocused(el) {
+  if (editing && el.dataset.id !== editing) setEditing(null);
+  const main = el.closest('.spane main');
+  // A list that scrolls itself (Wi-Fi networks, Bluetooth devices) keeps its row in view.
+  if (main && !el.parentElement.closest('.wifi-scroll')) scrollIntoBox(el, main, 28);
+  const bar = $('settings-hints');
+  if (bar) bar.innerHTML = hints(settingsHints(el));
+}
+
+function settingsHints(el) {
+  if (el.dataset.section) return [['A', 'Open'], ['B', 'Back']];
+  if (editing === el.dataset.id) return [['←→', 'Change'], ['A', 'Done']];
+  const what = el.dataset.edit !== undefined ? 'Change' : el.querySelector('.toggle') ? 'On / off' : 'Select';
+  return [['A', what], ['B', 'Sections']];
+}
+
+// Scrolls box (overflow hidden: only this scrolls it) so el shows whole, with room around it
+// for the focus ring; the first element takes it back to the top, the last to the bottom (the
+// notes under it show). The stage is scaled: screen pixels are turned back into the box's own.
+function scrollIntoBox(el, box, room) {
+  const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const scale = b.height / box.offsetHeight || 1;
+  const all = box.querySelectorAll('[data-nav]');
+  if (all[0] === el) box.scrollTop = 0;
+  else if (all[all.length - 1] === el) box.scrollTop = Math.min(box.scrollHeight, box.scrollTop + (r.top - b.top) / scale - room);
+  else if (r.bottom > b.bottom - room * scale) box.scrollTop += (r.bottom - b.bottom) / scale + room;
+  else if (r.top < b.top + room * scale) box.scrollTop -= (b.top - r.top) / scale + room;
 }
 
 // ---- Added screens ------------------------------------------------------------------------
@@ -544,7 +640,8 @@ function activate(el) {
     }
     case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
     case 'cancel': back(); break;
-    case 'settings': go('settings'); break;
+    // Settings opens on its section list (restoreFocus), not where the focus was last time.
+    case 'settings': state.memory.settings = null; go('settings'); break;
     case 'soon': toast(`${arg} come in a later update`); break;
     default: if (EXT.actions[act]) EXT.actions[act](el, arg);
   }
@@ -576,8 +673,11 @@ function press(button) {
   const view = EXT.views[state.view];
   if (view && view.press && view.press(button, el)) return;
   if (state.view === 'settings') {
+    if (editPress(button, el)) return;
+    // A value row not picked with A: left/right are the focus's, never the section's to change it.
+    const idle = el && el.dataset.edit !== undefined && (button === 'left' || button === 'right');
     const section = EXT.sections[state.section];
-    if (section && section.press && !(el && el.dataset.section) && section.press(button, el)) return;
+    if (section && section.press && !(el && el.dataset.section) && !idle && section.press(button, el)) return;
     if (settingsPress(button, el)) return;
   }
   switch (button) {
@@ -674,6 +774,7 @@ function onHost(msg) {
         // focus: the element to land on (an alert's row, the tile of an app that just closed);
         // section: the Settings section to open (an alert's action).
         if (msg.focus) state.memory[msg.view] = msg.focus;
+        else if (msg.view === 'settings') state.memory.settings = null;   // on the section list
         if (msg.section) state.section = msg.section;
         reset(msg.view);
         $('stage').classList.remove('blank');
