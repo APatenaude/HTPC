@@ -42,6 +42,63 @@ static class SonySamsungChecks
         await Samsung();
         Console.WriteLine("Review of 53df60a");
         await Review();
+        Console.WriteLine("Sony: silent renewal of an expired pairing");
+        await Renewal();
+    }
+
+    /// <summary>A Sony paired through the flow (its PIN typed), on its own address.</summary>
+    static async Task<(RokuWorld W, NewHost H, FakeSony Sony)> PairedSony(string ip)
+    {
+        var w = new RokuWorld();
+        var h = Host(w);
+        h.Screen = SonyScreen;
+        var sony = new FakeSony("sony", IPAddress.Parse(ip), SonyPort, "udn-sony", w.Trace);
+        h.Net.Responders.Add(sony.Ssdp);
+        await h.Tv.Discover();
+        h.Tv.Choose("bravia:udn-sony");
+        await Eventually(() => h.Tv.Pairing?.Stage == "code" && sony.Pin is not null);
+        h.Tv.PairCode(sony.Pin!);
+        await Eventually(() => h.Tv.Pairing?.Stage == "done");
+        await h.Tv.Poll();
+        return (w, h, sony);
+    }
+
+    static async Task Renewal()
+    {
+        // The TV renews without a PIN: new cookie kept, the command goes through, nobody told.
+        {
+            var (w, h, sony) = await PairedSony("127.0.0.44");
+            sony.RenewSilently = true;
+            sony.ExpireCookie();
+            var registers = sony.Registers;
+            await h.Sleep();
+            Check.That(!sony.On && sony.Registers == registers + 1 && h.Tv.Credentials.Get("bravia:udn-sony")?.Value == sony.Cookie &&
+                !h.Notices.Raised.Any(n => n.Id == TvNoticeRules.Unpaired) && NotLogged(sony.Cookie),
+                "Sony renewal: silent re-register, new cookie kept (not logged), the off went through, no notice");
+            h.Dispose(); sony.Dispose(); w.Dispose();
+        }
+        // The TV wants a PIN: one try, then "Pair the TV again", and no more tries.
+        {
+            var (w, h, sony) = await PairedSony("127.0.0.45");
+            sony.ExpireCookie();
+            var registers = sony.Registers;
+            await h.Sleep(); await w.RunFor(20); await h.Wake(); await h.Sleep(); await w.RunFor(20);
+            Check.That(sony.Registers == registers + 1 && h.Notices.Raised.Count(n => n.Id == TvNoticeRules.Unpaired) == 1,
+                $"Sony renewal: a PIN demanded, exactly one attempt ({sony.Registers - registers}) and one notice");
+            h.Dispose(); sony.Dispose(); w.Dispose();
+        }
+        // The re-register redirected to another host: not followed, refused, notice.
+        {
+            using var thief = new Thief();
+            var (w, h, sony) = await PairedSony("127.0.0.46");
+            var before = h.Tv.Credentials.Get("bravia:udn-sony")?.Value;
+            sony.ExpireCookie();
+            sony.RedirectRegisterTo = thief.Url;
+            await h.Sleep();
+            Check.That(thief.Requests == 0 && h.Tv.Credentials.Get("bravia:udn-sony")?.Value == before && h.Notices.Raised.Any(n => n.Id == TvNoticeRules.Unpaired),
+                "Sony renewal: redirected to another host, not followed (no cookie taken), and the notice");
+            h.Dispose(); sony.Dispose(); w.Dispose();
+        }
     }
 
     /// <summary>

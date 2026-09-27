@@ -32,6 +32,11 @@ sealed class FakeSony : IDisposable
     public Uri? RedirectTo { set => http.RedirectTo = value; }
     /// <summary>Its cookie expires (Sony: reportedly after about two weeks).</summary>
     public void ExpireCookie() => Cookie = "expired-" + Cookie;
+    /// <summary>A known client registering again without a PIN gets a new cookie (else the TV shows a PIN).</summary>
+    public bool RenewSilently { get; set; }
+    /// <summary>Its actRegister answers 307 to this host.</summary>
+    public Uri? RedirectRegisterTo { get; set; }
+    public int Registers;
 
     public FakeSony(string label, IPAddress ip, int port, string udn, Trace trace)
     {
@@ -60,6 +65,14 @@ sealed class FakeSony : IDisposable
         {
             case "getPowerStatus": return Ok(Result(new JsonObject { ["status"] = On ? "active" : "standby" }));
             case "actRegister":
+                Interlocked.Increment(ref Registers);
+                if (RedirectRegisterTo is { } to) return new FakeResponse(307) { Location = new Uri(to, "sony/accessControl").ToString() };
+                if (RenewSilently && Cookie is not null && !r.Headers.ContainsKey("Authorization"))
+                {
+                    // A client it knows registers again: a new cookie, no PIN.
+                    Cookie = Convert.ToHexString(RandomNumberGenerator.GetBytes(8));
+                    return new FakeResponse(200, Result().ToJsonString(), "application/json") { SetCookie = $"auth={Cookie}; Path=/sony/; Max-Age=1209600" };
+                }
                 if (r.Headers.TryGetValue("Authorization", out var auth) && auth.StartsWith("Basic "))
                 {
                     var given = Encoding.ASCII.GetString(Convert.FromBase64String(auth[6..])).TrimStart(':');

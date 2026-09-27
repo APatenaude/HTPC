@@ -110,7 +110,7 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(tv.Address, $"sony/{service}"))
             {
-                Content = new StringContent(new JsonObject { ["method"] = method, ["id"] = 1, ["params"] = args, ["version"] = version }.ToJsonString(), Encoding.UTF8, "application/json"),
+                Content = new StringContent(new JsonObject { ["method"] = method, ["id"] = 1, ["params"] = args.DeepClone(), ["version"] = version }.ToJsonString(), Encoding.UTF8, "application/json"), // a copy: a retry sends the same args
             };
             if (cookie is not null) request.Headers.Add("Cookie", $"auth={cookie}");
             if (basicPin is not null) request.Headers.Authorization = new("Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($":{basicPin}")));
@@ -123,7 +123,7 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
                 : null;
             return (Field(JsonNode.Parse(body), "result"), status, set);
         }
-        catch (Exception) { return (null, 0, null); }
+        catch (Exception e) { Log.Warn($"Sony {method}: {e.GetType().Name}"); return (null, 0, null); }
     }
 
     // Type-safe reads of the TV's JSON: an odd shape gives null, never an exception.
@@ -131,12 +131,43 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
     static JsonNode? At(JsonNode? node, int i) => node is JsonArray a && a.Count > i ? a[i] : null;
     static JsonNode? Field(JsonNode? node, string name) => node is JsonObject o ? o[name] : null;
 
-    /// <summary>The TV refused the cookie (401/403: it expired, reportedly after about two weeks, or pairing was undone).</summary>
-    void Refused(TvDevice tv, int status)
+    /// <summary>TVs whose silent renewal failed: no more tries until the user pairs again (or the box restarts).</summary>
+    readonly ConcurrentDictionary<string, bool> renewFailed = new();
+    readonly ConcurrentDictionary<string, bool> renewing = new();
+
+    /// <summary>
+    /// The TV refused the cookie (401/403: it expired, reportedly after about two weeks, or pairing
+    /// was undone). First one silent try (the user's choice, 27 Sept 2026): the same client
+    /// registers again without a PIN; a TV that hands back a new cookie keeps working unnoticed
+    /// (true: retry the command). If it wants a PIN, or anything else goes wrong, no more tries
+    /// and "Pair the TV again". (The TV may show a PIN briefly then; accepted.)
+    /// </summary>
+    async Task<bool> Refused(TvDevice tv, int status, CancellationToken cancel)
     {
-        if (status is not (401 or 403)) return;
-        Log.Warn($"Sony {tv.Name} refused this box's pairing ({status}): pair again in Settings › TV");
+        if (status is not (401 or 403)) return false;
+        if (!renewFailed.ContainsKey(tv.Key) && renewing.TryAdd(tv.Key, true))
+        {
+            try
+            {
+                if (await Vouched(tv, cancel))
+                {
+                    var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel);
+                    if (result is not null && !string.IsNullOrEmpty(cookie))
+                    {
+                        credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie });
+                        Log.Info($"Sony {tv.Name}: pairing renewed without a PIN");
+                        return true;
+                    }
+                }
+                renewFailed[tv.Key] = true;
+                Log.Warn($"Sony {tv.Name} refused this box's pairing ({status}) and wants a PIN (or did not answer): pair again in Settings › TV");
+            }
+            finally { renewing.TryRemove(tv.Key, out _); }
+        }
+        else if (renewFailed.ContainsKey(tv.Key)) return false; // told already
+        else return false; // a renewal is running
         PairingLost?.Invoke(tv);
+        return false;
     }
 
     public async Task<TvDevice?> Refresh(TvDevice tv, bool passive, CancellationToken cancel)
@@ -152,7 +183,7 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         if (!string.IsNullOrEmpty(cookie))
         {
             var (playing, playStatus, _) = on ? await Call(tv, "avContent", "getPlayingContentInfo", new JsonArray(), cookie, cancel) : (null, 200, null);
-            Refused(tv, playStatus);
+            await Refused(tv, playStatus, cancel); // a renewed cookie is used from the next poll
             if (playing is not null)
             {
                 var uri = Str(Field(At(playing, 0), "uri")) ?? "";
@@ -192,20 +223,28 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
             var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel, basicPin: pin);
             if (result is null || string.IsNullOrEmpty(cookie)) { step("code", "That PIN was not right. Type the one the TV shows."); continue; }
             credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie });
+            renewFailed.TryRemove(tv.Key, out _); // paired by the user: a later expiry may renew silently again
             step("done", $"{tv.Name} is paired.");
             return true;
         }
     }
 
     /// <summary>An authenticated call to the bound TV only (its identity re-checked right before).</summary>
-    async Task<bool> Command(TvDevice tv, string service, string method, JsonArray args, CancellationToken cancel)
+    async Task<bool> Command(TvDevice tv, string service, string method, JsonArray args, CancellationToken cancel, bool retried = false)
     {
         var cookie = credentials?.Get(tv.Key)?.Value; // read once
         if (string.IsNullOrEmpty(cookie) || !await Vouched(tv, cancel)) return false;
         var (result, status, _) = await Call(tv, service, method, args, cookie, cancel);
-        if (result is null) Log.Warn($"Sony {method}: {(status == 0 ? "no answer" : status.ToString())}");
-        Refused(tv, status);
-        return result is not null;
+        if (result is not null) return true;
+        Log.Warn($"Sony {method}: {(status == 0 ? "no answer" : status.ToString())}");
+        // Renewed silently: the command once more with the new cookie (never a second renewal for it).
+        if (!retried && await Refused(tv, status, cancel)) return await Command(tv, service, method, args, cancel, retried: true);
+        if (retried && status is 401 or 403)
+        {
+            renewFailed[tv.Key] = true;
+            PairingLost?.Invoke(tv);
+        }
+        return false;
     }
 
     public Task<bool> PowerOn(TvDevice tv, CancellationToken cancel) =>
