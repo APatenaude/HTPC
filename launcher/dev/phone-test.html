@@ -170,6 +170,10 @@ function auditFrame(win, where) {
   for (const el of [...root.querySelectorAll('*')].filter(inScope)) {
     if (el.matches('svg, svg *, input, img, .dpad-wrap, .pad-area, main, #tab-remote')) continue;
     const cs = win.getComputedStyle(el);
+    // Text cut off at its own box's edge: only with an ellipsis that shows (not on a flex or grid box).
+    const ownText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    if (ownText && /(hidden|clip)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1 &&
+      !(cs.textOverflow === 'ellipsis' && !/(flex|grid)/.test(cs.display))) bad(`${name(el)}: its text is clipped without an ellipsis`);
     const clipped = cs.textOverflow === 'ellipsis' || cs.webkitLineClamp !== 'none' && cs.webkitLineClamp !== '' || /(auto|scroll)/.test(cs.overflowY + cs.overflowX);
     if (clipped) continue;
     if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) bad(`${name(el)}: its content is wider than it (${el.scrollWidth} > ${el.clientWidth})`);
@@ -194,7 +198,7 @@ async function auditCatches() {
     '<button id="a" style="position:absolute;left:0;top:100px;width:60px;height:60px">a</button>' +
     '<button id="b" style="position:absolute;left:20px;top:120px;width:60px;height:60px">b</button>' +
     '<button id="off" style="position:absolute;left:340px;top:200px;width:80px;height:60px">off</button>' +
-    '<h2 style="position:absolute;top:-40px">cut</h2><div id="wide" style="width:60px;white-space:nowrap">a line far too long for its box</div><p>undefined</p></main></div>';
+    '<h2 style="position:absolute;top:-40px">cut</h2><span id="hard" style="display:flex;width:60px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">clipped hard at the edge</span><div id="wide" style="width:60px;white-space:nowrap">a line far too long for its box</div><p>undefined</p></main></div>';
   document.body.appendChild(f);
   await new Promise((resolve) => { f.onload = resolve; });
   const found = auditFrame(f.contentWindow, 'fixture').found.join('\n');
@@ -205,6 +209,7 @@ async function auditCatches() {
   check(/#wide.*wider than it/.test(found), 'audit: catches text running out of its box');
   check(/scrolls sideways/.test(found), 'audit: catches a page that scrolls sideways');
   check(/dev text/.test(found), 'audit: catches leftover dev text');
+  check(/#hard.*clipped without an ellipsis/.test(found), 'audit: catches text clipped at the edge of its box without an ellipsis');
   check(/h2 "cut" is cut off/.test(found), 'audit: catches text cut off by the screen');
 }
 
