@@ -49,6 +49,9 @@ sealed class LauncherSettings
     public int PreciseSpeed { get; set; } = 5;
     public int ScrollSpeed { get; set; } = 5;
 
+    /// <summary>The launcher's interface sounds (ui\sounds.js): "off", "low" or "medium".</summary>
+    public string InterfaceSounds { get; set; } = "low";
+
     /// <summary>The on-screen keyboard pops up by itself on text fields (SPEC N11).</summary>
     public bool ShowKeyboardAutomatically { get; set; } = true;
 
@@ -124,6 +127,11 @@ sealed class LauncherSettings
             case "pointerSpeed": PointerSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "preciseSpeed": PreciseSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "scrollSpeed": ScrollSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "interfaceSounds":
+                var level = value.GetString();
+                if (level is not ("off" or "low" or "medium")) return false;
+                InterfaceSounds = level;
+                break;
             case "showKeyboardAutomatically": ShowKeyboardAutomatically = value.GetBoolean(); break;
             default: return false;
         }

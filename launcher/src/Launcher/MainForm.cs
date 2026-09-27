@@ -180,7 +180,10 @@ sealed partial class MainForm : Form
     async Task InitWebView()
     {
         var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "launcher-webview");
-        var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
+        // The controller's presses reach the page as web messages, not user gestures: without
+        // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
+        var env = await CoreWebView2Environment.CreateAsync(null, dataDir,
+            new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--autoplay-policy=no-user-gesture-required" });
         await web.EnsureCoreWebView2Async(env);
         var core = web.CoreWebView2;
         core.Settings.AreDevToolsEnabled = options.Dev;
