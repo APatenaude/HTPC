@@ -82,7 +82,11 @@ sealed class MediaWatcher
                 Updated?.Invoke();
             }
             catch (Exception e) { Log.Warn($"Reading media sessions: {e.Message}"); }
-            await Task.Delay(1000);
+            // Once a second for the timer and the phone; in standby alone every 3 s is enough
+            // (an autoplay countdown plays a few seconds at most) and wakes the box less.
+            bool standbyOnly;
+            lock (wants) standbyOnly = wants.Count == 1 && wants.Contains("standby");
+            await Task.Delay(standbyOnly ? 3000 : 1000);
         }
     }
 
