@@ -11,7 +11,7 @@ namespace Htpc.Launcher;
 /// Apps open on top of this window. The Home button brings it back: a capture of the app's
 /// screen becomes the backdrop behind the Home menu while the app keeps running underneath.
 /// </summary>
-sealed class MainForm : Form
+sealed partial class MainForm : Form
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -116,6 +116,7 @@ sealed class MainForm : Form
         mouseWatch.Start();
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
+        StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
         // SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
         // launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
         await tv.Discover();
@@ -253,7 +254,8 @@ sealed class MainForm : Form
         brightness,
         controller = controller.Connected,
         battery = controller.BatteryLevel,
-        timer = sleepAt is null ? null : new { label = sleepLabel, endsAt = new DateTimeOffset(sleepAt.Value).ToUnixTimeMilliseconds() }
+        timer = sleepAt is null ? null : new { label = sleepLabel, endsAt = new DateTimeOffset(sleepAt.Value).ToUnixTimeMilliseconds() },
+        phone = PhoneSummary() // MainForm.Phone.cs: { url, paired, pairingOpen }, null while the remote is off
     };
 
     void PushState() => Post(StateObject());
@@ -389,6 +391,7 @@ sealed class MainForm : Form
         // Someone typing on a real keyboard needs no keyboard on screen: it pops up by itself
         // only while the controller is in use. (R3 still opens it.)
         if (DateTime.Now - controller.LastActivity > TimeSpan.FromMinutes(1)) return;
+        if (PhoneActivity > controller.LastActivity) return; // the phone is in use: it has its own keyboard
         if (keyboard.Visible && SameField(keyboardField, field)) return; // still typing there
         OpenKeyboard(field, auto: true);
     }

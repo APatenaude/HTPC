@@ -112,6 +112,9 @@ sealed class Standby
     public bool Active { get; private set; }
     public event Action<bool>? Changed;
 
+    /// <summary>The phone remote's last input (its heartbeat does not count): keeps the box awake like the controller.</summary>
+    public DateTime PhoneActivity { get; set; }
+
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
 
@@ -214,6 +217,8 @@ sealed class Standby
         var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
         var controllerIdle = DateTime.Now - controller.LastActivity;
         if (controllerIdle < idle) idle = controllerIdle;
+        var phoneIdle = DateTime.Now - PhoneActivity;
+        if (phoneIdle < idle) idle = phoneIdle;
         if (idle < TimeSpan.FromMinutes(settings.IdleMinutes)) return;
         if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await IsPlaying())) return;
         Sleep($"idle {settings.IdleMinutes} min");

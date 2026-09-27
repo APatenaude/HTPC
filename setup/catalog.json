@@ -10,12 +10,14 @@
       "preset": "controller",
       "icon": { "glyph": "youtube", "color": "#FF5B52" },
       "launch": { "exe": "%ProgramFiles%\\VacuumTube\\VacuumTube.exe", "args": "--fullscreen" },
+      "phoneKeys": { "back": "esc", "backspace": "afterTyping" },
       "install": {
         "source": "github",
         "repo": "shy1132/VacuumTube",
         "asset": "^VacuumTube-x64-Portable\\.zip$",
         "installDir": "VacuumTube",
-        "exe": "VacuumTube.exe"
+        "exe": "VacuumTube.exe",
+        "allowInbound": [ "%ProgramFiles%\\VacuumTube\\VacuumTube.exe" ]
       }
     },
     {
@@ -45,6 +47,7 @@
       "preset": "controller",
       "icon": { "glyph": "library", "color": "#3DC0F0" },
       "launch": { "exe": "%ProgramFiles%\\Jellyfin\\Jellyfin Media Player\\JellyfinMediaPlayer.exe", "args": "--tv" },
+      "phoneKeys": { "back": "esc", "backspace": "afterTyping" },
       "install": { "source": "winget", "id": "Jellyfin.JellyfinMediaPlayer" }
     },
     {
@@ -55,6 +58,7 @@
       "preset": "controller",
       "icon": { "glyph": "moon", "color": "#F5D16B" },
       "launch": { "exe": "%ProgramFiles%\\Moonlight Game Streaming\\Moonlight.exe" },
+      "phoneKeys": { "typing": false },
       "install": { "source": "winget", "id": "MoonlightGameStreamingProject.Moonlight" }
     },
     {

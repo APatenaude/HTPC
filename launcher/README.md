@@ -15,9 +15,73 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `src/Launcher/KeyboardForm.cs`, `TextFieldWatcher.cs`, `ui/keyboard.*` | On-screen keyboard (SPEC N11): a band over the app that never takes the focus, so its keys (SendInput) land in the app's text field. Pops up when a text field gets the focus in an app on the Mouse or Keyboard preset (UI Automation focus events, only listened to while such an app is in front), R3 opens it anywhere but Moonlight. A type, X delete, Y space, LT shift, LB/RB move the cursor, Start Enter, Select shows a password, B closes (and it stays closed for that field). |
 | `src/Launcher/SetupRunner.cs`, `ui/setup.*` | Setup mode, "TV Box Setup" (`--setup`, or "setup" in the exe's name; design: First-run setup): welcome, controller check (each button once; Hold Home skips), find the TV, pick apps (they become the home tiles), install (setup\setup.ps1 with one Windows permission prompt, live progress from `setup-progress.json`), done; then the installed launcher takes over. |
 | `src/Launcher/ButtonMap.cs`, `PadMapper.cs`, `Input.cs` | Button presets (SPEC N13): Mouse (Edge, Twitch, Stremio, websites; also any window that is not a catalog app) and Keyboard. Applied to the app in front on the controller thread, sent with SendInput. Controller preset = the app reads the pad itself. |
+| `phone/`, `src/Launcher/Phone*.cs`, `MainForm.Phone.cs`, `ui/phone-settings.*`, `ui/qr.js` | The phone remote (SPEC N8), below. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
 dimmed behind it, and the app keeps running underneath. B or the app's row returns to it.
+
+## Phone remote
+
+A web app the launcher serves at **http://tv.local** (port 80; when 80 is taken, 8765, and the
+port that worked is kept in `%LOCALAPPDATA%\HTPC\phones.json`). iPhone: Safari › Share › Add to
+Home Screen; Android: Chrome › ⋮ › Add to Home screen (over plain HTTP Android makes it a
+shortcut, not an installed app; that comes with HTTPS for Share, SPEC N9). Settings › Phone
+remote shows a QR code with the box's IP address and a one-time pairing key; the page moves on
+to tv.local by itself where the phone can open it (some Android phones cannot).
+
+| Tab | Controls |
+|---|---|
+| Remote | Touchpad (drag = pointer with acceleration, tap = click, two-finger tap = right-click, two-finger drag = scroll, press and hold then drag = drag) or Arrows (D-pad, OK). Back, Home (hold = Power), Options. Volume −/mute/+ (steps of 2), brightness. Power button: sleep (asks first); wake while asleep. |
+| Type | Live typing into the focused field on the TV (Backspaces for what changed, then the text), Enter, Delete, Clear, Tab, Shift+Tab. Paste a link: YouTube videos open in the YouTube tile (VacuumTube, started with the link; see below), Twitch in the Twitch tile, anything else in a new tab of the browser tile. |
+| Playing | What plays, ±10 s, play/pause, previous/next, seek bar, volume, sleep timer (the 1-minute warning reaches the phone, with +15 min). |
+
+Where input goes (`PhoneRouting.cs`, like the controller's `MainForm.OnPad`): over the
+launcher's own screens, the D-pad and OK are controller buttons and the touchpad moves the focus
+(swipes of 56 px, tap = OK, two-finger tap = back); with the on-screen keyboard up, the D-pad
+drives it; in an app, the D-pad and OK go through the app's button map (arrow keys; OK = the
+map's A), Back is always "go back" (browser Back in Mouse-preset apps, Esc otherwise), Options is
+the context-menu key, Home is our Home menu (in Moonlight too). catalog.json's `phoneKeys`
+changes that per app: `ok`/`back`/`options` (enter, esc, browserBack, altLeft, apps, space),
+`backspace: "afterTyping"` (YouTube, Jellyfin: Backspace only deletes what the phone just typed,
+since outside a text field it goes back a screen), `typing: false` (Moonlight: keys go to the
+game PC). Nothing typed from the phone reaches the launcher's own screens. Touchpad motion goes
+to PadMapper's frame thread (one writer for the pointer, in step with the TV); a phone that goes
+quiet for 15 s lets go of a held button. Phone use counts as activity for idle sleep, and while
+the phone is newer than the controller, the TV's keyboard does not pop up by itself. In standby
+only Home, the power button or Wake do anything (they wake the box). A phone cannot wake it from
+Windows sleep or hibernate: a web page cannot send Wake-on-LAN.
+
+Who may use it: the firewall lets in the home network only (Private networks, local subnet;
+setup's PhoneRemote step). Every request must name the box (Host: tv.local, its name or
+addresses); the WebSocket and pairing calls must come from the remote's own page (Origin), so
+no other web page, on any device, can drive the TV. A new phone pairs with a 4-digit code the
+TV shows (an urgent alert, over any app, only while shown; 5 wrong tries lock pairing for a
+minute), or by scanning the QR code in Settings; it then keeps a long random token in an
+HttpOnly cookie (on iPhone the Home Screen app pairs once more: it has its own cookies). Settings
+› Phone remote lists the phones (Forget) and can switch codes off. Keys are a fixed list (no
+Windows key or shortcuts), text is at most 256 characters a message and never logged, links
+must be http(s) with nothing that could become a command-line switch, and apps get them as
+separate arguments after `--` (VacuumTube only the checked video id). Typing is not encrypted on
+the home network until HTTPS (SPEC N9).
+
+Server (`PhoneServer.cs`): Kestrel inside the launcher, started in the background after the UI
+(never in setup mode; a failure is logged and the launcher carries on), serving only `phone/`.
+Protocol: `PhoneProtocol.cs` (JSON over one WebSocket; the first message carries the version,
+and a page of another version reloads). Volume/mute, the sleep timer, what plays and alerts go
+through small interfaces (`PhoneAdapters.cs`, `AlertsShim.cs`) with stand-ins in
+`MainForm.Phone.cs` until the button-map and alerts work is merged. The home screen's state
+message carries `phone: { url, paired, pairingOpen }` (the address to scan, a phone has paired,
+new phones need no code), and `ui/qr.js` has `qrSvg(text, px)`.
+
+VacuumTube and links: it has no single-instance lock (a second start opens a second window), so
+a YouTube link restarts it: `VacuumTube.exe --fullscreen -- https://www.youtube.com/watch?v=ID`.
+Its main process reads the last plain argument as the start-up deep link and hands it to
+YouTube's TV app (`h5vcc.runtime.initialDeepLink`, VacuumTube 1.8.2); whether YouTube plays it
+is to be checked on the box. Twitch links reopen the Twitch window on that page.
+
+Tests: `dev\phone-test.html` (typing differences, gestures; open it, or headless
+`--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, tv.local, firewall rules),
+`dev\New-PhoneIcons.ps1` (the app icons).
 
 ## Build and run on the box
 
@@ -36,6 +100,6 @@ Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 
 ## Not built yet
 
-The button map editor (per-app changes to a preset), typing from the phone, the phone remote
-(and its setup step), "when this video ends", tile editing, the library (installing apps later),
-running as the shell with a watchdog, updates from GitHub releases.
+The button map editor (per-app changes to a preset), "when this video ends", tile editing, the
+library (installing apps later), running as the shell with a watchdog, updates from GitHub
+releases. Phone: Share to TV and HTTPS with the box's own certificate (SPEC N9), the link player.
