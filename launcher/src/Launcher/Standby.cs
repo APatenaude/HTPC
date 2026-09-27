@@ -23,8 +23,17 @@ sealed class LauncherSettings
     /// <summary>No idle sleep while something plays, even with the controller untouched.</summary>
     public bool StayAwakeWhilePlaying { get; set; } = true;
 
-    /// <summary>The home screen's tiles, in order (catalog ids); null = the catalog's defaults.</summary>
+    /// <summary>
+    /// The home screen's tiles, in order (catalog ids and custom-tile ids); null = the catalog's
+    /// defaults. Custom tiles (added websites and programs) live in <see cref="CustomTiles"/>.
+    /// </summary>
     public List<string>? Tiles { get; set; }
+
+    /// <summary>Tiles the user added on the TV that are not catalog apps (added websites, programs).</summary>
+    public List<CustomTile> CustomTiles { get; set; } = new();
+
+    /// <summary>Per-tile renames and icon changes (SPEC W1), keyed by tile id.</summary>
+    public Dictionary<string, TileEdit> TileEdits { get; set; } = new();
 
     /// <summary>TV profiles by HDMI identity (EDID key): each TV the box meets gets its own.</summary>
     public Dictionary<string, TvProfile> Tvs { get; set; } = new();
@@ -32,25 +41,54 @@ sealed class LauncherSettings
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
+    static readonly string BackupPath = FilePath + ".bak";
+
+    // Several threads save (the UI thread on a settings change, the library job thread when a tile
+    // is added): one save at a time, and one never sees another half-written file.
+    static readonly object Gate = new();
 
     public static LauncherSettings Load()
     {
-        try
+        lock (Gate)
         {
-            if (File.Exists(FilePath)) return JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(FilePath), Json) ?? new();
+            foreach (var path in new[] { FilePath, BackupPath })
+            {
+                try
+                {
+                    if (!File.Exists(path)) continue;
+                    var loaded = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), Json);
+                    if (loaded is not null)
+                    {
+                        if (path == BackupPath) Log.Warn("Settings read from the backup copy (settings.json was unreadable)");
+                        return loaded;
+                    }
+                }
+                catch (Exception e) { Log.Warn($"Settings unreadable at {path}: {e.Message}"); }
+            }
+            return new();
         }
-        catch (Exception e) { Log.Warn($"Settings unreadable, using defaults: {e.Message}"); }
-        return new();
     }
 
+    /// <summary>
+    /// Writes settings.json atomically: a full temp file is written, the current file is kept as
+    /// settings.json.bak, and the temp file replaces it in one step (File.Replace). A crash mid-save
+    /// leaves either the old file or the backup intact, never a half-written one.
+    /// </summary>
     public void Save()
     {
-        try
+        lock (Gate)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                var json = JsonSerializer.Serialize(this, Json);
+                var temp = FilePath + ".tmp";
+                File.WriteAllText(temp, json);
+                if (File.Exists(FilePath)) File.Replace(temp, FilePath, BackupPath);
+                else File.Move(temp, FilePath);
+            }
+            catch (Exception e) { Log.Error("Saving settings", e); }
         }
-        catch (Exception e) { Log.Error("Saving settings", e); }
     }
 
     /// <summary>Applies one value sent by the Settings screen; false for an unknown key or value.</summary>

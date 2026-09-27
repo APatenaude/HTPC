@@ -24,14 +24,16 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath,
             args.Contains("--setup") || Path.GetFileName(Environment.ProcessPath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase));
     }
 
-    // An installed box keeps the catalog with setup; a build (and the setup exe) has its own
-    // copy next to the exe.
+    // The trusted catalog sits next to the exe: for the installed launcher that is
+    // Program Files\HTPC\Launcher\catalog.json (admin-write only, the same copy the \HTPC\Jobs task
+    // trusts); a dev build and the setup exe have their own copy beside them. As a fallback (an
+    // older install), the copy setup kept in ProgramData is used.
     static string FindCatalog(string baseDir)
     {
-        if (Path.GetFileName(Environment.ProcessPath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase))
-            return Path.Combine(baseDir, "catalog.json");
-        var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "setup", "catalog.json");
-        return File.Exists(installed) ? installed : Path.Combine(baseDir, "catalog.json");
+        var beside = Path.Combine(baseDir, "catalog.json");
+        if (File.Exists(beside)) return beside;
+        var kept = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "setup", "catalog.json");
+        return File.Exists(kept) ? kept : beside;
     }
 }
 

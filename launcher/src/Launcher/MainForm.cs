@@ -18,6 +18,8 @@ sealed class MainForm : Form
     readonly Options options;
     readonly WebView2 web = new() { Dock = DockStyle.Fill };
     readonly AppManager apps;
+    LibraryService library = null!;   // created in the constructor, after apps
+    List<InstalledProgram> lastScan = new();
     readonly ControllerService controller = new();
     readonly AudioVolume audio = new();
     readonly Dimmer dimmer = new();
@@ -57,8 +59,13 @@ sealed class MainForm : Form
         Controls.Add(web);
 
         setupMode = options.Setup;
-        apps = new AppManager(options.CatalogPath, settings.Tiles);
+        apps = new AppManager(options.CatalogPath);
+        apps.SetCustom(settings.CustomTiles, settings.TileEdits);   // added websites and programs, tile edits
+        if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        library = new LibraryService(apps, settings, options.CatalogPath);
+        library.Changed += () => OnUi(PushLibraryProgress);
+        library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
         closeSoon.Tick += (_, _) =>
@@ -199,7 +206,7 @@ sealed class MainForm : Form
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
-                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe() });
+                Post(new { type = "init", tiles = TileList(), settings = StateObject(), prefs = settings, power = new { sleep = s3, hibernate = s4 }, tv = tv.Describe(), libraryAvailable = library.Available });
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "tvChoose": tv.Choose(Str("id")!); break;
@@ -235,6 +242,33 @@ sealed class MainForm : Form
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
             case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
+            // App library and tile editing (SPEC W1, W5): all "library.*" and "tile.*" messages go
+            // through one handler, so the shared message registry (button-maps agent) can dispatch
+            // this whole feature by type prefix with a single registration.
+            default: HandleLibraryMessage(Str("type") ?? "", m); break;
+        }
+    }
+
+    void OnUi(Action a) { if (IsHandleCreated && !IsDisposed) BeginInvoke(a); }
+
+    /// <summary>Handles every "library.*" / "tile.*" message from the UI. Returns false for others.</summary>
+    bool HandleLibraryMessage(string type, JsonElement m)
+    {
+        string? Str(string name) => m.TryGetProperty(name, out var v) ? v.ToString() : null;
+        switch (type)
+        {
+            case "library.list": PushLibraryCatalog(); return true;
+            case "library.install": StartLibraryJob(Str("id")!, "install", m.TryGetProperty("addToHome", out var ah) && ah.GetBoolean()); return true;
+            case "library.uninstall": StartLibraryJob(Str("id")!, "uninstall", false); return true;
+            case "library.upgrade": StartLibraryJob(Str("id")!, "upgrade", false); return true;
+            case "library.startMenu": PushStartMenu(); return true;
+            case "library.addProgram": AddProgramTile(Str("name")!); return true;
+            case "library.addWebsite": AddWebsiteTile(Str("name"), Str("url")); return true;
+            case "tile.order": SetTileOrder(m.GetProperty("ids")); return true;
+            case "tile.rename": RenameTile(Str("id")!, Str("name")); return true;
+            case "tile.icon": IconTile(Str("id")!, Str("glyph"), Str("color")); return true;
+            case "tile.remove": RemoveTile(Str("id")!); return true;
+            default: return false;
         }
     }
 
@@ -243,7 +277,7 @@ sealed class MainForm : Form
         if (uiReady) web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, Json));
     }
 
-    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id) }).ToList();
+    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id), custom = t.Custom }).ToList();
 
     object StateObject() => new
     {
@@ -436,9 +470,9 @@ sealed class MainForm : Form
 
     void PostSetupInit()
     {
-        // Apps setup can install (Spotify must be installed without admin rights: later, from
-        // the library) and websites (nothing to install, just a tile).
-        var list = apps.All.Where(a => (a.Installable && !a.AsUser) || a.Type == "website")
+        // Apps setup can install (Spotify refuses to install elevated: later, from the library) and
+        // websites (nothing to install, just a tile).
+        var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated) || a.IsWebsite)
             // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
             .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
         Post(new { type = "init", apps = list, tv = tv.Describe(), controller = controller.Connected, battery = controller.BatteryLevel,
@@ -449,9 +483,11 @@ sealed class MainForm : Form
     {
         var picked = m.GetProperty("apps").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
         var tiles = m.GetProperty("tiles").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
-        settings.Tiles = tiles;
+        // Keep any custom tiles (added websites, programs) when setup is re-run from Settings.
+        var customIds = settings.CustomTiles.Select(c => c.Id).Where(id => !tiles.Contains(id));
+        settings.Tiles = tiles.Concat(customIds).ToList();
         settings.Save();
-        apps.SetTiles(tiles);
+        apps.SetTiles(settings.Tiles);
         Log.Info($"Setup: install {string.Join(", ", picked)}; tiles {string.Join(", ", tiles)}");
 
         var dir = SetupRunner.FindSetupDir();
@@ -727,6 +763,183 @@ sealed class MainForm : Form
             standby.Sleep("sleep timer");
         }
     }
+
+    // --- App library and tile editing (SPEC W1, W5) --------------------------------------------
+
+    void PushTiles() => Post(new { type = "tiles", tiles = TileList() });
+
+    // The home row starts from the catalog's defaults until the user changes it; the first change
+    // writes those ids down so the order can be edited.
+    void EnsureTiles()
+    {
+        settings.Tiles ??= apps.Tiles.Select(t => t.Id).ToList();
+    }
+
+    void ApplyTiles()
+    {
+        apps.SetCustom(settings.CustomTiles, settings.TileEdits);
+        if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
+        settings.Save();
+        PushTiles();
+    }
+
+    void PushLibraryCatalog()
+    {
+        var appCards = apps.Catalog.Where(a => !a.IsWebsite).Select(LibraryCard).ToList();
+        var siteCards = apps.Catalog.Where(a => a.IsWebsite).Select(LibraryCard).ToList();
+        Post(new { type = "libraryCatalog", apps = appCards, sites = siteCards, available = library.Available });
+    }
+
+    object LibraryCard(CatalogApp a) => new
+    {
+        id = a.Id,
+        name = a.Name,
+        glyph = a.Glyph,
+        color = a.Color,
+        desc = a.Desc ?? "",
+        type = a.Type,
+        state = LibraryState(a),
+        canUninstall = a.Installable && a.InstallSource != "builtin"
+    };
+
+    // home = already a tile; installed = on the box, A adds a tile; install = not there yet;
+    // installing = a job is running; add = a website (nothing to install, A just adds the tile).
+    string LibraryState(CatalogApp a)
+    {
+        if (library.IsQueued(a.Id)) return "installing";
+        var onHome = apps.Tiles.Any(t => t.Id == a.Id);
+        if (a.IsWebsite) return onHome ? "home" : "add";
+        if (onHome) return "home";
+        return apps.IsInstalled(a.Id) ? "installed" : "install";
+    }
+
+    void PushStartMenu()
+    {
+        lastScan = StartMenuScanner.Scan();
+        var onHome = new HashSet<string>(apps.Tiles.Where(t => t.Custom).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+        var list = lastScan.Select(p => new { name = p.Name, launchable = p.Launchable, note = p.Note, onHome = onHome.Contains(p.Name) });
+        Post(new { type = "programs", list });
+    }
+
+    void AddProgramTile(string name)
+    {
+        var program = lastScan.FirstOrDefault(p => p.Name == name);
+        if (program is null) { toastWarn("That program is no longer listed"); return; }
+        if (!program.Launchable || program.Target is null) { toastWarn($"{TileStore.CleanName(name)} can't be added: {program.Note ?? "not a program"}"); return; }
+        var tile = new CustomTile
+        {
+            Id = TileStore.NewId("program"),
+            Kind = "program",
+            Name = TileStore.CleanName(name),
+            Exe = program.Target,
+            Args = program.Args,
+            Glyph = "app",
+            Color = "#8CC2FF",
+            Preset = "mouse",
+        };
+        settings.CustomTiles.Add(tile);
+        EnsureTiles();
+        settings.Tiles!.Add(tile.Id);
+        ApplyTiles();
+        Log.Info($"Added program tile {tile.Name} ({program.Target})");
+        Post(new { type = "programAdded", name = tile.Name });
+    }
+
+    void AddWebsiteTile(string? name, string? url)
+    {
+        if (!TileStore.TryWebsiteUrl(url, out var clean, out var error))
+        {
+            Post(new { type = "websiteResult", ok = false, error });
+            return;
+        }
+        var tileName = TileStore.CleanName(name);
+        if (tileName.Length == 0) tileName = TileStore.CleanName(TileStore.SuggestWebsiteName(clean));
+        var tile = new CustomTile
+        {
+            Id = TileStore.NewId("website"),
+            Kind = "website",
+            Name = tileName,
+            Url = clean,
+            Glyph = "globe",
+            Color = "#8CC2FF",
+            Preset = "mouse",
+        };
+        settings.CustomTiles.Add(tile);
+        EnsureTiles();
+        settings.Tiles!.Add(tile.Id);
+        ApplyTiles();
+        Log.Info($"Added website tile {tile.Name} ({clean})");
+        Post(new { type = "websiteResult", ok = true, name = tile.Name });
+    }
+
+    void SetTileOrder(JsonElement ids)
+    {
+        var order = ids.EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
+        if (order.Count == 0) return;
+        settings.Tiles = order;
+        ApplyTiles();
+    }
+
+    void RenameTile(string id, string? name)
+    {
+        if (apps.Get(id) is null) return;
+        var clean = TileStore.CleanName(name);
+        var edit = settings.TileEdits.TryGetValue(id, out var e) ? e : settings.TileEdits[id] = new TileEdit();
+        edit.Name = clean.Length == 0 ? null : clean;
+        // A custom tile keeps its own name too, so removing the edit later still reads well.
+        if (apps.Get(id) is { Custom: true } && settings.CustomTiles.FirstOrDefault(c => c.Id == id) is { } custom && clean.Length > 0)
+            custom.Name = clean;
+        ApplyTiles();
+    }
+
+    void IconTile(string id, string? glyph, string? color)
+    {
+        if (apps.Get(id) is null) return;
+        var edit = settings.TileEdits.TryGetValue(id, out var e) ? e : settings.TileEdits[id] = new TileEdit();
+        if (TileStore.ValidGlyph(glyph)) edit.Glyph = glyph;
+        if (TileStore.ValidColor(color)) edit.Color = color;
+        ApplyTiles();
+    }
+
+    void RemoveTile(string id)
+    {
+        EnsureTiles();
+        settings.Tiles!.RemoveAll(t => t == id);
+        // A custom tile's details would be lost, so it is dropped from the store too (the user is
+        // asked first in the UI). Its Edge profile folder (website sign-in) is left on disk.
+        settings.CustomTiles.RemoveAll(c => c.Id == id);
+        settings.TileEdits.Remove(id);
+        ApplyTiles();
+    }
+
+    void StartLibraryJob(string id, string action, bool addToHome)
+    {
+        if (!library.Enqueue(id, action, addToHome, out var error))
+        {
+            toastWarn(error);
+            return;
+        }
+        PushLibraryCatalog();
+        PushLibraryProgress();
+    }
+
+    void PushLibraryProgress()
+    {
+        var (cur, pendingJobs) = library.Snapshot();
+        var running = cur is null ? null : new { id = cur.Id, name = cur.Name, action = cur.Action, phase = cur.Phase, percent = cur.Percent, message = cur.Message };
+        Post(new { type = "libraryProgress", current = running, pending = pendingJobs.Select(j => new { id = j.Id, action = j.Action }).ToList() });
+    }
+
+    void OnJobFinished(LibraryJob job, bool ok, string text)
+    {
+        toast(text, ok ? null : "warn");
+        PushLibraryProgress();
+        PushLibraryCatalog();
+        PushTiles();
+    }
+
+    void toast(string text, string? kind) => Post(new { type = "toast", text, kind });
+    void toastWarn(string text) => toast(text, "warn");
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

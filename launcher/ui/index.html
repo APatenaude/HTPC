@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <title>TV</title>
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="library.css">
+<script>
+// Surface a script error on the page (helps when reviewing headless screenshots; harmless in the box).
+addEventListener('error', function (e) {
+  var d = document.getElementById('jserr');
+  if (!d) { d = document.createElement('div'); d.id = 'jserr'; d.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;background:#b00020;color:#fff;font:16px monospace;padding:10px;max-width:100vw;white-space:pre-wrap'; (document.body || document.documentElement).appendChild(d); }
+  d.textContent += (e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno + (e.error && e.error.stack ? '\n' + e.error.stack : '') + '\n');
+});
+</script>
 </head>
 <body>
 <div id="stage">
@@ -47,10 +56,52 @@
     <div class="dialog" id="confirm-box"></div>
   </section>
 
+  <!-- App library and tile editing (library.js) -->
+  <section id="tileopts" class="view overlay">
+    <aside class="to-panel" id="tileopts-panel"></aside>
+    <footer class="hints" id="tileopts-hints"></footer>
+  </section>
+
+  <section id="rename" class="view">
+    <div class="center">
+      <div class="rn-wrap">
+        <div class="rn-field" id="rename-field"></div>
+        <div class="kbi" id="rename-kb"></div>
+      </div>
+    </div>
+    <footer class="hints" id="rename-hints"></footer>
+  </section>
+
+  <section id="changeicon" class="view">
+    <div class="center">
+      <div class="ci-wrap">
+        <div class="ci-preview" id="changeicon-preview"></div>
+        <div class="ci-glyphs" id="changeicon-glyphs"></div>
+        <div class="ci-colors" id="changeicon-colors"></div>
+      </div>
+    </div>
+    <footer class="hints" id="changeicon-hints"></footer>
+  </section>
+
+  <section id="addtile" class="view">
+    <header class="at-header">
+      <h1>Add a tile</h1>
+      <nav class="at-tabs" id="addtile-tabs" aria-label="Tile source"></nav>
+    </header>
+    <main class="at-main" id="addtile-body"></main>
+    <footer class="hints" id="addtile-hints"></footer>
+  </section>
+
+  <section id="installing" class="view overlay">
+    <div class="il-dialog" id="installing-box"></div>
+    <footer class="hints" id="installing-hints"></footer>
+  </section>
+
   <div id="opening"></div>
   <div id="toasts"></div>
 </div>
 <script src="icons.js"></script>
+<script src="library.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
