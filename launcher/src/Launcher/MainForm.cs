@@ -179,9 +179,16 @@ sealed class MainForm : Form
 
     void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        // WebView2 swallows exceptions from this handler: log them.
+        // WebView2 swallows exceptions from this handler: log them. Only the message type: the
+        // rest can hold what someone typed (a Wi-Fi password, a sign-in).
         try { HandleWebMessage(e); }
-        catch (Exception ex) { Log.Error($"UI message {e.WebMessageAsJson}", ex); }
+        catch (Exception ex) { Log.Error($"UI message \"{MessageType(e.WebMessageAsJson)}\"", ex); }
+    }
+
+    static string MessageType(string json)
+    {
+        try { using var doc = JsonDocument.Parse(json); return doc.RootElement.GetProperty("type").GetString() ?? "?"; }
+        catch (Exception) { return "?"; }
     }
 
     void HandleWebMessage(CoreWebView2WebMessageReceivedEventArgs e)
