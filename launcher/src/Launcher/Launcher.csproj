@@ -12,7 +12,9 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>HtpcLauncher</AssemblyName>
     <RootNamespace>Htpc.Launcher</RootNamespace>
-    <Version>0.1.0</Version>
+    <!-- The version is in Directory.Build.props (one number for the whole release). -->
+    <!-- Published for win-x64 only: named here so packages.lock.json covers that restore too. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <!-- The WebView2 package also carries its WPF control, whose WindowsBase reference
          conflicts with WinForms' copy. Harmless: the WPF control is not used. -->
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
@@ -30,5 +32,14 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
+
+  <!-- setup\VERSION: the kept setup scripts say which release they came with (the update job
+       checks it against the release's update.json). Written from Directory.Build.props. -->
+  <Target Name="WriteSetupVersion" BeforeTargets="AssignTargetPaths">
+    <WriteLinesToFile File="$(IntermediateOutputPath)VERSION" Lines="$(Version)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <None Include="$(IntermediateOutputPath)VERSION" Link="setup\VERSION" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
 </Project>

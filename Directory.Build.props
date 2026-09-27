@@ -1,0 +1,22 @@
+<Project>
+
+  <!--
+    The TV box's one version number. Everything a release ships carries it: the launcher (and so
+    "TV Box Setup.exe", the same file), the watchdog (its build generates an AssemblyInfo from
+    it), the setup scripts (a VERSION file in setup.zip) and the release's update.json.
+    launcher\dev\New-Release.ps1 changes it; the release workflow refuses a tag that differs.
+    Plain numeric SemVer (major.minor.patch): boxes compare the numbers, so 0.10.0 > 0.9.0.
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!--
+    NuGet packages are pinned by packages.lock.json next to each project; the release build
+    restores in locked mode, so it builds exactly what was tested here.
+  -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+</Project>

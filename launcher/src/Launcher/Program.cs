@@ -3,7 +3,8 @@ namespace Htpc.Launcher;
 /// <summary>
 /// Command line: --dev (dev tools, F5 reload), --windowed, --ui DIR, --catalog FILE,
 /// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV),
-/// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe").
+/// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"),
+/// --version (prints the version and ends; see Program.Main).
 /// </summary>
 sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv, bool Setup)
 {
@@ -37,9 +38,31 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath,
 
 static class Program
 {
+    /// <summary>
+    /// This build's release version, major.minor.patch (Directory.Build.props), the number the
+    /// updater compares; assembly versions carry a fourth part that is always 0.
+    /// </summary>
+    public static string Version
+    {
+        get
+        {
+            var v = typeof(Program).Assembly.GetName().Version ?? new System.Version(0, 0, 0);
+            return $"{v.Major}.{v.Minor}.{Math.Max(v.Build, 0)}";
+        }
+    }
+
     [STAThread]
     static void Main(string[] args)
     {
+        // --version: prints the version and ends, before anything else (no window, no single-instance
+        // lock, and above all not setup mode's "replace the running launcher": the release build
+        // runs "TV-Box-Setup.exe --version" to check what it built).
+        if (args.Contains("--version"))
+        {
+            Console.Out.WriteLine(Version);
+            Console.Out.Flush();
+            return;
+        }
         var options = Options.Parse(args);
         // Setup replaces a launcher that is already running (setup run again on a finished box).
         if (options.Setup)
