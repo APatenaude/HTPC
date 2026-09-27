@@ -11,4 +11,7 @@ if ($Arg) { throw 'Refused: reconcile takes no argument' }
 Enter-UpdateJob
 
 Invoke-LauncherReconcile
+# At every Windows start too: nothing a catalog app set up starts by itself (lib\AppAutostart.ps1;
+# the signed-in user's hive only if that user is already signed in, else the launcher sees to it).
+[void](Invoke-AppAutostartGuard -Apps (Get-AutostartCatalog $script:TrustedCatalog) -ReportOthers -Context 'reconcile')
 Write-UpdateProgress 'done' 100 'Nothing to put right'

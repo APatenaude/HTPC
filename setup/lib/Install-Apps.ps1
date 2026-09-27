@@ -19,6 +19,9 @@
       - install.firstRun files are written before the app first starts, when missing (VLC);
       - programs listed in install.blockInbound get an inbound Block rule, so Windows does not ask
         to allow them on the network (Stremio's streaming service).
+    Then nothing the catalog's apps set up starts by itself (lib\AppAutostart.ps1): every catalog
+    app, installed now or earlier from the library, in the machine's places and this user's
+    (Run values, Startup folders, tasks, declared services, Spotify's prefs).
 
 .PARAMETER Ids
     Catalog ids to install instead of the default picks, e.g. -Ids kodi,vlc
@@ -30,6 +33,7 @@ param(
 
 . "$PSScriptRoot\Common.ps1"
 . "$PSScriptRoot\AppCore.ps1"
+. "$PSScriptRoot\AppAutostart.ps1"
 
 $WorkDir = Join-Path $env:TEMP 'htpc-setup\apps'
 
@@ -56,4 +60,6 @@ foreach ($app in $picked) {
         $failed += $app.name
     }
 }
+Write-Host '  Apps that would start by themselves'
+[void](Invoke-AppAutostartGuard -Apps $entries -ReportOthers -Context 'setup')
 if ($failed) { throw "Failed to install: $($failed -join ', ')" }
