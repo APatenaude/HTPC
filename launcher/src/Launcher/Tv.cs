@@ -91,6 +91,7 @@ static class Roku
         {
             var info = XDocument.Parse(await Http.GetStringAsync(new Uri(baseUrl, "query/device-info"))).Root!;
             string V(string n) => info.Element(n)?.Value ?? "";
+            if (!SameTv(id, V("serial-number"), baseUrl)) return null; // another Roku has this address now
             var input = 0;
             if (V("power-mode") == "PowerOn")
             {
@@ -109,8 +110,27 @@ static class Roku
         catch (Exception) { return null; }
     }
 
-    public static async Task<bool> Key(Uri baseUrl, string key)
+    /// <summary>
+    /// False when the Roku answering at this address is another one (its serial number is not
+    /// the one looked for): an address kept from an earlier search can belong to another TV
+    /// since (DHCP). Nothing is ever sent to it.
+    /// </summary>
+    static bool SameTv(string id, string serial, Uri baseUrl)
     {
+        if (serial.Length == 0 || string.Equals(serial, id, StringComparison.OrdinalIgnoreCase)) return true;
+        Log.Warn($"Roku at {baseUrl.Host} is another TV now; nothing sent to it");
+        return false;
+    }
+
+    /// <summary>A key press, only once the Roku at that address has been checked to be this TV (id).</summary>
+    public static async Task<bool> Key(string id, Uri baseUrl, string key)
+    {
+        try
+        {
+            var info = XDocument.Parse(await Http.GetStringAsync(new Uri(baseUrl, "query/device-info"))).Root!;
+            if (!SameTv(id, info.Element("serial-number")?.Value ?? "", baseUrl)) return false;
+        }
+        catch (Exception e) { Log.Warn($"Roku {key}: not sent, no answer at {baseUrl.Host} ({e.Message})"); return false; }
         try
         {
             using var response = await Http.PostAsync(new Uri(baseUrl, $"keypress/{key}"), null);
@@ -278,7 +298,7 @@ sealed class TvService
         if (Profile is not { OffWithBox: true } || Current is not { } tv || tv.Locked || Refuse("off")) return;
         lastPower = "off"; // our own key: the next poll must not read it as the remote
         Quiet();
-        if (await Roku.Key(tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
+        if (await Roku.Key(tv.Id, tv.BaseUrl, "PowerOff")) Log.Info($"TV {tv.Name} off");
     }
 
     int turningOn;
@@ -306,7 +326,7 @@ sealed class TvService
             if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) { TurnOnResult?.Invoke(true); return; }
             if (tv is not { IsOn: true })
             {
-                if (!await Roku.Key(known.BaseUrl, "PowerOn")) { TurnOnResult?.Invoke(false); return; }
+                if (!await Roku.Key(known.Id, known.BaseUrl, "PowerOn")) { TurnOnResult?.Invoke(false); return; }
                 Log.Info($"TV {known.Name}: on sent");
                 // A TV in deeper standby can miss the first PowerOn: check, and send it once more.
                 for (var i = 0; i < 8 && tv is not { IsOn: true }; i++)
@@ -316,7 +336,7 @@ sealed class TvService
                     if (i == 4 && tv is not { IsOn: true })
                     {
                         Log.Info($"TV {known.Name} still {tv?.PowerMode ?? "silent"}: on sent again");
-                        await Roku.Key(known.BaseUrl, "PowerOn");
+                        await Roku.Key(known.Id, known.BaseUrl, "PowerOn");
                     }
                 }
                 Log.Info($"TV {known.Name}: {tv?.PowerMode ?? "no answer"}");
@@ -330,7 +350,7 @@ sealed class TvService
                 tv = await Roku.Describe(known.Id, known.BaseUrl);
             }
             Log.Info($"TV not on HDMI {p.Input}: switching");
-            await Roku.Key(known.BaseUrl, $"InputHDMI{p.Input}");
+            await Roku.Key(known.Id, known.BaseUrl, $"InputHDMI{p.Input}");
         }
         finally { turningOn = 0; }
     }
@@ -341,7 +361,7 @@ sealed class TvService
         if (Profile is not { } p || Current is not { } tv || tv.Locked || Refuse("test")) return false;
         lastPower = "off";
         Quiet();
-        if (!await Roku.Key(tv.BaseUrl, "PowerOff")) return false;
+        if (!await Roku.Key(tv.Id, tv.BaseUrl, "PowerOff")) return false;
         await Task.Delay(5000);
         await BringUp(p, tv);
         return (await Roku.Describe(tv.Id, tv.BaseUrl))?.IsOn == true;
