@@ -14,7 +14,10 @@
 .phone-ip { color: var(--muted); }
 .phone-fingerprint { font-family: Consolas, 'Cascadia Mono', monospace; font-size: 19px; line-height: 1.5; white-space: pre; color: var(--text); }
 /* Every phone and Shortcut key is listed: the section scrolls (to the focus). */
-.spane main:has(.phone-cards) { min-height: 0; overflow-y: auto; scrollbar-width: none; padding-bottom: 24px; }
+/* Its own scroller, no scrollbar (phone-settings.js keeps the focused row in view); a 0 basis, so the hints keep their height. */
+.spane main:has(.phone-cards) { flex: 1 1 0; min-height: 0; overflow-y: auto; scrollbar-width: none; padding-bottom: 24px; }
+.spane main:has(.phone-cards)::-webkit-scrollbar { display: none; }
+.spane main:has(.phone-cards) > * { flex-shrink: 0; }
 .ssection { margin-top: 18px; font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .phone-row { min-height: 88px; gap: 24px; }
 .srow .caption.good { color: #7FD1AE; }

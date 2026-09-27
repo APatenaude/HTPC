@@ -23,6 +23,7 @@ sealed class MemoryKeyStore : IKeyStore
         key.ImportPkcs8PrivateKey(pkcs8, out _);
         return key;
     }
+    public void Delete(string name) => keys.Remove(name);
     public ECDsa Create(string name, bool hardware = false)
     {
         var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -71,12 +72,26 @@ static partial class Program
         return (tags, ips);
     }
 
+    // The thumbprints of a name's intermediates in the user's and the machine's CA stores.
+    static HashSet<string> IntermediatesInStore(string name)
+    {
+        var found = new HashSet<string>();
+        foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+        {
+            using var store = new X509Store(StoreName.CertificateAuthority, location);
+            store.Open(OpenFlags.ReadOnly);
+            foreach (var c in store.Certificates) if (c.Subject.Contains($"CN={name} phone remote,")) found.Add(c.Thumbprint);
+        }
+        return found;
+    }
+
     static void CertificateTests()
     {
         var folder = TempFolder();
         var now = new DateTime(2026, 9, 27, 12, 0, 0);
         var store = new MemoryKeyStore();
-        var certs = new PhoneCertificates(folder, store, () => now);
+        var testName = $"HTPC test {Guid.NewGuid():N}";
+        var certs = new PhoneCertificates(folder, store, () => now, testName);
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home, IPAddress.Parse("8.8.8.8"), IPAddress.Parse("fe80::1") }), "first Ensure makes a server certificate");
         var root = certs.Authority!;
         var inter = certs.Intermediate!;
@@ -122,7 +137,7 @@ static partial class Program
         Check(fp.Length == 95 && fp.Split(':').Length == 32 && fp == Convert.ToHexString(SHA256.HashData(root.RawData)).Chunk(2).Select(c => new string(c)).Aggregate((a, b) => a + ":" + b),
             "fingerprint: the root's SHA-256, AB:CD:... as Android shows it");
 
-        certs = new PhoneCertificates(folder, store, () => now);
+        certs = new PhoneCertificates(folder, store, () => now, testName);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
             "after a restart: the same root, intermediate and certificate, none made");
         var moved = IPAddress.Parse("192.168.1.33");
@@ -133,9 +148,24 @@ static partial class Program
         now = now.AddDays(340);
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a month before it ends: renewed by the intermediate alone");
         now = now.AddDays(3650);
-        certs = new PhoneCertificates(folder, store, () => now);
+        certs = new PhoneCertificates(folder, store, () => now, testName);
         certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved });
         Check(certs.Authority!.Thumbprint != root.Thumbprint, "after 10 years: a new root (phones install it again)");
+        Check(!IntermediatesInStore(testName).Contains(inter.Thumbprint) && IntermediatesInStore(testName).Contains(certs.Intermediate!.Thumbprint),
+            "the new pair removed the old intermediate from the CA store, kept its own");
+
+        // What the single CA of an earlier build left goes too, and only that.
+        var legacy = new MemoryKeyStore();
+        legacy.Create("HTPC phone remote CA");
+        var legacyFolder = TempFolder();
+        Directory.CreateDirectory(legacyFolder);
+        File.WriteAllBytes(Path.Combine(legacyFolder, "ca.cer"), new byte[] { 1 });
+        new PhoneCertificates(legacyFolder, legacy, () => now, testName).Ensure(PhoneCertificates.LocalNames(), new[] { Home });
+        Check(legacy.Open("HTPC phone remote CA") is null && !File.Exists(Path.Combine(legacyFolder, "ca.cer")) && legacy.Open(PhoneCertificates.IntermediateKeyName) is not null,
+            "the old single CA's key and ca.cer removed; the new intermediate kept");
+        Directory.Delete(legacyFolder, true);
+        PhoneCertificates.RemoveIntermediates(testName, null);
+        Check(IntermediatesInStore(testName).Count == 0, "the test's intermediates removed from the CA stores");
         Directory.Delete(folder, true);
     }
 
@@ -144,13 +174,14 @@ static partial class Program
     static async Task HttpsTests()
     {
         var prefix = $"HTPC test {Guid.NewGuid():N} ";
+        var testName = prefix.Trim();
         var store = new CngKeyStore(prefix);
         var folder = TempFolder();
         var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
         var root = FindUp(Path.Combine("launcher", "phone"))!;
         try
         {
-            var certs = new PhoneCertificates(folder, store);
+            var certs = new PhoneCertificates(folder, store, name: testName);
             var pairing = new PhonePairing(file) { RequireCode = false };
             var server = new PhoneServer(new FakeHost(), root, pairing, IPAddress.Loopback, certificates: certs) { Addresses = () => new[] { Home } };
             var httpPort = FreePort();
@@ -174,6 +205,7 @@ static partial class Program
             var handler = new SocketsHttpHandler
             {
                 UseCookies = false,
+                AllowAutoRedirect = false,
                 ConnectCallback = async (_, ct) =>
                 {
                     var s = new Socket(SocketType.Stream, ProtocolType.Tcp);
@@ -198,6 +230,13 @@ static partial class Program
             var page = await https.GetAsync("/");
             Check(page.StatusCode == HttpStatusCode.OK && (seen & SslPolicyErrors.RemoteCertificateNameMismatch) == 0, "HTTPS at tv.local: the page, the certificate names tv.local");
             Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, "the handshake sends the intermediate; the chain ends at the root");
+            var shareOverHttps = new HttpRequestMessage(HttpMethod.Post, "/share")
+            {
+                Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["url"] = "https://vimeo.com/1" }), Headers = { { "Sec-Fetch-Site", "none" } },
+            };
+            var shared = await https.SendAsync(shareOverHttps);
+            Check(shared.StatusCode == HttpStatusCode.SeeOther && shared.Headers.GetValues("Set-Cookie").Any(v => v.StartsWith("htpc_share=") && v.Contains("secure")),
+                "over HTTPS the ticket cookie is Secure (http://tv.local never sees it)");
             var crt = await https.GetByteArrayAsync("/ca.crt");
             Check(crt.SequenceEqual(ca.RawData), "/ca.crt is the root (public)");
             Check(page.Headers.TryGetValues("Content-Security-Policy", out var csp) && csp.First().Contains("wss://tv.local ") && !csp.First().Contains(" ws: ") && !csp.First().Contains(" wss: "),
@@ -220,6 +259,8 @@ static partial class Program
             store.Delete(PhoneCertificates.IntermediateKeyName);
             store.Delete(PhoneCertificates.ServerKeyName);
             Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null, "test keys deleted from the key store");
+            PhoneCertificates.RemoveIntermediates(testName, null);
+            Check(IntermediatesInStore(testName).Count == 0, "its intermediate removed from the CA stores");
             if (Directory.Exists(folder)) Directory.Delete(folder, true);
             File.Delete(file);
         }
@@ -254,42 +295,60 @@ static partial class Program
         });
         var cookie = paired.Headers.GetValues("Set-Cookie").First().Split(';')[0];
 
-        // Android's Share target: a ticket only for a POST the phone itself made, carrying that link.
-        async Task<(string? Ticket, bool Deleted)> Share(HttpMethod method, string? site, string link = "https://vimeo.com/1")
+        // Android's Share target: a POST with a link always comes back as /share?url=<link> (the page
+        // asks); a ticket only when the phone itself posted it, bound to that link.
+        async Task<(HttpStatusCode Status, string? Location, string? Ticket, bool Deleted)> Share(HttpMethod method, string? site,
+            string link = "https://vimeo.com/1", string? oldTicket = null, string title = "A video", bool noLink = false)
         {
             var m = new HttpRequestMessage(method, method == HttpMethod.Get ? "/share?url=" + Uri.EscapeDataString(link) : "/share");
-            if (method == HttpMethod.Post) m.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["title"] = "A video", ["text"] = "Look: " + link });
+            if (method == HttpMethod.Post)
+                m.Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["title"] = title, ["text"] = noLink ? "just words" : "Look: " + link });
             if (site is not null) m.Headers.Add("Sec-Fetch-Site", site);
-            var r = await http.SendAsync(m);
+            if (oldTicket is not null) m.Headers.Add("Cookie", oldTicket);
+            using var client = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false }) { BaseAddress = new Uri(origin) };
+            var r = await client.SendAsync(m);
             var cookies = r.Headers.TryGetValues("Set-Cookie", out var c) ? c.Where(v => v.StartsWith("htpc_share=")).ToList() : new List<string>();
-            var ok = r.StatusCode == HttpStatusCode.OK && (await r.Content.ReadAsStringAsync()).Contains("phone.js");
-            if (!ok) Check(false, $"/share {method} is the page");
+            var deleted = cookies.Any(v => v.Contains("expires=Thu, 01 Jan 1970"));
             var ticket = cookies.FirstOrDefault(v => !v.Contains("expires=Thu, 01 Jan 1970"))?.Split(';')[0];
-            return (ticket is "htpc_share=" ? null : ticket, cookies.Any(v => v.Contains("expires=Thu, 01 Jan 1970")));
+            return (r.StatusCode, r.Headers.Location?.OriginalString, ticket, deleted);
         }
-        var (ticket, _) = await Share(HttpMethod.Post, "none");
-        Check(ticket is not null, "POST /share from the phone itself (Sec-Fetch-Site: none): a ticket");
-        var getNone = await Share(HttpMethod.Get, "none");
-        var postCross = await Share(HttpMethod.Post, "cross-site");
-        var postSame = await Share(HttpMethod.Post, "same-origin");
-        Check(getNone.Ticket is null && getNone.Deleted, "GET /share (a link in a message, a QR code): no ticket, the old cookie deleted; the page asks");
-        Check(postCross.Ticket is null && postCross.Deleted && postSame.Ticket is null && postSame.Deleted, "POST from a web page: no ticket, cookie deleted");
-        Check((await Share(HttpMethod.Post, null)).Ticket is null, "POST without Sec-Fetch-Site: no ticket");
-        async Task<string?> HelloShare(string cookies)
+        var posted = await Share(HttpMethod.Post, "none");
+        Check(posted.Status == HttpStatusCode.SeeOther && posted.Location == "/share?url=https%3A%2F%2Fvimeo.com%2F1" && posted.Ticket is not null,
+            "POST /share from the phone itself: 303 to /share?url=<link>, with a ticket");
+        var ticket = posted.Ticket!;
+        var cross = await Share(HttpMethod.Post, "cross-site", oldTicket: ticket);
+        Check(cross.Status == HttpStatusCode.SeeOther && cross.Location!.StartsWith("/share?url=") && cross.Ticket is null && cross.Deleted,
+            "POST from a web page (or a browser sending another Sec-Fetch-Site): 303 too (the page asks), no ticket, the old one deleted");
+        var noHeader = await Share(HttpMethod.Post, null);
+        Check(noHeader.Status == HttpStatusCode.SeeOther && noHeader.Ticket is null, "POST without Sec-Fetch-Site: 303, no ticket (the page asks)");
+        var nothing = await Share(HttpMethod.Post, "none", oldTicket: ticket, noLink: true);
+        Check(nothing.Status == HttpStatusCode.OK && nothing.Ticket is null && nothing.Deleted, "POST with no link: the page (\"no link\"), and an older ticket deleted");
+        var longTitle = await Share(HttpMethod.Post, "none", "https://vimeo.com/long", title: string.Concat(Enumerable.Repeat("é à ü ", 1500)));
+        Check(longTitle.Status == HttpStatusCode.SeeOther && longTitle.Ticket is not null, "a share over 4 KB (a long accented title): still a ticket (64 KB for /share)");
+        var getNone = await Share(HttpMethod.Get, "none", oldTicket: ticket);
+        Check(getNone.Status == HttpStatusCode.OK && getNone.Ticket is null && !getNone.Deleted, "GET /share from the phone (the redirect): the page, no new ticket, the ticket kept");
+        var getCross = await Share(HttpMethod.Get, "cross-site", oldTicket: ticket);
+        Check(getCross.Ticket is null && getCross.Deleted, "GET /share from a web page: the ticket cookie deleted");
+
+        async Task<string?> HelloShare(string cookies, bool ask = true)
         {
-            var (ws, _) = await Ws(port, origin, cookies);
-            if (ws is null) return "(refused)";
+            var ws = new ClientWebSocket();
+            ws.Options.SetRequestHeader("Origin", origin);
+            ws.Options.SetRequestHeader("Cookie", cookies);
+            try { await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws{(ask ? "?share=1" : "")}"), CancellationToken.None); }
+            catch (WebSocketException) { return "(refused)"; }
             var hello = await Receive(ws);
             ws.Abort();
             return hello?.GetProperty("share").ValueKind == JsonValueKind.String ? hello?.GetProperty("share").GetString() : null;
         }
-        Check(await HelloShare($"{cookie}; {ticket}") == "https://vimeo.com/1", "the ticket hands back exactly the shared link: the page plays it at once");
-        Check(await HelloShare($"{cookie}; {ticket}") is null, "the ticket works once");
-        var (other, _) = await Share(HttpMethod.Post, "none", "https://vimeo.com/2");
+        Check(await HelloShare($"{cookie}; {ticket}", ask: false) is null, "another tab connecting (no share=1) does not use the ticket up");
+        Check(await HelloShare($"{cookie}; {ticket}") == "https://vimeo.com/1", "the /share page's socket gets exactly the shared link: it plays at once");
+        Check(await HelloShare($"{cookie}; {ticket}") is null, "the ticket works once (after that the page asks)");
+        var other = (await Share(HttpMethod.Post, "none", "https://vimeo.com/2")).Ticket;
         Check(await HelloShare($"{cookie}; {other}") == "https://vimeo.com/2", "each ticket is bound to its own link");
-        var (late, _) = await Share(HttpMethod.Post, "none");
+        var late = (await Share(HttpMethod.Post, "none")).Ticket;
         now = now.AddSeconds(61);
-        Check(await HelloShare($"{cookie}; {late}") is null, "the ticket lasts 60 s");
+        Check(await HelloShare($"{cookie}; {late}") is null, "the ticket lasts 60 s (after that the page asks)");
         for (var i = 0; i < 20; i++) await Share(HttpMethod.Post, "none", $"https://vimeo.com/{i}");
         Check(server.ShareTicketCount <= 16, $"at most 16 tickets waiting ({server.ShareTicketCount})");
         Check((await Raw(port, $"GET /send HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 200"), "/send is the page");
@@ -358,6 +417,15 @@ static partial class Program
         Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/7\"}") == HttpStatusCode.OK, "other devices are not");
         now = now.AddMinutes(2);
         Check(await Open(other2, "Bearer " + token, "{\"url\":\"https://vimeo.com/8\"}") == HttpStatusCode.OK, "a minute later it is let in again");
+        Check(PhoneServer.Device(IPAddress.Parse("2001:db8::1")) == PhoneServer.Device(IPAddress.Parse("2001:db8::ffff:1"))
+            && PhoneServer.Device(IPAddress.Parse("2001:db8::1")) != PhoneServer.Device(IPAddress.Parse("2001:db8:0:1::1"))
+            && PhoneServer.Device(IPAddress.Parse("::ffff:192.168.1.5")) == "192.168.1.5", "a device: an IPv4 address, or an IPv6 /64");
+        for (var i = 0; i < 270; i++)
+        {
+            using var c = From($"127.0.{1 + i / 250}.{1 + i % 250}");
+            await Open(c, "Bearer wrong", "{}");
+        }
+        Check(server.LimitCount <= PhoneServer.MaxLimits, $"270 devices with wrong keys: the table stays at 256 at most ({server.LimitCount})");
         pairing.Forget(pairing.FindShortcut(token)!.Id);
         Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/9\"}") == HttpStatusCode.Unauthorized, "removed in Settings: 401");
         for (var i = 0; i < PhonePairing.MaxShortcuts; i++) pairing.NewShortcut("iPhone");

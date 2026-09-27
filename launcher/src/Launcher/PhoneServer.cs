@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Security;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -10,6 +11,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
@@ -500,30 +502,57 @@ sealed class PhoneServer
 
     /// <summary>
     /// Android's Share target: the installed app's Share sheet POSTs the shared text and link to
-    /// /share (links in messages, mail or QR codes can only GET it). Posted by the phone itself
-    /// (Sec-Fetch-Site "none"), with a link in it, the POST gets a one-time ticket (60 s, in a
-    /// cookie) that carries that link: the page's WebSocket hello hands it back and the page plays
-    /// it at once. Anything else (a GET, a post from some web page) gets no ticket, any old ticket
-    /// cookie is deleted, and the page asks before playing a link from its address.
+    /// /share (links in messages, mail or QR codes can only GET it). A POST with a link always
+    /// answers 303 to /share?url=&lt;link&gt;, where the page asks before playing it. When the phone
+    /// itself posted it (Sec-Fetch-Site "none"), the 303 also sets a one-time ticket (60 s, in a
+    /// cookie, only over the scheme it came on) bound to that link; the page's WebSocket asks for
+    /// it (/ws?share=1), and when the ticket's link is the one in the address, it plays at once.
+    /// Whatever goes wrong (another browser's header, an old or evicted ticket, another tab taking
+    /// it), the page still has the link and asks. A POST without a link, or anything not from the
+    /// phone itself, deletes an older ticket cookie.
     /// </summary>
     async Task Share(HttpContext ctx)
     {
         var fromPhone = ctx.Request.Headers["Sec-Fetch-Site"] == "none";
-        if (HttpMethods.IsPost(ctx.Request.Method) && fromPhone && ctx.Request.HasFormContentType)
+        if (HttpMethods.IsPost(ctx.Request.Method))
         {
-            try
+            string? link = null;
+            if (ctx.Request.HasFormContentType)
             {
-                var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
-                var link = new[] { "url", "text", "title" }.Select(k => PhoneLinks.FindLink(form[k].ToString())).FirstOrDefault(l => l is not null);
-                if (link is not null) IssueShareTicket(ctx, link);
+                // Shared text can be long (a title with accents, url-encoded): 64 KB here, 4 KB elsewhere.
+                if (ctx.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } size) size.MaxRequestBodySize = 64 * 1024;
+                try
+                {
+                    var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
+                    link = new[] { "url", "text", "title" }.Select(k => PhoneLinks.FindLink(form[k].ToString())).FirstOrDefault(l => l is not null);
+                }
+                catch (Exception e) when (e is InvalidDataException or IOException or Microsoft.AspNetCore.Http.BadHttpRequestException) { } // malformed, or over 64 KB
             }
-            catch (Exception e) when (e is InvalidDataException or IOException or Microsoft.AspNetCore.Http.BadHttpRequestException) { } // over 4 KB, malformed
+            if (link is not null)
+            {
+                if (fromPhone) IssueShareTicket(ctx, link); else DeleteShareCookie(ctx);
+                ctx.Response.StatusCode = StatusCodes.Status303SeeOther;
+                ctx.Response.Headers.Location = "/share?url=" + Uri.EscapeDataString(link);
+                return;
+            }
+            DeleteShareCookie(ctx);
         }
-        else ctx.Response.Cookies.Delete(ShareCookie, new CookieOptions { Path = "/", SameSite = SameSiteMode.Strict, HttpOnly = true });
+        else if (!fromPhone) DeleteShareCookie(ctx);
         await StaticFile(ctx, "/index.html");
     }
 
     const int MaxShareTickets = 16;
+
+    static CookieOptions ShareCookieOptions(HttpContext ctx) => new()
+    {
+        HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/", IsEssential = true,
+        Secure = ctx.Request.IsHttps, // made over HTTPS: never sent to http://tv.local
+    };
+
+    static void DeleteShareCookie(HttpContext ctx)
+    {
+        if (ctx.Request.Cookies.ContainsKey(ShareCookie)) ctx.Response.Cookies.Delete(ShareCookie, ShareCookieOptions(ctx));
+    }
 
     void IssueShareTicket(HttpContext ctx, string link)
     {
@@ -536,15 +565,19 @@ sealed class PhoneServer
                 shareTickets.Remove(old);
             shareTickets[Hash(ticket)] = (Hash(link), link, now() + ShareTicketLife);
         }
-        ctx.Response.Cookies.Append(ShareCookie, ticket, new CookieOptions
-        {
-            HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/", MaxAge = ShareTicketLife, IsEssential = true,
-        });
+        var options = ShareCookieOptions(ctx);
+        options.MaxAge = ShareTicketLife;
+        ctx.Response.Cookies.Append(ShareCookie, ticket, options);
     }
 
-    /// <summary>The link a ticket carries (used once, within 60 s, and only if it is still the link it was issued for).</summary>
+    /// <summary>
+    /// The link a ticket carries, for the /share page's WebSocket only (/ws?share=1: another tab
+    /// connecting does not use it up); once, within 60 s, and only if it is still the link it was
+    /// issued for.
+    /// </summary>
     string? TakeShareTicket(HttpContext ctx)
     {
+        if (ctx.Request.Query["share"] != "1") return null;
         if (ctx.Request.Cookies[ShareCookie] is not { Length: > 0 and <= 64 } ticket) return null;
         lock (shareTickets)
             return shareTickets.Remove(Hash(ticket), out var t) && t.Until > now() && Hash(t.Link) == t.LinkHash ? t.Link : null;
@@ -577,17 +610,18 @@ sealed class PhoneServer
     /// POST /api/open, for the iPhone's Shortcut: {"url": "..."} (or text with a link in it) and
     /// "Authorization: Bearer <key>". No Origin (a Shortcut sends none): the key is what counts.
     /// Each key opens at most 20 links a minute (only requests with that key count). A device
-    /// sending 10 wrong keys in a minute is shut out for a minute; nobody else is.
+    /// (an IPv4 address, or an IPv6 /64) sending 10 wrong keys in a minute is shut out for a
+    /// minute; nobody else is.
     /// </summary>
     async Task OpenShared(HttpContext ctx)
     {
         if (!HttpMethods.IsPost(ctx.Request.Method)) { ctx.Response.StatusCode = 405; return; }
-        var from = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+        var device = "ip " + Device(ctx.Connection.RemoteIpAddress);
         var t = now();
         lock (limits)
         {
             Prune(t);
-            if (limits.TryGetValue("ip " + from, out var ipLimit) && t < ipLimit.ClosedUntil) { ctx.Response.StatusCode = 429; return; }
+            if (limits.TryGetValue(device, out var ipLimit) && t < ipLimit.ClosedUntil) { ctx.Response.StatusCode = 429; return; }
         }
         var auth = ctx.Request.Headers.Authorization.ToString();
         var key = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : "";
@@ -595,7 +629,7 @@ sealed class PhoneServer
         {
             lock (limits)
             {
-                var l = Limit("ip " + from);
+                var l = Limit(device, t);
                 l.Times.Enqueue(t);
                 if (l.Times.Count >= WrongKeysPerMinute) { l.ClosedUntil = t.AddMinutes(1); l.Times.Clear(); Log.Warn("Phone remote: 10 wrong Shortcut keys from one device, shut out for a minute"); }
             }
@@ -605,7 +639,7 @@ sealed class PhoneServer
         }
         lock (limits)
         {
-            var l = Limit("key " + shortcut.Id);
+            var l = Limit("key " + shortcut.Id, t);
             if (l.Times.Count >= OpenPerMinute) { ctx.Response.StatusCode = 429; return; }
             l.Times.Enqueue(t);
         }
@@ -624,28 +658,51 @@ sealed class PhoneServer
         await Reply(ctx, 200, new { ok = true });
     }
 
+    /// <summary>A device for the lockout: an IPv4 address, or an IPv6 /64 (one home, one prefix).</summary>
+    public static string Device(IPAddress? address)
+    {
+        if (address is null) return "?";
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+        return Convert.ToHexString(address.GetAddressBytes(), 0, 8) + "/64";
+    }
+
     sealed class RateLimit
     {
         public readonly Queue<DateTime> Times = new();
-        public DateTime ClosedUntil;
+        public DateTime ClosedUntil, LastUsed;
     }
 
-    readonly Dictionary<string, RateLimit> limits = new();   // "key <id>": links opened; "ip <address>": wrong keys
+    public const int MaxLimits = 256;
+    readonly Dictionary<string, RateLimit> limits = new();   // "key <id>": links opened; "ip <device>": wrong keys
+    DateTime lastPrune;
 
-    RateLimit Limit(string name)
+    public int LimitCount { get { lock (limits) return limits.Count; } }
+
+    RateLimit Limit(string name, DateTime t)
     {
-        if (!limits.TryGetValue(name, out var l)) limits[name] = l = new RateLimit();
+        if (!limits.TryGetValue(name, out var l))
+        {
+            // At most 256 kept: the one used longest ago goes (many addresses cannot grow it).
+            if (limits.Count >= MaxLimits) limits.Remove(limits.MinBy(p => p.Value.LastUsed).Key);
+            limits[name] = l = new RateLimit();
+        }
+        l.LastUsed = t;
         return l;
     }
 
-    // Forgets what is more than a minute old (and devices and keys with nothing left).
+    // At most once a second: forgets what is more than a minute old (and devices and keys with nothing left).
     void Prune(DateTime t)
     {
-        foreach (var (name, l) in limits.ToList())
+        if (t - lastPrune < TimeSpan.FromSeconds(1) && t >= lastPrune) return;
+        lastPrune = t;
+        List<string>? empty = null;
+        foreach (var (name, l) in limits)
         {
             while (l.Times.Count > 0 && t - l.Times.Peek() > TimeSpan.FromMinutes(1)) l.Times.Dequeue();
-            if (l.Times.Count == 0 && t >= l.ClosedUntil) limits.Remove(name);
+            if (l.Times.Count == 0 && t >= l.ClosedUntil) (empty ??= new()).Add(name);
         }
+        if (empty is not null) foreach (var name in empty) limits.Remove(name);
     }
 
     static void SetCookie(HttpContext ctx, string token) =>

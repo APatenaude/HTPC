@@ -89,23 +89,30 @@ second QR code in Settings › Phone remote, which opens /send and pairs):
   only tv.local, the box's .local name and the private IPv4 ranges (e-mail, URI and directory
   names only under placeholders), so its key could never pass off a public site (constraints on
   an intermediate bind every verifier; on a root some skip them). The intermediate's key is
-  non-exportable, in the TPM when the box has one that does ECDSA P-256 (this box: the software
-  key store). It signs the server certificate (1 year) for tv.local and the box's private
+  non-exportable, in the TPM when the box has one that does ECDSA P-256 (else the software key
+  store; this box: the TPM). It signs the server certificate (1 year) for tv.local and the box's private
   addresses, made again at once when the address changes (no DHCP reservation) and a month before
-  it ends; the handshake sends it with the intermediate. Root and intermediate end together after
-  10 years: then the box makes a new pair and each phone installs the new root once more. Public
-  certificates in `%LOCALAPPDATA%\HTPC\certs`; nothing about the keys is logged. Kestrel adds port
+  it ends; the handshake sends it with the intermediate (for that, Windows adds the intermediate
+  to the "Intermediate Certification Authorities" store: the user's, or the machine's when the
+  launcher runs as administrator). Root and intermediate end together after 10 years: then the box
+  makes a new pair and each phone installs the new root once more; making a pair removes this
+  box's older intermediates from those stores (matched by name, the new one kept) and an earlier
+  build's single CA ("HTPC phone remote CA" key, ca.cer). Public certificates in
+  `%LOCALAPPDATA%\HTPC\certs`; nothing about the keys is logged. Kestrel adds port
   443 (a failure leaves HTTP running).
   The phone downloads the root from /ca.crt over plain HTTP, so it checks what it got: card 2 on
   the TV shows the root's SHA-256 fingerprint, and Android shows the installed one under
   Settings › Security › Encryption & credentials › Trusted credentials › User › the certificate;
   they must match before going on (the /send page says so and shows it too, but only the TV's
   is to be trusted). Then it opens https://tv.local, pairs and installs the app. Share › TV remote
-  POSTs the shared text and link to /share: when the phone itself posted it (`Sec-Fetch-Site:
-  none`) and it holds a link, the box keeps a one-time ticket (60 s, at most 16 waiting) bound to
-  that link and hands the link back in the page's WebSocket hello: it plays at once. A GET
-  /share?url=... (what a link in a message, a mail or a QR code can do) never gets a ticket, the
-  ticket cookie is deleted, and the page asks first. A shared link wakes the box from standby
+  POSTs the shared text and link to /share (64 KB at most there, for long titles); a link in it
+  always answers 303 to /share?url=<link>, whose page asks before playing. When the phone itself
+  posted it (`Sec-Fetch-Site: none`), the 303 also sets a one-time ticket (60 s, at most 16
+  waiting, a Secure cookie over HTTPS) bound to that link; the page's WebSocket asks for it
+  (/ws?share=1, so another tab does not use it up) and gets the link back in hello when it is the
+  one in the address: it plays at once. Anything else (another browser, an old ticket, a GET
+  /share?url=... from a message, a mail or a QR code) still asks; a POST without a link says
+  so and, like anything not from the phone itself, deletes an older ticket cookie. A shared link wakes the box from standby
   (the design's "Send to TV").
 - **iPhone:** a Shortcut the user makes once (Share sheet › Send to TV): POST
   http://tv.local/api/open, `Authorization: Bearer <key>`, JSON `{ "url": Shortcut Input }`.
@@ -113,7 +120,8 @@ second QR code in Settings › Phone remote, which opens /send and pairs):
   as a hash, at most 10, listed apart from the phones with Forget in Settings › Phone remote);
   it is the only endpoint without the Origin check: 4 KB at most, 20 links a minute per key
   (only requests with that key count), a device sending 10 wrong keys in a minute is shut out
-  for a minute (nobody else is). No Shortcut file is made (Apple only imports signed ones).
+  for a minute (nobody else is; a device is an IPv4 address or an IPv6 /64; the table keeps
+  256 at most, the longest unused going first). No Shortcut file is made (Apple only imports signed ones).
 - Links go where pasted ones go (YouTube in VacuumTube, Twitch in Twitch, the rest in the
   browser). YouTube's cast button (VacuumTube's own DIAL server, let in by setup's rule) and
   Jellyfin's "Play on" (through the Jellyfin server) need nothing from the launcher; they work

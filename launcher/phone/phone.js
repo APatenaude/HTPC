@@ -97,7 +97,8 @@ function connect() {
   clearTimeout(reconnectTimer);
   if (ws && ws.readyState <= WebSocket.OPEN) return;
   if (state.conn !== 'pairing') setConn('connecting');
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  // The /share page asks for the Share sheet's ticket (share=1); other tabs leave it alone.
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${pendingShare !== undefined ? '?share=1' : ''}`);
   ws = socket;
   socket.onopen = () => {
     retryMs = 500;
@@ -661,16 +662,17 @@ function sharedLink() {
 // undefined: nothing shared; null: shared, but no link in it.
 let pendingShare = location.pathname === '/share' ? sharedLink() : undefined;
 
-// Posted by this phone's Share sheet, the box hands the link back in hello (a one-time ticket):
-// it plays at once. A link in the address (/share?url=..., which any message or web page can
-// link to) always asks first.
+// The Share sheet's POST comes back as /share?url=<link> (the box answers it with a redirect).
+// When the box also hands back that same link from a ticket (this phone's own Share sheet), it
+// plays at once; otherwise (another browser, an old ticket, a link some message or page made)
+// the page asks first. Only a share with no link at all says so.
 function handleShare(ticketLink) {
-  const url = ticketLink || pendingShare;
+  const url = pendingShare || null;
   pendingShare = undefined;
   if (!demo) history.replaceState(null, '', '/');
   if (!url) { toast('No link in what was shared', 'warn'); return; }
   const go = () => { send({ t: 'open', url, share: true }); toast('Sent to the TV'); };
-  if (ticketLink) { go(); return; }
+  if (ticketLink && ticketLink === url) { go(); return; }
   openSheet('Play this on the TV?', url, [{ label: 'Play on the TV', primary: true, full: true, run: go }]);
 }
 

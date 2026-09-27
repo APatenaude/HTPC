@@ -18,6 +18,9 @@ interface IKeyStore
 
     /// <summary>Where the last key made went ("TPM", "software"), for the log.</summary>
     string LastProvider { get; }
+
+    /// <summary>Removes the named key, if there is one.</summary>
+    void Delete(string name);
 }
 
 /// <summary>
@@ -117,19 +120,25 @@ sealed class PhoneCertificates
     public static readonly string DefaultFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "certs");
 
+    /// <summary>The single CA of an earlier build (55f8611): its key and certificate go once a root and intermediate exist.</summary>
+    const string OldCaKeyName = "HTPC phone remote CA";
+
     readonly string folder;
     readonly IKeyStore keys;
     readonly Func<DateTime> now;
+    readonly string name;
     readonly object gate = new();
     X509Certificate2? root, intermediate;
     volatile X509Certificate2? server;
     volatile SslStreamCertificateContext? context;
 
-    public PhoneCertificates(string folder, IKeyStore keys, Func<DateTime>? clock = null)
+    /// <param name="name">The start of the CAs' names: "TV box (TV)"; tests: their own, to find and remove what they made.</param>
+    public PhoneCertificates(string folder, IKeyStore keys, Func<DateTime>? clock = null, string? name = null)
     {
         this.folder = folder;
         this.keys = keys;
         now = clock ?? (() => DateTime.Now);
+        this.name = name ?? $"TV box ({Environment.MachineName})";
     }
 
     /// <summary>The server certificate, with its key (null until Ensure made one).</summary>
@@ -177,7 +186,11 @@ sealed class PhoneCertificates
         {
             var dns = names.Select(n => n.ToLowerInvariant().TrimEnd('.')).Where(n => n.EndsWith(".local")).Distinct().ToList();
             var ips = addresses.Where(IsPrivate).Distinct().OrderBy(a => a.ToString()).ToList();
-            if (root is null || intermediate is null) LoadOrCreateAuthorities(dns);
+            if (root is null || intermediate is null)
+            {
+                LoadOrCreateAuthorities(dns);
+                ForgetOld();
+            }
             // Only what the intermediate permits (the box renamed since: its new .local name is left out).
             var permitted = PermittedNames(intermediate!);
             dns = dns.Where(n => permitted.Contains(n)).ToList();
@@ -230,7 +243,7 @@ sealed class PhoneCertificates
 
         // The root: its key exists only here, for this one signature.
         using var rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var rootRequest = new CertificateRequest($"CN=TV box ({Environment.MachineName}) phone remote root, O={Organization}", rootKey, HashAlgorithmName.SHA256);
+        var rootRequest = new CertificateRequest($"CN={name} phone remote root, O={Organization}", rootKey, HashAlgorithmName.SHA256);
         rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 1, true));
         rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
         rootRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(rootRequest.PublicKey, false));
@@ -238,7 +251,7 @@ sealed class PhoneCertificates
         var newRoot = X509CertificateLoader.LoadCertificate(rootWithKey.RawData);
 
         using var interKey = keys.Create(IntermediateKeyName, hardware: true);
-        var interRequest = new CertificateRequest(Name($"TV box ({Environment.MachineName}) phone remote"), interKey, HashAlgorithmName.SHA256);
+        var interRequest = new CertificateRequest(Name($"{name} phone remote"), interKey, HashAlgorithmName.SHA256);
         interRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
         interRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
         interRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
@@ -254,6 +267,65 @@ sealed class PhoneCertificates
         File.Delete(Path.Combine(folder, "server.cer"));
         server = null;
         (root, intermediate) = (newRoot, X509CertificateLoader.LoadCertificate(newIntermediate.RawData));
+    }
+
+    /// <summary>
+    /// What earlier pairs left: the single CA of an earlier build (its key and ca.cer), and this
+    /// box's older intermediates in Windows' "Intermediate Certification Authorities" store
+    /// (SslStreamCertificateContext puts the intermediate there, so the handshake can send it).
+    /// </summary>
+    void ForgetOld()
+    {
+        try
+        {
+            if (keys.Open(OldCaKeyName) is { } old)
+            {
+                old.Dispose();
+                keys.Delete(OldCaKeyName);
+                Log.Info("Phone remote: the old single CA's key removed");
+            }
+            var oldCert = Path.Combine(folder, "ca.cer");
+            if (File.Exists(oldCert)) File.Delete(oldCert);
+            var removed = RemoveIntermediates(name, intermediate?.Thumbprint);
+            if (removed > 0) Log.Info($"Phone remote: {removed} older intermediate certificate(s) of this box removed from the CA store");
+        }
+        catch (Exception e) { Log.Warn($"Phone remote: cleaning up older certificates: {e.Message}"); }
+    }
+
+    /// <summary>
+    /// Removes this box's intermediates (CN "&lt;name&gt; phone remote", O=HTPC TV box) but the one to
+    /// keep from the user's CA store, and from the machine's where allowed. Returns how many went.
+    /// </summary>
+    public static int RemoveIntermediates(string name, string? keep)
+    {
+        var removed = 0;
+        foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+        {
+            try
+            {
+                using var store = new X509Store(StoreName.CertificateAuthority, location);
+                store.Open(OpenFlags.ReadWrite);
+                foreach (var cert in store.Certificates)
+                {
+                    if (cert.Thumbprint == keep || !IsOurs(cert, $"{name} phone remote")) continue;
+                    try { store.Remove(cert); removed++; }
+                    catch (CryptographicException) { } // in the machine's store, and we are no admin
+                }
+            }
+            catch (CryptographicException) { } // the machine's store is read-only without admin rights
+        }
+        return removed;
+    }
+
+    static bool IsOurs(X509Certificate2 cert, string commonName)
+    {
+        string? cn = null, o = null;
+        foreach (var rdn in cert.SubjectName.EnumerateRelativeDistinguishedNames())
+        {
+            if (rdn.GetSingleElementType().Value == "2.5.4.3") cn = rdn.GetSingleElementValue();
+            if (rdn.GetSingleElementType().Value == "2.5.4.10") o = rdn.GetSingleElementValue();
+        }
+        return cn == commonName && o == Organization;
     }
 
     // Every name below the intermediate starts with its O (its directoryName constraint): O first

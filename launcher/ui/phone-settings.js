@@ -96,11 +96,28 @@ function fingerprintLines(fp) {
   return lines.join('\n');
 }
 
-// The section can be taller than the screen (every phone and key is listed): keep the focus in view.
-new MutationObserver(() => {
-  const el = document.querySelector('#settings .spane .srow.focused');
-  if (el && state.section === 'phone') el.scrollIntoView({ block: 'nearest' });
-}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+// The section can be taller than the screen (every phone and key is listed): its pane scrolls on
+// its own (no scrollbar) to keep the focused row in view; the rest of the screen stays put.
+// (scrollIntoView would also scroll the stage and the view, overflow: hidden or not.) A render
+// makes a new pane: it keeps the scroll it had, until the section is left.
+const phoneScroll = { top: 0 };
+function keepPhoneRowInView() {
+  if (state.view !== 'settings' || state.section !== 'phone') { phoneScroll.top = 0; return; }
+  const main = document.querySelector('#settings .spane main');
+  const el = main && main.querySelector('.srow.focused');
+  if (!el) return;
+  if (main.scrollTop !== phoneScroll.top) main.scrollTop = phoneScroll.top;
+  if (el === main.querySelector('[data-nav]')) main.scrollTop = 0; // the first row: the codes show again
+  else {
+    const m = main.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const scale = m.height / main.clientHeight || 1; // the stage is scaled to the screen
+    const pad = 24 * scale;
+    if (r.top < m.top + pad) main.scrollTop -= (m.top + pad - r.top) / scale;
+    else if (r.bottom > m.bottom - pad) main.scrollTop += (r.bottom - m.bottom + pad) / scale;
+  }
+  phoneScroll.top = main.scrollTop;
+}
+new MutationObserver(keepPhoneRowInView).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
 
 // Settings rows with keys "phone.*" (app.js's changeSetting hands them here).
 function phoneSetting(key) {
@@ -133,8 +150,13 @@ onAction('phone-forget', (el, id) => send({ type: 'phone.forget', id }));
 settingsSection('phone', {
   render: renderPhoneSection,
   shown() { askPhoneInfo(true); },
-  // Demo in a plain browser: index.html#settings/phone.
+  // Demo in a plain browser: index.html#settings/phone (?phones=8&keys=4: that many more, the last one focused).
   demo() {
+    const q = new URLSearchParams(location.hash.split('?')[1] || '');
+    const more = [];
+    for (let i = 1; i <= Number(q.get('phones') || 0); i++) more.push({ id: `p${i}`, name: `Phone ${i}`, connected: false, lastSeen: Date.now() - i * 86400000 });
+    for (let i = 1; i <= Number(q.get('keys') || 0); i++) more.push({ id: `k${i}`, name: `iPhone Shortcut ${i}`, connected: false, lastSeen: Date.now() - i * 86400000, shortcut: true });
+    if (more.length) state.memory.settings = `phone-${more[more.length - 1].id}`;
     EXT.host['phone.settings']({ type: 'phone.settings', phone: {
       listening: true, address: 'tv.local', ip: '192.168.1.20', requireCode: true, reach: 'ok', unpaired: 0, secure: true,
       fingerprint: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8',
@@ -144,6 +166,7 @@ settingsSection('phone', {
         { id: 'a1', name: 'iPhone', connected: true, lastSeen: Date.now() },
         { id: 'b2', name: 'Android phone', connected: false, lastSeen: Date.now() - 5 * 86400000 },
         { id: 'c3', name: 'iPhone Shortcut', connected: false, lastSeen: Date.now() - 86400000, shortcut: true },
+        ...more,
       ] } });
   },
 });
