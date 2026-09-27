@@ -33,14 +33,17 @@ static class RokuLab
         }
     }
 
-    /// <summary>The refactored code's host; set by NewHost once it exists.</summary>
-    public static Func<RokuWorld, IRokuHost> NewHostFactory = _ => throw new InvalidOperationException("no new host yet");
+    /// <summary>The refactored code's host.</summary>
+    public static Func<RokuWorld, IRokuHost> NewHostFactory = w => new NewHost(w);
 
     static async Task<List<string>> RunOne(Func<RokuWorld, Task> run, Func<RokuWorld, IRokuHost> host)
     {
         using var world = new RokuWorld();
         world.Host = host(world);
-        await run(world);
+        try { await run(world); }
+        finally { (world.Host as IDisposable)?.Dispose(); }
+        var wol = RokuScenarios.WakePackets(world.Trace.Lines);
+        if (wol.Count > 0) Console.WriteLine($"      ({wol.Count} Wake-on-LAN packets, first {wol[0].Trim()})");
         return world.Trace.Lines;
     }
 

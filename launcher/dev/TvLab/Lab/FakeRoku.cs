@@ -44,7 +44,11 @@ sealed class FakeRoku : IDisposable
         Serial = serial;
         this.clock = clock;
         this.trace = trace;
-        http = new FakeHttp(Handle) { Refused = () => trace.Add($"{Label} (no answer)") };
+        http = new FakeHttp(Handle)
+        {
+            Refused = () => trace.Add($"{Label} (no answer)"),
+            Arriving = () => { lock (gate) Settle(); }, // a Wake-on-LAN may have woken it by now
+        };
     }
 
     public Uri BaseUrl => http.BaseUrl;

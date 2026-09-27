@@ -20,6 +20,8 @@ sealed class FakeHttp : IDisposable
 
     public int Port { get; }
     public volatile bool Unreachable;
+    /// <summary>Runs as each connection arrives, before <see cref="Unreachable"/> is looked at (a fake's timed changes).</summary>
+    public Action? Arriving;
     /// <summary>A connection was refused (while <see cref="Unreachable"/>).</summary>
     public Action? Refused;
     public Uri BaseUrl => new($"http://127.0.0.1:{Port}/");
@@ -46,6 +48,7 @@ sealed class FakeHttp : IDisposable
     async Task Serve(TcpClient client)
     {
         using var _ = client;
+        Arriving?.Invoke();
         if (Unreachable)
         {
             Refused?.Invoke();
