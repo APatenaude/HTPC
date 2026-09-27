@@ -38,7 +38,9 @@ sealed class SoundSwitcher
         var wasBtDefault = lastDefault is not null && seen.Contains(lastDefault);
         // The output to come back to: the default while no Bluetooth one was (not the one Windows
         // picks the moment headphones go).
-        if (current is not null && !IsBt(current) && !wasBtDefault) returnTo = current.Id;
+        // Never an output of a Bluetooth device itself (its Hands-Free endpoint included).
+        bool OnBtDevice(AudioEndpoint e) => e.ContainerId is { } c && bluetooth.Contains(c);
+        if (current is not null && !OnBtDevice(current) && !wasBtDefault) returnTo = current.Id;
 
         string? switchTo = null;
         var arrived = bt.Where(e => !seen.Contains(e.Id)).ToList();
@@ -120,18 +122,26 @@ static class AudioEndpoints
     public static List<AudioEndpoint> List()
     {
         var list = new List<AudioEndpoint>();
+        // Every COM object is released at once: this runs every 2 s while Bluetooth audio is paired.
+        IMMDeviceEnumerator? enumerator = null;
+        IMMDeviceCollection? devices = null;
         try
         {
-            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
             string? defaultId = null;
-            if (enumerator.GetDefaultAudioEndpoint(eRender, 1, out var d) == 0) d.GetId(out defaultId);
-            if (enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, out var devices) != 0) return list;
+            if (enumerator.GetDefaultAudioEndpoint(eRender, 1, out var d) == 0) { d.GetId(out defaultId); Marshal.ReleaseComObject(d); }
+            if (enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, out devices) != 0) return list;
             devices.GetCount(out var count);
             for (uint i = 0; i < count; i++)
             {
-                if (devices.Item(i, out var device) != 0 || device.GetId(out var id) != 0) continue;
+                if (devices.Item(i, out var device) != 0) continue;
+                try
+                {
+                if (device.GetId(out var id) != 0) continue;
                 var opened = device.OpenPropertyStore(0, out var store);
                 if (opened != 0) { LastProblem = $"OpenPropertyStore 0x{opened:X8}"; continue; }
+                try
+                {
                 string name = "Sound output"; Guid? container = null; var form = -1;
                 var key = FriendlyName;
                 if (store.GetValue(ref key, out var v) == 0) { if (v.Type == VT_LPWSTR) name = Marshal.PtrToStringUni(v.Pointer) ?? name; PropVariantClear(ref v); }
@@ -142,9 +152,18 @@ static class AudioEndpoints
                 key = FormFactor;
                 if (store.GetValue(ref key, out v) == 0) { if (v.Type == VT_UI4) form = (int)v.UInt; PropVariantClear(ref v); }
                 list.Add(new AudioEndpoint(id, name, container, form, id == defaultId));
+                }
+                finally { Marshal.ReleaseComObject(store); }
+                }
+                finally { Marshal.ReleaseComObject(device); }
             }
         }
         catch (Exception e) { Log.Warn($"Sound outputs: {e.Message}"); }
+        finally
+        {
+            if (devices is not null) Marshal.ReleaseComObject(devices);
+            if (enumerator is not null) Marshal.ReleaseComObject(enumerator);
+        }
         return list;
     }
 }

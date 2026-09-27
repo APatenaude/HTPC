@@ -130,30 +130,37 @@ sealed class BluetoothService : IDisposable
     /// <summary>Looks for devices in pairing mode (while the user pairs one): on, or off.</summary>
     public void Discover(bool on)
     {
+        DeviceWatcher? stop = null;
         lock (gate)
         {
+            // A watcher that aborted (the radio went off while looking) is started again.
+            if (on && watcher is { Status: DeviceWatcherStatus.Aborted or DeviceWatcherStatus.Stopped }) watcher = null;
             if (on == (watcher is not null)) return;
             if (!on)
             {
-                try { if (watcher!.Status is DeviceWatcherStatus.Started or DeviceWatcherStatus.EnumerationCompleted) watcher.Stop(); } catch (Exception) { }
+                stop = watcher;
                 watcher = null;
                 nearby.Clear();
             }
             else
             {
                 var aqs = Protocols + " AND System.Devices.Aep.IsPaired:=System.StructuredQueryType.Boolean#False";
-                watcher = DeviceInformation.CreateWatcher(aqs, Props, DeviceInformationKind.AssociationEndpoint);
-                watcher.Added += (_, d) => { lock (gate) nearby[d.Id] = From(d); Changed?.Invoke(); };
-                watcher.Updated += (sender, u) =>
+                var w = DeviceInformation.CreateWatcher(aqs, Props, DeviceInformationKind.AssociationEndpoint);
+                // Events from a watcher already stopped (late ones) are dropped: only the current one's count.
+                w.Added += (s, d) => { lock (gate) { if (s != watcher) return; nearby[d.Id] = From(d); } Changed?.Invoke(); };
+                w.Updated += (s, u) =>
                 {
                     bool known;
-                    lock (gate) known = nearby.ContainsKey(u.Id);
+                    lock (gate) known = s == watcher && nearby.ContainsKey(u.Id);
                     if (known) _ = UpdateNearby(u.Id);   // its name or class often arrives later
                 };
-                watcher.Removed += (_, u) => { lock (gate) nearby.Remove(u.Id); Changed?.Invoke(); };
-                watcher.Start();
+                w.Removed += (s, u) => { lock (gate) { if (s != watcher) return; nearby.Remove(u.Id); } Changed?.Invoke(); };
+                watcher = w;
+                w.Start();
             }
         }
+        // Stopped outside the lock: its callbacks take the same lock.
+        try { if (stop?.Status is DeviceWatcherStatus.Started or DeviceWatcherStatus.EnumerationCompleted) stop.Stop(); } catch (Exception) { }
         Changed?.Invoke();
     }
 
@@ -178,9 +185,13 @@ sealed class BluetoothService : IDisposable
         {
             var d = await DeviceInformation.CreateFromIdAsync(id, Props, DeviceInformationKind.AssociationEndpoint);
             var custom = d.Pairing.Custom;
+            var kind = From(d).Kind;
             void OnRequest(DeviceInformationCustomPairing sender, DevicePairingRequestedEventArgs args)
             {
                 var decision = BtPairing.Decide(args.PairingKind);
+                // A keyboard pairs with a PIN typed on it, never "just works": a nearby device
+                // calling itself a keyboard with no PIN could type into the box. Not answered = not paired.
+                if (decision == BtPairing.Decision.Accept && kind == "keyboard") decision = BtPairing.Decision.Refuse;
                 Log.Info($"Bluetooth: pairing asks {args.PairingKind}: {decision}");
                 switch (decision)
                 {

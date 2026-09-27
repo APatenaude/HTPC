@@ -38,7 +38,11 @@ sealed partial class MainForm
     async Task RefreshBluetooth()
     {
         await bt.RefreshPaired();
+        var had = btAudio.Count > 0;
         btAudio = bt.Paired.Where(d => BtKinds.IsAudio(d.Kind) && d.ContainerId is not null).Select(d => d.ContainerId!.Value).ToHashSet();
+        // The last headphones were removed: one last look, so the output from before comes back
+        // (the check only runs while Bluetooth audio is paired).
+        if (had && btAudio.Count == 0) CheckSound();
     }
 
     /// <summary>Headphones came or went: the default output follows, and an alert says where sound plays.</summary>
@@ -85,10 +89,10 @@ sealed partial class MainForm
                 break;
             case "bt.pair":
                 var id = Str("id");
+                var name = bt.Nearby.FirstOrDefault(d => d.Id == id)?.Name ?? ""; // before Discover(false) clears the list
                 bt.Discover(false);   // looking while pairing slows pairing down
                 _ = Task.Run(async () =>
                 {
-                    var name = bt.Nearby.FirstOrDefault(d => d.Id == id)?.Name ?? "";
                     var (ok, text) = await bt.Pair(id, pin => OnUiQueued(() => Post(new { type = "bt.pin", id, name, pin })));
                     await RefreshBluetooth();
                     OnUiQueued(() => { Post(new { type = "bt.result", id, ok, text }); BluetoothPlaceChanged(); });
