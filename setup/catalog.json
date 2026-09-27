@@ -44,7 +44,7 @@
       "preset": "mouse",
       "desc": "Movies and shows through add-ons",
       "icon": { "glyph": "film", "color": "#7C8CFF" },
-      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe", "fill": true },
+      "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe", "args": "--autoupdater-endpoint=http://127.0.0.1:9/", "fill": true },
       "install": { "source": "winget", "scope": "user", "id": "Stremio.Stremio.Beta", "blockInbound": [ "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-runtime.exe" ] }
     },
     {

@@ -73,6 +73,7 @@ $Steps = [ordered]@{
     Edge         = { & "$lib\Set-EdgePolicy.ps1" }
     Power        = { & "$lib\Set-Power.ps1" }
     Updates      = { & "$lib\Set-UpdatePolicy.ps1" }
+    Bluetooth    = { & "$lib\Install-BluetoothDriver.ps1" }
     System       = { & "$lib\Set-SystemPolicy.ps1" }
     AutoLogon    = { & "$lib\Set-AutoLogon.ps1" }
     Launcher     = {

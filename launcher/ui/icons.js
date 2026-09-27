@@ -19,6 +19,8 @@ const ICONS = {
   info: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 11v6M12 7.5h0',
   controller: 'M6 8h12a4 4 0 0 1 4 4v2a3 3 0 0 1-5.4 1.8L15 14H9l-1.6 1.8A3 3 0 0 1 2 14v-2a4 4 0 0 1 4-4zM7 10.5v3M5.5 12h3M15.5 11.5h0M17.5 13h0',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  cursor: 'M5 3l14 8-6 1.5L10 19z',
+  headphones: 'M4 15v-3a8 8 0 0 1 16 0v3M4 15h3v5H4zM17 15h3v5h-3z',
   warn: 'M12 3l10 18H2zM12 10v5M12 18h0',
   close: 'M6 6l12 12M18 6L6 18',
   home: 'M3 11l9-8 9 8M5 9.5V21h14V9.5M10 21v-6h4v6',

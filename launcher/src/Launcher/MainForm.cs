@@ -542,7 +542,7 @@ sealed partial class MainForm : Form
     void Open(string id)
     {
         apps.Adopt(id); // already open without our knowing: switch to it, no second copy
-        if (apps.IsRunning(id)) { SwitchTo(id); return; }
+        if (apps.IsRunning(id)) { SwitchTo(id); ShowAppHint(id); return; }
         var name = apps.Get(id)?.Name ?? id;
         if (!apps.Launch(id))
         {
@@ -571,6 +571,7 @@ sealed partial class MainForm : Form
             StepAside();
             Post(new { type = "opened", id, ok = true });
             Log.Info($"{id} window up after {waited + 250} ms");
+            ShowAppHint(id); // MainForm.Alerts.cs: its buttons, for 4 s
             return;
         }
         AppDidntOpen(id, $"{name} is taking long to open", "It may still appear. Home comes back here.", retry: false);

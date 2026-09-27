@@ -51,7 +51,7 @@ static class AudioOutputs
 
     // PROPVARIANT: the type, three reserved words, then the value (a string pointer here).
     [StructLayout(LayoutKind.Explicit, Size = 24)]
-    struct PropVariant { [FieldOffset(0)] public ushort Type; [FieldOffset(8)] public IntPtr Pointer; }
+    struct PropVariant { [FieldOffset(0)] public ushort Type; [FieldOffset(8)] public IntPtr Pointer; [FieldOffset(16)] public long Rest; }   // 24 bytes: Windows writes that many
 
     [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant value);
 

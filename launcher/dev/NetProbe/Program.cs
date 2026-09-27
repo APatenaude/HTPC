@@ -46,6 +46,16 @@ for (uint code = 0x40000; code < 0x50000; code++)
     if ((t.Contains("key") || t.Contains("password") || t.Contains("passphrase") || t.Contains("psk")) && !t.Contains("unknown"))
         Console.WriteLine($"  0x{code:X5}: {text}");
 }
+// Bluetooth and sound outputs, read-only (nothing paired, removed or connected; names masked).
+Console.WriteLine($"bluetooth adapter: {await BluetoothService.HasAdapter()}, radio: {await BluetoothService.GetRadioState()}");
+var btService = new BluetoothService();
+await btService.RefreshPaired();
+Console.WriteLine($"paired: {btService.Paired.Count} ({string.Join(", ", btService.Paired.Select(d => $"{d.Kind}{(d.Connected ? " connected" : "")}"))})");
+var btAudio = btService.Paired.Where(d => BtKinds.IsAudio(d.Kind) && d.ContainerId is not null).Select(d => d.ContainerId!.Value).ToHashSet();
+var outputs = 0;
+foreach (var e in AudioEndpoints.List())
+    Console.WriteLine($"  output{++outputs}: form factor {e.FormFactor}, container {(e.ContainerId is null ? "none" : "yes")}, bluetooth {e.ContainerId is { } c && btAudio.Contains(c)}, hands-free {e.HandsFree}, default {e.IsDefault}");
+Console.WriteLine($"outputs: {AudioEndpoints.LastProblem ?? "read fine"}");
 return 0;
 
 namespace Htpc.Launcher

@@ -18,6 +18,8 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `src/Launcher/AlertsForm.cs` | The overlay over apps (design: Alerts, Inside an app): alert cards at the top right and the in-app button hint at the bottom left, painted with GDI+ into a layered window (per-pixel alpha, click-through, never takes the focus, left out of the Home menu's screen capture), above the brightness layer, clear of the on-screen keyboard, hidden in standby. `Show(OverlayView)`, `Hide()`, `Hidden`. Icons come from `ui/icons.js`. |
 | `src/Launcher/Alerts.cs`, `MainForm.Alerts.cs`, `AlertsFormOverlay.cs`, `ui/notices.*` | Alerts (SPEC W2, design: Alerts). Sources raise through `alerts` (IAlerts: `Raise`, `Update`, `Clear`, `ClaimsHome`); AlertCenter decides where and how long: cards top right on the launcher (`ui/notices.js`), only urgent ones over apps (AlertsForm), nothing in standby (they wait for the TV to be on). An alert with an action gets a row at the top of the Home menu: Home, then A does it, X dismisses; Home while its card is up opens the menu on that row; sleep warnings take Home themselves (+15 min, stay awake). Pills in the status bar. Logged by id only (a pairing code never reaches the log). Wired: app didn't open / closed unexpectedly / keeps closing (`AppExits.cs`), no internet / back online (`InternetWatch.cs`: 30 s offline, quiet for a minute after a wake), idle sleep in 1 minute, the TV not coming on, the sleep timer, volume, the phone. |
 | `src/Launcher/Wifi.cs`, `WlanNative.cs`, `WifiProfile.cs`, `MainForm.Wifi.cs`, `ui/wifi.*`, `ui/settings-network.js` | Wi-Fi (design: Settings: Wi-Fi), through Windows' native WLAN API without admin rights: the cable, the network in use and its signal, networks in range (scanned every 10 s only while the list is on screen, never in standby), joining (password typed on the TV or the phone; hidden networks; WPA2, WPA3 and transition mode, OWE, open; WEP and 802.1X refused) with a temporary profile that Windows keeps only once joined, forgetting, the Wi-Fi switch (Windows.Devices.Radios). Since 24H2 the network list needs location permission for the launcher: an Allow row when it is refused; setup allows it. `ui/wifi.js` (WifiUI) is the piece Settings and the first-run Wi-Fi step share. `dev/Run-NetProbe.ps1`: what this code sees on a box, read-only, names masked. |
+| `src/Launcher/Bluetooth.cs`, `SoundSwitch.cs`, `MainForm.Bluetooth.cs`, `ui/settings-bluetooth.js` | Settings › Bluetooth (design: Settings: Bluetooth): the switch, paired devices (connected, "sound plays here"; X removes), pairing new ones (nearby headphones, speakers, controllers, keyboards only, looked for only while pairing with the launcher in front; "just works" accepted, a keyboard's PIN shown, 0000 for old devices, phones not paired). Sound follows Bluetooth headphones: their stereo output (never Hands-Free) becomes the default when they connect, the previous one comes back when they go, and an alert says where sound plays (matched by the device's container id). Connecting a paired headset by hand is not built (Windows does it when it is turned on). |
+| `src/Launcher/AppHint.cs` | The in-app hint (design: Inside an app): the app's buttons from its own map, bottom left over the app for 4 s each time it opens (AlertsForm draws it); Home ends it. Settings › Controller can turn it off. |
 | `ui/textinput.js` | Text fields in the launcher's own screens: a real keyboard's keys stay in the field (only Enter and Escape work the screen); the on-screen keyboard and the phone post their text to the page instead of typing it (MainForm `TypeText`/`TypeKey`); R3 opens the keyboard clear of the field. |
 | `src/Launcher/ForeignWindowWatch.cs` | `--dev`: logs any new window that is neither the launcher's nor its apps' (a prompt nobody can answer with the controller). |
 | `src/Launcher/ButtonMap.cs`, `PadMapper.cs`, `Input.cs` | Button presets (SPEC N13): Mouse (Edge, Twitch, Stremio, websites) and Keyboard. Applied to the app in front on the controller thread, sent with SendInput; pointer and scroll speed from Settings › Controller. Controller preset = the app reads the pad itself. |
@@ -127,10 +129,17 @@ Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm
   launcher's WebViews close and open again, no restart.
 - **The apps' own updaters** are off where they can be: VacuumTube's (catalog
   `install.selfUpdate`: `resources\app-update.yml` removed at install and update, its download
-  folder deleted). Not done yet: Stremio's notice (its `--autoupdater-endpoint` option exists, but
-  what it does could not be checked without starting Stremio on the box); Plex HTPC and Spotify
-  (no setting found; Spotify has none).
+  folder deleted) and Stremio's (launch.args `--autoupdater-endpoint=http://127.0.0.1:9/`, a port
+  where nothing answers: checked in the VM with Stremio 5.0.24, whose "A new version of Stremio is
+  available" banner shows without it and not with it; the add-ons' catalogs still load). Plex HTPC
+  and Spotify: no setting found (Spotify has none).
 
+Checks: `setup\test\Test-Updates.ps1` (elevated; `-Only Core,Download,Swap,Faults,Planting,Wua`)
+runs the update jobs against fakes under `%TEMP%\htpc-updtest`: a fake GitHub on 127.0.0.1
+(`Serve-FakeRelease.ps1`: bad redirects, lying lengths, 429, 404, wrong hashes), fake launchers
+(healthy, crashing, hanging) and a fake watchdog, the job ended hard after every journal step,
+planted junctions / foreign owners / writable folders, and a faked Windows Update child. Nothing
+on the machine changes. Run it as SYSTEM too (a one-off scheduled task, in the test VM).
 ### Releases
 
     powershell -ExecutionPolicy Bypass -File launcher\dev\New-Release.ps1 -Version 0.2.0 -Notes "What changed, in a sentence"

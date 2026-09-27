@@ -214,6 +214,31 @@
   reset('home');
   await tick();
 
+  // ---- Settings › Bluetooth (settings-bluetooth.js) ------------------------------------------------
+  EXT.sections.bluetooth.demo();
+  state.section = 'bluetooth';
+  sent.length = 0;
+  reset('settings');
+  const btNode = (id) => $('settings').querySelector(`[data-id="${id}"]`);
+  check('Bluetooth: shown, the host lists devices', lastSent('bt.watch') && lastSent('bt.watch').on === true);
+  check('Bluetooth: paired headphones say sound plays there', btNode('bt-paired:0') && btNode('bt-paired:0').textContent.includes('sound plays here'));
+  setFocus(btNode('bt-new'));
+  press('a');
+  check('Bluetooth: Pair a new device looks for devices', lastSent('bt.scan') && lastSent('bt.scan').on === true && !!btNode('bt-near:0'));
+  setFocus(btNode('bt-near:0'));
+  press('a');
+  check('Bluetooth: A on a nearby device pairs it', lastSent('bt.pair') && lastSent('bt.pair').id === 'n1' && !!btNode('bt-pairing'));
+  onHost({ type: 'bt.pin', id: 'n1', name: '[Keyboard]', pin: '482915' });
+  check('Bluetooth: a keyboard\'s PIN is shown to type', btNode('bt-pin') && btNode('bt-pin').textContent.includes('482915'));
+  onHost({ type: 'bt.result', id: 'n1', ok: true, text: '[Keyboard] paired' });
+  check('Bluetooth: paired: back to the list, looking stops', !btNode('bt-pin') && !btNode('bt-pairing') && lastSent('bt.scan').on === false);
+  setFocus(btNode('bt-paired:1'));
+  press('x');
+  check('Bluetooth: X on a paired device asks before removing it', state.view === 'ask' && !lastSent('bt.forget'));
+  press('b');
+  reset('home');
+  check('Bluetooth: left, the host stops', lastSent('bt.watch').on === false);
+
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
   console.log = log;
