@@ -70,6 +70,28 @@ sealed class PhoneClient
     }
 
     public void Abort() => socket.Abort();
+
+    /// <summary>
+    /// A last message, then a proper close: an abort right after the send could drop the message
+    /// still on its way (the phone then never learns it was forgotten).
+    /// </summary>
+    public async Task SendAndClose(byte[] utf8)
+    {
+        await Send(utf8);
+        if (!await sending.WaitAsync(TimeSpan.FromSeconds(5))) { socket.Abort(); return; }
+        try
+        {
+            if (socket.State == WebSocketState.Open)
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "forgotten", timeout.Token);
+            }
+        }
+        catch (Exception) { }
+        finally { sending.Release(); }
+        await Task.Delay(1000);   // the phone reads it and closes its side; then it goes for sure
+        socket.Abort();
+    }
 }
 
 /// <summary>
@@ -485,7 +507,7 @@ sealed class PhoneServer
     {
         var bytes = Serialize(new { t = "bye", reason = "forgotten" });
         foreach (var c in Clients.Where(c => c.Phone?.Id == phoneId))
-            _ = c.Send(bytes).ContinueWith(_ => c.Abort());
+            _ = c.SendAndClose(bytes);
     }
 
     /// <summary>A host lifetime that waits for nothing and hooks nothing (the launcher's window decides when it ends).</summary>
