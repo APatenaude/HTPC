@@ -49,6 +49,7 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
 
     public void UseCredentials(TvCredentials c) => credentials = c;
     public int CodeLength => 4;
+    public event Action<TvDevice>? PairingLost;
     public bool IsPaired(TvDevice tv) => credentials?.Get(tv.Key)?.Value is { Length: > 0 };
     public void Forget(TvDevice tv) => credentials?.Forget(tv.Key);
 
@@ -97,8 +98,12 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         return Fresh();
     }
 
-    /// <summary>A JSON-RPC call; its "result" (or null on an error, a refusal or no answer).</summary>
-    async Task<(JsonNode? Result, HttpResponseMessage? Response)> Call(TvDevice tv, string service, string method, JsonArray args, string? cookie,
+    /// <summary>
+    /// A JSON-RPC call: its "result" (null on an error, a refusal, a redirect or no answer), the
+    /// HTTP status (0: no answer) and, on success, the auth cookie the TV set. Redirects are never
+    /// followed (TvHttp): a 30x is not this TV.
+    /// </summary>
+    async Task<(JsonNode? Result, int Status, string? Cookie)> Call(TvDevice tv, string service, string method, JsonArray args, string? cookie,
         CancellationToken cancel, string? basicPin = null, string version = "1.0")
     {
         try
@@ -109,21 +114,36 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
             };
             if (cookie is not null) request.Headers.Add("Cookie", $"auth={cookie}");
             if (basicPin is not null) request.Headers.Authorization = new("Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($":{basicPin}")));
-            var response = await http.SendAsync(request, cancel);
+            using var response = await http.SendAsync(request, cancel);
+            var status = (int)response.StatusCode;
+            if (!response.IsSuccessStatusCode) return (null, status, null);
             var body = await response.Content.ReadAsStringAsync(cancel);
-            var result = response.IsSuccessStatusCode ? JsonNode.Parse(body)?["result"] : null;
-            return (result, response);
+            var set = response.Headers.TryGetValues("Set-Cookie", out var values)
+                ? values.Select(v => v.Split(';')[0].Trim()).Where(v => v.StartsWith("auth=")).Select(v => v[5..]).FirstOrDefault()
+                : null;
+            return (Field(JsonNode.Parse(body), "result"), status, set);
         }
-        catch (Exception) { return (null, null); }
+        catch (Exception) { return (null, 0, null); }
     }
 
+    // Type-safe reads of the TV's JSON: an odd shape gives null, never an exception.
     static string? Str(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+    static JsonNode? At(JsonNode? node, int i) => node is JsonArray a && a.Count > i ? a[i] : null;
+    static JsonNode? Field(JsonNode? node, string name) => node is JsonObject o ? o[name] : null;
+
+    /// <summary>The TV refused the cookie (401/403: it expired, reportedly after about two weeks, or pairing was undone).</summary>
+    void Refused(TvDevice tv, int status)
+    {
+        if (status is not (401 or 403)) return;
+        Log.Warn($"Sony {tv.Name} refused this box's pairing ({status}): pair again in Settings › TV");
+        PairingLost?.Invoke(tv);
+    }
 
     public async Task<TvDevice?> Refresh(TvDevice tv, bool passive, CancellationToken cancel)
     {
         if (!await Vouched(tv, cancel)) return null;
-        var (power, _) = await Call(tv, "system", "getPowerStatus", new JsonArray(), null, cancel);
-        var status = Str(power?[0]?["status"]);
+        var (power, _, _) = await Call(tv, "system", "getPowerStatus", new JsonArray(), null, cancel);
+        var status = Str(Field(At(power, 0), "status"));
         if (status is null) return null;
         var on = status == "active";
         var input = 0;
@@ -131,9 +151,11 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         var cookie = passive ? null : credentials?.Get(tv.Key)?.Value; // read once
         if (!string.IsNullOrEmpty(cookie))
         {
-            if (on && (await Call(tv, "avContent", "getPlayingContentInfo", new JsonArray(), cookie, cancel)).Result is { } playing)
+            var (playing, playStatus, _) = on ? await Call(tv, "avContent", "getPlayingContentInfo", new JsonArray(), cookie, cancel) : (null, 200, null);
+            Refused(tv, playStatus);
+            if (playing is not null)
             {
-                var uri = Str(playing[0]?["uri"]) ?? "";
+                var uri = Str(Field(At(playing, 0), "uri")) ?? "";
                 var at = uri.IndexOf("port=", StringComparison.Ordinal);
                 if (uri.StartsWith("extInput:hdmi") && at > 0 && int.TryParse(uri[(at + 5)..].Split('&')[0], out var n)) input = n;
             }
@@ -145,8 +167,8 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
     /// <summary>The TV's network MACs, asked of the paired TV (its identity just checked).</summary>
     async Task<List<string>> Macs(TvDevice tv, string cookie, CancellationToken cancel)
     {
-        var (net, _) = await Call(tv, "system", "getNetworkSettings", new JsonArray(new JsonObject { ["netif"] = "" }), cookie, cancel);
-        return (net?[0] as JsonArray ?? new JsonArray()).Select(n => TvNet.NormalizeMac(Str(n?["hwAddr"]))).Where(m => m is not null).Select(m => m!).Distinct().ToList();
+        var (net, _, _) = await Call(tv, "system", "getNetworkSettings", new JsonArray(new JsonObject { ["netif"] = "" }), cookie, cancel);
+        return (At(net, 0) as JsonArray ?? new JsonArray()).Select(n => TvNet.NormalizeMac(Str(Field(n, "hwAddr")))).Where(m => m is not null).Select(m => m!).Distinct().ToList();
     }
 
     JsonArray Register() => new(
@@ -158,8 +180,8 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         step("working", $"Connecting to {tv.Name}…");
         if (!await Vouched(tv, cancel)) { step("failed", $"{tv.Name} is not answering where it was. Search again, then pick it."); return false; }
         // The first register (no PIN) makes the TV show one; it answers 401.
-        var (_, first) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel);
-        if (first is null) { step("failed", $"{tv.Name} did not answer. Is IP control on (Authentication: Normal)?"); return false; }
+        var (_, first, _) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel);
+        if (first is not (200 or 401)) { step("failed", $"{tv.Name} did not answer. Is IP control on (Authentication: Normal)?"); return false; }
         step("code", $"Type the PIN {tv.Name} shows.");
         while (true)
         {
@@ -167,10 +189,7 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
             if (pin is null) { step("failed", "Pairing cancelled."); return false; }
             if (pin.Length != 4 || !pin.All(char.IsDigit)) { step("code", "The PIN is 4 digits. Type it again."); continue; }
             if (!await Vouched(tv, cancel)) { step("failed", $"{tv.Name} is not answering where it was."); return false; }
-            var (result, response) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel, basicPin: pin);
-            var cookie = response?.Headers.TryGetValues("Set-Cookie", out var values) == true
-                ? values.Select(v => v.Split(';')[0].Trim()).Where(v => v.StartsWith("auth=")).Select(v => v[5..]).FirstOrDefault()
-                : null;
+            var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel, basicPin: pin);
             if (result is null || string.IsNullOrEmpty(cookie)) { step("code", "That PIN was not right. Type the one the TV shows."); continue; }
             credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie });
             step("done", $"{tv.Name} is paired.");
@@ -183,8 +202,9 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
     {
         var cookie = credentials?.Get(tv.Key)?.Value; // read once
         if (string.IsNullOrEmpty(cookie) || !await Vouched(tv, cancel)) return false;
-        var (result, response) = await Call(tv, service, method, args, cookie, cancel);
-        if (result is null) Log.Warn($"Sony {method}: {(response is null ? "no answer" : ((int)response.StatusCode).ToString())}");
+        var (result, status, _) = await Call(tv, service, method, args, cookie, cancel);
+        if (result is null) Log.Warn($"Sony {method}: {(status == 0 ? "no answer" : status.ToString())}");
+        Refused(tv, status);
         return result is not null;
     }
 

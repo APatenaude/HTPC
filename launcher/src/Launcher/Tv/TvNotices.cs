@@ -80,4 +80,21 @@ sealed class TvNoticeRules
         notices.Raise(new TvNotice(Paused, "Is this the right TV?", $"{reason}. The box stopped controlling it: pick your TV again in Settings › TV.", "tv", Bad: true, "TV settings"));
 
     public void ClearPaused() => notices.Clear(Paused);
+
+    public const string Unpaired = "tv-unpaired";
+    readonly HashSet<string> pairAgainShown = new();
+
+    /// <summary>The paired TV refused the box's key: once per TV per run, until it is paired again.</summary>
+    public void PairAgain(string tvName)
+    {
+        lock (pairAgainShown) if (!pairAgainShown.Add(tvName)) return;
+        notices.Raise(new TvNotice(Unpaired, "Pair the TV again", $"{tvName} no longer accepts the box. Pair it again in Settings › TV.", "tv", Bad: true, "TV settings"));
+    }
+
+    public void PairedAgain(string tvName)
+    {
+        bool shown;
+        lock (pairAgainShown) shown = pairAgainShown.Remove(tvName);
+        if (shown) notices.Clear(Unpaired);
+    }
 }

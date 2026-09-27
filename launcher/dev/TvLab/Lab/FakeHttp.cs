@@ -8,6 +8,7 @@ sealed record FakeRequest(string Method, string Path, Dictionary<string, string>
 sealed record FakeResponse(int Status, string Body = "", string ContentType = "text/xml; charset=utf-8")
 {
     public string? SetCookie { get; init; }
+    public string? Location { get; init; }
 }
 
 /// <summary>
@@ -27,6 +28,8 @@ sealed class FakeHttp : IDisposable
     public Action? Arriving;
     /// <summary>A connection was refused (while <see cref="Unreachable"/>).</summary>
     public Action? Refused;
+    /// <summary>Answer every request with a 307 to this host.</summary>
+    public Uri? RedirectTo;
     public Uri BaseUrl => new($"http://{Bind}:{Port}/");
     public IPAddress Bind { get; }
 
@@ -66,11 +69,13 @@ sealed class FakeHttp : IDisposable
         var request = await Read(stream);
         if (request is null) return;
         FakeResponse response;
-        try { response = handler(request); }
+        // Redirect mode: everything goes 307 to another host (a TV must never follow it).
+        try { response = RedirectTo is { } to ? new FakeResponse(307) { Location = new Uri(to, request.Path.TrimStart('/')).ToString() } : handler(request); }
         catch (Exception e) { response = new FakeResponse(500, e.Message, "text/plain"); }
         var body = Encoding.UTF8.GetBytes(response.Body);
         var head = $"HTTP/1.1 {response.Status} {(response.Status == 200 ? "OK" : "Error")}\r\nContent-Type: {response.ContentType}\r\n" +
                    (response.SetCookie is null ? "" : $"Set-Cookie: {response.SetCookie}\r\n") +
+                   (response.Location is null ? "" : $"Location: {response.Location}\r\n") +
                    $"Content-Length: {body.Length}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
         await stream.WriteAsync(body);

@@ -40,6 +40,101 @@ static class SonySamsungChecks
         await Sony();
         Console.WriteLine("Samsung (beta)");
         await Samsung();
+        Console.WriteLine("Review of 53df60a");
+        await Review();
+    }
+
+    /// <summary>
+    /// A host that would answer everything convincingly (the bound TV's ids, a cookie): a redirect
+    /// to it must never be followed, so it must never be reached.
+    /// </summary>
+    sealed class Thief : IDisposable
+    {
+        readonly FakeHttp http;
+        public int Requests;
+        public Uri Url => http.BaseUrl;
+        public Thief() => http = new FakeHttp(r =>
+        {
+            Interlocked.Increment(ref Requests);
+            return r.Path.StartsWith("/api/v2") ? new FakeResponse(200, "{\"device\":{\"id\":\"uuid:sam-living\",\"type\":\"Samsung SmartTV\",\"PowerState\":\"on\"}}", "application/json")
+                : r.Path.StartsWith("/sony") ? new FakeResponse(200, "{\"result\":[{\"status\":\"active\"}]}", "application/json") { SetCookie = "auth=stolen" }
+                : new FakeResponse(200, "<device-info><serial-number>X00000000001</serial-number><power-mode>PowerOn</power-mode><is-tv>true</is-tv></device-info>");
+        }, IPAddress.Parse("127.0.0.98"));
+        public void Dispose() => http.Dispose();
+    }
+
+    static async Task Review()
+    {
+        using var thief = new Thief();
+        // Roku: its answers redirect elsewhere; nothing follows them.
+        {
+            using var w = new RokuWorld();
+            var h = new NewHost(w);
+            w.Host = h;
+            var roku = w.AddRoku("roku", "X00000000001");
+            roku.On = true; roku.Input = 1;
+            h.Bind(roku, 1, RokuWorld.EdidKey);
+            await h.Boot(TimeSpan.FromMinutes(30));
+            roku.RedirectTo = thief.Url;
+            await w.RunFor(20); await h.Sleep(); await h.Wake(); await h.Test();
+            Check.Equal(0, thief.Requests, "Roku: a 307 to another host is not followed (no read, no key there)");
+            h.Dispose();
+        }
+        // Sony: no cookie, no command, no pairing through a redirect; an expired cookie asks to pair again.
+        {
+            using var w = new RokuWorld();
+            var h = Host(w);
+            h.Screen = SonyScreen;
+            using var sony = new FakeSony("sony", IPAddress.Parse("127.0.0.43"), SonyPort, "udn-sony", w.Trace);
+            h.Net.Responders.Add(sony.Ssdp);
+            await h.Tv.Discover();
+            h.Tv.Choose("bravia:udn-sony");
+            await Eventually(() => h.Tv.Pairing?.Stage == "code" && sony.Pin is not null);
+            h.Tv.PairCode(sony.Pin!);
+            await Eventually(() => h.Tv.Pairing?.Stage == "done");
+            await h.Tv.Poll();
+            sony.RedirectTo = thief.Url;
+            await w.RunFor(20); await h.Sleep(); await h.Wake();
+            h.Tv.StartPairing();
+            await Eventually(() => h.Tv.Pairing?.Stage == "failed", 5);
+            Check.Equal(0, thief.Requests, "Sony: a 307 to another host gets no cookie, no command, no pairing");
+            Check.That(h.Tv.Credentials.Get("bravia:udn-sony")?.Value != "stolen", "Sony: another host's cookie never becomes the credential");
+            // (The failed pairing above left the old cookie; pair again for the expiry check.)
+            sony.RedirectTo = null;
+            h.Tv.StartPairing();
+            await Eventually(() => h.Tv.Pairing?.Stage == "code" && sony.Pin is not null);
+            h.Tv.PairCode(sony.Pin!);
+            await Eventually(() => h.Tv.Pairing?.Stage == "done");
+            sony.ExpireCookie();
+            await h.Tv.Poll(); await h.Sleep();
+            Check.That(h.Notices.Raised.Any(n => n.Id == TvNoticeRules.Unpaired), "Sony: an expired cookie (401/403) raises \"Pair the TV again\"");
+            h.Dispose();
+        }
+        // Samsung: the identity read redirected elsewhere does not match; the channel's pinned key.
+        {
+            using var w = new RokuWorld();
+            var h = Host(w);
+            h.Screen = SamScreen;
+            using var sam = new FakeSamsung("sam", IPAddress.Parse("127.0.0.54"), SamRest, SamWs, "sam-living", w.Trace);
+            h.Net.Responders.Add(sam.Ssdp);
+            await h.Tv.Discover();
+            h.Tv.Choose("tizen:sam-living");
+            await Eventually(() => h.Tv.Pairing?.Stage == "done");
+            Check.That(h.Tv.Credentials.Get("tizen:sam-living")?.Pin is { Length: > 0 }, "Samsung: its channel's TLS key pinned at pairing");
+            await h.Tv.Poll();
+            var keys = sam.Keys;
+            sam.RedirectTo = thief.Url;
+            await w.RunFor(20); await h.Sleep(); await h.Wake();
+            Check.That(thief.Requests == 0 && sam.Keys == keys, "Samsung: a 307 to another host is no identity match (no key, nothing there)");
+            sam.RedirectTo = null;
+            sam.ReplaceChannelKey(); // same REST id, another TLS key on the channel
+            var mark = w.Trace.Lines.Count;
+            await w.RunFor(20);
+            await h.Sleep(); await h.Wake();
+            Check.That(sam.Keys == keys && !w.Trace.Lines.Skip(mark).Any(l => l.Contains("sam remote channel")),
+                "Samsung: a channel with another TLS key gets no token and no key (pinned)");
+            h.Dispose();
+        }
     }
 
     static async Task Sony()

@@ -335,6 +335,9 @@ static class TvHttp
     {
         UseProxy = false,
         UseCookies = false, // no shared cookie jar across TVs: a driver sets its own TV's cookie itself (Sony)
+        // Never follow a redirect: it would carry a cookie or re-send a command to another host, or
+        // let another host answer an identity check. A 30x is simply not this TV.
+        AllowAutoRedirect = false,
         ConnectTimeout = TimeSpan.FromSeconds(3),
         PooledConnectionLifetime = TimeSpan.FromMinutes(1),
         SslOptions = { RemoteCertificateValidationCallback = delegate { return true; } },

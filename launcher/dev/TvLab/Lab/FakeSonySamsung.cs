@@ -29,6 +29,9 @@ sealed class FakeSony : IDisposable
     public string? Cookie { get; private set; }
     public string Mac { get; set; } = "02:00:00:00:3c:01";
     public int Authenticated;   // requests that carried a cookie
+    public Uri? RedirectTo { set => http.RedirectTo = value; }
+    /// <summary>Its cookie expires (Sony: reportedly after about two weeks).</summary>
+    public void ExpireCookie() => Cookie = "expired-" + Cookie;
 
     public FakeSony(string label, IPAddress ip, int port, string udn, Trace trace)
     {
@@ -112,6 +115,9 @@ sealed class FakeSamsung : IDisposable
     public string? Token { get; private set; }
     public string Mac { get; set; } = "02:00:00:00:4d:01";
     public int Channels, Prompts, Keys;
+    public Uri? RedirectTo { set => rest.RedirectTo = value; }
+    /// <summary>Its remote channel now has another TLS key (another TV behind the same REST answer).</summary>
+    public void ReplaceChannelKey() => cert.Replace();
 
     public FakeSamsung(string label, IPAddress ip, int restPort, int wsPort, string id, Trace trace)
     {

@@ -52,6 +52,7 @@ sealed class FakeRoku : IDisposable
     }
 
     public Uri BaseUrl => http.BaseUrl;
+    public Uri? RedirectTo { set => http.RedirectTo = value; }
 
     /// <summary>Unreachable until woken by Wake-on-LAN (or never, if <paramref name="forever"/>).</summary>
     public void Unplug() => http.Unreachable = true;

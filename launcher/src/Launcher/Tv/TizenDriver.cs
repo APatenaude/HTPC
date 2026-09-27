@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -51,6 +52,7 @@ sealed class TizenDriver : ITvDriver, ITvPairing
 
     public void UseCredentials(TvCredentials c) => credentials = c;
     public int CodeLength => 0;
+    public event Action<TvDevice>? PairingLost;
     public bool IsPaired(TvDevice tv) => credentials?.Get(tv.Key)?.Value is { Length: > 0 };
     public void Forget(TvDevice tv) => credentials?.Forget(tv.Key);
 
@@ -109,12 +111,26 @@ sealed class TizenDriver : ITvDriver, ITvPairing
         new($"wss://{tv.Address.Host}:{wsPort}/api/v2/channels/samsung.remote.control?name={Convert.ToBase64String(Encoding.UTF8.GetBytes("TV Box"))}" +
             (token is null ? "" : $"&token={Uri.EscapeDataString(token)}"));
 
-    /// <summary>The remote channel: its token (a new one when pairing), or null when refused or silent.</summary>
-    static async Task<(ClientWebSocket? Socket, string? Token)> Open(Uri uri, TimeSpan wait, CancellationToken cancel)
+    static string PinOf(X509Certificate cert) =>
+        Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(new X509Certificate2(cert).PublicKey.ExportSubjectPublicKeyInfo()));
+
+    /// <summary>
+    /// The remote channel: its token (a new one when pairing), the TV's TLS key hash, and whether the
+    /// TV refused a token (unauthorized). With <paramref name="pin"/>, only the TV with that key:
+    /// another one fails in the handshake, before the token is sent (it is in the URL).
+    /// </summary>
+    static async Task<(ClientWebSocket? Socket, string? Token, string? Pin, bool Refused)> Open(Uri uri, string? pin, TimeSpan wait, CancellationToken cancel)
     {
         var socket = new ClientWebSocket();
-        socket.Options.RemoteCertificateValidationCallback = delegate { return true; }; // the TV's own certificate; its REST id says who it is
+        string? seen = null;
+        socket.Options.RemoteCertificateValidationCallback = (_, cert, _, _) =>
+        {
+            if (cert is null) return false;
+            seen = PinOf(cert);
+            return pin is null || seen == pin;
+        };
         socket.Options.Proxy = null;
+        var refused = false;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
@@ -128,13 +144,14 @@ sealed class TizenDriver : ITvDriver, ITvPairing
                 var m = JsonNode.Parse(Encoding.UTF8.GetString(buffer, 0, result.Count));
                 var ev = m?["event"] is JsonValue e && e.TryGetValue<string>(out var s) ? s : null;
                 if (ev == "ms.channel.connect")
-                    return (socket, m?["data"]?["token"] is JsonValue t && t.TryGetValue<string>(out var tok) ? tok : "");
-                if (ev is "ms.channel.unauthorized" or "ms.channel.timeOut") break;
+                    return (socket, m?["data"]?["token"] is JsonValue t && t.TryGetValue<string>(out var tok) ? tok : "", seen, false);
+                if (ev is "ms.channel.unauthorized") { refused = true; break; }
+                if (ev is "ms.channel.timeOut") break;
             }
         }
         catch (Exception) { }
         socket.Dispose();
-        return (null, null);
+        return (null, null, seen, refused);
     }
 
     public async Task<bool> Pair(TvDevice tv, Action<string, string> step, Func<CancellationToken, Task<string?>> nextCode, CancellationToken cancel)
@@ -142,27 +159,33 @@ sealed class TizenDriver : ITvDriver, ITvPairing
         step("working", $"Connecting to {tv.Name}…");
         if (!await Vouched(tv, cancel)) { step("failed", $"{tv.Name} is not answering where it was. Search again, then pick it."); return false; }
         step("prompt", $"Say yes on {tv.Name}: it asks to allow “TV Box”.");
-        var (socket, token) = await Open(Remote(tv, null), TimeSpan.FromSeconds(40), cancel);
+        var (socket, token, pin, _) = await Open(Remote(tv, null), null, TimeSpan.FromSeconds(40), cancel);
         using (socket)
         {
-            if (socket is null || string.IsNullOrEmpty(token))
+            if (socket is null || string.IsNullOrEmpty(token) || string.IsNullOrEmpty(pin))
             {
                 step("failed", $"{tv.Name} did not allow the box. Check IP Remote is on; if you chose Deny, allow it under Settings › General › External Device Manager › Device Connection Manager › Device List.");
                 return false;
             }
-            credentials?.Set(tv.Key, new TvCredentials.Secret { Value = token, Scheme = "wss" });
+            // Its TLS key, pinned: the token will only ever go to the TV with that key.
+            credentials?.Set(tv.Key, new TvCredentials.Secret { Value = token, Scheme = "wss", Pin = pin });
         }
         step("done", $"{tv.Name} is paired.");
         return true;
     }
 
-    /// <summary>KEY_POWER to the bound TV only: its REST id re-checked right before, its token over wss only.</summary>
+    /// <summary>KEY_POWER to the bound TV only: its REST id re-checked right before, its pinned key, the token over wss only.</summary>
     async Task<bool> Power(TvDevice tv, CancellationToken cancel)
     {
-        var token = credentials?.Get(tv.Key)?.Value; // read once
-        if (string.IsNullOrEmpty(token) || !await Vouched(tv, cancel)) return false;
-        var (socket, _) = await Open(Remote(tv, token), TimeSpan.FromSeconds(5), cancel);
-        if (socket is null) { Log.Warn($"Samsung {tv.Name}: the remote channel refused this box's token (pair again in Settings › TV)"); return false; }
+        var secret = credentials?.Get(tv.Key); // read once
+        if (secret is not { Value.Length: > 0, Pin.Length: > 0 } || !await Vouched(tv, cancel)) return false;
+        var (socket, _, _, refused) = await Open(Remote(tv, secret.Value), secret.Pin, TimeSpan.FromSeconds(5), cancel);
+        if (socket is null)
+        {
+            Log.Warn($"Samsung {tv.Name}: {(refused ? "the TV refused this box's token (pair again in Settings › TV)" : "the remote channel did not open (or not its TLS key)")}");
+            if (refused) PairingLost?.Invoke(tv);
+            return false;
+        }
         using (socket)
         {
             try
