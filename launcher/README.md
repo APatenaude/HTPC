@@ -158,8 +158,11 @@ is to be checked on the box. Twitch links reopen the Twitch window on that page.
 Tests: `tests\PhoneTests` (`dotnet run --project launcher\tests\PhoneTests`: protocol, links,
 routing, pointer, pairing and its locks, Host/Origin, the server on 127.0.0.1 with a fake
 launcher, the root and the constrained intermediate, HTTPS with a test key made in the user's key
-store and deleted after, the Share target's ticket, the Shortcut's /api/open and its limits), `dev\phone-test.html` (typing differences, gestures; open it, or headless
-`--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
+store and deleted after, the Share target's ticket, the Shortcut's /api/open and its limits), `dev\phone-test.html` (typing differences, gestures, the Playing timeline; then a layout audit: every
+screen of the page's `?demo=` views in frames of 375x560, 390x664, 430x740, 360x640 and 664x390, checking
+44 px targets, overlaps, controls and text inside the screen or a scrolling area, text inside its box,
+no sideways scrolling, a Remote tab that never scrolls, no dev text; `?grid=<screen>` shows one screen
+at all five sizes for screenshots; open it, or headless `--allow-file-access-from-files --dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
 field; its own requests never cross the inbound rule, so the real test is a phone),
 `dev\New-PhoneIcons.ps1` (the app icons).
 

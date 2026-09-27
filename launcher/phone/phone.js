@@ -4,7 +4,7 @@
 // one WebSocket; the launcher decides where each button goes (the TV's own screens, the
 // on-screen keyboard or the app in front). Messages: PhoneProtocol.cs.
 //
-// ?demo=remote|link|linksheet|arrows|type|playing|live|pair|asleep|sleep|timer shows a screen with made-up data and
+// ?demo=remote|arrows|connecting|type|playing|nothing|live|longtitle|link|linksheet|pair|paircode|asleep|lost|sleep|timer|share|send|sendkey shows a screen with made-up data and
 // no box (screenshots). It sends nothing.
 
 const PROTOCOL = 1;
@@ -850,26 +850,41 @@ function runDemo(view) {
     media: { app: 'Jellyfin', title: 'Episode title', subtitle: 'Show · S2 E3', playing: true, position: 1390, duration: 3062, art: 0, canSeek: true, canNext: true, canPrevious: true } };
   state.box = box;
   state.pad = view === 'arrows' ? 'arrows' : 'touchpad';
-  state.tab = { type: 'type', playing: 'playing', timer: 'playing' }[view] || 'remote';
+  state.tab = { type: 'type', playing: 'playing', timer: 'playing', nothing: 'playing', longtitle: 'playing' }[view] || 'remote';
   if (view === 'playing' || view === 'timer') box.timer = { label: '30 min', endsAt: Date.now() + 24 * 60000, left: 24 * 60 };
   if (view === 'live') {
     state.tab = 'playing';
     box.app = 'Twitch';
     box.media = { app: 'Twitch', title: 'Speedrunning the classics, day 3', subtitle: 'streamer_name', playing: true, position: 0, duration: 0, live: true, art: 0, canSeek: false, canNext: false, canPrevious: false };
   }
+  if (view === 'nothing') box.media = null;
+  if (view === 'longtitle') {
+    box.app = 'A media app with a long name';
+    box.media = { app: box.app, title: 'An extremely long episode title that goes on and on, to see where it wraps and where it stops on a small phone',
+      subtitle: 'A show with a long name · Season 12 · Episode 345 · The director’s cut', playing: false, position: 5400, duration: 10800, art: 0, canSeek: true, canNext: true, canPrevious: true };
+  }
+  if (view === 'connecting' || view === 'lost') state.conn = 'connecting';
   if (view === 'link') $('linkbar-url').value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
   if (view === 'type') text.value = 'severance';
   if (view === 'asleep') box.standby = true;
   state.receivedAt = Date.now();
   render();
-  if (view === 'pair') showPairing();
+  if (view === 'pair' || view === 'paircode') showPairing();
+  if (view === 'paircode') {
+    $('pair-start').hidden = true;
+    $('pair-form').hidden = false;
+    $('pair-error').textContent = pairError({ status: 400, data: { error: 'wrong', left: 2 } });
+  }
   if (view === 'sleep') $('power').click();
   if (view === 'timer') $('timer-button').click();
   if (view === 'send' || view === 'sendkey') {
     onBox({ t: 'hello', v: PROTOCOL, paired: true, state: box, ca: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8' });
     openSend();
   }
-  if (view === 'sendkey') onBox({ t: 'shortcutKey', token: 'demo-Qm9vc3RlZC1kZW1vLWtleS1ub3QtcmVhbA', url: 'http://tv.local/api/open' });
+  if (view === 'sendkey') {
+    onBox({ t: 'shortcutKey', token: 'demo-Qm9vc3RlZC1kZW1vLWtleS1ub3QtcmVhbA', url: 'http://tv.local/api/open' });
+    $('send-iphone').scrollIntoView();
+  }
   if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
   if (view === 'lost') $('lost').hidden = false;
   // &kbd=300: as if iOS's keyboard covered the bottom 300 px (what visualViewport then reports).

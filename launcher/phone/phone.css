@@ -151,7 +151,7 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .live-badge { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px; background: #E5484D; color: #FFF; font-weight: 700; font-size: 13px; letter-spacing: 0.08em; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #FFF; }
 .live-note { font-size: 14px; color: var(--text-2); }
-.transport { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 10px; }
+.transport { display: flex; align-items: center; justify-content: center; gap: min(14px, 2.5vw); margin-top: 10px; }
 .transport button { display: flex; align-items: center; justify-content: center; border-radius: 50%; flex-shrink: 0; }
 .transport .small { width: 48px; height: 48px; background: transparent; color: var(--text-2); }
 .transport .mid { width: 64px; height: 64px; }
@@ -161,12 +161,16 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .timer .soft { font-weight: 400; color: var(--text-2); }
 
 /* Covers, sheets, toasts ---------------------------------------------------------------------- */
-.cover { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: var(--bg); text-align: center; color: var(--accent); }
+.cover { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 12px; padding: 24px; overflow-y: auto; background: var(--bg); text-align: center; color: var(--accent); }
 .cover h2 { font-size: 24px; color: var(--text); }
 .cover p { margin: 0 0 8px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
+/* Centred while they fit; taller than the screen (landscape), they scroll from the top. */
+.cover > *, .pair > * { flex-shrink: 0; }
+.cover > :first-child, .pair > :first-child { margin-top: auto; }
+.cover > :last-child, .pair > :last-child { margin-bottom: auto; }
 .wide { width: 100%; max-width: 360px; height: 56px; border-radius: 16px; font-size: 16px; }
 
-.pair { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)); background: var(--bg); text-align: center; color: var(--accent); }
+.pair { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 12px; overflow-y: auto; padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: var(--bg); text-align: center; color: var(--accent); }
 .pair h2 { font-size: 26px; color: var(--text); letter-spacing: -0.01em; }
 .pair p { margin: 0 0 8px; max-width: 360px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
 .pair form { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
@@ -176,7 +180,7 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 
 /* Send to TV from other apps (the Shortcut, the certificate) and the Type tab's way in. */
 .send-link { display: flex; align-items: center; gap: 12px; margin: 14px var(--gutter) 0; min-height: 52px; padding: 0 16px; border-radius: 16px; background: var(--panel); font-size: 15px; text-align: left; color: var(--text); }
-.send { position: fixed; inset: 0; z-index: 25; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: max(16px, env(safe-area-inset-top)) var(--gutter) max(24px, env(safe-area-inset-bottom)); background: var(--bg); }
+.send { position: fixed; inset: 0; z-index: 25; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: max(16px, env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); background: var(--bg); }
 .send-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 8px; }
 .send-top h2 { font-size: 22px; }
 .send .lead { margin: 0 0 8px; }
@@ -194,7 +198,8 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .fingerprint { display: block; margin-top: 6px; padding: 10px 12px; border-radius: 12px; background: var(--button); color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.6; white-space: pre; }
 .send-body { display: flex; flex-direction: column; }
 .sheet-wrap { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: rgba(0, 0, 0, 0.55); }
-.sheet { width: 100%; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 22px var(--gutter) max(20px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; background: var(--panel); }
+.sheet { width: 100%; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 22px max(var(--gutter), env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); border-radius: 24px 24px 0 0; background: var(--panel); }
+.sheet > * { flex-shrink: 0; } /* a short screen: the sheet scrolls, its buttons keep their size */
 .sheet h2 { font-size: 20px; }
 .sheet p { margin: 0 0 4px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
 .sheet p:empty { display: none; }
@@ -227,15 +232,20 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 /* Very short (Safari's bars on a small iPhone): everything a little tighter, so the pad or D-pad keeps room. */
 @media (max-height: 600px) and (orientation: portrait) {
   .top { padding-top: 8px; padding-bottom: 4px; }
-  .seg button { height: 36px; }
   .pad-area { margin-top: 8px; min-height: 130px; }
   .row3 { margin-top: 8px; }
   .tile { height: 48px; }
   .volume { margin-top: 8px; }
-  .volume button, .slider { height: 40px; }
+  .volume button, .slider { height: 44px; }
   .slider { margin-top: 8px; }
   .tabs { height: calc(56px + env(safe-area-inset-bottom)); }
 }
+/* Narrow phones (360 px): the transport's buttons a little smaller, so all five fit. */
+@media (max-width: 380px) {
+  .transport .mid { width: 56px; height: 56px; }
+  .transport .big { width: 76px; height: 76px; }
+}
+
 /* Landscape: the pad on the left, the buttons on the right. */
 @media (orientation: landscape) and (max-height: 540px) {
   #tab-remote { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: auto 1fr auto auto auto; column-gap: 0; align-content: start; }
@@ -249,7 +259,7 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
   .dpad { width: min(220px, 60vh); }
   .tabs { height: calc(56px + env(safe-area-inset-bottom)); }
   .tabs button { flex-direction: row; gap: 8px; font-size: 13px; }
-  .art { max-height: 36vh; }
+  #tab-playing .art { display: none; } /* the controls first: no room for the artwork */
 }
 
 /* The D-pad takes the room its area has, never more: it cannot reach the buttons below. */

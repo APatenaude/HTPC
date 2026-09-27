@@ -5,9 +5,10 @@
 <title>Phone remote: logic tests</title>
 </head>
 <body>
-<!-- Tests for launcher\phone\phone-logic.js (live-typing differences, touchpad gestures). Open in a
-     browser, or headless: msedge --headless=new --dump-dom file:///.../launcher/dev/phone-test.html
-     and look for "ALL PASSED". -->
+<!-- Tests for launcher\phone\phone-logic.js (live-typing differences, touchpad gestures), then a
+     layout audit of the phone page at phone sizes (see below). Open in a browser, or headless:
+     msedge --headless=new --allow-file-access-from-files --virtual-time-budget=120000 --dump-dom
+     file:///.../launcher/dev/phone-test.html and look for "ALL PASSED". -->
 <pre id="results"></pre>
 <script src="../phone/phone-logic.js"></script>
 <script>
@@ -86,8 +87,159 @@ check(same(timeline({ duration: 0, live: true, canSeek: true }), { live: true, b
 check(same(timeline({ duration: 14400, live: true, canSeek: true }), { live: true, bar: false, seek: false }), 'live with a growing length: still no bar');
 check(same(timeline({ duration: 0 }), { live: true, bar: false, seek: false }), 'no length known: treated as live');
 check(same(timeline(null), { live: false, bar: true, seek: false }), 'nothing playing: the empty bar, no badge');
-out.push(failed ? `${failed} FAILED` : 'ALL PASSED');
-document.getElementById('results').textContent = out.join('\n');
+// ---- Layout audit: the phone page (demo data) in frames of real phone sizes, every screen ----------
+// Each frame is its own viewport, so the page's media queries see the phone's size. For each
+// screen: every control is at least 44 x 44 px, inside the screen or a scrolling area, and
+// overlaps no other control or block; no text runs out of its box; the page never scrolls
+// sideways; the Remote tab itself never scrolls; no leftover dev text.
+// ?grid=playing shows one screen at every size side by side (screenshots), without the tests.
+const SIZES = [[375, 560], [390, 664], [430, 740], [360, 640], [664, 390]];
+const SCREENS = ['remote', 'arrows', 'connecting', 'type', 'playing', 'nothing', 'live', 'longtitle', 'linksheet', 'link', 'linkkbd',
+  'pair', 'paircode', 'asleep', 'lost', 'sleep', 'timer', 'share', 'send', 'sendkey'];
+const pageUrl = (screen, h) => `../phone/index.html?demo=${screen === 'linkkbd' ? 'linksheet' : screen}` +
+  (screen === 'linkkbd' ? `&kbd=${Math.round(h * 0.45)}` : '');
+
+function frame(screen, [w, h], host) {
+  return new Promise((resolve) => {
+    const f = document.createElement('iframe');
+    Object.assign(f.style, { width: w + 'px', height: h + 'px', border: '0', background: '#000', flexShrink: '0' });
+    f.onload = () => setTimeout(() => resolve(f), 300);
+    f.src = pageUrl(screen, h);
+    host.appendChild(f);
+  });
+}
+
+function auditFrame(win, where) {
+  const d = win.document;
+  const found = [];
+  const bad = (what) => found.push(`${where}: ${what}`);
+  const shown = (el) => {
+    if (el.closest('[hidden]')) return false;
+    const cs = win.getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const name = (el) => (el.id ? '#' + el.id : el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : '')) +
+    (el.textContent.trim() ? ` "${el.textContent.trim().slice(0, 24)}"` : '');
+  // The layer on top: an open sheet, the Send page, pairing; else the app (minus what a cover hides).
+  const layers = ['#pair', '#send', '#sheet', '#linksheet'].map((s) => d.querySelector(s)).filter((e) => e && !e.hidden);
+  const root = layers.length ? layers[layers.length - 1] : d.getElementById('app');
+  const cover = !layers.length && ['#asleep', '#lost'].map((s) => d.querySelector(s)).find((e) => e && !e.hidden);
+  const inScope = (el) => shown(el) && !el.closest('.toast, .errors') && (!cover || !d.getElementById('main').contains(el) || cover.contains(el));
+  const controls = [...root.querySelectorAll('button, input, a[href], select, textarea, [role="radio"]')].filter(inScope);
+  const blocks = [...root.querySelectorAll('.touchpad, .dpad, .art, .meta, .live, .lead, .note, h1, h2, h3, p, .status, .pill, .fingerprint, .times')].filter(inScope);
+  const W = win.innerWidth, H = win.innerHeight;
+  const scroller = (el) => {
+    for (let p = el.parentElement; p && p !== d.body; p = p.parentElement) {
+      const cs = win.getComputedStyle(p);
+      if (/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1) return p;
+    }
+    return null;
+  };
+  const cross = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
+  // What of an element shows: its box cut to its scrolling area (the rest shows once scrolled there).
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = scroller(el);
+    const b = s ? s.getBoundingClientRect() : { left: 0, right: W, top: 0, bottom: H };
+    return { left: Math.max(r.left, b.left), right: Math.min(r.right, b.right), top: Math.max(r.top, b.top), bottom: Math.min(r.bottom, b.bottom) };
+  };
+  for (const c of controls) {
+    const r = c.getBoundingClientRect();
+    if (r.width < 44 - 0.5 || r.height < 44 - 0.5) bad(`${name(c)} is ${Math.round(r.width)} x ${Math.round(r.height)} px (under 44)`);
+    const s = scroller(c);
+    const box = s ? s.getBoundingClientRect() : { left: 0, right: W, top: 0, bottom: H };
+    if (r.left < box.left - 1 || r.right > box.right + 1 || (!s && (r.top < -1 || r.bottom > H + 1))) bad(`${name(c)} is outside the screen or its scrolling area`);
+    // Inside a scrolling area: not below it with the area unable to scroll there.
+    if (s && r.top > box.bottom + s.scrollHeight) bad(`${name(c)} cannot be scrolled to`);
+  }
+  // Text and pictures too: cut off by the screen with nothing to scroll.
+  for (const b of blocks) {
+    const r = b.getBoundingClientRect();
+    if (!scroller(b) && (r.top < -1 || r.bottom > H + 1 || r.left < -1 || r.right > W + 1)) bad(`${name(b)} is cut off by the screen`);
+  }
+  const all = controls.concat(blocks);
+  for (let i = 0; i < controls.length; i++) {
+    for (let j = 0; j < all.length; j++) {
+      const a = controls[i], b = all[j];
+      if (a === b || a.contains(b) || b.contains(a) || (j < controls.length && j < i)) continue;
+      if (cross(visible(a), visible(b))) bad(`${name(a)} overlaps ${name(b)}`);
+    }
+  }
+  for (const el of [...root.querySelectorAll('*')].filter(inScope)) {
+    if (el.matches('svg, svg *, input, img, .dpad-wrap, .pad-area, main, #tab-remote')) continue;
+    const cs = win.getComputedStyle(el);
+    const clipped = cs.textOverflow === 'ellipsis' || cs.webkitLineClamp !== 'none' && cs.webkitLineClamp !== '' || /(auto|scroll)/.test(cs.overflowY + cs.overflowX);
+    if (clipped) continue;
+    if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) bad(`${name(el)}: its content is wider than it (${el.scrollWidth} > ${el.clientWidth})`);
+    if (el.scrollHeight > el.clientHeight + 1 && el.clientHeight > 0 && cs.overflowY !== 'visible') bad(`${name(el)}: its text is cut off`);
+  }
+  if (d.documentElement.scrollWidth > W + 1) bad(`the page scrolls sideways (${d.documentElement.scrollWidth} > ${W})`);
+  const main = d.getElementById('main');
+  if (!layers.length && !cover && !d.getElementById('tab-remote').hidden && main.scrollHeight > main.clientHeight + 1)
+    bad(`the Remote tab scrolls (${main.scrollHeight} > ${main.clientHeight})`);
+  const text = root.innerText || '';
+  const dev = /\b(TODO|FIXME|XXX|lorem|undefined|NaN|null)\b|\[object/.exec(text);
+  if (dev) bad(`dev text on screen: "${dev[0]}"`);
+  return { found, controls: controls.length };
+}
+
+// The audit itself: a page made wrong on purpose must be caught on each count.
+async function auditCatches() {
+  const f = document.createElement('iframe');
+  Object.assign(f.style, { width: '375px', height: '560px', position: 'absolute', opacity: '0.01' });
+  f.srcdoc = '<div id="app" style="height:100%"><main id="main" style="position:relative;height:100%"><section id="tab-remote" hidden></section>' +
+    '<button id="tiny" style="width:30px;height:30px">x</button>' +
+    '<button id="a" style="position:absolute;left:0;top:100px;width:60px;height:60px">a</button>' +
+    '<button id="b" style="position:absolute;left:20px;top:120px;width:60px;height:60px">b</button>' +
+    '<button id="off" style="position:absolute;left:340px;top:200px;width:80px;height:60px">off</button>' +
+    '<h2 style="position:absolute;top:-40px">cut</h2><div id="wide" style="width:60px;white-space:nowrap">a line far too long for its box</div><p>undefined</p></main></div>';
+  document.body.appendChild(f);
+  await new Promise((resolve) => { f.onload = resolve; });
+  const found = auditFrame(f.contentWindow, 'fixture').found.join('\n');
+  f.remove();
+  check(/#tiny.*under 44/.test(found), 'audit: catches a target under 44 px');
+  check(/#a .*overlaps #b/.test(found), 'audit: catches two controls overlapping');
+  check(/#off.*outside the screen/.test(found), 'audit: catches a control off the screen');
+  check(/#wide.*wider than it/.test(found), 'audit: catches text running out of its box');
+  check(/scrolls sideways/.test(found), 'audit: catches a page that scrolls sideways');
+  check(/dev text/.test(found), 'audit: catches leftover dev text');
+  check(/h2 "cut" is cut off/.test(found), 'audit: catches text cut off by the screen');
+}
+
+async function layoutAudit() {
+  await auditCatches();
+  const host = document.createElement('div');
+  Object.assign(host.style, { position: 'absolute', left: '0', top: '0', opacity: '0.01' });
+  document.body.appendChild(host);
+  let screens = 0, controls = 0;
+  for (const screen of SCREENS) {
+    for (const size of SIZES) {
+      const f = await frame(screen, size, host);
+      let res;
+      try { res = auditFrame(f.contentWindow, `${screen} @ ${size.join('x')}`); }
+      catch (e) { res = { found: [`${screen} @ ${size.join('x')}: cannot look inside the frame (${e.message}); run with --allow-file-access-from-files`], controls: 0 }; }
+      f.remove();
+      screens++;
+      controls += res.controls;
+      for (const p of res.found) check(false, p);
+    }
+  }
+  check(true, `layout: ${screens} screens (${SCREENS.length} states x ${SIZES.length} sizes), ${controls} controls checked`);
+}
+
+const grid = new URLSearchParams(location.search).get('grid');
+if (grid) {
+  document.body.style.cssText = 'margin:0;background:#333;display:flex;gap:16px;align-items:flex-start;padding:16px;font:14px sans-serif;color:#ccc';
+  document.getElementById('results').remove();
+  for (const size of SIZES) frame(grid, size, document.body);
+} else {
+  layoutAudit().then(() => {
+    out.push(failed ? `${failed} FAILED` : 'ALL PASSED');
+    document.getElementById('results').textContent = out.join('\n');
+  });
+}
 </script>
 </body>
 </html>
