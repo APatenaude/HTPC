@@ -3,52 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-/// <summary>Windows master volume through Core Audio (IAudioEndpointVolume).</summary>
+/// <summary>
+/// Windows' volume and mute on the default output (Core Audio: CoreAudio, AudioOutputs.cs, which
+/// also says what the volume is when the output changes).
+/// </summary>
 sealed class AudioVolume
 {
-    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator { }
-
-    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IMMDeviceEnumerator
-    {
-        [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
-        [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
-    }
-
-    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IMMDevice
-    {
-        [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object endpoint);
-    }
-
-    // Methods in vtable order up to the ones used (endpointvolume.h).
-    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IAudioEndpointVolume
-    {
-        [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
-        [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
-        [PreserveSig] int GetChannelCount(out uint count);
-        [PreserveSig] int SetMasterVolumeLevel(float levelDb, ref Guid context);
-        [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid context);
-        [PreserveSig] int GetMasterVolumeLevel(out float levelDb);
-        [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
-        [PreserveSig] int SetChannelVolumeLevel(uint channel, float levelDb, ref Guid context);
-        [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
-        [PreserveSig] int GetChannelVolumeLevel(uint channel, out float levelDb);
-        [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
-        [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
-        [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
-    }
-
-    static IAudioEndpointVolume Endpoint()
-    {
-        var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
-        Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(0 /* eRender */, 1 /* eMultimedia */, out var device));
-        var iid = typeof(IAudioEndpointVolume).GUID;
-        Marshal.ThrowExceptionForHR(device.Activate(ref iid, 23 /* CLSCTX_ALL */, IntPtr.Zero, out var endpoint));
-        return (IAudioEndpointVolume)endpoint;
-    }
-
     // Without an audio device (the TV off on an HDMI-only box) every read fails: once a minute in the log is enough.
     static DateTime quietUntil;
     static void Warn(string message)
@@ -61,21 +21,13 @@ sealed class AudioVolume
     /// <summary>0 to 100, or null when there is no audio device.</summary>
     public int? Get()
     {
-        try
-        {
-            Marshal.ThrowExceptionForHR(Endpoint().GetMasterVolumeLevelScalar(out var level));
-            return (int)Math.Round(level * 100);
-        }
+        try { return CoreAudio.Level(null).Volume; }
         catch (Exception e) { Warn($"Reading volume: {e.Message}"); return null; }
     }
 
     public void Set(int percent)
     {
-        try
-        {
-            var context = Guid.Empty;
-            Marshal.ThrowExceptionForHR(Endpoint().SetMasterVolumeLevelScalar(Math.Clamp(percent, 0, 100) / 100f, ref context));
-        }
+        try { CoreAudio.SetVolume(null, percent); }
         catch (Exception e) { Warn($"Setting volume: {e.Message}"); }
     }
 
@@ -95,20 +47,12 @@ sealed class AudioVolume
     {
         get
         {
-            try
-            {
-                Marshal.ThrowExceptionForHR(Endpoint().GetMute(out var mute));
-                return mute;
-            }
+            try { return CoreAudio.Level(null).Muted; }
             catch (Exception e) { Warn($"Reading mute: {e.Message}"); return null; }
         }
         set
         {
-            try
-            {
-                var context = Guid.Empty;
-                Marshal.ThrowExceptionForHR(Endpoint().SetMute(value ?? false, ref context));
-            }
+            try { CoreAudio.SetMute(null, value ?? false); }
             catch (Exception e) { Warn($"Setting mute: {e.Message}"); }
         }
     }

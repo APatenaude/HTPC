@@ -370,5 +370,39 @@ static class BluetoothChecks
         var s4 = new SoundSwitcher();
         s4.Update(new[] { tv, stereo }, bt);
         T.Check("headphones already connected when the launcher starts: not switched", s4.Update(new[] { tv, stereo }, bt).SwitchTo is null);
+
+        T.Group("Bluetooth: the volume goes with the sound");
+        SoundLevel At(int v, bool muted = false) => new(v, muted);
+        // Windows remembers 100 for the headphones; the box is at 40 on the TV.
+        var s5 = new SoundSwitcher();
+        s5.Update(new[] { tv with { Level = At(40) } }, bt);
+        st = s5.Update(new[] { tv with { Level = At(40) }, stereo with { Level = At(100) }, handsFree }, bt);
+        T.Check("headphones connect: switched to at the TV's 40, set before the switch", st.SwitchTo == "bt-stereo" && st.Carry == ("bt-stereo", At(40)), $"{st.Carry}");
+        st = s5.Update(new[] { tv with { IsDefault = false, Level = At(40) }, stereo with { IsDefault = true, Level = At(40) }, handsFree }, bt);
+        T.Check("next look, at 40: nothing to carry", st.Carry is null && st.SwitchTo is null);
+        st = s5.Update(new[] { tv with { IsDefault = false, Level = At(40) }, stereo with { IsDefault = true, Level = At(25) }, handsFree }, bt);
+        T.Check("turned down to 25 on the headphones: left alone", st.Carry is null && st.SwitchTo is null);
+        st = s5.Update(new[] { tv with { Level = At(80) } }, bt);
+        T.Check("headphones go, Windows picks the TV (its own 80): the TV gets their last 25", st.SwitchTo is null && st.Carry == ("tv", At(25)), $"{st.Carry}");
+        T.Equal("... and says where sound is", "Sound is back on TCL TV (HDMI)", st.Announce);
+        st = s5.Update(new[] { tv with { Level = At(25) } }, bt);
+        T.Check("settled at 25: quiet", st.Carry is null && st.Announce is null);
+
+        var s6 = new SoundSwitcher();
+        s6.Update(new[] { tv with { Level = At(40, muted: true) }, usb with { IsDefault = false, Level = At(58) } }, bt);
+        st = s6.Update(new[] { tv with { IsDefault = false, Level = At(40, muted: true) }, usb with { IsDefault = false, Level = At(58) }, stereo with { IsDefault = true, Level = At(100) } }, bt);
+        T.Check("Windows made the headphones the default itself: they get the TV's level after, mute included", st.SwitchTo is null && st.Carry == ("bt-stereo", At(40, muted: true)), $"{st.Carry}");
+        s6.Update(new[] { tv with { IsDefault = false, Level = At(40, muted: true) }, usb with { IsDefault = false, Level = At(58) }, stereo with { IsDefault = true, Level = At(35) } }, bt);
+        st = s6.Update(new[] { tv with { IsDefault = false, Level = At(40, muted: true) }, usb with { Level = At(58) } }, bt);
+        T.Check("headphones go, Windows picks the USB speakers: back to the TV at the headphones' 35", st.SwitchTo == "tv" && st.Carry == ("tv", At(35)), $"{st.SwitchTo} {st.Carry}");
+
+        var s7 = new SoundSwitcher();
+        s7.Update(new[] { tv with { Level = At(40) }, stereo with { Level = At(40) } }, bt);
+        st = s7.Update(new[] { tv with { IsDefault = false, Level = At(40) }, stereo with { IsDefault = true, Level = At(20) } }, bt);
+        T.Check("switched in Settings (the level went along there), then turned down: not undone", st.Carry is null && st.Announce == "Sound now plays on Headphones", $"{st.Carry}");
+
+        var s8 = new SoundSwitcher();
+        s8.Update(new[] { tv }, bt);
+        T.Check("levels unreadable: switched without one", s8.Update(new[] { tv, stereo }, bt) is { SwitchTo: "bt-stereo", Carry: null });
     }
 }

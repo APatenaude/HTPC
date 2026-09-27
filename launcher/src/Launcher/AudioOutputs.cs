@@ -9,12 +9,16 @@ namespace Htpc.Launcher;
 /// panel itself uses (as do SoundSwitch and the user's own sound-switch script), stable since
 /// Windows 7. All three roles are set (console, multimedia, communications) so every app
 /// follows. If it fails, Settings shows the list without switching.
+///
+/// The volume is one level for the box, whatever plays the sound: the level the slider shows.
+/// Windows keeps a volume per output (the TV's HDMI output sat at 100 while the speakers were at
+/// 58), so a switch gives the new output the level the box is at before it becomes the default:
+/// nothing plays louder or quieter for a moment, and the slider stays true. The same goes when
+/// sound follows Bluetooth headphones (SoundSwitcher, SoundSwitch.cs).
 /// </summary>
 static class AudioOutputs
 {
     public sealed record Output(string Id, string Name, bool IsDefault);
-
-    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator { }
 
     // Methods in vtable order up to the ones used (mmdeviceapi.h).
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -81,12 +85,14 @@ static class AudioOutputs
     public static List<Output> List()
     {
         var list = new List<Output>();
+        object? enumerator = null;
         try
         {
-            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            enumerator = CoreAudio.NewEnumerator();
+            var devicesOf = (IMMDeviceEnumerator)enumerator;
             string? defaultId = null;
-            if (enumerator.GetDefaultAudioEndpoint(eRender, 1 /* eMultimedia */, out var d) == 0) d.GetId(out defaultId);
-            Marshal.ThrowExceptionForHR(enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, out var devices));
+            if (devicesOf.GetDefaultAudioEndpoint(eRender, 1 /* eMultimedia */, out var d) == 0) d.GetId(out defaultId);
+            Marshal.ThrowExceptionForHR(devicesOf.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, out var devices));
             devices.GetCount(out var count);
             for (uint i = 0; i < count; i++)
             {
@@ -96,6 +102,7 @@ static class AudioOutputs
             }
         }
         catch (Exception e) { Log.Warn($"Listing sound outputs: {e.Message}"); }
+        finally { CoreAudio.Release(enumerator); }
         return list;
     }
 
@@ -108,16 +115,207 @@ static class AudioOutputs
         finally { PropVariantClear(ref value); }
     }
 
-    /// <summary>Makes the output Windows' default for every role; false if Windows refused.</summary>
-    public static bool SetDefault(string id)
+    static readonly object Switching = new();   // one switch at a time (Left/Right in Settings can come quickly)
+
+    /// <summary>
+    /// Settings › Sound: makes the output the default at the level the box is at now (the
+    /// default output's, read just before). False if Windows refused.
+    /// </summary>
+    public static bool SwitchKeepingLevel(string id)
     {
+        lock (Switching) return SetDefault(id, CoreAudio.TryLevel(null));
+    }
+
+    /// <summary>
+    /// Makes the output Windows' default for every role. The level (when known) is set on it
+    /// first, so it never plays at the level Windows last kept for it. False if Windows refused.
+    /// </summary>
+    public static bool SetDefault(string id, SoundLevel? level)
+    {
+        lock (Switching)
+        {
+            var before = CoreAudio.TryLevel(id);
+            if (level is { } l && l != before)
+            {
+                try { CoreAudio.SetLevel(id, l); }
+                catch (Exception e) { Log.Warn($"Sound output {id}: setting the level first: {e.Message}"); }
+            }
+            try
+            {
+                var policy = (IPolicyConfig)new PolicyConfigClient();
+                for (var role = 0; role < 3; role++) Marshal.ThrowExceptionForHR(policy.SetDefaultEndpoint(id, role));
+                Log.Info($"Sound output: {id} at {level?.ToString() ?? "its own level"} (it was at {before?.ToString() ?? "?"}; now {CoreAudio.TryLevel(null)?.ToString() ?? "?"})");
+                return true;
+            }
+            catch (Exception e) { Log.Warn($"Switching sound output: {e.Message}"); return false; }
+        }
+    }
+
+    /// <summary>Gives an output a level without switching to it (Windows already did); false if it failed.</summary>
+    public static bool SetLevel(string id, SoundLevel level)
+    {
+        lock (Switching)
+        {
+            try
+            {
+                var before = CoreAudio.TryLevel(id);
+                CoreAudio.SetLevel(id, level);
+                Log.Info($"Sound output {id}: level {level} (it was at {before?.ToString() ?? "?"})");
+                return true;
+            }
+            catch (Exception e) { Log.Warn($"Sound output {id}: setting the level: {e.Message}"); return false; }
+        }
+    }
+}
+
+/// <summary>An output's volume (0 to 100) and mute: Windows keeps both for each output.</summary>
+readonly record struct SoundLevel(int Volume, bool Muted)
+{
+    public override string ToString() => Muted ? $"{Volume} (muted)" : $"{Volume}";
+}
+
+/// <summary>
+/// What the volume (AudioVolume), the outputs list (AudioOutputs) and the Bluetooth sound check
+/// (AudioEndpoints) share in Core Audio: the device enumerator and each output's own level.
+///
+/// Windows' device enumerator is one object per process, and .NET gives one wrapper per COM
+/// object. Made with "new" on a [ComImport] class, that wrapper takes the class's type: the
+/// three files each had their own class, so "new" threw InvalidCastException ("Specified cast
+/// is not valid") while another file's wrapper was still alive, until the garbage collector
+/// happened to take it. On the box (27 Sept) the outputs list came up empty and, right after a
+/// switch, the volume could not be read, so the slider showed 0. NewEnumerator gives each
+/// caller a wrapper of its own (GetUniqueObjectForIUnknown), released after use.
+/// </summary>
+static class CoreAudio
+{
+    [DllImport("ole32.dll")] static extern int CoCreateInstance(ref Guid clsid, IntPtr outer, int context, ref Guid iid, out IntPtr instance);
+
+    static readonly Guid EnumeratorClass = new("BCDE0395-E52F-467C-8E3D-C4579291692E"), IUnknown = new("00000000-0000-0000-C000-000000000046");
+
+    // Methods in vtable order up to the ones used (mmdeviceapi.h, endpointvolume.h).
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDeviceEnumerator
+    {
+        [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+        [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+        [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDevice
+    {
+        [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object endpoint);
+    }
+
+    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioEndpointVolume
+    {
+        [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int GetChannelCount(out uint count);
+        [PreserveSig] int SetMasterVolumeLevel(float levelDb, ref Guid context);
+        [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid context);
+        [PreserveSig] int GetMasterVolumeLevel(out float levelDb);
+        [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig] int SetChannelVolumeLevel(uint channel, float levelDb, ref Guid context);
+        [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
+        [PreserveSig] int GetChannelVolumeLevel(uint channel, out float levelDb);
+        [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+        [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
+        [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    }
+
+    const int eRender = 0, eMultimedia = 1, CLSCTX_ALL = 23;
+
+    /// <summary>A wrapper of the device enumerator for this caller alone; Release it after use.</summary>
+    public static object NewEnumerator()
+    {
+        var clsid = EnumeratorClass;
+        var iid = IUnknown;
+        Marshal.ThrowExceptionForHR(CoCreateInstance(ref clsid, IntPtr.Zero, CLSCTX_ALL, ref iid, out var unknown));
+        try { return Marshal.GetUniqueObjectForIUnknown(unknown); }
+        finally { Marshal.Release(unknown); }
+    }
+
+    public static void Release(object? o)
+    {
+        if (o is not null && Marshal.IsComObject(o)) Marshal.ReleaseComObject(o);
+    }
+
+    /// <summary>The output's level (null id: the default output); throws when it cannot be read (no audio device).</summary>
+    public static SoundLevel Level(string? id) => WithVolume(id, LevelOf);
+
+    /// <summary>Level, or null.</summary>
+    public static SoundLevel? TryLevel(string? id)
+    {
+        try { return Level(id); }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>The level of a device another file listed (its own IMMDevice wrapper); null if unreadable.</summary>
+    public static SoundLevel? LevelOfDevice(object device)
+    {
+        object? endpoint = null;
         try
         {
-            var policy = (IPolicyConfig)new PolicyConfigClient();
-            for (var role = 0; role < 3; role++) Marshal.ThrowExceptionForHR(policy.SetDefaultEndpoint(id, role));
-            Log.Info($"Sound output: {id}");
-            return true;
+            var iid = typeof(IAudioEndpointVolume).GUID;
+            if (((IMMDevice)device).Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out endpoint) != 0) return null;
+            return LevelOf((IAudioEndpointVolume)endpoint);
         }
-        catch (Exception e) { Log.Warn($"Switching sound output: {e.Message}"); return false; }
+        catch (Exception) { return null; }
+        finally { Release(endpoint); }
+    }
+
+    public static void SetVolume(string? id, int percent) => WithVolume(id, v =>
+    {
+        var context = Guid.Empty;
+        Marshal.ThrowExceptionForHR(v.SetMasterVolumeLevelScalar(Math.Clamp(percent, 0, 100) / 100f, ref context));
+        return true;
+    });
+
+    public static void SetMute(string? id, bool muted) => WithVolume(id, v =>
+    {
+        var context = Guid.Empty;
+        Marshal.ThrowExceptionForHR(v.SetMute(muted, ref context));
+        return true;
+    });
+
+    /// <summary>Volume and mute in one go: unmuting comes after the volume, muting before it.</summary>
+    public static void SetLevel(string? id, SoundLevel level) => WithVolume(id, v =>
+    {
+        var context = Guid.Empty;
+        if (level.Muted) Marshal.ThrowExceptionForHR(v.SetMute(true, ref context));
+        Marshal.ThrowExceptionForHR(v.SetMasterVolumeLevelScalar(Math.Clamp(level.Volume, 0, 100) / 100f, ref context));
+        if (!level.Muted) Marshal.ThrowExceptionForHR(v.SetMute(false, ref context));
+        return true;
+    });
+
+    static SoundLevel LevelOf(IAudioEndpointVolume v)
+    {
+        Marshal.ThrowExceptionForHR(v.GetMasterVolumeLevelScalar(out var level));
+        Marshal.ThrowExceptionForHR(v.GetMute(out var muted));
+        return new SoundLevel((int)Math.Round(level * 100), muted);
+    }
+
+    // The output's IAudioEndpointVolume for one use; every COM object released after.
+    static T WithVolume<T>(string? id, Func<IAudioEndpointVolume, T> use)
+    {
+        object? enumerator = null, device = null, endpoint = null;
+        try
+        {
+            enumerator = NewEnumerator();
+            var devices = (IMMDeviceEnumerator)enumerator;
+            Marshal.ThrowExceptionForHR(id is null ? devices.GetDefaultAudioEndpoint(eRender, eMultimedia, out var d) : devices.GetDevice(id, out d));
+            device = d;
+            var iid = typeof(IAudioEndpointVolume).GUID;
+            Marshal.ThrowExceptionForHR(d.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out endpoint));
+            return use((IAudioEndpointVolume)endpoint);
+        }
+        finally
+        {
+            Release(endpoint);
+            Release(device);
+            Release(enumerator);
+        }
     }
 }
