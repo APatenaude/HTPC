@@ -1,10 +1,10 @@
 /* App library and tile editing (library.js). Built on app.css tokens, laid out on the 1920x1080
    stage, controller-driven. Focus rings come from app.css .focused. */
 
-/* ---- Tile options (Start on a home tile) ---- */
+/* ---- Tile options (Start on a home tile): beside its tile (library.js placeByTile) ---- */
 #tileopts { background: rgba(13, 14, 17, 0.45); }
 .to-panel {
-  position: absolute; right: 96px; top: 220px; width: 460px; box-sizing: border-box; padding: 20px;
+  position: absolute; left: 1364px; top: 220px; width: 460px; box-sizing: border-box; padding: 20px;
   border-radius: 28px; background: var(--row); box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 1px var(--track);
   display: flex; flex-direction: column; gap: 6px; animation: pop 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
@@ -53,6 +53,19 @@
 .lc-name.grow { flex-grow: 1; }
 .lc-desc { flex-grow: 1; font-size: 19px; line-height: 1.35; color: var(--text-2); }
 .lc-status { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 700; }
+/* Installing (or waiting to): a dashed blue edge (as its home tile), the app's icon dimmed, a
+   spinner and a bar along the bottom. Did not install: a dashed amber edge. */
+.lc-app { position: relative; overflow: hidden; }
+.lc-app.busy { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.lc-app.busy .lc-top > span:first-child { opacity: 0.45; }
+.lc-app.failed { outline: 2px dashed var(--warn); outline-offset: -2px; }
+.lc-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--track); }
+.lc-bar span, .pbar span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.lc-bar.going span, .pbar.going span { animation: going 1.4s ease-in-out infinite; }
+@keyframes going { 50% { opacity: 0.35; } }
+.lc-spin, .tile .pbadge .lc-spin { flex-shrink: 0; width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%;
+  border: 3px solid #33373F; border-top-color: var(--accent); animation: lc-spin 0.9s linear infinite; }
+@keyframes lc-spin { to { transform: rotate(360deg); } }
 .lc-grid.sites { grid-auto-rows: 92px; }
 .lc-site {
   display: flex; align-items: center; gap: 14px; height: 92px; padding: 0 24px; box-sizing: border-box;
@@ -163,7 +176,28 @@
 .il-fill { height: 12px; border-radius: 6px; background: var(--accent); transition: width 0.3s ease; }
 .il-note { font-size: 22px; color: var(--muted); }
 
+/* A home tile for an app being installed (library.js onTiles): dashed blue edge, its icon
+   dimmed, what it is doing at the top, a bar at the bottom; amber when it did not install. */
+.tile.pending { background: transparent; border: 2px dashed var(--accent); }
+.tile.pending .pglyph { display: flex; opacity: 0.4; }
+.tile.pending .name { color: var(--text-2); }
+.tile .pbadge { position: absolute; top: 20px; left: 24px; display: flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 700; color: var(--accent); }
+.tile .pbar { position: absolute; left: 28px; right: 28px; bottom: 22px; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.tile.pending.failed { border-color: var(--warn); }
+.tile.pending.failed .pbadge { color: var(--warn); }
+.tile.pending.focused { background: var(--tile-focus); }
+
 /* The "Add tile" home tile: dashed outline */
 .tile.add { background: transparent; border: 2px dashed var(--key-edge); color: var(--muted); }
 .tile.add.focused { background: var(--tile-focus); border-color: var(--accent); color: #FFFFFF; }
-.tile.moving { box-shadow: 0 0 0 4px var(--accent), 0 28px 64px rgba(0, 0, 0, 0.6); opacity: 0.92; }
+/* Moving a tile (Tile options > Move): it is lifted and shown where it will land, the rest of
+   the grid (the "+" tile too, so nothing reflows) steps back. */
+.tile.moving {
+  z-index: 1; transform: scale(1.06); background: var(--accent-bg); border-color: var(--accent); color: #FFFFFF;
+  box-shadow: 0 0 0 4px var(--accent), 0 28px 64px rgba(0, 0, 0, 0.6) !important;
+}
+.tile.moving::after {
+  content: 'Moving'; position: absolute; top: 20px; left: 24px; padding: 4px 12px; border-radius: 12px;
+  background: var(--accent); color: var(--bg); font-size: 20px; font-weight: 700;
+}
+.tiles:has(.tile.moving) > :not(.moving) { opacity: 0.45; }

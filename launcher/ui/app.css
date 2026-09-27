@@ -48,14 +48,16 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .view.on { display: flex; animation: view-in 0.22s ease-out; }
 @keyframes view-in { from { opacity: 0; transform: scale(1.015); } to { opacity: 1; transform: none; } }
 #menu.on { animation: none; }   /* the panel slides in instead */
-#home.behind { animation: none; }
+#home.behind, #home.stay { animation: none; }   /* stay: back from under an overlay, it never left */
+#home.behind .hints { visibility: hidden; }    /* the overlay's hints are the ones that count */
 
 /* Coming back from a hidden launcher or standby: fade up from dark */
 #stage { transition: opacity 0.35s ease-out; }
 #stage.blank { opacity: 0; transition: none; }
 
-/* Home tiles appear in a short cascade */
-#home.on .tile { animation: tile-in 0.35s ease-out both; }
+/* Home tiles appear in a short cascade. Backwards, not both: an animation that holds its end
+   state overrides the tile's own transform and opacity (the focused tile's zoom, move mode). */
+#home.on .tile { animation: tile-in 0.35s ease-out backwards; }
 #home.on .tile:nth-child(2) { animation-delay: 0.03s; }
 #home.on .tile:nth-child(3) { animation-delay: 0.06s; }
 #home.on .tile:nth-child(4) { animation-delay: 0.09s; }
@@ -90,7 +92,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
   aspect-ratio: 16 / 10; border-radius: 28px; box-sizing: border-box;
   background: var(--tile); border: 2px solid var(--tile-edge); color: #D9D8D4;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, translate 0.22s ease, opacity 0.15s ease;
 }
 .tile .name { font-family: var(--display); font-weight: 600; font-size: 34px; letter-spacing: -0.01em; }
 .tile .badge { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
@@ -110,6 +112,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
   font-family: var(--display); font-weight: 700; font-size: 22px;
 }
 .key.wide { padding: 0 16px; font-size: 20px; }
+.hint .key + .key { margin-left: -6px; }   /* two buttons for one label (LB RB) */
 .hint span:last-child { font-size: 26px; line-height: 1; }
 #power .hints, #timer .hints { position: absolute; left: 0; bottom: 0; }
 
@@ -136,6 +139,23 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .quicks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .quick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 116px; border-radius: 22px; background: var(--row); font-size: 22px; color: #D9D8D4; }
 .panel .hints { margin: auto -48px 0; padding: 0 48px; }
+
+/* The Home menu over an app: its buttons, beside the panel (buttons.js menuAppCard) */
+#menu-app { position: absolute; right: 96px; bottom: 96px; width: 800px; }
+.ma-card {
+  display: flex; flex-direction: column; gap: 22px; padding: 30px 36px; border-radius: 28px; background: var(--panel);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 1px var(--track); animation: pop 0.2s ease-out;
+}
+.ma-head { display: flex; align-items: center; gap: 16px; }
+.ma-head b { font-family: var(--display); font-weight: 600; font-size: 34px; }
+.ma-how { margin-left: auto; padding: 6px 14px; border-radius: 14px; background: var(--track); font-size: 20px; color: var(--text-2); }
+.ma-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 28px; }
+.ma-row { display: flex; align-items: center; gap: 14px; min-width: 0; font-size: 23px; color: #D9D8D4; }
+.ma-row > span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ma-row .key, .ma-foot .key { flex-shrink: 0; min-width: 40px; height: 40px; font-size: 18px; }
+.ma-foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 20px;
+  border-top: 1px solid var(--track); font-size: 22px; color: var(--text-2); }
+.ma-foot > span { display: flex; align-items: center; gap: 10px; }
 .empty { font-size: 24px; color: var(--muted); padding: 8px 4px; }
 
 /* Power and timer */
@@ -177,7 +197,10 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .spane { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Room at the bottom: the pane scrolls to the focus (app.js scrollIntoBox) with its ring clear of the hints */
 .spane main { flex-grow: 1; min-height: 0; padding: 72px 96px 32px 80px; display: flex; flex-direction: column; gap: 14px; }
-.spane main > :not(.wifi-scroll) { flex-shrink: 0; }   /* not squeezed: the pane scrolls instead (a list that scrolls itself still fits) */
+/* Scrolled into view (the pane, a list scrolling itself), a row keeps room around it for its focus ring */
+.spane [data-nav] { scroll-margin: 20px 0; }
+/* Not squeezed: the pane scrolls instead. A list that scrolls itself (Wi-Fi, Bluetooth, Button maps) still fits in it. */
+.spane main > :not(.wifi-scroll):not(.mlist) { flex-shrink: 0; }
 .spane header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
 .spane h1 { font-size: 48px; }
 .spane header p { margin: 0; font-size: 26px; color: var(--text-2); }

@@ -21,17 +21,19 @@
     const tiles = $('tiles');
     let card = $('phone-card');
     if (!wanted()) { if (card) card.remove(); shownUrl = null; return; }
-    // renderTiles rewrites the tiles only when they change: the card is added again then.
+    // renderTiles updates the tiles in place and leaves the card be: drawn again only for a new address.
     if (card && card.parentNode === tiles && state.phone.url === shownUrl) return;
-    if (state.phone.url !== shownUrl) { qr = qrSvg(state.phone.url, 176); shownUrl = state.phone.url; }
+    if (state.phone.url !== shownUrl) { qr = qrSvg(state.phone.url, 148); shownUrl = state.phone.url; }
     if (!card) { card = document.createElement('div'); card.id = 'phone-card'; }
+    // The QR code on the left; on the right what to do, then what the box is waiting for and
+    // "Not now" on one line at the bottom.
     card.innerHTML =
       `<div class="pc-qr">${qr}</div>` +
       '<div class="pc-text"><b>Add the remote to your phone</b>' +
-        '<span>Point your phone’s camera at the code, then add it to your home screen ' +
-        '(iPhone: Share › Add to Home Screen; Android: ⋮ › Install app).</span>' +
-        '<span class="pc-wait"><span></span>Waiting for your phone</span>' +
-        '<div class="pc-btn" data-nav data-id="phone-card-hide" data-act="phone-card-hide">Not now</div></div>';
+        '<span>Scan the code with your phone’s camera, then add the page to your home screen ' +
+        '(Share › Add to Home Screen, or ⋮ › Install app).</span>' +
+        '<div class="pc-foot"><span class="pc-wait"><span></span>Waiting for your phone</span>' +
+        '<div class="pc-btn" data-nav data-id="phone-card-hide" data-act="phone-card-hide">Not now</div></div></div>';
     tiles.appendChild(card);
   }
 

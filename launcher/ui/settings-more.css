@@ -79,7 +79,7 @@
 .mrow.focused { background: var(--tile-focus); }
 .mname { flex-grow: 1; font-size: 28px; }
 .mpreset { padding: 6px 16px; border-radius: 16px; background: var(--chip); font-size: 21px; color: #D9D8D4; }
-.mchanges { width: 140px; font-size: 21px; color: var(--warn); }
+.mchanges { width: 220px; text-align: right; font-size: 21px; color: var(--warn); }
 
 /* Button map editor */
 #buttons { flex-direction: column; background: var(--bg); }
@@ -87,12 +87,12 @@
 .bmain { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
 .bmain header { display: flex; flex-direction: column; gap: 8px; }
 .bmain h1 { font-size: 48px; }
-.bpreset { display: flex; align-items: center; gap: 18px; }
-.blabel { font-size: 23px; color: var(--muted); white-space: nowrap; flex-shrink: 0; }
-.bpreset .seg { background: var(--row-2); }
-.bpreset .seg span { padding: 10px 22px; font-size: 23px; }
-.bpreset .seg.focused { box-shadow: 0 0 0 4px var(--accent) !important; }
-.bnote { font-size: 21px; line-height: 1.3; color: var(--muted); }
+/* The preset row: "Preset: Mouse", how many buttons differ from it (marked with a dot), Change */
+.bpreset.srow { min-height: 88px; padding: 14px 28px; gap: 24px; }
+.bpreset .label { font-size: 28px; }
+.bpreset .label b { font-weight: 700; }
+.bpreset .caption { display: flex; align-items: center; gap: 10px; font-size: 22px; }
+.bpreset .value { gap: 8px; font-size: 24px; font-weight: 400; color: var(--text-2); }
 .bgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; }
 .brow { display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 18px; box-sizing: border-box; border-radius: 16px; background: var(--row-2); }
 .brow.focused, .brow.editing { background: var(--tile-focus); }
@@ -110,12 +110,33 @@
   background: var(--row); box-shadow: inset 0 0 0 1px var(--track); display: flex; flex-direction: column; gap: 16px; min-height: 0;
 }
 .btitle { font-family: var(--display); font-weight: 600; font-size: 30px; }
-.bcats { display: flex; gap: 4px; }
-.bcat { padding: 8px 11px; border-radius: 16px; font-size: 19px; color: var(--muted); white-space: nowrap; }
+/* The picker's categories, LB and RB at their ends */
+.bcats { display: flex; align-items: center; gap: 2px; }
+.bcats .key { flex-shrink: 0; min-width: 0; height: 36px; padding: 0 10px; font-size: 16px; }
+.bcats .key:first-child { margin-right: 4px; }
+.bcats .key:last-child { margin-left: 4px; }
+.bcat { flex: 1; text-align: center; padding: 8px 4px; border-radius: 16px; font-size: 18px; color: var(--muted); white-space: nowrap; }
 .bcat.on { background: var(--track); color: #FFFFFF; font-weight: 700; }
-.blist { display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 6px 6px 14px; margin: 0 -6px -6px; }
+/* Lists that scroll (the picker, the presets, Button maps): room inside for the focus ring, and
+   their ends fade where there is more (buttons.js keepInView) */
+.blist { display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 8px; margin: 0 -8px -8px; min-height: 0; }
+.blist.more-down, .mlist.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent); }
+.blist.more-up, .mlist.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 56px), transparent); }
+.blist.more-up.more-down, .mlist.more-up.more-down {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
 .bitem { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 16px; box-sizing: border-box; flex-shrink: 0; border-radius: 14px; font-size: 22px; }
 .bitem .grow { flex-grow: 1; }
+.bitem.tall { padding: 14px 16px; }
+.bitem.tall .grow { display: flex; flex-direction: column; gap: 4px; }
+.bitem.tall b { font-size: 24px; }
+.bitem.tall small { font-size: 19px; line-height: 1.35; color: var(--muted); }
+/* What the focused button does (before A opens its choice) */
+.bnow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 0 22px;
+  border-radius: 18px; background: var(--tile-focus); box-shadow: inset 0 0 0 2px var(--track); }
+.bnow-value { font-size: 28px; font-weight: 700; }
+.bnow-cat { flex-shrink: 0; padding: 4px 12px; border-radius: 12px; background: var(--track); font-size: 18px; color: var(--text-2); }
 .bitem.on { background: var(--tile-focus); box-shadow: inset 0 0 0 2px var(--accent); }
 .bitem.focused { background: var(--tile-focus); box-shadow: 0 0 0 4px var(--accent) !important; }
 .bcheck { display: flex; color: var(--ok); }

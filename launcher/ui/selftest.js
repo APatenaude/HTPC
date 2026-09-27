@@ -333,6 +333,150 @@
   check('TV: the input is not changed by moving over it', state.tv.profile.input === 1);
   reset('home');
 
+  // ---- Settings: a value changing redraws in place; the sleep timer set right there ----------------
+  state.section = 'sleep';
+  reset('settings');
+  const navSleep = sNode('s-sleep');
+  press('down');
+  check('Settings: moving through the sections keeps the list (its ring not drawn again)', sNode('s-sleep') === navSleep && sNode('s-tv').classList.contains('focused') && state.section === 'tv');
+  press('up');
+  setFocus(sNode('set-idleMinutes'));
+  const idleRow = sNode('set-idleMinutes'), timerRow = sNode('set-timer');
+  press('a'); press('right');
+  check('Settings: a stepper changing keeps its row (the ring is not drawn again)', sNode('set-idleMinutes') === idleRow && idleRow.classList.contains('focused') && idleRow.classList.contains('editing'));
+  press('a');
+  setFocus(sNode('set-stayAwakeWhilePlaying'));
+  const awakeRow = sNode('set-stayAwakeWhilePlaying');
+  press('a');
+  check('Settings: a toggle flipping keeps its row', sNode('set-stayAwakeWhilePlaying') === awakeRow && awakeRow.classList.contains('focused'));
+  state.timer = null;
+  setFocus(timerRow);
+  press('a');
+  check('Sleep timer: A picks the row, it does not open the timer screen', state.view === 'settings' && timerRow.classList.contains('editing'));
+  press('right');
+  check('Sleep timer: right sets 15 min, right there', state.view === 'settings' && state.timer && state.timer.label === '15 min' && lastSent('timer').minutes === 15 && sNode('set-timer') === timerRow);
+  press('right');
+  check('Sleep timer: right again, 30 min', state.timer && state.timer.label === '30 min' && lastSent('timer').minutes === 30);
+  press('left'); press('left');
+  check('Sleep timer: left back to Off', state.timer === null && lastSent('timer').minutes === 0);
+  press('left');
+  check('Sleep timer: left from Off goes round to This video ends', state.timer && state.timer.endsAt === 'video');
+  press('right');
+  press('a');
+  // A list that scrolls itself keeps the focus ring of its last row whole.
+  WifiUI.demo('wifi');
+  setFocus(sNode('s-wifi'));
+  const rows = [...$('settings').querySelectorAll('.wifi-scroll [data-nav]')];
+  setFocus(rows[rows.length - 1]);
+  const wl = $('settings').querySelector('.wifi-scroll').getBoundingClientRect(), wr = rows[rows.length - 1].getBoundingClientRect();
+  check('Wi-Fi: the last row of the list shows whole, its ring too', wr.bottom + 4 <= wl.bottom && wr.top >= wl.top, `${wr.bottom} / ${wl.bottom}`);
+  setFocus(rows[0]);
+  const w0 = rows[0].getBoundingClientRect(), wl0 = $('settings').querySelector('.wifi-scroll').getBoundingClientRect();
+  check('Wi-Fi: back on the first row, its ring shows whole', w0.top - 4 >= wl0.top, `${w0.top} / ${wl0.top}`);
+  reset('home');
+
+  // ---- Home: tiles updated in place, Tile options, moving a tile, an app installing -------------
+  const tileEl = (id) => $('tiles').querySelector(`[data-id="tile:${id}"]`);
+  state.current = null; state.backdrop = null;
+  onHost({ type: 'state', running: ['jellyfin'] });
+  reset('home');
+  const jf = tileEl('jellyfin'), yt = tileEl('youtube');
+  setFocus(jf);
+  press('x');
+  check('Home: X on a running tile asks to close it', state.view === 'confirm');
+  press('a');
+  check('Home: closed, back on home without its entrance again', state.view === 'home' && $('home').classList.contains('stay') && lastSent('close').id === 'jellyfin');
+  onHost({ type: 'state', running: [] });
+  check('Home: the app gone, only its tile changes (same elements, no badge)', tileEl('jellyfin') === jf && tileEl('youtube') === yt && !jf.querySelector('.badge'));
+
+  setFocus(tileEl('moonlight'));
+  press('start');
+  const panelR = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), mR = tileEl('moonlight').getBoundingClientRect();
+  check('Tile options: one hint bar (the home one hidden under it)', getComputedStyle($('home-hints')).visibility === 'hidden' && !!$('tileopts').querySelector('.hints'));
+  check('Tile options: beside the tile, level with it', panelR.left >= mR.right && panelR.top < mR.bottom && panelR.bottom > mR.top, `${panelR.left},${panelR.top} / ${mR.right},${mR.top}`);
+  press('b');
+  setFocus(tileEl('jellyfin'));
+  press('start');
+  const p2 = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), jR = tileEl('jellyfin').getBoundingClientRect();
+  check('Tile options: at the right edge, on the tile\'s left and on screen', p2.right <= jR.left && p2.left >= 0, `${p2.left}-${p2.right} / ${jR.left}`);
+  press('b');
+
+  setFocus(tileEl('moonlight'));
+  press('start');
+  press('a');                                       // Move
+  const mv = tileEl('moonlight');
+  check('Move: the tile is marked, the "+" tile stays (dimmed)', mv.classList.contains('moving') && tileEl('+add') && tileEl('+add').classList.contains('dim'));
+  press('right');
+  check('Move: it trades places with its neighbour, the same element', state.tiles.findIndex((t) => t.id === 'moonlight') === 5 && tileEl('moonlight') === mv && mv.classList.contains('focused'));
+  press('b');
+  check('Move: B puts it back', state.tiles.findIndex((t) => t.id === 'moonlight') === 4 && !state.moving);
+
+  // "Install and add to home": a tile shows it installing, then that it did not install.
+  const kodi = { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: '', type: 'app', state: 'install', canUninstall: true };
+  onHost({ type: 'library.catalog', apps: [kodi], sites: [] });
+  state.libraryAvailable = true;
+  EXT.actions.libcard(null, 'kodi');
+  EXT.actions.installBtn(null, 'home');
+  check('Install: asked with add to home', lastSent('library.install').id === 'kodi' && lastSent('library.install').addToHome === true);
+  onHost({ type: 'library.progress', current: { id: 'kodi', name: 'Kodi', action: 'install', phase: 'download', percent: 40 }, pending: [] });
+  reset('home');
+  check('Install: home shows a tile installing it, with the progress', tileEl('~kodi') && /Downloading/.test(tileEl('~kodi').textContent) && !!tileEl('~kodi').querySelector('.pbar'));
+  onHost({ type: 'library.progress', current: null, pending: [] });
+  onHost({ type: 'library.catalog', apps: [kodi], sites: [] });
+  check('Install: it did not install: the tile says so', tileEl('~kodi') && tileEl('~kodi').classList.contains('failed') && /Didn/.test(tileEl('~kodi').textContent));
+  setFocus(tileEl('~kodi'));
+  check('Install: its hints: A tries again, X removes', /Try again/.test($('home-hints').textContent) && /Remove/.test($('home-hints').textContent));
+  press('x');
+  check('Install: X takes the tile away', !tileEl('~kodi'));
+
+  // ---- Button maps: the list, the editor's preset row and the picker ---------------------------
+  mapsDemo();
+  reset('home');
+  go('maps');
+  const mNode = (id) => $('maps').querySelector(`[data-id="${id}"]`);
+  press('up');
+  check('Button maps: up on the first app stays there', focusId() === 'm-youtube', focusId());
+  for (let i = 0; i < 12; i++) press('down');
+  const mlist = $('maps').querySelector('.mlist').getBoundingClientRect(), last = mNode('m-_other').getBoundingClientRect();
+  check('Button maps: down to the last app, it stays and shows whole', focusId() === 'm-_other' && last.bottom <= mlist.bottom, `${focusId()} ${last.bottom} > ${mlist.bottom}`);
+  setFocus(mNode('m-twitch'));
+  press('a');
+  const bNode = (id) => $('buttons').querySelector(`[data-id="${id}"]`);
+  check('Editor: opens on a button, the preset row says how many differ', state.view === 'buttons' && focusId() === 'b-a' && /2 buttons changed/.test(bNode('b-preset').textContent));
+  press('up'); press('up'); press('up');
+  check('Editor: up goes to the preset row and stops there', focusId() === 'b-preset' && /Change preset/.test($('buttons').querySelector('.hints').textContent), focusId());
+  press('left');
+  check('Editor: left on the preset row changes nothing', mapApp('twitch').map.preset === 'mouse' && focusId() === 'b-preset');
+  press('a');
+  check('Editor: A on the preset row opens the presets, on the current one', focusId() === 'bp-mouse');
+  press('down'); press('a');
+  check('Editor: another preset with buttons changed asks first', state.view === 'ask' && mapApp('twitch').map.preset === 'mouse');
+  press('b'); press('b');
+  check('Editor: cancelled, B closes the presets as they were', state.view === 'buttons' && focusId() === 'b-preset' && mapApp('twitch').map.preset === 'mouse', focusId());
+  setFocus(bNode('b-start'));
+  press('a');
+  check('Editor: A on a button opens its choice, with LB RB for the categories', !!$('buttons').querySelector('.bcats .key') && /LB\s*RB\s*Category/.test($('buttons').querySelector('.hints').textContent));
+  const cat = () => $('buttons').querySelector('.bcat.on').textContent;
+  press('rb');
+  check('Editor: RB: the next category', cat() === 'Mouse', cat());
+  press('lb'); press('lb');
+  check('Editor: LB: the one before (round to the last)', cat() === 'Nothing', cat());
+  press('b');
+  check('Editor: B closes the choice, back on the button', !maps.picking && focusId() === 'b-start', focusId());
+  reset('home');
+
+  // ---- The Home menu over an app says what its buttons do ---------------------------------------
+  state.tiles.find((t) => t.id === 'twitch').running = true;
+  state.current = 'twitch';
+  go('menu');
+  const card = $('menu-app').textContent;
+  check('Menu over an app: its buttons beside the panel, and how to go back', /Twitch/.test(card) && /Enter/.test(card) && /Back to Twitch/.test(card) && /This menu/.test(card), card.slice(0, 80));
+  back();
+  state.current = null;
+  go('menu');
+  check('Menu over the home screen: no app card', $('menu-app').textContent === '');
+  reset('home');
+
   // ---- Report -------------------------------------------------------------------------------------
   press = realPress;   // eslint-disable-line no-global-assign
   console.log = log;
