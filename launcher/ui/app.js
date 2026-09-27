@@ -131,10 +131,12 @@ const POWER = [
   { id: 'shutdown', glyph: 'power', label: 'Shut down', caption: '' },
   { id: 'desktop', glyph: 'desktop', label: 'Desktop mode', caption: 'Normal Windows desktop, for maintenance' }
 ];
+// While the Windows desktop is up (desktop mode), its card leads back instead.
+const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close the Windows desktop and taskbar' };
 
 function renderPower() {
   POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
-  $('power-cards').innerHTML = POWER.map((p) =>
+  $('power-cards').innerHTML = POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
       `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join('');
   $('power-note').innerHTML = '';
@@ -306,10 +308,13 @@ function changeSetting(key, step) {
 
 function renderConfirm() {
   const c = state.confirm;
+  const [title, text, ok] = c.kind === 'desktop'
+    ? ['Switch to the Windows desktop?', 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.', 'Desktop mode']
+    : [`Close ${esc(c.name)}?`, 'It stops, and anything playing in it ends.', 'Close'];
   $('confirm-box').innerHTML =
-    `<h2>Close ${esc(c.name)}?</h2><p>It stops, and anything playing in it ends.</p>` +
+    `<h2>${title}</h2><p>${text}</p>` +
     '<div class="buttons">' +
-      `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">Close</div>` +
+      `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">${ok}</div>` +
       '<div class="button" data-nav data-id="confirm-cancel" data-act="cancel">Cancel</div>' +
     '</div>' +
     `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`;
@@ -464,7 +469,11 @@ function activate(el) {
     case 'home': state.current = null; state.backdrop = null; send({ type: 'home' }); reset('home'); break;
     case 'view': go(arg); break;
     case 'power': go('power'); break;
-    case 'power-action': send({ type: 'power', action: arg }); break;
+    case 'power-action':
+      // Desktop mode leaves the TV screens for the Windows desktop: asked once first.
+      if (arg === 'desktop') { state.confirm = { kind: 'desktop' }; go('confirm'); }
+      else send({ type: 'power', action: arg });
+      break;
     case 'timer': {
       const o = TIMER[Number(arg)];
       state.timer = o.minutes === 0 ? null : { label: o.label, endsAt: o.minutes === 'video' ? 'video' : Date.now() + o.minutes * 60000 };
@@ -472,7 +481,10 @@ function activate(el) {
       render();
       break;
     }
-    case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
+    case 'confirm-close':
+      send(state.confirm.kind === 'desktop' ? { type: 'power', action: 'desktop' } : { type: 'close', id: state.confirm.id });
+      back();
+      break;
     case 'tv-test': toast('Turning the TV off and back on…'); send({ type: 'tvTest' }); break;
     case 'tv-refresh': toast('Searching for TVs…'); send({ type: 'tvRefresh' }); break;
     case 'cancel': back(); break;
@@ -565,9 +577,9 @@ function onHost(msg) {
       if (msg.running) {
         for (const t of state.tiles) t.running = msg.running.includes(t.id);
         // The app the menu was opened over has closed: B and Home now lead home, not to it.
-        if (state.current && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
+        if (state.current && state.current !== 'desktop' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
-      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert']) if (k in msg) state[k] = msg[k];
+      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'desktop']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;

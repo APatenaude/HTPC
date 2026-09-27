@@ -11,7 +11,7 @@ namespace Htpc.Launcher;
 /// Apps open on top of this window. The Home button brings it back: a capture of the app's
 /// screen becomes the backdrop behind the Home menu while the app keeps running underneath.
 /// </summary>
-sealed class MainForm : Form
+sealed partial class MainForm : Form
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -114,13 +114,13 @@ sealed class MainForm : Form
         controller.Start();
         clock.Start();
         mouseWatch.Start();
-        try { await InitWebView(); }
-        catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
+        await StartWebView();
         // SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
         // launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
         await tv.Discover();
         var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
-        if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
+        if (options.Restarted) Log.Info("Started again by the watchdog: the TV is left as it is");
+        else if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
         else Log.Info($"Box up {uptime.TotalHours:0.#} h: the TV is left as it is");
     }
 
@@ -167,6 +167,7 @@ sealed class MainForm : Form
         {
             Log.Error($"WebView2 process failed: {args.ProcessFailedKind}");
             if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) core.Reload();
+            else if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited) ExitForRestart("the WebView2 browser process ended");
         };
         core.Navigate(setupMode ? "https://launcher.htpc/setup.html" : "https://launcher.htpc/index.html");
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
@@ -232,6 +233,7 @@ sealed class MainForm : Form
             case "switchTo": case "resume": SwitchTo(Str("id")!); break;
             case "close": apps.Close(Str("id")!); break;
             case "power": Power(Str("action")!); break;
+            case "restart": Power("restart"); break; // the setup wizard's Done screen
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
             case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
@@ -252,6 +254,7 @@ sealed class MainForm : Form
         volume = audio.Get() ?? 0,
         brightness,
         controller = controller.Connected,
+        desktop = desktop.Active,
         battery = controller.BatteryLevel,
         timer = sleepAt is null ? null : new { label = sleepLabel, endsAt = new DateTimeOffset(sleepAt.Value).ToUnixTimeMilliseconds() }
     };
@@ -498,7 +501,11 @@ sealed class MainForm : Form
             Log.Info($"Setup finished: starting {installed}");
             try
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(installed) { UseShellExecute = true });
+                // Through the watchdog when there is one: it keeps the launcher running from now on.
+                var watchdog = Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(File.Exists(watchdog) ? watchdog : installed) { UseShellExecute = true });
+                WatchdogPause.Clear();
+                Environment.ExitCode = 75; // a planned exit (hand-over), not a crash
                 Close();
                 return;
             }
@@ -551,6 +558,7 @@ sealed class MainForm : Form
 
     void SwitchTo(string id)
     {
+        if (id == DesktopMode.Id) { ShowDesktop(); return; }
         var window = apps.MainWindow(id);
         if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
         if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
@@ -584,7 +592,8 @@ sealed class MainForm : Form
     void ShowOver(CatalogApp? app, string view)
     {
         string? backdrop = null;
-        if (app is not null)
+        var overDesktop = app is null && desktop.Active;
+        if (app is not null || overDesktop)
         {
             try
             {
@@ -593,11 +602,11 @@ sealed class MainForm : Form
                 var name = $"screen-{DateTime.Now.Ticks}.jpg";
                 ScreenCapture.Save(Path.Combine(captureDir, name));
                 backdrop = $"https://capture.htpc/{name}";
-                Log.Info($"Home over {app.Id}: screen captured in {clock.ElapsedMilliseconds} ms");
+                Log.Info($"Home over {app?.Id ?? DesktopMode.Id}: screen captured in {clock.ElapsedMilliseconds} ms");
             }
             catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
         }
-        Post(new { type = "show", view, current = app?.Id, backdrop });
+        Post(new { type = "show", view, current = app?.Id ?? (overDesktop ? DesktopMode.Id : null), backdrop });
         PushState();
         Reveal();
     }
@@ -607,7 +616,7 @@ sealed class MainForm : Form
         PushState();
         if (started) return;
         // An app closed by itself (or crashed) while in front: come back to the home screen.
-        if (!LauncherActive && apps.ForegroundApp() is null)
+        if (!LauncherActive && apps.ForegroundApp() is null && !desktop.Active)
         {
             Post(new { type = "show", view = "home" });
             Reveal();
@@ -627,7 +636,8 @@ sealed class MainForm : Form
                 break;
             case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
             case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
-            case "desktop": WindowState = FormWindowState.Minimized; break;
+            case "desktop": EnterDesktop(); break;
+            case "tv": BackToTv(); break;
         }
     }
 
@@ -674,6 +684,7 @@ sealed class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
+        if (m.Msg == DesktopMode.BackToTvMessage) { BackToTv(); return; }
         if (m.Msg == StandbyMessage && standby is not null)
         {
             if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone

@@ -169,6 +169,7 @@ sealed class AppManager
         }
         psi.UseShellExecute = false;
         psi.WorkingDirectory = Path.GetDirectoryName(psi.FileName)!;
+        UserEnvironment.Apply(psi); // PATH and variables as they are now, not as at sign-in
 
         try
         {

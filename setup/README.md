@@ -28,10 +28,51 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
-| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, these scripts kept in `ProgramData\HTPC\setup`, started at sign-in |
+| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, these scripts kept in `ProgramData\HTPC\setup`; the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell |
+| Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
 `catalog.json` is the one app list for setup now and the launcher's library later.
+
+## The launcher as the shell
+
+SPEC N1: the box signs in straight to the TV home screen, no desktop, taskbar or Start menu.
+The Shell step sets this account's "Custom User Interface" policy value
+(`HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System\Shell`, what gpedit's User
+Configuration > Administrative Templates > System > Custom User Interface writes) to
+`"C:\Program Files\HTPC\Launcher\HtpcWatchdog.exe" --shell`. Windows then starts the watchdog
+instead of Explorer for this account only; the machine-wide shell and other accounts keep
+Explorer. Tested in the VM on 26100: sign-in goes to the launcher, no Explorer process.
+
+Why not Shell Launcher (IoT Enterprise's kiosk feature): it restarts the shell whatever
+happens, so a launcher failing at start would loop on a black screen; it needs its optional
+feature and SYSTEM-context WMI (MDM bridge); and every planned exit (setup handing over, an
+update) would trigger its exit action. It does two things this setup does not: Run/RunOnce
+programs, and Settings and other packaged apps from the custom shell (see below). If those are
+ever needed, it is the fallback, with the watchdog as its shell.
+
+The watchdog (`launcher\src\Watchdog`, built for the .NET Framework in Windows, a few MB, idle)
+starts the launcher and starts it again after a crash, a kill, or 60 s without its window
+answering; not while Windows signs out or restarts, not while a pause is set
+(`HKCU\Software\HTPC\WatchdogPauseUntil`, or `C:\ProgramData\HTPC\state\watchdog-pause` from
+SYSTEM jobs), and not for exit code 75 (a planned exit). Three exits within a minute of starting
+in a row: the box restarts once (at most every 6 hours), then the Windows desktop with "The TV
+launcher keeps closing. Back to TV to try again.", with new tries after 30 s, 2 min and 10 min.
+Log: `C:\ProgramData\HTPC\logs\watchdog.log`.
+
+Desktop mode (Power menu, one confirmation) starts Explorer: desktop, taskbar, Start menu. The
+launcher stays behind it; Home still opens the menu over the desktop. Back to TV (Power menu,
+or the "Back to TV" shortcut on the desktop and in Start) closes Explorer and its windows.
+
+Without Explorer: no tray icons or notifications; the Win key and Win+ shortcuts do nothing;
+programs in Run/RunOnce and the Startup folder do not start (desktop mode runs them); Settings
+(`ms-settings:`) and other packaged apps do not open. Ctrl+Alt+Del (sign out, Task Manager),
+Ctrl+Shift+Esc and Alt+Tab work: from Task Manager, Run new task > `explorer.exe` gives the
+desktop back.
+
+Undo (back to Explorer, the watchdog started from Run as before; next sign-in):
+
+    powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\lib\Set-Shell.ps1 -Undo
 
 `tools/Test-HwDecode.ps1` also runs on its own (`-Json` for the launcher): it lists the
 driver's decoders and, when mpv or ffmpeg is present, plays the 4K clips in

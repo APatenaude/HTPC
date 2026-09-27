@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Builds "TV Box Setup.exe": the launcher as one self-contained file (no .NET needed on the
-    box), with its web UI and the setup scripts inside.
+    box), with its web UI, the setup scripts and the watchdog (HtpcWatchdog.exe) inside.
 
 .DESCRIPTION
     Run as "TV Box Setup.exe" it opens in setup mode (the name has "setup" in it): pick apps,
@@ -30,4 +30,6 @@ $exe = Join-Path $Out 'TV Box Setup.exe'
 Copy-Item (Join-Path $work 'HtpcLauncher.exe') $exe -Force
 $extra = @(Get-ChildItem $work -File | Where-Object { $_.Name -ne 'HtpcLauncher.exe' })
 if ($extra) { Write-Warning "Also published (not in the single file): $($extra.Name -join ', ')" }
+# The watchdog is inside the exe too; a copy beside it serves setup.ps1 -LauncherExe run by hand.
+Copy-Item (Join-Path (Split-Path $project) 'obj\watchdog\HtpcWatchdog.exe') $Out -Force
 Write-Host ("{0} ({1:N0} MB)" -f $exe, ((Get-Item $exe).Length / 1MB))

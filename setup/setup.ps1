@@ -14,7 +14,8 @@
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
-      Launcher      the launcher (-LauncherExe) into Program Files, started at sign-in
+      Launcher      the launcher (-LauncherExe) and its watchdog into Program Files, started at sign-in
+      Shell         the launcher replaces the Windows desktop for this account (-Skip Shell keeps Explorer)
       DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
@@ -76,6 +77,7 @@ $Steps = [ordered]@{
         if (-not $LauncherExe) { Write-Same 'no launcher given (-LauncherExe); skipped'; return }
         & "$lib\Install-Launcher.ps1" -Exe $LauncherExe -SetupDir $PSScriptRoot
     }
+    Shell        = { & "$lib\Set-Shell.ps1" }
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
@@ -175,6 +177,7 @@ $activeName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Computer
 $pendingName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
 if ($activeName -ne $pendingName) { $restart += "computer name $pendingName" }
 if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $restart += 'Windows servicing' }
+if ($results['Shell'] -eq 'OK' -and (& "$lib\Set-Shell.ps1" -Pending)) { $restart += 'shell' }
 
 Write-Host "`n== Summary"
 foreach ($name in $results.Keys) { Write-Host ('  {0,-13} {1}' -f $name, $results[$name]) }

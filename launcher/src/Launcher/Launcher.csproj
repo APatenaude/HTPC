@@ -29,4 +29,19 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
 
+  <!-- The watchdog (..\Watchdog) is built for the .NET Framework that comes with Windows, with
+       its own compiler, and ships next to the launcher (also inside the setup exe). -->
+  <PropertyGroup>
+    <WatchdogSource>..\Watchdog\Watchdog.cs</WatchdogSource>
+    <WatchdogExe>$(BaseIntermediateOutputPath)watchdog\HtpcWatchdog.exe</WatchdogExe>
+    <FrameworkCsc>$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe</FrameworkCsc>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(WatchdogExe)" Link="HtpcWatchdog.exe" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildWatchdog" BeforeTargets="BeforeBuild" Inputs="$(WatchdogSource)" Outputs="$(WatchdogExe)">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)watchdog" />
+    <Exec Command="&quot;$(FrameworkCsc)&quot; /nologo /target:winexe /optimize+ /warnaserror+ /out:&quot;$(WatchdogExe)&quot; &quot;$(WatchdogSource)&quot;" />
+  </Target>
+
 </Project>

@@ -14,6 +14,8 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `src/Launcher/Tv.cs` | TV control (Roku ECP): found by SSDP, matched by EDID, one profile per TV; off/on with the box, follows the TV's own remote. |
 | `src/Launcher/KeyboardForm.cs`, `TextFieldWatcher.cs`, `ui/keyboard.*` | On-screen keyboard (SPEC N11): a band over the app that never takes the focus, so its keys (SendInput) land in the app's text field. Pops up when a text field gets the focus in an app on the Mouse or Keyboard preset (UI Automation focus events, only listened to while such an app is in front), R3 opens it anywhere but Moonlight. A type, X delete, Y space, LT shift, LB/RB move the cursor, Start Enter, Select shows a password, B closes (and it stays closed for that field). |
 | `src/Launcher/SetupRunner.cs`, `ui/setup.*` | Setup mode, "TV Box Setup" (`--setup`, or "setup" in the exe's name; design: First-run setup): welcome, controller check (each button once; Hold Home skips), find the TV, pick apps (they become the home tiles), install (setup\setup.ps1 with one Windows permission prompt, live progress from `setup-progress.json`), done; then the installed launcher takes over. |
+| `src/Watchdog/Watchdog.cs` | HtpcWatchdog.exe, the Windows shell of the TV account (setup's Shell step): starts the launcher, starts it again after a crash, a kill or a 60 s hang; box restart once, then the Windows desktop, after repeated fast exits; pauses; a "One moment…" screen while it restarts. .NET Framework (Windows' own csc.exe, C# 5, built by Launcher.csproj), a few MB. Log: `C:\ProgramData\HTPC\logs\watchdog.log`. |
+| `src/Launcher/Shell.cs`, `MainForm.Shell.cs` | Desktop mode (Power menu, confirmed): Explorer for maintenance, Home still works over it; Back to TV (Power menu, or `HtpcLauncher.exe --tv`, the desktop shortcut) closes it. `--restarted` (from the watchdog) leaves the TV as it is. Apps start with the user's environment built afresh (PATH after installs). WebView2 that cannot start: the launcher exits for the watchdog to start it again. |
 | `src/Launcher/ButtonMap.cs`, `PadMapper.cs`, `Input.cs` | Button presets (SPEC N13): Mouse (Edge, Twitch, Stremio, websites; also any window that is not a catalog app) and Keyboard. Applied to the app in front on the controller thread, sent with SendInput. Controller preset = the app reads the pad itself. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
@@ -31,11 +33,12 @@ dimmed behind it, and the app keeps running underneath. B or the app's row retur
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
 `-NoTv` never sends the TV a key (no on at start, no off in standby): for working on the box
-while nobody is watching.
+while nobody is watching. It pauses the installed watchdog (if any) for 15 minutes, or until
+the dev build is up, so the installed launcher does not come back meanwhile.
 Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 
 ## Not built yet
 
 The button map editor (per-app changes to a preset), typing from the phone, the phone remote
 (and its setup step), "when this video ends", tile editing, the library (installing apps later),
-running as the shell with a watchdog, updates from GitHub releases.
+updates from GitHub releases.
