@@ -21,8 +21,8 @@ sealed class AlertsFormOverlay : IAlertOverlay
     public void Hide() => form.Hide();
 
     /// <summary>
-    /// The launcher comes forward: cards leave the app. AlertsForm is a layered window, which
-    /// the Home menu's screen capture (SRCCOPY) leaves out anyway.
+    /// The launcher comes forward: cards leave the app. The Home menu's screen capture leaves
+    /// AlertsForm out anyway (ScreenCapture.LeaveOut).
     /// </summary>
     public void ClearForCapture() => form.Hide();
 }

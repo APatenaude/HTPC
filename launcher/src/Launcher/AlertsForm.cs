@@ -16,8 +16,8 @@ sealed record OverlayView(IReadOnlyList<OverlayCard> Cards);
 /// <summary>
 /// Alerts over whatever is on screen (design: Alerts), painted with GDI+ into a layered
 /// window: per-pixel alpha (round corners, shadows), clicks pass through, it never takes
-/// the focus, and the Home menu's screen capture (SRCCOPY) leaves it out. A windowed WebView2
-/// cannot be transparent over video and costs a renderer. It only paints what it is given
+/// the focus, and the Home menu's screen capture leaves it out (ScreenCapture.LeaveOut). A
+/// windowed WebView2 cannot be transparent over video and costs a renderer. It only paints what it is given
 /// (Show replaces everything; AlertCenter decides what, when and for how long), keeps clear
 /// of the on-screen keyboard's band, and stays hidden while suppressed (standby).
 /// Laid out in the design's 1920x1080 units and scaled to the screen. Icons are icons.js's

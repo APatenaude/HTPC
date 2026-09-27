@@ -128,8 +128,8 @@ sealed partial class MainForm
     }
 
     /// <summary>
-    /// ShowOver, before the screen capture: cards leave the app for the launcher's own, and
-    /// nothing over the app may end up in the Home menu's backdrop. The menu's focus: the row of
+    /// ShowOver, as the launcher comes forward: cards leave the app for the launcher's own (the
+    /// Home menu's backdrop never has them: ScreenCapture.LeaveOut). The menu's focus: the row of
     /// the actionable card on screen when Home was pressed, else null (the remembered focus).
     /// </summary>
     string? LauncherComingForward(string view)

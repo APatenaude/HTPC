@@ -1,4 +1,3 @@
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
@@ -225,45 +224,5 @@ sealed class CursorHider
     {
         SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
         Hidden = false;
-    }
-}
-
-static class ScreenCapture
-{
-    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
-    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
-    [DllImport("gdi32.dll")] static extern bool StretchBlt(IntPtr dest, int x, int y, int w, int h, IntPtr src, int sx, int sy, int sw, int sh, int rop);
-    [DllImport("gdi32.dll")] static extern int SetStretchBltMode(IntPtr hdc, int mode);
-    [DllImport("gdi32.dll")] static extern bool SetBrushOrgEx(IntPtr hdc, int x, int y, IntPtr previous);
-    const int SRCCOPY = 0x00CC0020, HALFTONE = 4;
-
-    /// <summary>
-    /// Saves the screen as a 1920x1080 JPEG (the backdrop behind the Home menu), scaled down in
-    /// one GDI StretchBlt straight from the screen: no 4K intermediate bitmap, so it is quick.
-    /// </summary>
-    public static void Save(string path)
-    {
-        var bounds = Screen.PrimaryScreen!.Bounds;
-        using var small = new Bitmap(1920, 1080);
-        using (var g = Graphics.FromImage(small))
-        {
-            var dest = g.GetHdc();
-            var screen = GetDC(IntPtr.Zero);
-            try
-            {
-                SetStretchBltMode(dest, HALFTONE);
-                SetBrushOrgEx(dest, 0, 0, IntPtr.Zero);
-                StretchBlt(dest, 0, 0, 1920, 1080, screen, bounds.X, bounds.Y, bounds.Width, bounds.Height, SRCCOPY);
-            }
-            finally
-            {
-                ReleaseDC(IntPtr.Zero, screen);
-                g.ReleaseHdc(dest);
-            }
-        }
-        var jpeg = ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == ImageFormat.Jpeg.Guid);
-        using var parameters = new EncoderParameters(1);
-        parameters.Param[0] = new EncoderParameter(Encoder.Quality, 80L);
-        small.Save(path, jpeg, parameters);
     }
 }
