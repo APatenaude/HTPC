@@ -1,5 +1,5 @@
 // Line icons from the design canvas (24x24, stroked). Tiles use each app's glyph and colour
-// until real logos replace them.
+// while it has no logo of its own (appIcon in app.js).
 const ICONS = {
   play: 'M8 5.5v13l11-6.5z',
   youtube: 'M3 8a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM10 9.5v5l4.5-2.5z',

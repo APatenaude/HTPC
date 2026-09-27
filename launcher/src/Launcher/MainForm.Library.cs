@@ -51,6 +51,7 @@ sealed partial class MainForm
         if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
         settings.Save();
         PushTiles();
+        RefreshLogos(); // an added tile's logo (MainForm.Logos.cs)
     }
 
     void PushLibraryCatalog()
@@ -66,6 +67,7 @@ sealed partial class MainForm
         name = a.Name,
         glyph = a.Glyph,
         color = a.Color,
+        logo = logos.Url(a.Id), // MainForm.Logos.cs
         desc = a.Desc ?? "",
         type = a.Type,
         state = LibraryState(a),
@@ -162,12 +164,19 @@ sealed partial class MainForm
         ApplyTiles();
     }
 
+    // "logo" goes back to the app's logo (the glyph and colour chosen are dropped). A colour
+    // picked while the logo shows means the glyph: the tile's current one, in that colour.
     void IconTile(string id, string? glyph, string? color)
     {
-        if (apps.Get(id) is null) return;
+        if (apps.Get(id) is not { } app) return;
         var edit = settings.TileEdits.TryGetValue(id, out var e) ? e : settings.TileEdits[id] = new TileEdit();
+        if (glyph == "logo") { edit.Glyph = null; edit.Color = null; }
         if (TileStore.ValidGlyph(glyph)) edit.Glyph = glyph;
-        if (TileStore.ValidColor(color)) edit.Color = color;
+        if (TileStore.ValidColor(color))
+        {
+            edit.Color = color;
+            edit.Glyph ??= app.Glyph;
+        }
         ApplyTiles();
     }
 
@@ -208,6 +217,7 @@ sealed partial class MainForm
         PushLibraryProgress();
         PushLibraryCatalog();
         PushTiles();
+        if (ok) RefreshLogos(); // the app just installed has its icon now
     }
 
     void toast(string text, string? kind) => Post(new { type = "toast", text, kind });

@@ -95,6 +95,11 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
   transition: transform 0.15s ease, box-shadow 0.15s ease, translate 0.22s ease, opacity 0.15s ease;
 }
 .tile .name { font-family: var(--display); font-weight: 600; font-size: 34px; letter-spacing: -0.01em; }
+/* An app's icon (appIcon): its logo, full colour, or its glyph. */
+.appicon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.appicon > img { display: none; object-fit: contain; }
+.appicon.has-logo > img { display: block; }
+.appicon.has-logo > svg { display: none; }
 .tile .badge { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
 .tile .badge::before { content: ''; width: 12px; height: 12px; border-radius: 6px; background: var(--accent); }
 
