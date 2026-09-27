@@ -389,7 +389,7 @@ sealed class AppManager
         else
         {
             var exe = app.Exe is null ? null : Environment.ExpandEnvironmentVariables(app.Exe);
-            if (exe is null || !File.Exists(exe)) exe = StartMenuTarget(app.Name);
+            if (exe is null || !File.Exists(exe)) exe = StartMenuTarget(ShippedName(app));
             if (exe is null || !File.Exists(exe)) { Log.Warn($"{id}: not found, cannot open a link in it"); return false; }
             psi.FileName = exe;
             // The tile's switches only: a page it opens by itself (the Browser's Google) would open too.
