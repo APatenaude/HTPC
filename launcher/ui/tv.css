@@ -71,3 +71,23 @@
 .tv-say { display: flex; align-items: flex-start; gap: 14px; max-width: 1400px; font-size: 28px; line-height: 1.4; }
 .tv-say .icon { flex-shrink: 0; margin-top: 2px; }
 .tv-say.ok { color: #7FD1AE; } .tv-say.alarm { color: var(--warn); } .tv-say.info { color: var(--text-2); }
+
+/* Pairing (tv.js pairHtml): say yes on the TV, or type its code on a keypad */
+.tv-pair { display: flex; flex-direction: column; gap: 16px; padding: 24px 28px; border-radius: 22px; background: var(--panel); box-shadow: inset 0 0 0 2px var(--accent); }
+.tv-side .tv-pair { padding: 0; background: none; box-shadow: none; }
+.tv-pair h2 { margin: 0; display: flex; align-items: center; gap: 12px; font-family: var(--display); font-weight: 600; font-size: 30px; }
+.tv-pair p { margin: 0; display: flex; align-items: center; gap: 14px; font-size: 23px; line-height: 1.4; color: var(--text-2); }
+.tv-pair.done h2 { color: #7FD1AE; }
+.tv-pair.failed h2 { color: var(--warn); }
+.tv-spin { flex-shrink: 0; width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%; border: 4px solid #33373F; border-top-color: var(--accent); animation: tv-spin 0.9s linear infinite; }
+@keyframes tv-spin { to { transform: rotate(360deg); } }
+.tv-code { display: flex; gap: 10px; }
+.tv-cbox { display: flex; align-items: center; justify-content: center; width: 56px; height: 68px; border-radius: 14px; background: var(--bg);
+  box-shadow: inset 0 0 0 2px var(--key-edge); font-family: var(--display); font-weight: 600; font-size: 34px; }
+.tv-cbox.now { box-shadow: inset 0 0 0 3px var(--accent); }
+.tv-keys { display: grid; grid-template-columns: repeat(8, 64px); gap: 8px; }
+.tv-pbuttons { display: flex; gap: 12px; flex-wrap: wrap; }
+.tv-pbtn { display: flex; align-items: center; justify-content: center; min-width: 64px; height: 60px; padding: 0 22px; box-sizing: border-box;
+  border-radius: 16px; background: #22252B; font-size: 24px; font-weight: 700; }
+.tv-keys .tv-pbtn { padding: 0; font-family: var(--display); font-size: 26px; }
+.tv-pbtn.focused { background: var(--tile-focus); box-shadow: 0 0 0 4px var(--accent); }

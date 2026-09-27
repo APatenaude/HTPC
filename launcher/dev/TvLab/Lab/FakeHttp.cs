@@ -14,7 +14,7 @@ sealed record FakeResponse(int Status, string Body = "", string ContentType = "t
 /// </summary>
 sealed class FakeHttp : IDisposable
 {
-    readonly TcpListener listener = new(IPAddress.Loopback, 0);
+    readonly TcpListener listener;
     readonly Func<FakeRequest, FakeResponse> handler;
     readonly CancellationTokenSource stop = new();
 
@@ -24,11 +24,14 @@ sealed class FakeHttp : IDisposable
     public Action? Arriving;
     /// <summary>A connection was refused (while <see cref="Unreachable"/>).</summary>
     public Action? Refused;
-    public Uri BaseUrl => new($"http://127.0.0.1:{Port}/");
+    public Uri BaseUrl => new($"http://{Bind}:{Port}/");
+    public IPAddress Bind { get; }
 
-    public FakeHttp(Func<FakeRequest, FakeResponse> handler)
+    public FakeHttp(Func<FakeRequest, FakeResponse> handler, IPAddress? bind = null)
     {
         this.handler = handler;
+        Bind = bind ?? IPAddress.Loopback;
+        listener = new TcpListener(Bind, 0);
         listener.Start();
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         _ = Task.Run(AcceptLoop);

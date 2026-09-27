@@ -67,6 +67,7 @@ sealed class TvService
         clock = parts.Clock;
         cache = TvCache.Load(parts.Files);
         Credentials = TvCredentials.Load(parts.Files);
+        foreach (var pairing in parts.Drivers.OfType<ITvPairing>()) pairing.UseCredentials(Credentials);
         notices = new TvNoticeRules(parts.Notices, clock);
         driversOff = parts.Files.DriversOff();
         if (driversOff.Count > 0) Log.Info($"TV control methods turned off on this box: {string.Join(", ", driversOff)}");
@@ -109,6 +110,7 @@ sealed class TvService
         tv = null!;
         driver = null!;
         if (p is null || p.Paused is not null || Current is not { } current || current.Locked || DriverFor(p.Method) is not { } d) return false;
+        if (d is ITvPairing pairs && !pairs.IsPaired(current)) return false; // not paired yet: nothing to send with
         tv = current;
         driver = d;
         return true;
@@ -236,7 +238,63 @@ sealed class TvService
         if (tv is null) return;
         Bind(tv);
         Log.Info($"TV picked: {tv.Name} ({tv.Method}, {tv.Model}) on HDMI {Profile?.Input}");
+        if (DriverFor(tv.Method) is ITvPairing pairs && !pairs.IsPaired(tv)) StartPairing();
     }
+
+    // --- Pairing (only the TV the user picked, never under --no-tv) ------------------------------------
+
+    CancellationTokenSource? pairCancel;
+    System.Threading.Channels.Channel<string>? codes;
+
+    /// <summary>The pairing in progress or just ended (setup and Settings show it), or null.</summary>
+    public TvPairState? Pairing { get; private set; }
+
+    /// <summary>Pairs the profile's TV (its prompt or code on the TV); "tv.pair" starts it again.</summary>
+    public void StartPairing()
+    {
+        if (Refuse("pairing") || Profile is not { Paused: null } p || Current is not { } tv || DriverFor(p.Method) is not ITvPairing pairs) return;
+        CancelPairing();
+        var cancel = pairCancel = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        var channel = codes = System.Threading.Channels.Channel.CreateUnbounded<string>();
+        Pairing = new TvPairState(tv.Key, tv.Name, "working", $"Connecting to {tv.Name}…", 6);
+        Changed?.Invoke();
+        _ = Task.Run(async () =>
+        {
+            var ok = false;
+            try
+            {
+                ok = await pairs.Pair(tv, (stage, message) =>
+                {
+                    Pairing = new TvPairState(tv.Key, tv.Name, stage, message, 6);
+                    Changed?.Invoke();
+                }, async c => { try { return await channel.Reader.ReadAsync(c); } catch (Exception) { return null; } }, cancel.Token);
+            }
+            catch (Exception e) { Log.Warn($"TV pairing with {tv.Name}: {e.GetType().Name}"); }
+            Log.Info($"TV pairing with {tv.Name} ({tv.Method}): {(ok ? "paired" : "not paired")}");
+            if (ok && Profile is { } profile && await DriverFor(tv.Method)!.Refresh(tv, false, CancellationToken.None) is { } now)
+            {
+                Found = Found.Select(t => t.Key == now.Key ? now : t).ToList();
+                Contact(profile, now); // its MACs, from the paired connection
+            }
+            if (!ok && Pairing?.Stage != "failed") Pairing = new TvPairState(tv.Key, tv.Name, "failed", "Not paired. Try again.", 6);
+            Changed?.Invoke();
+        });
+    }
+
+    /// <summary>A code typed on the box (the one the TV shows). Never logged.</summary>
+    public void PairCode(string code) => codes?.Writer.TryWrite(code);
+
+    public void CancelPairing()
+    {
+        pairCancel?.Cancel();
+        codes?.Writer.TryComplete();
+        pairCancel = null;
+        codes = null;
+        if (Pairing is { Stage: not ("done" or "failed") }) Pairing = Pairing with { Stage = "failed", Message = "Pairing cancelled." };
+    }
+
+    /// <summary>Whether this TV is paired (true for methods without pairing).</summary>
+    public bool IsPaired(TvDevice tv) => DriverFor(tv.Method) is not ITvPairing pairs || pairs.IsPaired(tv);
 
     void Bind(TvDevice tv)
     {
@@ -306,6 +364,7 @@ sealed class TvService
     {
         if (!profiles.Remove(edidKey, out var p)) return;
         if (p.DeviceId.Length > 0) Credentials.Forget($"{p.Method}:{p.DeviceId}");
+        if (Found.FirstOrDefault(t => t.Method == p.Method && t.Id == p.DeviceId) is { } tv && DriverFor(p.Method) is ITvPairing pairs) pairs.Forget(tv);
         parts.SaveProfiles();
         Log.Info($"TV profile forgotten: {p.Name}");
         Changed?.Invoke();
