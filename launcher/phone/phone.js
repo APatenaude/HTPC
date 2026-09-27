@@ -134,7 +134,7 @@ function onBox(m) {
       break;
     case 'state': applyState(m.state); break;
     case 'toast': toast(m.text, m.kind); break;
-    case 'warn': showBanner(m.text, m.extend ? '+15 min' : null, () => send({ t: 'timerExtend' })); break;
+    case 'warn': showBanner(m.text, m.extend ? '+15 min' : null, () => send({ t: 'timerExtend' })); timerBanner = !!m.extend; break;
     case 'bye': toast('This phone was removed on the TV', 'warn'); break;
   }
 }
@@ -157,6 +157,9 @@ function applyState(s) {
   if (!s || typeof s !== 'object') return;
   Object.assign(state.box, s);
   state.receivedAt = Date.now();
+  // The sleep warning is over once the timer is off or has more than a minute again (+15 on the TV).
+  const t = state.box.timer;
+  if (timerBanner && (!t || typeof t.left !== 'number' || t.left > 60)) { $('banner').hidden = true; timerBanner = false; }
   render();
 }
 
@@ -544,6 +547,7 @@ $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) close
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
 
 let bannerTimer = 0;
+var timerBanner = false;   // the banner shows the sleep timer's warning (var: applyState may run first)
 function showBanner(textContent, actionLabel, action) {
   $('banner-text').textContent = textContent;
   const b = $('banner-action');

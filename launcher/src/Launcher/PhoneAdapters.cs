@@ -1,8 +1,8 @@
 namespace Htpc.Launcher;
 
 // What the phone remote needs from volume, the sleep timer and media playback, kept to three
-// small interfaces: AudioVolume (with mute), SleepTimer and MediaWatcher belong to the button-map
-// work, and MainForm.Phone.cs adapts whichever versions are in the build (stand-ins until then).
+// small interfaces (PhoneTests fakes them): MainForm.Phone.cs adapts AudioVolume (with mute),
+// SleepTimer and MediaWatcher to them.
 
 /// <summary>Windows' master volume, with mute.</summary>
 interface IPhoneAudio

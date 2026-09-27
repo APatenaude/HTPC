@@ -75,11 +75,12 @@ the home network until HTTPS (SPEC N9).
 Server (`PhoneServer.cs`): Kestrel inside the launcher, started in the background after the UI
 (never in setup mode; a failure is logged and the launcher carries on), serving only `phone/`.
 Protocol: `PhoneProtocol.cs` (JSON over one WebSocket; the first message carries the version,
-and a page of another version reloads). Volume/mute, the sleep timer, what plays and alerts go
-through small interfaces (`PhoneAdapters.cs`, `AlertsShim.cs`) with stand-ins in
-`MainForm.Phone.cs` until the button-map and alerts work is merged. The home screen's state
-message carries `phone: { url, paired, pairingOpen }` (the address to scan, a phone has paired,
-new phones need no code), and `ui/qr.js` has `qrSvg(text, px)`.
+and a page of another version reloads). Volume/mute, the sleep timer and what plays go through
+small interfaces (`PhoneAdapters.cs`) over AudioVolume, SleepTimer and MediaWatcher
+(`MainForm.Phone.cs`); the pairing code and "Phone remote connected" are alerts (IAlerts). The
+state message carries `phone: { url, paired, pairingOpen }` (the address to scan, a phone has
+paired, new phones need no code) for the home screen's "Add the remote to your phone" card (not
+drawn yet: first-run and TV work), and `ui/qr.js` has `qrSvg(text, px)`.
 
 VacuumTube and links: it has no single-instance lock (a second start opens a second window), so
 a YouTube link restarts it: `VacuumTube.exe --fullscreen -- https://www.youtube.com/watch?v=ID`.

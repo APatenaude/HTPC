@@ -186,18 +186,10 @@ sealed class MediaWatcher
     /// </summary>
     public async Task<bool> SendAsync(string source, string command, double seconds = 0)
     {
-        var m = await Manager();
-        GlobalSystemMediaTransportControlsSession? s;
-        try
-        {
-            // Several sessions can share an app id (every Edge window is "MSEdge"): "play" goes to
-            // a paused one, anything else to the one playing, if there is such a session.
-            var same = m?.GetSessions().Where(x => x.SourceAppUserModelId == source).ToList() ?? new();
-            var wanted = command == "play" ? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused
-                : GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-            s = same.FirstOrDefault(x => x.GetPlaybackInfo().PlaybackStatus == wanted) ?? same.FirstOrDefault();
-        }
-        catch (Exception e) { manager = null; Log.Warn($"Media {command}: {e.Message}"); return false; }
+        // "play" goes to a paused session, anything else to the one playing (see Choose).
+        var s = Choose(await Manager(), source, command == "play"
+            ? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused
+            : GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
         if (s is null) return false;
         try
         {
@@ -218,11 +210,29 @@ sealed class MediaWatcher
         catch (Exception e) { Log.Warn($"Media {command} to {source}: {e.Message}"); return false; }
     }
 
+    /// <summary>
+    /// The session of that app id, preferring one in the wanted state: several sessions can share
+    /// an app id (every Edge window is "MSEdge"). A session that vanishes while asked is skipped.
+    /// </summary>
+    GlobalSystemMediaTransportControlsSession? Choose(GlobalSystemMediaTransportControlsSessionManager? m, string source,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus wanted)
+    {
+        if (m is null) return null;
+        List<GlobalSystemMediaTransportControlsSession> same;
+        try { same = m.GetSessions().Where(x => x.SourceAppUserModelId == source).ToList(); }
+        catch (Exception e) { manager = null; Log.Warn($"Media sessions: {e.Message}"); return null; }
+        bool Is(GlobalSystemMediaTransportControlsSession x)
+        {
+            try { return x.GetPlaybackInfo().PlaybackStatus == wanted; }
+            catch (Exception) { return false; }
+        }
+        return same.FirstOrDefault(Is) ?? same.FirstOrDefault();
+    }
+
     /// <summary>The session's cover or video frame (for the phone), or null.</summary>
     public async Task<(byte[] Data, string ContentType)?> ThumbnailAsync(string source)
     {
-        var m = await Manager();
-        var s = m?.GetSessions().FirstOrDefault(x => x.SourceAppUserModelId == source);
+        var s = Choose(await Manager(), source, GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
         if (s is null) return null;
         try
         {

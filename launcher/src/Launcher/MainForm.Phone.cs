@@ -28,6 +28,7 @@ partial class MainForm
     long phoneActivityTicks;
     bool phoneDragging;             // a phone holds the left button down (press, hold, drag)
     string phoneStateSent = "";
+    (int Volume, bool Muted) phoneSound;   // as last read (PhoneState)
     string phoneReach = "unknown";  // firewall rule and network, for Settings
     DateTime phoneReachChecked;
     (string? Url, DateTime At) phoneUrl;   // the address for QR codes, looked up at most every 30 s
@@ -54,20 +55,30 @@ partial class MainForm
             phoneAlerts = alerts;
             pairing = new PhonePairing(PhonePairing.DefaultPath);
             phones = new PhoneServer(new PhoneHost(this), Path.Combine(AppContext.BaseDirectory, "phone"), pairing);
+            // Both run inside other work (Standby.Enter, SleepTimer.Tick): nothing may escape.
             standby.Changed += active =>
             {
-                if (active)
+                try
                 {
-                    mapper.Feed.Clear();
-                    ReleasePhoneDrag();
-                    // Nobody sees a code in standby, and it only works while the TV shows it.
-                    pairing?.CancelCode();
-                    HidePairCode(false);
+                    if (active)
+                    {
+                        mapper.Feed.Clear();
+                        ReleasePhoneDrag();
+                        // Nobody sees a code in standby, and it only works while the TV shows it.
+                        pairing?.CancelCode();
+                        HidePairCode(false);
+                    }
+                    StateChanged();
                 }
-                StateChanged();
+                catch (Exception e) { Log.Error("Phone remote, standby", e); }
             };
-            // The sleep timer's last minute: the phones get the warning too (with +15 min).
-            sleepTimer.Warning += _ => phones?.Broadcast(new { t = "warn", text = "Going to sleep in 1 minute", extend = true });
+            // The sleep timer's last minute: the phones get the warning too (with +15 min), unless
+            // in standby, where the phone's +15 would do nothing.
+            sleepTimer.Warning += _ =>
+            {
+                try { if (!standby.Active) phones?.Broadcast(new { t = "warn", text = "Going to sleep in 1 minute", extend = true }); }
+                catch (Exception e) { Log.Error("Phone remote, timer warning", e); }
+            };
             clock.Tick += (_, _) => PhoneTick();
         }
         catch (Exception e)
@@ -298,6 +309,16 @@ partial class MainForm
     /// </summary>
     async Task PhoneOpen(PhoneClient phone, string url)
     {
+        try { await OpenPhoneLink(phone, url); }
+        catch (Exception e)
+        {
+            Log.Error("Phone link", e);
+            phones?.Send(phone, new { t = "toast", text = "The TV could not open that link", kind = "warn" });
+        }
+    }
+
+    async Task OpenPhoneLink(PhoneClient phone, string url)
+    {
         var target = PhoneLinks.Route(url);
         if (target is null)
         {
@@ -365,7 +386,8 @@ partial class MainForm
     }
 
     /// <summary>
-    /// For the home screen's "Add the remote to your phone" card (app.js state.phone): the
+    /// For the home screen's "Add the remote to your phone" card (app.js state.phone; the card is
+    /// not drawn yet, it comes with the first-run work): the
     /// address to scan (the box's IP address: every phone can open it, and the page moves on to
     /// tv.local where that works), whether a phone has paired yet, and whether new phones get in
     /// without a code. Null while the remote is not running.
@@ -487,11 +509,14 @@ partial class MainForm
         // Seconds from now (the phone's clock may be off): the phone counts on from when it got them.
         var position = media is null ? 0 : media.Playing ? media.Position + (DateTime.Now - media.PositionAt).TotalSeconds : media.Position;
         if (media is { Duration: > 0 }) position = Math.Min(position, media.Duration);
+        // The volume as last read: not read every second in standby (nothing changes it there,
+        // and without the TV an HDMI-only box may have no audio device at all).
+        if (!standby.Active) phoneSound = (phoneAudio.Volume ?? 0, phoneAudio.Muted);
         return new
         {
             standby = standby.Active,
-            volume = phoneAudio.Volume ?? 0,
-            muted = phoneAudio.Muted,
+            volume = phoneSound.Volume,
+            muted = phoneSound.Muted,
             brightness,
             timer = timer is null ? null : new
             {
