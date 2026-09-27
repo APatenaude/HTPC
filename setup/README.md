@@ -66,7 +66,7 @@ Hyper-V test VM. See `autounattend/README.md`.
 | 2026-09-26 | .NET SDK 10.0.401 | `dev/Install-BuildTools.ps1` |
 | 2026-09-26 | setup.ps1: all steps; the Microsoft Store was added (`wsreset -i`) during a first HEVC attempt and left in place | `setup.ps1` |
 | 2026-09-26 | HEVC Video Extensions 2.4.109.0, for this user and provisioned for new ones | `setup.ps1 -Only Codecs` |
-| 2026-09-26 | Windows Firewall: two inbound Allow rules (Public) for `stremio-runtime.exe`, from someone clicking Allow on its prompt | not scripted: setup now answers with a Block rule instead (`install.blockInbound`); remove them for the box to match |
+| 2026-09-26 | Windows Firewall: two inbound Allow rules (Public) for `stremio-runtime.exe`, from the user clicking Allow on its prompt; kept on purpose | not scripted: a clean install gets a Block rule instead (`install.blockInbound`), which also keeps the prompt away |
 
 To undo before calling the box finished: remove PortableGit, ffmpeg, mpv and the .NET SDK.
 
