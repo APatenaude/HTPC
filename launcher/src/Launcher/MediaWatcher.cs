@@ -24,6 +24,37 @@ sealed record MediaInfo(
 }
 
 /// <summary>
+/// Whether a session plays a live stream (Windows has no such flag): its timeline is missing
+/// (Edge gives a live stream none; Twitch's channels come so), endless (a week or more), or it
+/// grows as it plays (the part one can seek in follows the live edge: 3 small steps in a row,
+/// not the jump from an ad to the video). A growing one stays live until the title changes.
+/// </summary>
+sealed class LiveGuess
+{
+    public static readonly double Endless = TimeSpan.FromDays(7).TotalSeconds;
+    string? item;
+    double? lastDuration;
+    DateTime lastAt;
+    int steps;
+
+    public bool IsLive(MediaInfo s)
+    {
+        var key = s.Source + "\n" + s.Title;
+        if (key != item) { item = key; lastDuration = null; steps = 0; }
+        if (s.Duration is { } d)
+        {
+            if (lastDuration is { } before && steps < 3 && d != before)
+            {
+                var grew = d - before;
+                steps = grew > 0.5 && grew <= Math.Max(0, (s.At - lastAt).TotalSeconds) + 5 ? steps + 1 : 0;
+            }
+            (lastDuration, lastAt) = (d, s.At);
+        }
+        return s.Duration is null || s.Duration >= Endless || steps >= 3;
+    }
+}
+
+/// <summary>
 /// Windows' media sessions (GlobalSystemMediaTransportControlsSessionManager): what plays, for
 /// "when this video ends" (SPEC N14), the idle check, standby (pause everything) and the
 /// phone's Playing tab. Sessions are read once a second, only while someone needs them

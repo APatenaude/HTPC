@@ -55,6 +55,8 @@ static partial class Program
 
     static async Task<int> Main()
     {
+        // Tests name their CAs themselves: the box's own (its intermediates stay in Windows' CA stores) never grow.
+        var boxOnes = IntermediatesInStore(PhoneCertificates.BoxName);
         Console.WriteLine("Protocol"); ProtocolTests();
         Console.WriteLine("Links"); LinkTests();
         Console.WriteLine("Routing"); RoutingTests();
@@ -65,6 +67,7 @@ static partial class Program
         Console.WriteLine("Certificates"); CertificateTests();
         Console.WriteLine("HTTPS (a key in the user's key store for the test, deleted after)"); await HttpsTests();
         Console.WriteLine("Share and the Shortcut"); await ShareTests();
+        Check(IntermediatesInStore(PhoneCertificates.BoxName).IsSubsetOf(boxOnes), "no intermediate under the box's own name added to the CA stores");
         Console.WriteLine($"\n{passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;
     }

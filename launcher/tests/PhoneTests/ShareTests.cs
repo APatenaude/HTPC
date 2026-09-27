@@ -85,15 +85,16 @@ static partial class Program
         return found;
     }
 
-    // A public-only CA certificate with this subject, as a leftover in the user's CA store.
-    static X509Certificate2 Leftover(string subject)
+    // A public-only CA certificate with this subject, as a leftover in a CA store (the user's unless said).
+    static X509Certificate2 Leftover(string subject) => Leftover(subject, StoreLocation.CurrentUser);
+    static X509Certificate2 Leftover(string subject, StoreLocation location)
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest(new X500DistinguishedName(subject), key, HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
         using var made = request.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
         var cert = X509CertificateLoader.LoadCertificate(made.RawData);
-        using var store = new X509Store(StoreName.CertificateAuthority, StoreLocation.CurrentUser);
+        using var store = new X509Store(StoreName.CertificateAuthority, location);
         store.Open(OpenFlags.ReadWrite);
         store.Add(cert);
         return cert;
@@ -105,7 +106,7 @@ static partial class Program
         var now = new DateTime(2026, 9, 27, 12, 0, 0);
         var store = new MemoryKeyStore();
         var testName = $"HTPC test {Guid.NewGuid():N}";
-        var certs = new PhoneCertificates(folder, store, () => now, testName);
+        var certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home, IPAddress.Parse("8.8.8.8"), IPAddress.Parse("fe80::1") }), "first Ensure makes a server certificate");
         var root = certs.Authority!;
         var inter = certs.Intermediate!;
@@ -151,7 +152,7 @@ static partial class Program
         Check(fp.Length == 95 && fp.Split(':').Length == 32 && fp == Convert.ToHexString(SHA256.HashData(root.RawData)).Chunk(2).Select(c => new string(c)).Aggregate((a, b) => a + ":" + b),
             "fingerprint: the root's SHA-256, AB:CD:... as Android shows it");
 
-        certs = new PhoneCertificates(folder, store, () => now, testName);
+        certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
             "after a restart: the same root, intermediate and certificate, none made");
         var moved = IPAddress.Parse("192.168.1.33");
@@ -162,7 +163,7 @@ static partial class Program
         now = now.AddDays(340);
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a month before it ends: renewed by the intermediate alone");
         now = now.AddDays(3650);
-        certs = new PhoneCertificates(folder, store, () => now, testName);
+        certs = new PhoneCertificates(folder, store, testName, () => now);
         certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved });
         Check(certs.Authority!.Thumbprint != root.Thumbprint, "after 10 years: a new root (phones install it again)");
         Check(!IntermediatesInStore(testName).Contains(inter.Thumbprint) && IntermediatesInStore(testName).Contains(certs.Intermediate!.Thumbprint),
@@ -173,7 +174,7 @@ static partial class Program
         var leftovers = new[] { $"CN={testName} phone remote, O=HTPC TV box", $"O=HTPC TV box, CN={testName} phone remote" }.Select(Leftover).ToList();
         var others = new[] { $"CN={testName} phone remote, O=Someone else", $"CN={testName} phone remote + O=HTPC TV box" }.Select(Leftover).ToList();
         Check(leftovers[0].Subject.StartsWith("CN=") && leftovers[1].Subject.StartsWith("O="), $"leftovers in both orders ({leftovers[0].Subject} | {leftovers[1].Subject})");
-        certs = new PhoneCertificates(folder, store, () => now, testName);
+        certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a restart with the same pair: nothing made");
         var inStore = IntermediatesInStore(testName);
         Check(!leftovers.Any(l => inStore.Contains(l.Thumbprint)) && inStore.Contains(certs.Intermediate!.Thumbprint),
@@ -185,13 +186,35 @@ static partial class Program
             foreach (var o in others) user.Remove(o);
         }
 
+        // What the box had: leftovers in the machine's store (from test runs as administrator) show
+        // in the user's store too, and the launcher, without administrator rights, cannot remove
+        // them: it says how many. Only an administrator's cleanup removes them.
+        if (Environment.IsPrivilegedProcess)
+        {
+            var machineOnes = new[] { $"O=HTPC TV box, CN={testName} phone remote", $"CN={testName} phone remote, O=HTPC TV box" }
+                .Select(s => Leftover(s, StoreLocation.LocalMachine)).ToList();
+            using (var userView = new X509Store(StoreName.CertificateAuthority, StoreLocation.CurrentUser))
+            {
+                userView.Open(OpenFlags.ReadOnly);
+                Check(machineOnes.All(m => userView.Certificates.Find(X509FindType.FindByThumbprint, m.Thumbprint, false).Count == 1),
+                    "leftovers in the machine's CA store show in the user's store too (what the box showed)");
+            }
+            var asUser = PhoneCertificates.RemoveIntermediates(testName, certs.Intermediate!.Thumbprint, machine: false);
+            Check(asUser.Stuck == 2 && machineOnes.All(m => IntermediatesInStore(testName).Contains(m.Thumbprint)) && IntermediatesInStore(testName).Contains(certs.Intermediate!.Thumbprint),
+                $"without administrator rights they stay (the 14:52 start), and it says so: {asUser.Stuck} in the machine's store");
+            var asAdmin = PhoneCertificates.RemoveIntermediates(testName, certs.Intermediate!.Thumbprint);
+            Check(asAdmin is { Removed: 2, Stuck: 0 } && !machineOnes.Any(m => IntermediatesInStore(testName).Contains(m.Thumbprint)),
+                "an administrator's cleanup removes them from the machine's store (either order)");
+        }
+        else Console.WriteLine("    info: not administrator: the machine-store leftover check is skipped");
+
         // What the single CA of an earlier build left goes too, and only that.
         var legacy = new MemoryKeyStore();
         legacy.Create("HTPC phone remote CA");
         var legacyFolder = TempFolder();
         Directory.CreateDirectory(legacyFolder);
         File.WriteAllBytes(Path.Combine(legacyFolder, "ca.cer"), new byte[] { 1 });
-        new PhoneCertificates(legacyFolder, legacy, () => now, testName).Ensure(PhoneCertificates.LocalNames(), new[] { Home });
+        new PhoneCertificates(legacyFolder, legacy, testName, () => now).Ensure(PhoneCertificates.LocalNames(), new[] { Home });
         Check(legacy.Open("HTPC phone remote CA") is null && !File.Exists(Path.Combine(legacyFolder, "ca.cer")) && legacy.Open(PhoneCertificates.IntermediateKeyName) is not null,
             "the old single CA's key and ca.cer removed; the new intermediate kept");
         Directory.Delete(legacyFolder, true);
@@ -212,7 +235,7 @@ static partial class Program
         var root = FindUp(Path.Combine("launcher", "phone"))!;
         try
         {
-            var certs = new PhoneCertificates(folder, store, name: testName);
+            var certs = new PhoneCertificates(folder, store, testName);
             var pairing = new PhonePairing(file) { RequireCode = false };
             var server = new PhoneServer(new FakeHost(), root, pairing, IPAddress.Loopback, certificates: certs) { Addresses = () => new[] { Home } };
             var httpPort = FreePort();

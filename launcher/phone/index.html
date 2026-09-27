@@ -34,6 +34,18 @@
 
   <main id="main">
     <section class="tab" id="tab-remote" aria-label="Remote">
+      <form class="linkbar" id="linkbar" action="#" aria-labelledby="linkbar-title">
+        <div class="linkbar-head">
+          <span class="linkbar-title" id="linkbar-title"><span data-icon="share" data-size="16" data-weight="2.25" aria-hidden="true"></span>Send a link to the TV</span>
+          <button type="button" class="linkbar-more" id="linkbar-more">From other apps</button>
+        </div>
+        <div class="linkbar-row">
+          <input id="linkbar-url" type="url" placeholder="Paste a link here" aria-label="Link to send" aria-describedby="linkbar-note" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">
+          <button type="button" id="linkbar-paste">Paste</button>
+          <button type="submit" class="primary" id="linkbar-send" hidden>Send</button>
+        </div>
+        <p class="linkbar-note" id="linkbar-note">YouTube opens in YouTube, Twitch in Twitch, anything else in the Browser.</p>
+      </form>
       <div class="seg" role="radiogroup" aria-label="Touchpad or arrows">
         <button type="button" role="radio" id="seg-touchpad" aria-checked="true">Touchpad</button>
         <button type="button" role="radio" id="seg-arrows" aria-checked="false">Arrows</button>
@@ -85,12 +97,6 @@
         <button type="button" id="shift-tab" aria-label="Shift Tab: previous field"><span data-icon="shifttab" data-size="20" aria-hidden="true"></span>Back tab</button>
         <button type="button" id="tab" aria-label="Tab: next field"><span data-icon="tab" data-size="20" aria-hidden="true"></span>Tab</button>
       </div>
-      <h2 class="section" id="link-title">Play a link on the TV</h2>
-      <form class="link" id="link-form" action="#" aria-labelledby="link-title">
-        <input id="link" type="url" placeholder="Paste a link" aria-label="Link" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
-        <button type="submit" class="primary">Play</button>
-      </form>
-      <p class="note">YouTube opens in YouTube, Twitch in Twitch, anything else in the browser.</p>
       <button type="button" class="send-link" id="send-open"><span data-icon="share" aria-hidden="true"></span><span class="grow">Send to TV from other apps</span><span data-icon="chevright" aria-hidden="true"></span></button>
       <button type="button" class="kbd-space" id="kbd-space">Your phone’s keyboard opens here</button>
     </section>
@@ -104,10 +110,11 @@
         <span class="media-title" id="media-title">Nothing playing</span>
         <span class="media-sub" id="media-sub"></span>
       </div>
-      <div class="seek">
+      <div class="seek" id="seek-wrap">
         <input type="range" id="seek" min="0" max="100" step="1" value="0" aria-label="Position">
         <div class="times"><span id="pos">0:00</span><span id="dur">0:00</span></div>
       </div>
+      <div class="live" id="live" hidden><span class="live-badge"><span class="live-dot" aria-hidden="true"></span>LIVE</span><span class="live-note">A live stream: it plays as it happens</span></div>
       <div class="transport">
         <button type="button" class="small" id="prev" aria-label="Previous" data-icon="skipprev"></button>
         <button type="button" class="mid" id="back10" aria-label="Back 10 seconds" data-icon="rewind" data-size="26"></button>

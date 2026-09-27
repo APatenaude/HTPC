@@ -280,6 +280,21 @@ Console.WriteLine("== VideoEndDetector");
     var info = M("V", P, 100, 600, t0);
     Check(Math.Abs(info.PositionAt(t0.AddSeconds(10))!.Value - 110) < 0.01, "position moves on while playing");
     Check(M("V", Pa, 100, 600, t0).PositionAt(t0.AddSeconds(10)) == 100, "position stays while paused");
+
+    // Live streams (the phone's Playing tab shows LIVE, no timeline, no seeking).
+    var g = new LiveGuess();
+    Check(g.IsLive(M("Channel", P, null, null, t0)), "live: no timeline (Edge gives a live stream none)");
+    Check(new LiveGuess().IsLive(M("Channel", P, 5000, 1e9, t0)), "live: an endless timeline");
+    g = new LiveGuess();
+    var liveSeen = new List<bool>();
+    for (var s = 0; s < 5; s++) liveSeen.Add(g.IsLive(M("Channel", P, 3600 + s, 3600 + s, t0.AddSeconds(s))));
+    Check(liveSeen.SequenceEqual(new[] { false, false, false, true, true }), "live: a timeline that grows as it plays, after 3 steps: " + string.Join(",", liveSeen));
+    Check(g.IsLive(M("Channel", P, 3700, 3700, t0.AddSeconds(100))), "and it stays live while the title stays");
+    Check(!g.IsLive(M("Next video", P, 10, 600, t0.AddSeconds(101))), "a new title with a fixed length: not live");
+    g = new LiveGuess();
+    var ad = new[] { g.IsLive(M("V", P, 5, 15, t0)), g.IsLive(M("V", P, 0, 600, t0.AddSeconds(10))), g.IsLive(M("V", P, 1, 600, t0.AddSeconds(11))),
+        g.IsLive(M("V", P, 2, 601, t0.AddSeconds(12))), g.IsLive(M("V", P, 3, 601, t0.AddSeconds(13))) };
+    Check(ad.All(l => !l), "an ad then the video (15 s, then 600 s, a length settling by a second): not live");
 }
 
 // ---------------------------------------------------------------- SleepTimer

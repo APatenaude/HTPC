@@ -55,7 +55,7 @@ partial class MainForm
             phoneAlerts = alerts;
             pairing = new PhonePairing(PhonePairing.DefaultPath);
             // HTTPS with the box's own certificates (Android's installed app and Share target, SPEC N9).
-            var certificates = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore());
+            var certificates = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
             phones = new PhoneServer(new PhoneHost(this), Path.Combine(AppContext.BaseDirectory, "phone"), pairing, certificates: certificates);
             // Both run inside other work (Standby.Enter, SleepTimer.Tick): nothing may escape.
             standby.Changed += active =>
@@ -538,6 +538,7 @@ partial class MainForm
         // Seconds from now (the phone's clock may be off): the phone counts on from when it got them.
         var position = media is null ? 0 : media.Playing ? media.Position + (DateTime.Now - media.PositionAt).TotalSeconds : media.Position;
         if (media is { Duration: > 0 }) position = Math.Min(position, media.Duration);
+        if (media is { Live: true }) position = 0; // a live stream: no timeline on the phone
         // The volume as last read: not read every second in standby (nothing changes it there,
         // and without the TV an HDMI-only box may have no audio device at all).
         if (!standby.Active) phoneSound = (phoneAudio.Volume ?? 0, phoneAudio.Muted);
@@ -559,8 +560,8 @@ partial class MainForm
             media = media is null ? null : new
             {
                 app = media.App, title = media.Title, subtitle = media.Subtitle, playing = media.Playing,
-                position = Math.Round(Math.Max(0, position)), duration = Math.Round(media.Duration),
-                art = media.ArtVersion, canSeek = media.CanSeek, canNext = media.CanNext, canPrevious = media.CanPrevious,
+                position = Math.Round(Math.Max(0, position)), duration = media.Live ? 0 : Math.Round(media.Duration), live = media.Live,
+                art = media.ArtVersion, canSeek = media.CanSeek && !media.Live, canNext = media.CanNext, canPrevious = media.CanPrevious,
             },
         };
     }
@@ -622,6 +623,7 @@ partial class MainForm
         readonly object gate = new();
         int artFor;                                   // the item the artwork is for
         (byte[] Data, string ContentType)? art;
+        readonly LiveGuess live = new();
 
         MediaInfo? Pick()
         {
@@ -640,9 +642,10 @@ partial class MainForm
             if (s is null || s.Status is MediaStatus.Closed or MediaStatus.Stopped) return null;
             var appName = s.App is { } id ? form.apps.Get(id)?.Name : null;
             var item = HashCode.Combine(s.Source, s.Title, s.Artist) & 0x7FFFFFFF;
-            bool ready;
+            bool ready, isLive;
             lock (gate)
             {
+                isLive = live.IsLive(s);
                 if (item != artFor)
                 {
                     // A new item: its artwork is read in the background; the phone asks for it once ArtVersion says so.
@@ -658,7 +661,7 @@ partial class MainForm
                 ready = art is not null;
             }
             return new PhoneMediaSnapshot(appName, s.Title ?? appName ?? "Playing", s.Artist, s.Status == MediaStatus.Playing,
-                s.Position ?? 0, s.Duration ?? 0, s.At, ready ? item : 0, s.CanSeek && s.Duration > 0, s.CanNext, s.CanPrevious);
+                s.Position ?? 0, s.Duration ?? 0, s.At, ready ? item : 0, s.CanSeek && s.Duration > 0 && !isLive, s.CanNext, s.CanPrevious, isLive);
         }
 
         public (byte[] Data, string ContentType)? Artwork() { lock (gate) return art; }
@@ -680,13 +683,16 @@ partial class MainForm
                 }
                 return;
             }
-            var canSeek = s.CanSeek && s.Duration > 0;
+            bool isLive;
+            lock (gate) isLive = live.IsLive(s);
+            var canSeek = s.CanSeek && s.Duration > 0 && !isLive;
             switch (action)
             {
                 case PhoneMediaAction.Toggle: _ = form.media.SendAsync(s.Source, "playPause"); break;
                 case PhoneMediaAction.Next: _ = form.media.SendAsync(s.Source, "next"); break;
                 case PhoneMediaAction.Previous: _ = form.media.SendAsync(s.Source, "previous"); break;
                 case PhoneMediaAction.Back10 or PhoneMediaAction.Forward10:
+                    if (isLive) break; // live: no seeking (the phone hides it too)
                     if (canSeek)
                     {
                         // The position as of now: it moves on while playing.
