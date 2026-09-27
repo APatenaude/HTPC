@@ -17,8 +17,8 @@ sealed class VolumeOsd : Form
 {
     const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
 
-    // Design units (1920 wide): top left, clear of the alert cards (top right), the app hint
-    // (bottom left) and subtitles (bottom).
+    // Design units (1920 wide): top left, clear of the alert cards (top right) and subtitles
+    // (bottom).
     const float CardLeft = 96, CardTop = 48, CardWidth = 520, RowHeight = 88, NameHeight = 40, Shade = 40;
 
     // The speaker with a cross instead of its waves (icons.js has no muted speaker).

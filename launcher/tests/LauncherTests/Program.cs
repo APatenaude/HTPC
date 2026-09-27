@@ -119,6 +119,11 @@ Console.WriteLine("== ButtonMapStore");
     var text = JsonSerializer.Serialize(withMaps, opts);
     var back = JsonSerializer.Deserialize<LauncherSettings>(text, opts)!;
     Check(JsonSerializer.Serialize(back.ButtonMaps) == JsonSerializer.Serialize(json), "LauncherSettings round trip keeps buttonMaps");
+
+    // A settings file from before the in-app hint was dropped: its switch is skipped, not an error.
+    var old = JsonSerializer.Deserialize<LauncherSettings>("""{ "idleMinutes": 45, "showAppHints": false, "showKeyboardAutomatically": false }""", opts)!;
+    Check(old.IdleMinutes == 45 && !old.ShowKeyboardAutomatically, "settings with the old showAppHints still load");
+    Check(!JsonSerializer.Serialize(old, opts).Contains("showAppHints"), "showAppHints is not written back");
 }
 
 // ---------------------------------------------------------------- PadMapper
@@ -492,7 +497,6 @@ Console.WriteLine("== Alerts overlay");
         new("volume", "Volume 45", null, "speaker", AlertTone.Info, null, null),
         new("app", "Stremio closed unexpectedly", "It stopped responding and was closed. A long line to see the wrapping work as it should.", "warn", AlertTone.Bad, "A", "Reopen"),
     };
-    var hint = new OverlayHint("Mouse mode", "controller", new List<(string, string)> { ("L stick", "Move pointer"), ("R stick", "Scroll"), ("X", "Click"), ("B", "Esc"), ("A", "Enter"), ("Y", "Space"), ("R3", "Keyboard"), ("Home", "Menu") }, "Twitch's buttons. Shows for 4 seconds when the app opens.");
     void Shot(string name, OverlayView v, Rectangle screen, Rectangle avoid)
     {
         using var b = AlertsForm.Render(v, screen, avoid, iconsFile, out var at);
@@ -511,12 +515,10 @@ Console.WriteLine("== Alerts overlay");
         Console.WriteLine($"  {name}: window {at}");
     }
     var hd = new Rectangle(0, 0, 1920, 1080);
-    Shot("cards-1080", new OverlayView(cards, null), hd, Rectangle.Empty);
-    Shot("sleep-4k", new OverlayView(cards.Take(1).ToList(), null), new Rectangle(0, 0, 3840, 2160), Rectangle.Empty);
-    Shot("hint-and-card", new OverlayView(cards.Take(1).ToList(), hint), hd, Rectangle.Empty);
-    Shot("hint-keyboard-bottom", new OverlayView(Array.Empty<OverlayCard>(), hint), hd, new Rectangle(0, 1080 - 560, 1920, 560));
-    Shot("cards-keyboard-top", new OverlayView(cards.Take(2).ToList(), null), hd, new Rectangle(0, 0, 1920, 560));
-    Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>(), null), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
+    Shot("cards-1080", new OverlayView(cards), hd, Rectangle.Empty);
+    Shot("sleep-4k", new OverlayView(cards.Take(1).ToList()), new Rectangle(0, 0, 3840, 2160), Rectangle.Empty);
+    Shot("cards-keyboard-top", new OverlayView(cards.Take(2).ToList()), hd, new Rectangle(0, 0, 1920, 560));
+    Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>()), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
 
     // The volume indicator: top left, clear of the alert cards (top right) and of the keyboard.
     void VolumeShot(string name, SoundLevel level, string? output, Rectangle screen, Rectangle avoid, Action<Rectangle> check)

@@ -7,7 +7,6 @@ AppExitChecks.Run();
 AlertChecks.Run();
 InternetChecks.Run();
 WifiChecks.Run();
-HintChecks.Run();
 BluetoothChecks.Run();
 return T.Summary();
 
@@ -256,65 +255,6 @@ static class InternetChecks
     }
 }
 
-static class HintChecks
-{
-    public static void Run()
-    {
-        T.Group("In-app hint: what it lists");
-        var mouse = AppHint.For("Twitch", ButtonMap.Mouse, false);
-        T.Equal("mouse preset: title", "Mouse mode", mouse.Title);
-        T.Equal("mouse preset: the pointer glyph", "cursor", mouse.Glyph);
-        T.Check("at most 8 buttons (the design's card)", mouse.Buttons.Count <= 8, mouse.Buttons.Count.ToString());
-        T.Check("the user's mouse preset: L stick pointer, X clicks, A Enter", mouse.Buttons.Contains(("L stick", "Move pointer")) && mouse.Buttons.Contains(("X", "Click")) && mouse.Buttons.Contains(("A", "Enter")), string.Join(", ", mouse.Buttons));
-        T.Check("R3 is the keyboard, Home the menu, last", mouse.Buttons.Contains(("R3", "Keyboard")) && mouse.Buttons[^1] == ("Home", "Menu"));
-        T.Equal("caption names the app", "Twitch’s buttons", mouse.Caption);
-        T.Equal("keyboard preset: title", "Keyboard mode", AppHint.For("Kodi", ButtonMap.Keyboard, false).Title);
-        var pad = AppHint.For("YouTube", null, false);
-        T.Check("controller preset: Home menu, Hold Home power", pad.Title == "YouTube uses the controller" && pad.Buttons.SequenceEqual(new[] { ("Home", "Menu"), ("Hold Home", "Power"), ("R3", "Keyboard") }));
-        var moon = AppHint.For("Moonlight", null, true);
-        T.Check("Moonlight: Home goes to the game PC, Hold Home is our menu, no R3", moon.Buttons.SequenceEqual(new[] { ("Home", "Game PC"), ("Hold Home", "Menu") }));
-        T.Equal("a changed button shows its key", "F", AppHint.Label(ButtonMapStore.ParseAction("key:F")));
-        T.Equal("a launcher action shows its name", "Sleep timer", AppHint.Label(ButtonMapStore.ParseAction("do:timer")));
-
-        T.Group("In-app hint: when it shows");
-        var r = new AlertRig();
-        r.Center.ShowHint(mouse);
-        r.Pump();
-        T.Check("the launcher still in front: not yet", r.Overlay.Current is null);
-        r.Tick(0.3);
-        r.Center.SetPlace(AlertPlace.App);
-        T.Check("the app comes to the front: shown", r.Overlay.Current?.Hint == mouse);
-        r.Tick(3.5);
-        T.Check("3.5 s later: still up", r.Overlay.Current?.Hint == mouse);
-        r.Tick(1);
-        T.Check("after 4 s: gone", r.Overlay.Current is null);
-        r.Center.SetPlace(AlertPlace.Launcher);
-        r.Center.ShowHint(mouse);
-        r.Center.SetPlace(AlertPlace.App);
-        T.Check("opened again: shown again (every time)", r.Overlay.Current?.Hint == mouse);
-        r.Center.SetPlace(AlertPlace.Launcher);
-        T.Check("Home while it shows: gone", r.Overlay.Current is null);
-        r.Center.SetPlace(AlertPlace.App);
-        T.Check("... and not back over the app", r.Overlay.Current is null);
-        r.Center.SetPlace(AlertPlace.Launcher);
-        r.Center.ShowHint(mouse);
-        r.Tick(11);
-        r.Center.SetPlace(AlertPlace.App);
-        T.Check("its app never came to the front in 10 s: dropped", r.Overlay.Current is null);
-        r.Center.ShowHint(mouse);
-        r.Center.Raise(new AlertSpec { Id = "sleep", Title = "Sleeping in 1 minute", Urgent = true, ClaimsHome = true, Action = "+15 min" });
-        r.Pump();
-        T.Check("with an alert: card top right and hint together", r.Overlay.Current?.Hint == mouse && r.Overlay.Ids.Contains("sleep"));
-        // What AlertsForm draws for it, 4K (looked at by hand): %TEMP%\htpc-hint.png.
-        var icons = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\ui\icons.js"));
-        var screen = new System.Drawing.Rectangle(0, 0, 3840, 2160);
-        using (var bmp = AlertsForm.Render(r.Overlay.Current!, screen, System.Drawing.Rectangle.Empty, icons, out var at))
-        {
-            bmp.Save(Path.Combine(Path.GetTempPath(), "htpc-hint.png"));
-            T.Check("drawn: the hint sits at the bottom left", at.Left < screen.Width / 2 && at.Bottom > screen.Height / 2, at.ToString());
-        }
-    }
-}
 static class BluetoothChecks
 {
     public static void Run()
