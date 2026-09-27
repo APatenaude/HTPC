@@ -67,7 +67,7 @@ function renderStatus() {
     `<div class="clock"><span class="time">${timeText(now)}</span><span class="date">${esc(dateText(now))}</span></div>` +
     '<div class="pills">' +
       (state.timer ? `<div class="pill timer">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
-      (state.alert ? `<div class="pill alert">${icon(state.alert.glyph || 'info', 28, 2)}<span>${esc(state.alert.text)}</span></div>` : '') +
+      noticePillsHtml() + // alerts (notices.js)
       `<div class="pill"${low ? ' style="color: var(--warn)"' : ''}>${icon('controller', 32)}<b>${esc(batteryText())}</b></div>` +
       `<div class="round" data-nav data-id="settings" data-act="settings" aria-label="Settings">${icon('sliders', 28, 2)}</div>` +
       `<div class="round" data-nav data-id="power" data-act="power" aria-label="Power">${icon('power', 28, 2)}</div>` +
@@ -105,12 +105,15 @@ function renderMenu() {
           (t.id === state.current ? '<span class="tag">Now</span>' : '') +
         '</div>').join('')
     : '<div class="empty">No apps open</div>';
+  // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
+  $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
   $('menu-panel').innerHTML =
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
+    noticeRowsHtml() + // alerts with something to do (notices.js)
     `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 38, 2)}Home screen</div>` +
-    `<span class="section">Open apps</span>${apps}` +
-    '<span class="section">Quick</span>' +
+    `<span class="section">Open apps</span><div class="apps">${apps}</div>` +
+    '<span class="section quick-label">Quick</span>' +
     `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 34)}` +
       `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
     `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 34)}` +
@@ -528,13 +531,8 @@ function showOpening(t) {
 }
 function hideOpening() { $('opening').classList.remove('on'); }
 
-function toast(text, kind) {
-  const el = document.createElement('div');
-  el.className = 'toast' + (kind === 'warn' ? ' warn' : '');
-  el.innerHTML = icon(kind === 'warn' ? 'warn' : 'info', 30, 2) + `<span>${esc(text)}</span>`;
-  $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), 5000);
-}
+// A short message from the page, drawn with the alerts (notices.js).
+function toast(text, kind) { if (text) noticeOwn(text, kind); }
 
 function activate(el) {
   if (!el) return;
@@ -608,6 +606,8 @@ function press(button) {
       break;
     case 'b': back(); break;
     case 'x': {
+      // An alert's row: dismisses it, and nothing else (never on to the close below).
+      if (el && el.dataset.alert) { noticeDismiss(el.dataset.alert); break; }
       // Home screen: the focused tile, if it is running. Menu: the focused app row, else the
       // app the menu was opened over.
       let id = null;
@@ -619,10 +619,17 @@ function press(button) {
       break;
     }
     case 'home':
-      if (state.view === 'home') { state.current = null; state.backdrop = null; go('menu'); }
+      if (state.view === 'home') {
+        state.current = null; state.backdrop = null;
+        // An actionable alert on screen: the menu opens on its row; otherwise where it was left.
+        const f = noticeHomeFocus();
+        if (f) state.memory.menu = f;
+        go('menu');
+      }
       else back();
       break;
     case 'homeHold': if (state.view !== 'power') go('power'); break;
+    case 'r3': { const f = textField(); if (f) openKeyboardFor(f); break; }  // textinput.js
   }
 }
 
@@ -631,6 +638,9 @@ const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }
+  // A text field has the focus: the key is the field's (Backspace deletes, x types an x), only
+  // Enter and Escape still confirm and cancel (textinput.js).
+  if (keyGuard(e)) return;
   const b = KEYS[e.key];
   if (!b) return;
   e.preventDefault();
@@ -653,7 +663,7 @@ function onHost(msg) {
     case 'tv': state.tv = msg.tv; if (state.view === 'settings') render(); break;
     case 'opened':
       hideOpening();
-      if (!msg.ok) toast(msg.text, 'warn');
+      if (!msg.ok && msg.text) toast(msg.text, 'warn'); // failures come as alerts now
       break;
     case 'state':
       if (msg.running) {
@@ -671,6 +681,10 @@ function onHost(msg) {
       const apply = () => {
         state.current = msg.current || null;
         state.backdrop = msg.backdrop || null;
+        // focus: the element to land on (an alert's row, the tile of an app that just closed);
+        // section: the Settings section to open (an alert's action).
+        if (msg.focus) state.memory[msg.view] = msg.focus;
+        if (msg.section) state.section = msg.section;
         reset(msg.view);
         $('stage').classList.remove('blank');
       };

@@ -91,6 +91,7 @@ sealed partial class MainForm : Form
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); };
         Directory.CreateDirectory(captureDir);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
+        InitAlerts();   // MainForm.Alerts.cs
         InitSettings(); // MainForm.Settings.cs
     }
 
@@ -109,6 +110,7 @@ sealed partial class MainForm : Form
             // UI thread would deadlock the awaits inside.
             Task.Run(() => tv.TurnOff()).Wait(3000);
         };
+        AlertsLoaded(); // MainForm.Alerts.cs
         var (hasS3, hasS4) = Standby.Capabilities();
         Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
         controller.Start();
@@ -371,6 +373,7 @@ sealed partial class MainForm : Form
         Pad.Up => "up", Pad.Down => "down", Pad.Left => "left", Pad.Right => "right",
         Pad.A => "a", Pad.B => "b", Pad.X => "x", Pad.Y => "y", Pad.Start => "start", Pad.Select => "select",
         Pad.LB => "lb", Pad.RB => "rb", Pad.LT => "lt", Pad.RT => "rt",
+        Pad.R3 => "r3", // the launcher's own text fields: the on-screen keyboard
         _ => null
     };
 
@@ -427,15 +430,15 @@ sealed partial class MainForm : Form
         switch (m.GetProperty("type").GetString())
         {
             case "type":
-                Input.Type(m.GetProperty("text").GetString() ?? "");
+                TypeText(m.GetProperty("text").GetString() ?? "");
                 break;
             case "key":
                 switch (m.GetProperty("key").GetString())
                 {
-                    case "backspace": Input.Tap(0x08); break;
-                    case "left": Input.Tap(0x25); break;
-                    case "right": Input.Tap(0x27); break;
-                    case "enter": Input.Tap(0x0D); CloseKeyboard("Enter"); break;
+                    case "backspace": TypeKey("backspace"); break;
+                    case "left": TypeKey("left"); break;
+                    case "right": TypeKey("right"); break;
+                    case "enter": TypeKey("enter"); CloseKeyboard("Enter"); break;
                 }
                 break;
             case "close":
@@ -532,7 +535,7 @@ sealed partial class MainForm : Form
         var name = apps.Get(id)?.Name ?? id;
         if (!apps.Launch(id))
         {
-            Post(new { type = "opened", id, ok = false, text = $"{name} could not be started" });
+            AppDidntOpen(id, $"{name} didn’t open", "It isn’t installed, or its program wasn’t found.", retry: false);
             return;
         }
         _ = BringUpWhenReady(id, name);
@@ -549,7 +552,7 @@ sealed partial class MainForm : Form
             await Task.Delay(250);
             // Edge started on a profile that is already open hands over to it and exits.
             if (!apps.IsRunning(id)) apps.Adopt(id);
-            if (!apps.IsRunning(id)) { Post(new { type = "opened", id, ok = false, text = $"{name} closed right away" }); return; }
+            if (!apps.IsRunning(id)) { AppDidntOpen(id, $"{name} didn’t open", "It closed while starting.", retry: true); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
             if (apps.Get(id)?.Fill == true) Native.FillScreen(window);
@@ -559,7 +562,7 @@ sealed partial class MainForm : Form
             Log.Info($"{id} window up after {waited + 250} ms");
             return;
         }
-        Post(new { type = "opened", id, ok = false, text = $"{name} is taking long to open" });
+        AppDidntOpen(id, $"{name} is taking long to open", "It may still appear. Home comes back here.", retry: false);
     }
 
     void SwitchTo(string id)
@@ -596,6 +599,7 @@ sealed partial class MainForm : Form
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
     void ShowOver(CatalogApp? app, string view)
     {
+        var focus = LauncherComingForward(view); // alerts off the app before the capture
         string? backdrop = null;
         if (app is not null)
         {
@@ -610,7 +614,7 @@ sealed partial class MainForm : Form
             }
             catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
         }
-        Post(new { type = "show", view, current = app?.Id, backdrop });
+        Post(new { type = "show", view, current = app?.Id, backdrop, focus });
         PushState();
         Reveal();
     }
@@ -619,10 +623,10 @@ sealed partial class MainForm : Form
     {
         PushState();
         if (started) return;
-        // An app closed by itself (or crashed) while in front: come back to the home screen.
+        // An app closed by itself (or crashed) while in front: come back to the home screen, on its tile.
         if (!LauncherActive && apps.ForegroundApp() is null)
         {
-            Post(new { type = "show", view = "home" });
+            Post(new { type = "show", view = "home", focus = $"tile:{id}" });
             Reveal();
         }
     }
@@ -638,8 +642,8 @@ sealed partial class MainForm : Form
                 // In the mode chosen in Settings (standby by default).
                 standby.Sleep("Power menu");
                 break;
-            case "restart": System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
-            case "shutdown": System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
+            case "restart": apps.MarkAllClosing("restart"); System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
+            case "shutdown": apps.MarkAllClosing("shut down"); System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0"); break;
             case "desktop": WindowState = FormWindowState.Minimized; break;
         }
     }

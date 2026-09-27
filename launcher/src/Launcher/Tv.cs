@@ -204,6 +204,13 @@ sealed class TvService
     /// <summary>Found TVs or the profile changed: refresh Settings.</summary>
     public event Action? Changed;
 
+    /// <summary>
+    /// After the box asked the TV to come on (TurnOn): true when it reports on, false when it
+    /// did not answer or stayed off (the "TV not responding" alert). Not raised when nothing
+    /// was sent (no profile, a locked TV, --no-tv).
+    /// </summary>
+    public event Action<bool>? TurnOnResult;
+
     public TvService(LauncherSettings settings) => this.settings = settings;
 
     /// <summary>--no-tv: the TV is watched and shown in Settings but never sent a key.</summary>
@@ -296,10 +303,10 @@ sealed class TvService
             lastInput = p.Input;
             Quiet();
             var tv = await Roku.Describe(known.Id, known.BaseUrl);
-            if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) return;
+            if (tv is { IsOn: true } && (p.Input == 0 || tv.ActiveInput == p.Input)) { TurnOnResult?.Invoke(true); return; }
             if (tv is not { IsOn: true })
             {
-                if (!await Roku.Key(known.BaseUrl, "PowerOn")) return;
+                if (!await Roku.Key(known.BaseUrl, "PowerOn")) { TurnOnResult?.Invoke(false); return; }
                 Log.Info($"TV {known.Name}: on sent");
                 // A TV in deeper standby can miss the first PowerOn: check, and send it once more.
                 for (var i = 0; i < 8 && tv is not { IsOn: true }; i++)
@@ -314,6 +321,7 @@ sealed class TvService
                 }
                 Log.Info($"TV {known.Name}: {tv?.PowerMode ?? "no answer"}");
             }
+            TurnOnResult?.Invoke(tv is { IsOn: true });
             if (p.Input == 0) return;
             for (var i = 0; i < 6; i++)
             {
