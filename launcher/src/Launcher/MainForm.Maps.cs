@@ -80,8 +80,8 @@ sealed partial class MainForm
     {
         var ids = apps.Tiles.Select(t => t.Id).Concat(apps.RunningIds()).Distinct();
         var list = ids.Select(apps.Get).OfType<CatalogApp>()
-            .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, map = maps.DescribeApp(a.Id, a.Preset) })
-            .Append(new { id = ButtonMapStore.Other, name = "Other windows", glyph = "app", color = "#B3B5BC", map = maps.DescribeApp(ButtonMapStore.Other, "mouse") })
+            .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, logo = LogoFor(a), map = maps.DescribeApp(a.Id, a.Preset) })
+            .Append(new { id = ButtonMapStore.Other, name = "Other windows", glyph = "app", color = "#B3B5BC", logo = (string?)null, map = maps.DescribeApp(ButtonMapStore.Other, "mouse") })
             .ToList();
         Post(new { type = "maps.data", presets = ButtonMapStore.DescribePresets(), apps = list });
     }

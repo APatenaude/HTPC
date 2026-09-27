@@ -113,7 +113,7 @@
       const rows = [['opt-move', 'move', 'Move'], ['opt-rename', 'pencil', 'Rename'], ['opt-icon', 'image', 'Change icon']];
       el('tileopts').innerHTML =
         '<aside class="to-panel">' +
-          `<div class="to-head"><span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 40)}</span>${esc(t.name)}</div>` +
+          `<div class="to-head">${appIcon(t, 40)}${esc(t.name)}</div>` +
           rows.map(([act, glyph, label]) => `<button class="to-item" data-nav data-id="${act}" data-act="${act}">${icon(glyph, 32, 2)}${label}</button>`).join('') +
           '<div class="to-sep"></div>' +
           `<button class="to-item danger" data-nav data-id="opt-remove" data-act="opt-remove">${icon('trash', 32, 2)}Remove from home</button>` +
@@ -196,14 +196,19 @@
     render() {
       const t = targetTile();
       if (!t) { back(); return; }
-      const cur = { glyph: t.glyph, color: t.color };
+      // The app's own logo (when the host has one) comes first; picking a glyph or a colour
+      // replaces it, "Logo" brings it back.
+      const onLogo = !!t.logo;
+      const logoChoice = t.logoUrl
+        ? `<div class="ci-logo"><button class="ci-glyph wide${onLogo ? ' on' : ''}" data-nav data-id="g-logo" data-act="glyph" data-arg="logo">` +
+            `${appIcon({ ...t, logo: t.logoUrl }, 40)}Logo</button></div>` : '';
       el('changeicon').innerHTML =
         '<main class="lib-center"><div class="ci-wrap">' +
-          `<div class="ci-preview"><span style="display:flex;color:${esc(cur.color)}">${icon(cur.glyph, 80)}</span><span class="ci-name">${esc(t.name)}</span></div>` +
+          `<div class="ci-preview">${appIcon(t, 80)}<span class="ci-name">${esc(t.name)}</span></div>` + logoChoice +
           '<div class="ci-glyphs">' + ICONS.map((g) =>
-            `<button class="ci-glyph${g === cur.glyph ? ' on' : ''}" data-nav data-id="g-${g}" data-act="glyph" data-arg="${g}">${icon(g, 40)}</button>`).join('') + '</div>' +
+            `<button class="ci-glyph${!onLogo && g === t.glyph ? ' on' : ''}" data-nav data-id="g-${g}" data-act="glyph" data-arg="${g}">${icon(g, 40)}</button>`).join('') + '</div>' +
           '<div class="ci-colors">' + COLORS.map((c) =>
-            `<button class="ci-color${c.toUpperCase() === String(cur.color).toUpperCase() ? ' on' : ''}" data-nav data-id="c-${c}" data-act="color" data-arg="${c}"><span style="background:${c}"></span></button>`).join('') + '</div>' +
+            `<button class="ci-color${!onLogo && c.toUpperCase() === String(t.color).toUpperCase() ? ' on' : ''}" data-nav data-id="c-${c}" data-act="color" data-arg="${c}"><span style="background:${c}"></span></button>`).join('') + '</div>' +
         '</div></main>' +
         `<footer class="hints">${hints([['A', 'Choose'], ['B', 'Done']])}</footer>`;
     },
@@ -291,14 +296,14 @@
     const apps = lib.catalog.apps.map((c) => {
       const st = cardStatus(c);
       return `<button class="lc-app${st.busy ? ' busy' : ''}${st.failed ? ' failed' : ''}" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}" data-uninstall="${c.canUninstall ? 1 : 0}">` +
-        `<div class="lc-top"><span style="display:flex;color:${esc(c.color)}">${icon(c.glyph, 40)}</span><span class="lc-name">${esc(c.name)}</span></div>` +
+        `<div class="lc-top">${appIcon(c, 40)}<span class="lc-name">${esc(c.name)}</span></div>` +
         `<span class="lc-desc">${esc(c.desc)}</span>` +
         `<span class="lc-status" style="color:${st.color}">${statusIcon(st, 22)}${esc(st.label)}</span>${progressBar(st, 'lc-bar')}</button>`;
     }).join('');
     const sites = lib.catalog.sites.map((c) => {
       const st = cardStatus(c);
       return `<button class="lc-site" data-nav data-id="site-${esc(c.id)}" data-act="sitecard" data-arg="${esc(c.id)}">` +
-        `<span style="display:flex;color:${esc(c.color)}">${icon('globe', 34)}</span>` +
+        appIcon({ ...c, glyph: 'globe' }, 34) +   // without its logo, a site shows as a website
         `<span class="lc-name grow">${esc(c.name)}</span>` +
         `<span style="display:flex;color:${st.color}">${icon(st.glyph, 24, 2.25)}</span></button>`;
     }).join('');
@@ -428,7 +433,7 @@
       el('installing').innerHTML =
         '<div class="il-dialog">' +
           '<div class="il-head">' +
-            `<span class="il-icon">${icon(c.glyph, 72, 1.5)}</span>` +
+            `<span class="il-icon">${appIcon({ ...c, color: '' }, 72, 1.5)}</span>` +
             `<div class="il-text"><span class="il-name">${esc(c.name)}</span><span class="il-desc">${esc(c.desc || '')}</span></div>` +
           '</div>' + action +
         '</div>' +
@@ -472,7 +477,7 @@
         id: `tile:~${id}`, cls: `tile pending${failed ? ' failed' : ''}`, act: failed ? 'pending-retry' : 'pending-info', arg: id,
         x: failed ? 'pending-remove' : null, hints: failed ? [['A', 'Try again'], ['X', 'Remove']] : [],
         html: `<span class="pbadge">${statusIcon(st, 22)}${esc(st.label)}</span>` +
-          `<span class="pglyph" style="color:${esc(c.color)}">${icon(c.glyph, 88)}</span><span class="name">${esc(c.name)}</span>` +
+          `<span class="pglyph">${appIcon(c, 88)}</span><span class="name">${esc(c.name)}</span>` +
           progressBar(st, 'pbar'),
       };
     });
@@ -568,14 +573,14 @@
         { id: 'plex', name: 'Plex HTPC', glyph: 'library', desc: 'Plex’s app made for TVs', state: 'install', canUninstall: true },
         { id: 'spotify', name: 'Spotify', glyph: 'music', desc: 'Music streaming', state: 'installing', canUninstall: true },
         { id: 'feishin', name: 'Feishin', glyph: 'music', desc: 'Music from your Navidrome server', state: 'install', canUninstall: true },
-      ].map((a) => Object.assign(a, { color: C[a.id] || '#F3F2EF' })),
+      ].map((a) => demoLogo(Object.assign(a, { color: C[a.id] || '#F3F2EF' }))),
       sites: [
         { id: 'netflix', name: 'Netflix', color: '#FF4B55', state: 'add' },
         { id: 'disneyplus', name: 'Disney+', color: '#4D8DFF', state: 'add' },
         { id: 'primevideo', name: 'Prime Video', color: '#2BB0F5', state: 'add' },
         { id: 'crunchyroll', name: 'Crunchyroll', color: '#FF8A2B', state: 'add' },
         { id: 'tubi', name: 'Tubi', color: '#FFD43B', state: 'add' },
-      ],
+      ].map(demoLogo),
     };
     lib.progress = { current: { id: 'spotify', name: 'Spotify', action: 'install', phase: 'download', percent: 62 }, pending: [] };
     lib.queued = new Set(['spotify']);

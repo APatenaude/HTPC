@@ -612,6 +612,9 @@ Console.WriteLine("== Home menu over an app: the app's window and the pointer");
     Check(CursorHider.ComeBackTo(new Point(5000, 10), screen, parked) == new Point(1920, 1080), "off the screen now: the middle");
 }
 
+// ---------------------------------------------------------------- Logos (LogoTests.cs)
+LogoTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 

@@ -189,6 +189,7 @@ sealed partial class MainForm : Form
         core.Settings.IsGeneralAutofillEnabled = false;
         core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping(AppLogos.Host, logos.Folder, CoreWebView2HostResourceAccessKind.Allow); // MainForm.Logos.cs
         core.WebMessageReceived += OnWebMessage;
         core.ProcessFailed += (_, args) =>
         {
@@ -263,7 +264,12 @@ sealed partial class MainForm : Form
         if (uiReady) web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, Json));
     }
 
-    object TileList() => apps.Tiles.Select(t => new { id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, running = apps.IsRunning(t.Id), custom = t.Custom }).ToList();
+    // logo: shown instead of the glyph (MainForm.Logos.cs); logoUrl: the app's logo, shown or not (Change icon offers it).
+    object TileList() => apps.Tiles.Select(t => new
+    {
+        id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, logo = LogoFor(t), logoUrl = logos.Url(t.Id),
+        running = apps.IsRunning(t.Id), custom = t.Custom
+    }).ToList();
 
     object StateObject() => new
     {

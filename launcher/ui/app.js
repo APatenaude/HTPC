@@ -49,6 +49,19 @@ function hints(list) {
       `<span>${esc(label)}</span></div>`).join('');
 }
 
+// An app's icon: its own logo (from its program or its site, cached by the host: logos.htpc) a
+// little larger than a glyph would be, in the glyph's room (what is around it does not move),
+// else its glyph in its colour. A logo that does not load gives way to the glyph (both are
+// there; the image's error hides it).
+function appIcon(a, size, weight) {
+  const glyph = icon(a.glyph, size, weight);
+  const color = `color:${esc(a.color || 'inherit')}`;
+  if (!a.logo) return `<span class="appicon" style="${color}">${glyph}</span>`;
+  const px = Math.round(size * 1.25), room = -Math.round((px - size) / 2);
+  return `<span class="appicon has-logo" style="${color}"><img src="${esc(a.logo)}" width="${px}" height="${px}" alt="" draggable="false" ` +
+    `style="margin:${room}px" onerror="this.parentNode.classList.remove('has-logo')">${glyph}</span>`;
+}
+
 function timeText(d) { return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
 function dateText(d) { return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); }
 
@@ -89,9 +102,7 @@ function renderStatus() {
 function renderTiles() {
   const want = state.tiles.map((t) => ({
     id: `tile:${t.id}`, cls: state.moving === t.id ? 'tile moving' : 'tile', act: 'launch', arg: t.id,
-    html: (t.running ? '<span class="badge">Running</span>' : '') +
-      `<span style="display:flex;color:${esc(t.color || 'inherit')}">${icon(t.glyph, 88)}</span>` +
-      `<span class="name">${esc(t.name)}</span>`,
+    html: (t.running ? '<span class="badge">Running</span>' : '') + appIcon(t, 88) + `<span class="name">${esc(t.name)}</span>`,
   }));
   for (const f of EXT.tiles) want.push(...f());   // apps being installed (library.js)
   // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen. While a
@@ -156,8 +167,7 @@ function renderMenu() {
   const apps = running.length
     ? running.map((t) =>
         `<div class="row" data-nav data-id="app:${esc(t.id)}" data-act="switch" data-arg="${esc(t.id)}" data-close="${esc(t.id)}">` +
-          `<span style="display:flex;color:${esc(t.color)}">${icon(t.glyph, 36)}</span>` +
-          `<span class="grow">${esc(t.name)}</span>` +
+          appIcon(t, 36) + `<span class="grow">${esc(t.name)}</span>` +
           (t.id === state.current ? '<span class="tag">Now</span>' : '') +
         '</div>').join('')
     : '<div class="empty">No apps open</div>';
@@ -712,7 +722,7 @@ function reset(view) { state.stack = []; state.view = view; render(); }
 
 function showOpening(t) {
   const el = $('opening');
-  el.innerHTML = `<span class="logo" style="color:${esc(t.color)}">${icon(t.glyph, 160, 1.5)}</span>` +
+  el.innerHTML = `<span class="logo">${appIcon(t, 160, 1.5)}</span>` +
     `<span class="name">Opening ${esc(t.name)}</span><span class="sub">Home comes back here anytime</span>`;
   el.classList.add('on');
 }
@@ -928,7 +938,8 @@ function onHost(msg) {
 if (host) {
   host.addEventListener('message', (e) => onHost(e.data));
 } else {
-  // Demo data for a plain browser.
+  // Demo data for a plain browser. ?logos=1 in the hash: logos from logos\<id>.png next to the
+  // page (none ship; a missing one shows the glyph), e.g. index.html#home?logos=1.
   onHost({ type: 'init', tiles: [
     { id: 'youtube', name: 'YouTube', glyph: 'youtube', color: '#FF5B52' },
     { id: 'twitch', name: 'Twitch', glyph: 'chat', color: '#B08CFF' },
@@ -936,7 +947,13 @@ if (host) {
     { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', color: '#3DC0F0', running: true },
     { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B' },
     { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A' }
-  ], settings: { controller: true, battery: 'full' } });
+  ].map(demoLogo), settings: { controller: true, battery: 'full' } });
+}
+
+// Demo (no host) with ?logos=1: an item's logo is logos/<id>.png beside the page.
+function demoLogo(a) {
+  if (!host && /[?&]logos=1/.test(location.hash)) a.logo = a.logoUrl = `logos/${a.id}.png`;
+  return a;
 }
 
 fit();

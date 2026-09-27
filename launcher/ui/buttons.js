@@ -107,8 +107,7 @@ addView('maps', {
     const apps = maps.data ? maps.data.apps : [];
     const rows = apps.map((a) =>
       `<div class="mrow" data-nav data-id="m-${esc(a.id)}" data-act="map-edit" data-arg="${esc(a.id)}">` +
-        `<span style="display:flex;color:${esc(a.color || 'inherit')}">${icon(a.glyph, 34)}</span>` +
-        `<span class="mname">${esc(a.name)}</span>` +
+        appIcon(a, 34) + `<span class="mname">${esc(a.name)}</span>` +
         `<span class="mpreset">${esc(PRESET_NAMES[a.map.preset] || a.map.preset)}</span>` +
         `<span class="mchanges">${esc(changesText(a))}</span>${icon('chevright', 28, 2)}</div>`).join('');
     renderKeepingScroll($('maps'), settingsNavStatic('controller') +
@@ -177,7 +176,7 @@ function menuAppCard() {
     rows.push(['Home', 'This menu']);
   }
   return '<div class="ma-card">' +
-    `<div class="ma-head"><span style="display:flex;color:${esc(tile.color || 'inherit')}">${icon(tile.glyph, 40)}</span>` +
+    `<div class="ma-head">${appIcon(tile, 40)}` +
       `<b>${esc(app.name)}</b><span class="ma-how">${esc(how)}</span></div>` +
     `<div class="ma-grid">${rows.map(([b, l]) =>
       `<div class="ma-row"><span class="key${b.length > 1 ? ' wide' : ''}">${esc(b)}</span><span>${esc(l)}</span></div>`).join('')}</div>` +
@@ -526,7 +525,7 @@ function mapsDemo() {
     l3: 'mouse:middle', r3: 'do:keyboard' };
   const keyboard = { leftStick: 'arrows', rightStick: 'pointer', dpad: 'arrows', a: 'key:Enter', b: 'key:Esc', x: 'key:Space', y: 'key:Tab',
     lb: 'key:PageUp', rb: 'key:PageDown', lt: 'key:Home', rt: 'key:End', select: 'key:Backspace', start: 'key:Menu', l3: 'mouse:left', r3: 'do:keyboard' };
-  const app = (id, name, glyph, color, preset, changes) => ({ id, name, glyph, color, map: { preset, defaultPreset: preset, changes: changes || {} } });
+  const app = (id, name, glyph, color, preset, changes) => demoLogo({ id, name, glyph, color, map: { preset, defaultPreset: preset, changes: changes || {} } });
   maps.data = {
     presets: { controller: {}, mouse, keyboard },
     apps: [

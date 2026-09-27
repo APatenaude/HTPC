@@ -163,6 +163,19 @@ sealed class AppManager
         return StartMenuTarget(ShippedName(app)) is not null;
     }
 
+    /// <summary>
+    /// The program an app (not a website) runs: its exe where the catalog or its tile says, else
+    /// the one behind its Start menu shortcut; null when not installed. Can be slow (shortcuts):
+    /// not on the UI thread.
+    /// </summary>
+    public string? ProgramPath(string id)
+    {
+        var app = Get(id);
+        if (app is null || app.IsWebsite) return null;
+        if (app.Exe is not null && Environment.ExpandEnvironmentVariables(app.Exe) is var exe && File.Exists(exe)) return exe;
+        return app.Custom ? null : StartMenuTarget(ShippedName(app));
+    }
+
     public List<string> RunningIds()
     {
         lock (running) return running.Where(r => !r.Value.HasExited).Select(r => r.Key).ToList();
