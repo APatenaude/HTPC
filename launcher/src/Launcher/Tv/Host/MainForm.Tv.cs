@@ -70,6 +70,10 @@ sealed partial class MainForm
                 if (on) _ = tv.Discover();
                 break;
             case "tv.read": _ = ReadTv(); break;
+            // Pairing the picked TV (LG: say yes on the TV; Google TV: the code it shows). Codes are never logged.
+            case "tv.pair": tv.StartPairing(); break;
+            case "tv.code": tv.PairCode(Str("code")); break;
+            case "tv.cancelPair": tv.CancelPairing(); PostTv(); break;
             case "tv.test":
                 _ = Task.Run(async () =>
                 {

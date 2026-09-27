@@ -92,6 +92,62 @@ const TvUi = {
     return tv.port > 0 ? `The TV told the box it is on HDMI ${tv.port} (through the HDMI cable).` : 'The TV did not say which input the box is on: pick it.';
   },
 
+  // statusLine and inputStatus give plain text (TV names in it): esc() where it is drawn.
+
+  /** The code typed so far on the pairing keypad (Google TV). */
+  code: '',
+
+  /**
+   * Pairing (LG: say yes on the TV; Google TV: type the code the TV shows), as a panel: every
+   * control has data-id (setup) and data-act (Settings). Null when there is nothing to show.
+   */
+  pairHtml(tv) {
+    const pr = tv.pairing;
+    const unpaired = tv.status === 'unpaired' && tv.profile;
+    if (!pr && !unpaired) return '';
+    const btn = (id, act, label, arg) => `<div class="tv-pbtn" data-nav data-id="${id}" data-act="${act}"${arg ? ` data-arg="${arg}"` : ''}>${esc(label)}</div>`;
+    const name = esc((pr && pr.name) || (tv.profile && tv.profile.name) || 'the TV');
+    if (!pr || (pr.stage === 'done' && unpaired)) {
+      return `<div class="tv-pair"><h2>Pair ${name}</h2><p>The box needs the TV’s OK once before it can turn it on and off.</p>` +
+        `<div class="tv-pbuttons">${btn('tvpair-start', 'tv-pair', 'Pair now')}</div></div>`;
+    }
+    if (pr.stage === 'done') return `<div class="tv-pair done"><h2>${icon('check', 34, 2.5)} ${name} is paired</h2></div>`;
+    if (pr.stage === 'failed') {
+      return `<div class="tv-pair failed"><h2>Not paired</h2><p>${esc(pr.message)}</p>` +
+        `<div class="tv-pbuttons">${btn('tvpair-start', 'tv-pair', 'Try again')}</div></div>`;
+    }
+    if (pr.stage === 'code') {
+      const n = pr.codeLength || 6;
+      const boxes = Array.from({ length: n }, (_, i) => `<span class="tv-cbox${i === TvUi.code.length ? ' now' : ''}">${esc(TvUi.code[i] || '')}</span>`).join('');
+      const keys = '0123456789ABCDEF'.split('').map((k) => btn(`tvkey:${k}`, 'tv-key', k, k)).join('');
+      return `<div class="tv-pair"><h2>Type the code on ${name}</h2><p>${esc(pr.message)}</p>` +
+        `<div class="tv-code">${boxes}</div><div class="tv-keys">${keys}</div>` +
+        `<div class="tv-pbuttons">${btn('tvkey:del', 'tv-key', 'Delete', 'del')}${btn('tvpair-ok', 'tv-code', 'OK')}${btn('tvpair-cancel', 'tv-cancel-pair', 'Cancel')}</div></div>`;
+    }
+    // working, prompt
+    return `<div class="tv-pair"><h2>${pr.stage === 'prompt' ? 'Say yes on the TV' : 'Pairing'}</h2>` +
+      `<p><span class="tv-spin"></span>${esc(pr.message)}</p>` +
+      `<div class="tv-pbuttons">${btn('tvpair-cancel', 'tv-cancel-pair', 'Cancel')}</div></div>`;
+  },
+
+  /** A pairing control pressed (setup and Settings share this); true when it was one. */
+  pairAction(id) {
+    const pr = state.tv && state.tv.pairing; // "state": setup.js's or app.js's, whichever page this is
+    if (id === 'tvpair-start') { TvUi.code = ''; send({ type: 'tv.pair' }); return true; }
+    if (id === 'tvpair-cancel') { TvUi.code = ''; send({ type: 'tv.cancelPair' }); return true; }
+    if (id === 'tvpair-ok') {
+      if (pr && TvUi.code.length === (pr.codeLength || 6)) { send({ type: 'tv.code', code: TvUi.code }); TvUi.code = ''; }
+      return true;
+    }
+    if (id.startsWith('tvkey:')) {
+      const k = id.slice(6);
+      if (k === 'del') TvUi.code = TvUi.code.slice(0, -1);
+      else if (TvUi.code.length < ((pr && pr.codeLength) || 6)) TvUi.code += k;
+      return true;
+    }
+    return false;
+  },
+
   statusLine(tv) {
     const p = tv.profile;
     const s = tv.status;
@@ -102,6 +158,7 @@ const TvUi = {
     if (s === 'paused') return { kind: 'warn', text: `Paused: ${p.paused}. Pick your TV again to go on.` };
     if (s === 'none') return { kind: 'info', text: 'The box leaves this TV to its own remote.' };
     if (s === 'unavailable') return { kind: 'warn', text: 'This control method is turned off on this box.' };
+    if (s === 'unpaired') return { kind: 'warn', text: `${p.name} is not paired yet: the box cannot control it until it is.` };
     return { kind: 'info', text: 'Which TV is this box plugged into? Pick it under “How the box controls it”.' };
   },
 
@@ -133,6 +190,25 @@ const TvUi = {
       case 'paused': return { ...base, status: 'paused', caps: { ...caps, test: false }, profile: { ...profile, paused: 'Living room tv says it shows HDMI 3, not the box (HDMI 1)' } };
       case 'none': return { ...base, status: 'none', profile: { ...profile, method: 'none', methodLabel: 'No TV control', deviceId: '' }, caps: { off: false, follow: false, input: false, readInput: false, test: false } };
       case 'missing': return { ...base, status: 'missing', caps: { ...caps, test: false }, found: [{ ...roku, on: false, power: 'unknown' }] };
+      case 'pair-prompt': case 'pair-failed': case 'pair-unpaired': {
+        const lgTv = { id: 'webos:1a2b', method: 'webos', label: 'LG (webOS)', beta: true, name: 'LG OLED65C4', model: 'OLED65C4PUA', locked: false, on: false, power: 'unknown', input: 0, detected: false, picked: true, paired: false };
+        const stage = kind === 'pair-prompt' ? { stage: 'prompt', message: 'Say yes on LG OLED65C4: a prompt asks to allow “TV Box”.' }
+          : kind === 'pair-failed' ? { stage: 'failed', message: 'LG OLED65C4 did not accept the box. Check LG Connect Apps is on, then try again.' } : null;
+        return { ...base, screen: 'LG TV SSCR2', status: 'unpaired', methods: [methods[0], { ...lg, detected: false }], found: [lgTv],
+          caps: { off: true, follow: true, input: true, readInput: true, test: false }, profiles: [{ ...profiles[1], current: true }],
+          profile: { ...profile, method: 'webos', methodLabel: 'LG (webOS)', beta: true, deviceId: '1a2b', name: 'LG OLED65C4', model: 'OLED65C4PUA' },
+          pairing: stage && { id: 'webos:1a2b', name: 'LG OLED65C4', codeLength: 6, ...stage } };
+      }
+      case 'pair-code': {
+        const g = { id: 'androidtv', label: 'Google TV / Android TV', brand: 'Google TV', beta: true, how: 'Over your network. Type the code the TV shows, once.',
+          checklist: [{ name: 'Same network', where: 'The TV and the box on the same network.' }], detected: false };
+        const gTv = { id: 'androidtv:bt-020000002b01', method: 'androidtv', label: 'Google TV / Android TV', beta: true, name: 'Living room Google TV', model: 'TCL 65Q651G', locked: false, on: false, power: 'unknown', input: 0, detected: false, picked: true, paired: false };
+        TvUi.code = 'A3';
+        return { ...base, screen: 'TCL 65Q651G', status: 'unpaired', methods: [methods[0], g], found: [gTv],
+          caps: { off: true, follow: true, input: true, readInput: false, test: false }, profiles: [{ ...profiles[0], name: 'Living room Google TV', method: 'androidtv', methodLabel: 'Google TV / Android TV' }],
+          profile: { ...profile, method: 'androidtv', methodLabel: 'Google TV / Android TV', beta: true, deviceId: 'bt-020000002b01', name: 'Living room Google TV', model: 'TCL 65Q651G' },
+          pairing: { id: 'androidtv:bt-020000002b01', name: 'Living room Google TV', stage: 'code', message: 'Type the code Living room Google TV shows.', codeLength: 6 } };
+      }
       default: return base;
     }
   },
@@ -161,10 +237,13 @@ if (typeof settingsSection === 'function') (() => {
         (x.current ? '<span class="tv-now"><span></span>Plugged in now</span>' : '') + '</div>').join('');
     const setUp = !p && tv.screen
       ? `<div class="tv-card add" data-nav data-id="tv-setup" data-act="tv-method">${icon('plus', 28, 2)}Set up this TV (${esc(tv.screen)})</div>` : '';
-    let right = `<div class="srow" data-nav data-id="tv-method" data-act="tv-method"><div class="text"><span class="label">How the box controls it</span>` +
+    let right = TvUi.pairHtml(tv) + `<div class="srow" data-nav data-id="tv-method" data-act="tv-method"><div class="text"><span class="label">How the box controls it</span>` +
       `<span class="caption">${esc(p ? (p.method === 'none' ? 'No TV control: its own remote' : `${p.methodLabel}${p.beta ? ' (beta)' : ''}, over your network${p.name ? ` · ${p.name}` : ''}`) : 'Not set up yet: pick your TV')}</span></div>` +
       `<div class="value">${icon('chevright', 30, 2)}</div></div>`;
-    if (p && p.method !== 'none') {
+    // While pairing runs, only its panel (the rest waits; the keypad needs the room).
+    const pairing = tv.pairing && ['code', 'prompt', 'working'].includes(tv.pairing.stage);
+    if (pairing) right = TvUi.pairHtml(tv);
+    if (!pairing && p && p.method !== 'none') {
       if (tv.caps.input) right += `<div class="srow" data-nav data-id="tv-input" data-tv-input="1"><div class="text"><span class="label">Input this box is on</span>` +
         `<span class="caption">${esc(TvUi.portNote(tv))}</span></div>` +
         `<div class="value">${icon('chevleft', 26, 2)}${p.input ? `HDMI ${p.input}` : 'Unknown'}${icon('chevright', 26, 2)}</div></div>`;
@@ -250,6 +329,8 @@ if (typeof settingsSection === 'function') (() => {
     if (x.current) { go('tvmethod'); return; }
     ask({ title: `Forget ${x.name}?`, text: 'Its settings go. If the box is plugged into it again, it asks to set it up.', yes: 'Forget', onYes: () => send({ type: 'tv.forget', key }) });
   });
+  // Pairing controls (the panel above): the same ids as in setup.
+  for (const act of ['tv-pair', 'tv-key', 'tv-code', 'tv-cancel-pair']) onAction(act, (el) => { TvUi.pairAction(el.dataset.id); window.render(); });
   onAction('tv-test', () => { toast('Turning the TV off and back on…'); send({ type: 'tv.test' }); });
   onAction('tv-refresh', () => { toast('Searching for TVs…'); send({ type: 'tv.refresh' }); });
 

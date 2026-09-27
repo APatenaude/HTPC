@@ -45,9 +45,19 @@ sealed class FakeNet : ITvNet
             Interlocked.Increment(ref WakePackets);
             trace.Add($"wol {mac}");
             foreach (var f in rokus) f.WakePacket(mac);
+            foreach (var w in WakeTargets) w(mac);
         }
         return Task.CompletedTask;
     }
+
+    /// <summary>Other fakes that wake on a magic packet (LG).</summary>
+    public readonly List<Action<string>> WakeTargets = new();
+
+    /// <summary>mDNS answers of other fakes (Google TV, Chromecast), by service.</summary>
+    public readonly List<Func<string, IEnumerable<MdnsService>>> MdnsResponders = new();
+
+    public Task<IReadOnlyList<MdnsService>> Mdns(string service, TimeSpan wait, CancellationToken cancel) =>
+        Task.FromResult<IReadOnlyList<MdnsService>>(MdnsResponders.SelectMany(r => r(service)).ToList());
 }
 
 /// <summary>Notices recorded for checks.</summary>

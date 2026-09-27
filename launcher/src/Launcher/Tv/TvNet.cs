@@ -19,7 +19,13 @@ interface ITvNet
 
     /// <summary>Wake-on-LAN magic packets for these MACs, on every LAN adapter's subnet.</summary>
     Task WakeOnLan(IReadOnlyCollection<string> macs);
+
+    /// <summary>DNS-SD instances of a service ("_androidtvremote2._tcp.local"), each at the address that answered for it.</summary>
+    Task<IReadOnlyList<MdnsService>> Mdns(string service, TimeSpan wait, CancellationToken cancel);
 }
+
+/// <summary>A DNS-SD instance: its name, the address it answered from (its own A record), port and TXT.</summary>
+sealed record MdnsService(string Instance, IPAddress Address, int Port, IReadOnlyDictionary<string, string> Txt);
 
 /// <summary>A network adapter as the filter sees it (a plain record, so the filter can be tested with a table).</summary>
 sealed record LanAdapter(string Name, string Description, NetworkInterfaceType Type, OperationalStatus Status,
@@ -138,6 +144,144 @@ sealed class TvNet : ITvNet
             }
             catch (SocketException e) { Log.Warn($"Wake-on-LAN on {adapter.Name}: {e.SocketErrorCode}"); }
         }
+    }
+
+    /// <summary>
+    /// mDNS question from a random port on each LAN adapter: responders then answer straight back
+    /// to it (legacy unicast, RFC 6762 6.7), which needs no firewall rule, before or after setup
+    /// makes the network Private. (Windows' own DnsServiceBrowse was the other way; this one picks
+    /// the adapter and works on the Public profile setup starts on.)
+    /// </summary>
+    public async Task<IReadOnlyList<MdnsService>> Mdns(string service, TimeSpan wait, CancellationToken cancel)
+    {
+        var found = new List<MdnsService>();
+        var query = MdnsQuery(service);
+        var target = new IPEndPoint(IPAddress.Parse("224.0.0.251"), 5353);
+        await Task.WhenAll(Adapters().Select(adapter => Task.Run(async () =>
+        {
+            try
+            {
+                using var udp = new UdpClient(new IPEndPoint(adapter.Address!, 0));
+                udp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, adapter.Address!.GetAddressBytes());
+                await udp.SendAsync(query, target, cancel);
+                var until = DateTime.UtcNow + wait;
+                while (true)
+                {
+                    var left = until - DateTime.UtcNow;
+                    if (left <= TimeSpan.Zero) break;
+                    var receive = udp.ReceiveAsync(cancel).AsTask();
+                    if (await Task.WhenAny(receive, Task.Delay(left, cancel)) != receive) break;
+                    var services = ParseMdns(receive.Result.Buffer, receive.Result.RemoteEndPoint.Address, service);
+                    lock (found) found.AddRange(services);
+                }
+            }
+            catch (Exception e) when (e is SocketException or OperationCanceledException) { }
+        }, cancel)));
+        return found.GroupBy(s => (s.Instance, s.Address.ToString())).Select(g => g.First()).ToList();
+    }
+
+    public static byte[] MdnsQuery(string service)
+    {
+        var q = new List<byte> { 0x4E, 0x31, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
+        foreach (var label in service.TrimEnd('.').Split('.'))
+        {
+            var b = Encoding.UTF8.GetBytes(label);
+            q.Add((byte)b.Length);
+            q.AddRange(b);
+        }
+        q.AddRange(new byte[] { 0, 0, 12, 0, 1 }); // end of name, type PTR, class IN
+        return q.ToArray();
+    }
+
+    /// <summary>
+    /// The instances of <paramref name="service"/> in one mDNS answer. An instance counts only when
+    /// its host's A record is the address the answer came from: a device speaks for itself only.
+    /// Malformed packets give nothing.
+    /// </summary>
+    public static List<MdnsService> ParseMdns(byte[] p, IPAddress from, string service)
+    {
+        var result = new List<MdnsService>();
+        try
+        {
+            if (p.Length < 12) return result;
+            int U16(int i) => (p[i] << 8) | p[i + 1];
+            var counts = U16(4) + U16(6) + U16(8) + U16(10);
+            var at = 12;
+            for (var q = 0; q < U16(4); q++) { ReadName(p, ref at); at += 4; }
+            var ptr = new List<string>();
+            var srv = new Dictionary<string, (string Target, int Port)>(StringComparer.OrdinalIgnoreCase);
+            var txt = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            var a = new List<(string Host, IPAddress Ip)>();
+            for (var r = 0; r < counts - U16(4) && at + 10 <= p.Length; r++)
+            {
+                var name = ReadName(p, ref at);
+                var type = U16(at);
+                var length = U16(at + 8);
+                var data = at + 10;
+                if (data + length > p.Length) break;
+                switch (type)
+                {
+                    case 12 when name.Equals(service.TrimEnd('.'), StringComparison.OrdinalIgnoreCase):
+                        var d = data;
+                        ptr.Add(ReadName(p, ref d));
+                        break;
+                    case 33 when length >= 7:
+                        var t = data + 6;
+                        srv[name] = (ReadName(p, ref t), U16(data + 4));
+                        break;
+                    case 16:
+                        var kv = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        for (var o = data; o < data + length;)
+                        {
+                            var n = p[o];
+                            if (o + 1 + n > data + length) break;
+                            var s = Encoding.UTF8.GetString(p, o + 1, n);
+                            var eq = s.IndexOf('=');
+                            if (eq > 0) kv[s[..eq]] = s[(eq + 1)..];
+                            o += 1 + n;
+                        }
+                        txt[name] = kv;
+                        break;
+                    case 1 when length == 4:
+                        a.Add((name, new IPAddress(p.AsSpan(data, 4))));
+                        break;
+                }
+                at = data + length;
+            }
+            foreach (var instance in ptr.Distinct())
+            {
+                if (!srv.TryGetValue(instance, out var s)) continue;
+                if (!a.Any(x => x.Host.Equals(s.Target, StringComparison.OrdinalIgnoreCase) && x.Ip.Equals(from))) continue;
+                var label = instance.EndsWith("." + service.TrimEnd('.'), StringComparison.OrdinalIgnoreCase) ? instance[..^(service.TrimEnd('.').Length + 1)] : instance;
+                result.Add(new MdnsService(label, from, s.Port, txt.TryGetValue(instance, out var kv) ? kv : new Dictionary<string, string>()));
+            }
+        }
+        catch (IndexOutOfRangeException) { result.Clear(); }
+        catch (ArgumentException) { result.Clear(); }
+        return result;
+    }
+
+    /// <summary>A DNS name at <paramref name="at"/> (compression followed, loops cut off).</summary>
+    static string ReadName(byte[] p, ref int at)
+    {
+        var labels = new List<string>();
+        var i = at;
+        var jumped = false;
+        for (var hops = 0; hops < 32; hops++)
+        {
+            var len = p[i];
+            if (len == 0) { if (!jumped) at = i + 1; break; }
+            if ((len & 0xC0) == 0xC0)
+            {
+                if (!jumped) at = i + 2;
+                jumped = true;
+                i = ((len & 0x3F) << 8) | p[i + 1];
+                continue;
+            }
+            labels.Add(Encoding.UTF8.GetString(p, i + 1, len));
+            i += 1 + len;
+        }
+        return string.Join('.', labels);
     }
 
     /// <summary>6 bytes 0xFF, then the MAC 16 times; null for something that is not a MAC.</summary>

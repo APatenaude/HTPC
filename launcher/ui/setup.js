@@ -176,7 +176,8 @@ function tvView() {
       (tv.caps && tv.caps.test && p ? `<div class="su-btn" data-nav data-id="tv-test" style="align-self:flex-start;margin-top:12px">Test: turn the TV off, then back on</div>` : '') +
       (showStatus ? `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` : '') +
       '</div>' +
-      (p && p.method === 'none' ? '' : TvUi.checklistHtml(tv, side)) +
+      // Pairing the picked TV takes the side panel's place while it runs (or while the TV waits for it).
+      (TvUi.pairHtml(tv) ? `<div class="tv-side">${TvUi.pairHtml(tv)}</div>` : p && p.method === 'none' ? '' : TvUi.checklistHtml(tv, side)) +
       '</div>' + (state.dialog ? tvDialog() : ''),
     buttons: button('back', 'Back') + button('next', 'Next', true),
   };
@@ -224,7 +225,9 @@ function render() {
   if (state.step === 'wifi') mountWifi($('su-wifi'));
   const nav = items();
   const keep = nav.find((e) => e.dataset.id === state.focus);
-  setFocus(keep || nav.find((e) => e.classList.contains('picked')) || nav.find((e) => e.classList.contains('primary')) || nav[0] || null);
+  // While pairing, its controls first (the first key, or its button).
+  const pairFirst = nav.find((e) => e.closest('.tv-pair'));
+  setFocus(keep || pairFirst || nav.find((e) => e.classList.contains('picked')) || nav.find((e) => e.classList.contains('primary')) || nav[0] || null);
 }
 
 /**
@@ -321,6 +324,7 @@ function install() {
 
 function activate(id) {
   if (!id) return;
+  if (TvUi.pairAction(id)) { render(); return; }
   if (id === 'next') stepBy(1);
   else if (id === 'back') stepBy(-1);
   else if (id === 'install') install();

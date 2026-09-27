@@ -6,6 +6,8 @@ static class TvDrivers
     public static IReadOnlyList<ITvDriver> Create(ITvNet net) => new ITvDriver[]
     {
         new RokuDriver(net),
+        new WebOsDriver(net),
+        new AndroidTvDriver(net),
     };
 }
 
@@ -34,6 +36,7 @@ static class TvUiState
             : driver is null ? "unavailable"
             : current is null ? "missing"
             : current.Locked ? "locked"
+            : !tv.IsPaired(current) ? "unpaired"
             : "ok";
         return new
         {
@@ -42,6 +45,7 @@ static class TvUiState
             screenKey = screen?.Key,
             port = screen?.Port ?? 0,
             handsOff = tv.HandsOff,
+            pairing = tv.Pairing is { } pair ? new { id = pair.DeviceKey, name = pair.Name, stage = pair.Stage, message = pair.Message, codeLength = pair.CodeLength } : null,
             status,
             profile = p is null ? null : new
             {
@@ -79,6 +83,8 @@ static class TvUiState
                 input = t.State.Input,
                 detected = showing.Contains(t.Key),
                 picked = p is not null && p.Method == t.Method && p.DeviceId == t.Id,
+                paired = tv.IsPaired(t),
+                twin = tv.HasTwin(t),
             }),
             methods = tv.Drivers.Where(d => !d.Info.Beta || tv.Found.Any(t => t.Method == d.Info.Id)).Select(d => new
             {

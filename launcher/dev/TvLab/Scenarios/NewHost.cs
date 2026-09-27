@@ -23,13 +23,13 @@ sealed class NewHost : IRokuHost, IDisposable
     public DateTime LastUserInput = DateTime.MinValue;
     public bool ScreenOn => !standbyActive;
 
-    public NewHost(RokuWorld world, bool handsOff = false, IReadOnlyList<ITvDriver>? drivers = null, string? filesDir = null)
+    public NewHost(RokuWorld world, bool handsOff = false, Func<FakeNet, ITvClock, IReadOnlyList<ITvDriver>>? drivers = null, string? filesDir = null)
     {
         FilesDir = filesDir ?? Path.Combine(Path.GetTempPath(), "tvlab-" + Guid.NewGuid().ToString("N")[..8]);
         trace = world.Trace;
         Net = new FakeNet(world.Trace, world.Fakes);
         Notices = new FakeNotices(world.Trace);
-        Tv = new TvService(new TvParts(Profiles, () => ProfileSaves++, drivers ?? new ITvDriver[] { new RokuDriver(Net, clock: world.Clock) }, Net, world.Clock,
+        Tv = new TvService(new TvParts(Profiles, () => ProfileSaves++, drivers?.Invoke(Net, world.Clock) ?? new ITvDriver[] { new RokuDriver(Net, clock: world.Clock) }, Net, world.Clock,
             new TvFiles(FilesDir), () => Screen, Notices))
         {
             HandsOff = handsOff,

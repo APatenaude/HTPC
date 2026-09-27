@@ -33,12 +33,14 @@ switch (command)
     case "roku": await RokuLab.CompareWithBaseline(); break;
     case "checks": await TvChecks.RunAll(); break;
     case "unit": UnitChecks.RunAll(); break;
+    case "phaseb": await PhaseBChecks.RunAll(); break;
     case "edid" when args.Contains("--write-fixtures"): UnitChecks.WriteEdidFixtures(); break;
     case "discover": await Discover.Run(); break;
     case "all":
         await RokuLab.CompareWithBaseline();
         await TvChecks.RunAll();
         UnitChecks.RunAll();
+        await PhaseBChecks.RunAll();
         break;
     default:
         Console.WriteLine($"Unknown command {command}");
