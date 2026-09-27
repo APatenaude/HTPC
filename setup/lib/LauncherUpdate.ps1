@@ -226,11 +226,16 @@ function Test-UserSignedIn {
 }
 
 # The watchdog runs from the launcher's folder: it is what starts the new launcher after the
-# swap (this job never does), so no update without it.
+# swap (this job never does), so no update without it. After an update that brought a new
+# watchdog, the old one keeps running (until the next sign-in) from its renamed file,
+# HtpcWatchdog.prev.exe or a set-aside .old-*: still the launcher's folder, still admin-only.
 function Test-WatchdogRunning($Paths) {
-    $exe = Join-Path $Paths.LauncherDir 'HtpcWatchdog.exe'
-    [bool](Get-CimInstance Win32_Process -Filter "Name = 'HtpcWatchdog.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $exe, [StringComparison]::OrdinalIgnoreCase) })
+    $dir = $Paths.LauncherDir.TrimEnd('\')
+    [bool](Get-CimInstance Win32_Process -Filter "Name LIKE 'HtpcWatchdog%'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ExecutablePath -and [string]::Equals((Split-Path $_.ExecutablePath -Parent), $dir, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path $_.ExecutablePath -Leaf) -match '^HtpcWatchdog(\.prev|\.exe\.old-[0-9a-f]{8}|\.prev\.exe\.old-[0-9a-f]{8})?(\.exe)?$'
+        })
 }
 
 # The new release's job runner must load: this update's own rollback, and every later job, run
