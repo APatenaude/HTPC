@@ -387,7 +387,11 @@ try {
         Write-Host 'Planting (as the job would meet them)'
         Set-Scenario 'normal'
         Publish-FakeRelease '0.2.0' 'healthy'
+        # Someone else's: this account's, or, run as SYSTEM, the signed-in user's.
         $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if ($me -eq 'S-1-5-18') {
+            $me = (New-Object Security.Principal.NTAccount((Get-CimInstance Win32_ComputerSystem).UserName)).Translate([Security.Principal.SecurityIdentifier]).Value
+        }
 
         $root = New-FakeBox 'plant-junction'
         $elsewhere = Join-Path $work 'elsewhere'
