@@ -50,7 +50,11 @@ function dateText(d) { return d.toLocaleDateString('en-GB', { weekday: 'long', d
 
 function timerText() {
   if (!state.timer) return '';
-  if (state.timer.endsAt === 'video') return 'Sleep after this video';
+  // "When this video ends": nothing played yet, or the video's minutes left if its app says.
+  if (state.timer.endsAt === 'video') {
+    if (state.timer.waiting) return 'Sleep after the next video';
+    return state.timer.minutesLeft ? `Sleep after this video · ${state.timer.minutesLeft} min` : 'Sleep after this video';
+  }
   const min = Math.max(0, Math.ceil((state.timer.endsAt - Date.now()) / 60000));
   return `Sleep in ${min} min`;
 }
@@ -511,6 +515,8 @@ function demoRoute(hash) {
     if (EXT.sections[arg] && EXT.sections[arg].demo) EXT.sections[arg].demo();
   }
   if (EXT.views[view] && EXT.views[view].demo) EXT.views[view].demo(arg);
+  // #timer/video: the sleep timer set to "when this video ends", 23 minutes left.
+  if (view === 'timer' && arg === 'video') state.timer = { label: 'This video ends', endsAt: 'video', minutesLeft: 23 };
   go(view);
 }
 
