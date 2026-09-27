@@ -73,8 +73,14 @@ The Shell step sets this account's "Custom User Interface" policy value
 Configuration > Administrative Templates > System > Custom User Interface writes) to
 `"C:\Program Files\HTPC\Launcher\HtpcWatchdog.exe" --shell`. Windows then starts the watchdog
 instead of Explorer for this account only; the machine-wide shell and other accounts keep
-Explorer. Tested in the VM on 26100: sign-in goes to the launcher, no Explorer process.
-
+Explorer. Tested in the VM on 26100 (27 Sept 2026, TV Box Setup from the desktop, then Restart
+now): sign-in to the home screen in about 9 s, no Explorer; a killed launcher back in 3 s, a
+hung one ended after 60 s, the WebView2 browser killed: back in 3 s; a killed watchdog started
+again by the launcher within 30 s; a crash loop restarted the box once, the next one gave the
+desktop with the message and a new try after 30 s; desktop mode: taskbar in 2 s, Home over it,
+Back to TV closes it (full work area again, nothing comes back); a folder window an app opens
+stays; sign-out and restart: no restarts meanwhile; RunOnce runs only with desktop mode;
+setup.ps1 -Only Launcher replaces both programs while they run; -Undo gives the desktop back.
 Why not Shell Launcher (IoT Enterprise's kiosk feature): it restarts the shell whatever
 happens, so a launcher failing at start would loop on a black screen; it needs its optional
 feature and SYSTEM-context WMI (MDM bridge); and every planned exit (setup handing over, an

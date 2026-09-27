@@ -148,8 +148,8 @@ namespace Htpc.Watchdog
                     sawExit = true;
                     var code = holder.Process != null ? ExitCode(holder.Process) : null;
                     var lived = holder.Started.HasValue ? DateTime.Now - holder.Started.Value : (TimeSpan?)null;
-                    Log.Info("Launcher ended (pid " + holder.Pid + (lived.HasValue ? ", ran " + Seconds(lived.Value) : "")
-                        + (code.HasValue ? ", exit code " + code.Value : "") + ")");
+                    Log.Info((holder.Pid == 0 ? "Setup (or another launcher) ended" : "Launcher ended (pid " + holder.Pid) + (lived.HasValue ? ", ran " + Seconds(lived.Value) : "")
+                        + (code.HasValue ? ", exit code " + code.Value : "") + (holder.Pid == 0 ? "" : ")"));
                     if (code == PlannedExit) { }                  // an update or a hand-over: not a crash
                     else if (lived.HasValue && lived.Value < FastExit) fastExits++;
                     else if (lived.HasValue) fastExits = 0;

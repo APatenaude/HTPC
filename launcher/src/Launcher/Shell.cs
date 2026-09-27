@@ -78,14 +78,15 @@ sealed class DesktopMode
     }
 
     /// <summary>
-    /// Closes Explorer where the launcher is the shell: asked first (the taskbar's own "Exit
-    /// Explorer"), then ended. Its folder windows close with it. Returns once it is gone.
+    /// Closes Explorer where the launcher is the shell and its desktop is up: asked first (the
+    /// taskbar's own "Exit Explorer"), then ended; its folder windows close with it. A folder
+    /// window an app opened without the desktop is left alone. Returns once it is gone.
     /// </summary>
     public async Task Leave()
     {
-        if (!ShellSession) return;
         var tray = Taskbar();
-        if (tray != IntPtr.Zero) PostMessage(tray, 0x5B4 /* WM_USER + 436: Exit Explorer */, IntPtr.Zero, IntPtr.Zero);
+        if (!ShellSession || tray == IntPtr.Zero) return;
+        PostMessage(tray, 0x5B4 /* WM_USER + 436: Exit Explorer */, IntPtr.Zero, IntPtr.Zero);
         for (var waited = 0; waited < 5000 && Explorers().Count > 0; waited += 250) await Task.Delay(250);
         EndExplorers("did not exit");
         ResetWorkArea();

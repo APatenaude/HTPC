@@ -159,8 +159,14 @@ Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format
 $progressFile = Join-Path $logDir 'setup-progress.json'
 $planned = @($Steps.Keys | Where-Object { -not (($Only -and $Only -notcontains $_) -or $Skip -contains $_) })
 function Save-Progress([string]$Running, [bool]$Done = $false) {
-    [ordered]@{ steps = $planned; running = $Running; results = $results; done = $Done; log = $log } |
-        ConvertTo-Json | Out-File $progressFile -Encoding ascii
+    $json = [ordered]@{ steps = $planned; running = $Running; results = $results; done = $Done; log = $log } | ConvertTo-Json
+    # The setup exe reads this file every 0.7 s; a write that meets its read is tried again
+    # (it once stopped setup with "being used by another process").
+    for ($try = 1; $try -le 20; $try++) {
+        try { [IO.File]::WriteAllText($progressFile, $json); return }
+        catch [IO.IOException] { Start-Sleep -Milliseconds 100 }
+    }
+    Write-Attention "progress not saved ($progressFile busy)"
 }
 
 $results = [ordered]@{}

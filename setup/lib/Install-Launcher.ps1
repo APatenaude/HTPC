@@ -46,6 +46,8 @@ $watchdogFrom = @(
     (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $Exe).Path) 'HtpcWatchdog.exe'),
     (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $SetupDir).Path) 'HtpcWatchdog.exe')
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+# Setup run again from ProgramData\HTPC\setup has no watchdog of its own: the installed one stays.
+if (-not $watchdogFrom -and (Test-Path -LiteralPath $watchdog)) { $watchdogFrom = $watchdog }
 if (-not $watchdogFrom) { throw "HtpcWatchdog.exe not found next to $Exe or $SetupDir" }
 
 $pauseKey = 'HKCU:\Software\HTPC'
