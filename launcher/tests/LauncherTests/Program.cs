@@ -635,6 +635,14 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
 
     static string[] AppManagerArgs(JsonElement launch) =>
         launch.TryGetProperty("args", out var v) ? v.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries) : Array.Empty<string>();
+
+    // Website tiles: full screen with no exit bubble, and still the tile's own profile (sign-ins kept).
+    var site = EdgeSiteApp.Arguments(@"C:\Users\u\AppData\Local\HTPC\edge\twitch", "https://www.twitch.tv/");
+    Check(site.Contains("--start-fullscreen") && site.Contains("--force-app-mode"), "website tiles: full screen in app mode (no \"exit full screen\" bubble)");
+    Check(!site.Any(a => a.StartsWith("--kiosk") || a.StartsWith("--inprivate") || a.StartsWith("--incognito") || a.StartsWith("--guest")),
+        "website tiles: never kiosk, InPrivate or guest (their sign-ins would be lost)");
+    Check(site[0] == @"--user-data-dir=C:\Users\u\AppData\Local\HTPC\edge\twitch" && site[1] == "--app=https://www.twitch.tv/" && site.Count(a => a.Contains("twitch.tv")) == 1,
+        "website tiles: their own profile folder, the address as one argument of its own");
 }
 
 // ---------------------------------------------------------------- Logos (LogoTests.cs)

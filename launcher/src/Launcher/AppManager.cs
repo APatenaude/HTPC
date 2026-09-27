@@ -276,16 +276,10 @@ sealed class AppManager
         if (app.IsWebsite)
         {
             // Each website tile has its own Edge profile (its own sign-in) and opens as an app
-            // window (no address bar or tabs). The url is passed as a separate argument, not built
-            // into a command-line string, so an added site's address cannot inject Edge switches
-            // (it is validated to a plain http(s) URL when the tile is added).
-            var profile = Path.Combine(EdgeProfiles, app.Id);
+            // window, full screen with no "exit full screen" bubble (EdgeSiteApp). The url is a
+            // separate argument (it is validated to a plain http(s) URL when the tile is added).
             psi = new ProcessStartInfo(EdgeExe) { UseShellExecute = false };
-            psi.ArgumentList.Add($"--user-data-dir={profile}");
-            psi.ArgumentList.Add($"--app={app.Url}");
-            psi.ArgumentList.Add("--start-fullscreen");
-            psi.ArgumentList.Add("--no-first-run");
-            psi.ArgumentList.Add("--no-default-browser-check");
+            foreach (var a in EdgeSiteApp.Arguments(Path.Combine(EdgeProfiles, app.Id), app.Url!)) psi.ArgumentList.Add(a);
         }
         else if (app.Exe is not null && File.Exists(Environment.ExpandEnvironmentVariables(app.Exe)))
         {
@@ -449,9 +443,7 @@ sealed class AppManager
         if (app.Type == "website")
         {
             psi.FileName = EdgeExe;
-            psi.ArgumentList.Add($"--user-data-dir={Path.Combine(EdgeProfiles, app.Id)}");
-            psi.ArgumentList.Add($"--app={page.AbsoluteUri}");
-            foreach (var a in new[] { "--start-fullscreen", "--no-first-run", "--no-default-browser-check" }) psi.ArgumentList.Add(a);
+            foreach (var a in EdgeSiteApp.Arguments(Path.Combine(EdgeProfiles, app.Id), page.AbsoluteUri)) psi.ArgumentList.Add(a);
         }
         else
         {
