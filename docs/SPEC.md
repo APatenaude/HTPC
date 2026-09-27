@@ -100,7 +100,7 @@ Decisions of 26 September 2026, evening (with the agents' plans):
 | Topic | Decision |
 |---|---|
 | Home button | Hold = 0.5 s everywhere. In Moonlight a tap goes to the game PC, a hold opens our menu |
-| Browser | The Edge tile is called "Browser" and opens on Google (new tabs too). Website tiles are separate app windows with their own sign-in each and no address bar; links they open in a new window open in another app window. Extensions in every Edge profile: uBlock Origin Lite, Dark Reader, FrankerFaceZ, Video Speed Controller |
+| Browser | The Edge tile is called "Browser" and opens on Google (new tabs too). Website tiles are separate app windows with their own sign-in each and no address bar; links they open in a new window open in another app window. Extensions in every Edge profile: uBlock Origin Lite, FrankerFaceZ, Video Speed Controller. Light pages are drawn dark by Edge itself (`--enable-features=WebContentsForceDark`); Dark Reader was dropped on 27 September 2026 because it opened pages asking to be paid for |
 | Look | Windows in dark mode. Launcher icon: accent-blue tile with a TV and a play mark |
 | Library | Kodi, VLC, Plex HTPC, Spotify, Feishin; sites Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi, Pluto TV, Kick, Crave, CBC Gem. Install and uninstall from the TV (not the Browser), keeping app data; "Add tile" also lists everything in the Start menu; line icons + colour; installs run right away at low priority |
 | Buttons | Per-app maps only for Mouse/Keyboard apps; YouTube, Jellyfin and Moonlight can only switch preset. Global pointer/scroll speeds. R3 (keyboard) editable, Home not. Extra keys (Tab, refresh, zoom, full screen, volume) on a row of the on-screen keyboard |

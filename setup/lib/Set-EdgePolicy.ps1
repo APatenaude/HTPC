@@ -24,9 +24,10 @@ $edge = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
 # Edge installs Chrome Web Store extensions through this policy too, given Google's update URL.
 $edgeStore = 'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
 $chromeStore = 'https://clients2.google.com/service/update2/crx'
+# Dark pages come from Edge itself now (--enable-features=WebContentsForceDark on the Browser
+# and website tiles): Dark Reader, listed here before, opened pages asking to be paid for.
 $extensions = [ordered]@{
     'uBlock Origin Lite (ad blocking)'     = "cimighlppcgcoapaliogpjjdehbnofhn;$edgeStore"
-    'Dark Reader (dark mode, darkreader.org)' = "ifoakfbpdcdoeenechcleahebpibofpc;$edgeStore"
     'FrankerFaceZ (Twitch, frankerfacez.com)' = "fadndhdgpmmaapbmfcknlfgcflmmmieb;$chromeStore"
     'Video Speed Controller (github.com/igrigorik/videospeed)' = "nffaoalbilbmmfgbnbgppjihopabppdk;$chromeStore"
 }
@@ -35,6 +36,17 @@ foreach ($name in $extensions.Keys) {
     Write-Host "  Extension: $name"
     Set-RegValue "$edge\ExtensionInstallForcelist" "$slot" $extensions[$name] 'String'
     $slot++
+}
+# Slots past the list, left by an earlier setup (Dark Reader's list was one longer): removed, so
+# Edge uninstalls what is no longer listed.
+$forcelist = Get-Item "$edge\ExtensionInstallForcelist" -ErrorAction SilentlyContinue
+if ($forcelist) {
+    foreach ($value in $forcelist.GetValueNames()) {
+        if ($value -match '^\d+$' -and [int]$value -ge $slot) {
+            Remove-ItemProperty -Path "$edge\ExtensionInstallForcelist" -Name $value
+            Write-Change "extension slot $value removed (no longer in the list)"
+        }
+    }
 }
 
 Write-Host '  Search: Google'

@@ -24,6 +24,13 @@ static class EdgeSiteApp
     public static IReadOnlyList<string> Arguments(string profile, string url) => new[]
     {
         $"--user-data-dir={profile}", $"--app={url}",
-        "--start-fullscreen", "--force-app-mode", "--no-first-run", "--no-default-browser-check",
+        "--start-fullscreen", "--force-app-mode", "--no-first-run", "--no-default-browser-check", DarkPages,
     };
+
+    /// <summary>
+    /// Light pages drawn dark by Chromium itself ("Auto Dark Mode for Web Contents"), for the
+    /// website tiles and the Browser tile (catalog.json). It replaced the Dark Reader extension,
+    /// which opened pages of its own asking to be paid for (the user, 27 Sept 2026).
+    /// </summary>
+    public const string DarkPages = "--enable-features=WebContentsForceDark";
 }

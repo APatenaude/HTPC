@@ -647,6 +647,9 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     // Website tiles: full screen with no exit bubble, and still the tile's own profile (sign-ins kept).
     var site = EdgeSiteApp.Arguments(@"C:\Users\u\AppData\Local\HTPC\edge\twitch", "https://www.twitch.tv/");
     Check(site.Contains("--start-fullscreen") && site.Contains("--force-app-mode"), "website tiles: full screen in app mode (no \"exit full screen\" bubble)");
+    var browser = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "edge").GetProperty("launch");
+    Check(site.Contains(EdgeSiteApp.DarkPages) && AppManagerArgs(browser).Contains(EdgeSiteApp.DarkPages),
+        "website tiles and the Browser: light pages drawn dark by Edge itself (no Dark Reader)");
     Check(!site.Any(a => a.StartsWith("--kiosk") || a.StartsWith("--inprivate") || a.StartsWith("--incognito") || a.StartsWith("--guest")),
         "website tiles: never kiosk, InPrivate or guest (their sign-ins would be lost)");
     Check(site[0] == @"--user-data-dir=C:\Users\u\AppData\Local\HTPC\edge\twitch" && site[1] == "--app=https://www.twitch.tv/" && site.Count(a => a.Contains("twitch.tv")) == 1,
