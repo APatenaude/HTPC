@@ -232,15 +232,16 @@
         : lib.tab === 'library'
           ? [['A', 'Install or add'], ['X', 'Uninstall'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']]
           : [['A', 'Add to home'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
-      // The tab's list keeps its scroll through a redraw (install progress, the clock).
+      // The same tab again (install progress, a logo, the catalog after an add): its cards are
+      // updated in place (patchHtml), their logos not loaded again, the list's scroll and the
+      // focus left be. Another tab is drawn afresh.
       const old = el('addtile').querySelector('.at-main');
-      const top = old && el('addtile').dataset.tab === lib.tab ? old.scrollTop : 0;
+      if (old && el('addtile').dataset.tab === lib.tab) { patchHtml(old, body); return; }
       el('addtile').innerHTML =
         '<header class="at-header"><h1>Add a tile</h1>' + `<nav class="at-tabs" aria-label="Tile source">${tabs}</nav></header>` +
         `<main class="at-main">${body}</main>` +
         `<footer class="hints">${hints(hintList)}</footer>`;
       el('addtile').dataset.tab = lib.tab;
-      el('addtile').querySelector('.at-main').scrollTop = top;
     },
     // The tab's list scrolls to the focus, with room for its ring, above the hints.
     focused(node) {
@@ -502,6 +503,10 @@
     switch (msg.type) {
       case 'library.available': state.libraryAvailable = !!msg.available; break;
       case 'library.catalog': {
+        // The same catalog again (the host sends it on each look, each logo, each add): nothing to draw.
+        const key = JSON.stringify([msg.apps, msg.sites]), failed = [...lib.failed].join();
+        const same = key === lib.catalogKey;
+        lib.catalogKey = key;
         lib.catalog = { apps: msg.apps || [], sites: msg.sites || [] };
         // Out of the queue and still to install: it did not.
         for (const id of lib.finished) {
@@ -509,6 +514,7 @@
           if (c && c.state === 'install') lib.failed.add(id); else lib.failed.delete(id);
         }
         lib.finished.clear();
+        if (same && failed === [...lib.failed].join()) break;
         if (state.view === 'addtile' && lib.tab === 'library') { render(); focusBodyIfNeeded(); }
         else if (state.view === 'installing' || state.view === 'home') render();
         break;
