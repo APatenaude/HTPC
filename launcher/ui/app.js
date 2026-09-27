@@ -198,9 +198,9 @@ const CHOICES = {
 const SLEEP_MODES = {
   standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Tap Home on the controller to wake it.',
              wake: 'Tap Home on the controller to wake' },
-  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller can’t wake it: use the power button, the keyboard or the phone.',
+  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller and the phone can’t wake it: use the power button or the keyboard.',
            wake: 'Wake with the power button or the keyboard' },
-  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button, the keyboard or the phone.',
+  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button or the keyboard.',
                wake: 'Wake with the power button' }
 };
 
@@ -309,6 +309,7 @@ function changeSetting(key, step) {
     send({ type: 'tvChoose', id: ids[(cur + step + ids.length) % ids.length] });
     return;
   }
+  if (key.startsWith('phone.') && typeof phoneSetting === 'function') { phoneSetting(key); return; }   // phone-settings.js
   if (key.startsWith('tv.')) {
     const name = key.slice(3);
     if (!state.tv.profile) return;
@@ -690,7 +691,7 @@ function onHost(msg) {
         // The app the menu was opened over has closed: B and Home now lead home, not to it.
         if (state.current && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
-      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert']) if (k in msg) state[k] = msg[k];
+      for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;

@@ -21,9 +21,78 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `ui/settings-more.*`, `src/Launcher/MainForm.Settings.cs`, `DecodeCheck.cs`, `AudioOutputs.cs`, `SystemInfo.cs` | Settings › Controller (battery, button test, rumble, pointer / slow pointer / scroll speed, show the keyboard automatically, Button maps), Sound (output: TV, soundbar, Bluetooth, switched for every role through IPolicyConfig, listed only if Windows refuses; volume; test sound), Display (brightness; the hardware decoding check: `setup\tools\Test-HwDecode.ps1 -Json -NoPlayback` in the background, report kept in `C:\ProgramData\HTPC\hwdecode-last.json`), Updates (installed versions), About (Desktop mode, box, versions, hardware; restart the launcher, save the logs to a USB stick, run setup again). Demo routes: `index.html#settings/controller` and so on. |
 | `ui/app.js` (added screens), `src/Launcher/MainForm.Messages.cs` | How features plug in: `settingsSection`, `addView`, `onAction`, `hostMessage`, `ask` in app.js; `[UiMessages("prefix.")]` and `[UiReady]` methods in any MainForm part. |
 | `src/Launcher/MainForm.Library.cs`, `LibraryService.cs`, `TileStore.cs`, `StartMenuScanner.cs`, `ui/library.*` | App library and tile editing (SPEC W1, W5). The Add tile screen (Library / On this box / Website), Tile options (Start on a home tile: move, rename, change icon, remove), and installing/uninstalling from the TV. `LibraryService` owns the install queue and starts the `\HTPC\Jobs` scheduled task (machine-scope apps, elevated as SYSTEM, no prompt on the TV) or runs winget itself for per-user apps; it never lets a standard process run anything but an install/uninstall of a catalog id. Custom tiles (added websites, programs) and per-tile edits live in `settings.json` (`CustomTiles`, `TileEdits`); AppManager merges them so they launch like catalog apps. `library.js` registers its screens through app.js's addView / onAction / hostMessage registry; `MainForm.Library.cs` handles the `library.*` / `tile.*` messages through the UiMessages registry. |
+| `phone/`, `src/Launcher/Phone*.cs`, `MainForm.Phone.cs`, `ui/phone-settings.*`, `ui/qr.js` | The phone remote (SPEC N8), below. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
 dimmed behind it, and the app keeps running underneath. B or the app's row returns to it.
+
+## Phone remote
+
+A web app the launcher serves at **http://tv.local** (port 80; when 80 stays taken for 10 s,
+8765 until the next start). iPhone: Safari › Share › Add to
+Home Screen; Android: Chrome › ⋮ › Add to Home screen (over plain HTTP Android makes it a
+shortcut, not an installed app; that comes with HTTPS for Share, SPEC N9). Settings › Phone
+remote shows a QR code with the box's IP address and a one-time pairing key; the page moves on
+to tv.local by itself where the phone can open it (some Android phones cannot).
+
+| Tab | Controls |
+|---|---|
+| Remote | Touchpad (drag = pointer with acceleration, tap = click, two-finger tap = right-click, two-finger drag = scroll, press and hold then drag = drag) or Arrows (D-pad, OK). Back, Home (hold = Power), Options. Volume −/mute/+ (steps of 2), brightness. Power button: sleep (asks first); wake while asleep. |
+| Type | Live typing into the focused field on the TV (Backspaces for what changed, then the text), Enter, Delete, Clear, Tab, Shift+Tab. Paste a link: YouTube videos open in the YouTube tile (VacuumTube, started with the link; see below), Twitch in the Twitch tile, anything else in a new tab of the browser tile. |
+| Playing | What plays, ±10 s, play/pause, previous/next, seek bar, volume, sleep timer (the 1-minute warning reaches the phone, with +15 min). |
+
+Where input goes (`PhoneRouting.cs`, like the controller's `MainForm.OnPad`): over the
+launcher's own screens, the D-pad and OK are controller buttons and the touchpad moves the focus
+(swipes of 56 px, tap = OK, two-finger tap = back); with the on-screen keyboard up, the D-pad
+drives it; in an app, the D-pad and OK go through the app's button map (arrow keys; OK = the
+map's A), Back is always "go back" (browser Back in Mouse-preset apps, Esc otherwise), Options is
+the context-menu key, Home is our Home menu (in Moonlight too). catalog.json's `phoneKeys`
+changes that per app: `ok`/`back`/`options` (enter, esc, browserBack, altLeft, apps, space),
+`backspace: "afterTyping"` (YouTube, Jellyfin: Backspace only deletes what the phone just typed,
+since outside a text field it goes back a screen), `typing: false` (Moonlight: keys go to the
+game PC). Nothing typed from the phone reaches the launcher's own screens. Touchpad motion goes
+to PadMapper's frame thread (one writer for the pointer, in step with the TV); a phone that goes
+quiet for 15 s lets go of a held button. Phone use counts as activity for idle sleep, and while
+the phone is newer than the controller, the TV's keyboard does not pop up by itself. In standby
+only Home, the power button or Wake do anything (they wake the box); volume, typing, links and
+the rest wait until it is awake. A phone cannot wake it from
+Windows sleep or hibernate: a web page cannot send Wake-on-LAN.
+
+Who may use it: the firewall lets in the home network only (Private networks, local subnet;
+setup's PhoneRemote step). Every request must name the box (Host: tv.local, its name or
+addresses); the WebSocket and pairing calls must come from the remote's own page (Origin), so
+no other web page, on any device, can drive the TV. A new phone pairs with a 4-digit code the
+TV shows (an urgent alert, over any app, only while shown, one code at a time, 30 s before the
+next after one goes unused; 5 wrong tries lock pairing for 1 minute, then 2, 4... up to an hour,
+until a phone pairs), or by scanning the QR code in Settings; it then keeps a long random token in an
+HttpOnly cookie (on iPhone the Home Screen app pairs once more: it has its own cookies). Settings
+› Phone remote lists the phones (Forget) and can switch codes off. Keys are a fixed list (no
+Windows key or shortcuts), text is at most 256 characters a message and never logged, links
+must be http(s) with nothing that could become a command-line switch, and apps get them as
+separate arguments after `--` (VacuumTube only the checked video id). Typing is not encrypted on
+the home network until HTTPS (SPEC N9).
+
+Server (`PhoneServer.cs`): Kestrel inside the launcher, started in the background after the UI
+(never in setup mode; a failure is logged and the launcher carries on), serving only `phone/`.
+Protocol: `PhoneProtocol.cs` (JSON over one WebSocket; the first message carries the version,
+and a page of another version reloads). Volume/mute, the sleep timer, what plays and alerts go
+through small interfaces (`PhoneAdapters.cs`, `AlertsShim.cs`) with stand-ins in
+`MainForm.Phone.cs` until the button-map and alerts work is merged. The home screen's state
+message carries `phone: { url, paired, pairingOpen }` (the address to scan, a phone has paired,
+new phones need no code), and `ui/qr.js` has `qrSvg(text, px)`.
+
+VacuumTube and links: it has no single-instance lock (a second start opens a second window), so
+a YouTube link restarts it: `VacuumTube.exe --fullscreen -- https://www.youtube.com/watch?v=ID`.
+Its main process reads the last plain argument as the start-up deep link and hands it to
+YouTube's TV app (`h5vcc.runtime.initialDeepLink`, VacuumTube 1.8.2); whether YouTube plays it
+is to be checked on the box. Twitch links reopen the Twitch window on that page.
+
+Tests: `tests\PhoneTests` (`dotnet run --project launcher\tests\PhoneTests`: protocol, links,
+routing, pointer, pairing and its locks, Host/Origin, the server on 127.0.0.1 with a fake
+launcher), `dev\phone-test.html` (typing differences, gestures; open it, or headless
+`--dump-dom`), `dev\Test-Phone.ps1` (on the box, read-only: ports, the firewall rule field by
+field; its own requests never cross the inbound rule, so the real test is a phone),
+`dev\New-PhoneIcons.ps1` (the app icons).
 
 ## Build and run on the box
 
@@ -32,7 +101,7 @@ dimmed behind it, and the app keeps running underneath. B or the app's row retur
     powershell -ExecutionPolicy Bypass -File launcher\dev\Send-Pad.ps1 -Press A      # controller input without a controller
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1           # Mouse preset, end to end, on a test page
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1 -Keyboard # on-screen keyboard: click a field, type
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Publish-Setup.ps1          # launcher\dist\TV Box Setup.exe (56 MB, self-contained)
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Publish-Setup.ps1          # launcher\dist\TV Box Setup.exe (68 MB, self-contained; 12 MB of it Kestrel)
 
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
@@ -42,6 +111,6 @@ Log: `C:\ProgramData\HTPC\logs\launcher.log`.
 
 ## Not built yet
 
-Typing from the phone, the phone remote (and its setup step), running as the shell with a
-watchdog, updates from GitHub releases (the launcher self-update; app updates already share the
-`\HTPC\Jobs` mechanism).
+Running as the shell with a watchdog, updates from GitHub releases (the launcher self-update; app
+updates already share the `\HTPC\Jobs` mechanism). Phone: Share to TV and HTTPS with the box's
+own certificate (SPEC N9), the link player.

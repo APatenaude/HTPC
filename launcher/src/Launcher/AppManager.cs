@@ -359,4 +359,75 @@ sealed class AppManager
             catch (Exception e) { Log.Error($"Closing {id}", e); }
         });
     }
+
+    /// <summary>
+    /// Opens the app on a page (the phone's "play a link"): a website tile on that page, any
+    /// other app with the link after "--" (Edge opens it in a new tab; VacuumTube reads it as
+    /// its start-up deep link). Arguments go one by one (ArgumentList), and after "--" nothing
+    /// is read as a switch, so no link can add one. If the app is already running, the link goes
+    /// through a second, short-lived process that is not tracked: right for Edge, which hands it
+    /// to the open window; the caller closes VacuumTube and website tiles first (they would open
+    /// a second window). False when the app cannot be found.
+    /// </summary>
+    public bool LaunchWith(string id, Uri page)
+    {
+        var app = Get(id);
+        if (app is null || !page.IsAbsoluteUri || page.Scheme is not ("http" or "https")) return false;
+        Adopt(id);
+        var handOver = IsRunning(id);
+        var psi = new ProcessStartInfo { UseShellExecute = false };
+        if (app.Type == "website")
+        {
+            psi.FileName = EdgeExe;
+            psi.ArgumentList.Add($"--user-data-dir={Path.Combine(EdgeProfiles, app.Id)}");
+            psi.ArgumentList.Add($"--app={page.AbsoluteUri}");
+            foreach (var a in new[] { "--start-fullscreen", "--no-first-run", "--no-default-browser-check" }) psi.ArgumentList.Add(a);
+        }
+        else
+        {
+            var exe = app.Exe is null ? null : Environment.ExpandEnvironmentVariables(app.Exe);
+            if (exe is null || !File.Exists(exe)) exe = StartMenuTarget(app.Name);
+            if (exe is null || !File.Exists(exe)) { Log.Warn($"{id}: not found, cannot open a link in it"); return false; }
+            psi.FileName = exe;
+            // The tile's switches only: a page it opens by itself (the Browser's Google) would open too.
+            foreach (var a in SplitArguments(Environment.ExpandEnvironmentVariables(app.Args ?? "")).Where(a => a.StartsWith('-'))) psi.ArgumentList.Add(a);
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add(page.AbsoluteUri);
+        }
+        psi.WorkingDirectory = Path.GetDirectoryName(psi.FileName)!;
+        try
+        {
+            var process = Process.Start(psi)!;
+            if (handOver) { Log.Info($"Link handed to the running {id} (pid {process.Id})"); return true; }
+            Track(id, process);
+            Log.Info($"Started {id} with a link (pid {process.Id})");
+            RunningChanged?.Invoke(id, true);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Starting {id} with a link", e);
+            return false;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr CommandLineToArgvW(string commandLine, out int count);
+
+    /// <summary>A catalog "args" string as the arguments a program would see (Windows' own rules for quotes).</summary>
+    internal static List<string> SplitArguments(string args)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(args)) return list;
+        // A dummy program name first: the first token follows different quoting rules.
+        var argv = CommandLineToArgvW("x " + args, out var count);
+        if (argv == IntPtr.Zero) return list;
+        try
+        {
+            for (var i = 1; i < count; i++)
+                list.Add(System.Runtime.InteropServices.Marshal.PtrToStringUni(System.Runtime.InteropServices.Marshal.ReadIntPtr(argv, i * IntPtr.Size))!);
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(argv); }
+        return list;
+    }
 }

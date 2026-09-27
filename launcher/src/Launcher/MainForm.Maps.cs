@@ -40,6 +40,13 @@ sealed partial class MainForm
     {
         if (ButtonMapStore.CommandFor(mapper.Map, pad) is not { } command) return false;
         Log.Info($"{pad}: {command}");
+        RunCommand(command, app);
+        return true;
+    }
+
+    /// <summary>A launcher action (from the controller's map, or the phone's buttons through it).</summary>
+    void RunCommand(string command, CatalogApp? app)
+    {
         switch (command)
         {
             case "menu": ShowOver(app, "menu"); break;
@@ -51,7 +58,6 @@ sealed partial class MainForm
                 break;
             default: Volume(command); break;
         }
-        return true;
     }
 
     /// <summary>The on-screen keyboard's extra row: Tab, refresh, zoom, full screen, volume, mute.</summary>

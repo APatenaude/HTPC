@@ -187,7 +187,17 @@ sealed class MediaWatcher
     public async Task<bool> SendAsync(string source, string command, double seconds = 0)
     {
         var m = await Manager();
-        var s = m?.GetSessions().FirstOrDefault(x => x.SourceAppUserModelId == source);
+        GlobalSystemMediaTransportControlsSession? s;
+        try
+        {
+            // Several sessions can share an app id (every Edge window is "MSEdge"): "play" goes to
+            // a paused one, anything else to the one playing, if there is such a session.
+            var same = m?.GetSessions().Where(x => x.SourceAppUserModelId == source).ToList() ?? new();
+            var wanted = command == "play" ? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused
+                : GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            s = same.FirstOrDefault(x => x.GetPlaybackInfo().PlaybackStatus == wanted) ?? same.FirstOrDefault();
+        }
+        catch (Exception e) { manager = null; Log.Warn($"Media {command}: {e.Message}"); return false; }
         if (s is null) return false;
         try
         {

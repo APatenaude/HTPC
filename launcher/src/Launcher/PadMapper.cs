@@ -58,8 +58,12 @@ sealed class PadMapper
 
     public PadMapper()
     {
+        Feed = new PointerFeed(() => moving.Set());
         new Thread(Frames) { IsBackground = true, Name = "Pointer frames", Priority = ThreadPriority.AboveNormal }.Start();
     }
+
+    /// <summary>The phone's touchpad: moved on the frame thread too, whatever the map (one writer for the pointer).</summary>
+    public PointerFeed Feed { get; }
 
     /// <summary>The map for the app in front; set from any thread.</summary>
     public ButtonMap? Map { get => map; set => map = value; }
@@ -137,10 +141,10 @@ sealed class PadMapper
         {
             moving.Wait();
             var m = motion;
-            if (m is null)
+            if (m is null && !Feed.Pending)
             {
                 moving.Reset();
-                if (motion is not null) moving.Set(); // moved again meanwhile
+                if (motion is not null || Feed.Pending) moving.Set(); // moved again meanwhile
                 pointerX = pointerY = scrollX = scrollY = 0;
                 last = -1;
                 continue;
@@ -154,8 +158,12 @@ sealed class PadMapper
             last = now;
             try
             {
-                Stick(m.Left, m.LX, m.LY, dt, m);
-                Stick(m.Right, m.RX, m.RY, dt, m);
+                if (m is not null)
+                {
+                    Stick(m.Left, m.LX, m.LY, dt, m);
+                    Stick(m.Right, m.RX, m.RY, dt, m);
+                }
+                Feed.Frame();
             }
             catch (Exception e) { Log.Error("Pointer frame", e); }
         }

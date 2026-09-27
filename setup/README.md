@@ -30,6 +30,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
 | Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; started at sign-in |
 | Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\` and `user\` stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 30-min limit, the TV user may run it) |
+| PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80 and 8765) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
 `catalog.json` is the one app list for setup and the launcher's library.
@@ -55,6 +56,13 @@ elevation, run by the launcher itself; their firewall Block rules still need ele
 `firewall:<id>` job adds them through the task first (resolving the interactive user's profile so
 `%LOCALAPPDATA%` points at the real user, not SYSTEM). `Invoke-AppJob.ps1 -DryRun -Catalog <path>`
 validates a token and prints what it would do without installing anything (for tests).
+
+On a box that runs a dev build of the launcher (launcher\dev\Start-Launcher.ps1), the phone
+remote's rule must name that exe too, before the build first runs (else Windows asks over the TV):
+
+    powershell -ExecutionPolicy Bypass -File setup\lib\Set-PhoneRemote.ps1 -Program "C:\Program Files\HTPC\Launcher\HtpcLauncher.exe","<repo>\launcher\src\Launcher\bin\Debug\net10.0-windows10.0.19041.0\HtpcLauncher.exe"
+
+(as admin; setup.ps1 -Only PhoneRemote does the installed exe only).
 
 `tools/Test-HwDecode.ps1` also runs on its own (`-Json` for the launcher): it lists the
 driver's decoders and, when mpv or ffmpeg is present, plays the 4K clips in

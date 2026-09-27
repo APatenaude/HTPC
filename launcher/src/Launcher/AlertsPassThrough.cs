@@ -55,7 +55,7 @@ sealed class DirectAlerts : IAlerts
         raised.RemoveAll(r => r.Spec.Id == alert.Id);
         raised.Insert(0, (alert, onAction, alert.Duration is { } d ? DateTime.Now + d : null));
         if (alert.Duration is not null) expiry.Start();
-        Log.Info($"Alert: {alert.Title}{(alert.Body is null ? "" : $" ({alert.Body})")}");
+        Log.Info($"Alert: {alert.Id}"); // not the text: a pairing code or a phone's name has no place in the log
         Show();
     }, null);
 
