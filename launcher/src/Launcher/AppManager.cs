@@ -4,7 +4,13 @@ using System.Text.Json;
 namespace Htpc.Launcher;
 
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
-    string Glyph, string Color, string? Exe, string? Args, bool Installable, bool AsUser, bool Fill);
+    string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
+    string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
+    bool InstallElevated = true)
+{
+    /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
+    public bool IsWebsite => Type == "website";
+}
 
 /// <summary>
 /// The catalog's apps: starts them, tracks the ones running, finds their windows and closes them.
@@ -16,14 +22,19 @@ sealed class AppManager
     static readonly string EdgeExe = Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe");
     static readonly string EdgeProfiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "edge");
 
-    readonly Dictionary<string, CatalogApp> byId;
+    readonly List<CatalogApp> catalog;          // the shipped catalog, unchanged
+    Dictionary<string, CatalogApp> byId;        // catalog + custom tiles, with the user's edits applied
+    IReadOnlyDictionary<string, TileEdit> edits = new Dictionary<string, TileEdit>();
     readonly Dictionary<string, Process> running = new();
 
     /// <summary>The home screen's tiles: the ones picked in setup, else the catalog's defaults.</summary>
     public IReadOnlyList<CatalogApp> Tiles { get; private set; }
 
-    /// <summary>Every app in the catalog (setup's list to pick from).</summary>
-    public IReadOnlyList<CatalogApp> All { get; }
+    /// <summary>Every app the launcher knows: the catalog plus the user's added tiles, edits applied.</summary>
+    public IReadOnlyList<CatalogApp> All { get; private set; }
+
+    /// <summary>Only the shipped catalog entries (the library and setup's list to pick from).</summary>
+    public IReadOnlyList<CatalogApp> Catalog => catalog;
 
     /// <summary>An app started, exited or was closed. Raised on a thread-pool thread.</summary>
     public event Action<string, bool>? RunningChanged;
@@ -31,39 +42,99 @@ sealed class AppManager
     public AppManager(string catalogPath, IReadOnlyList<string>? tileIds = null)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(catalogPath));
-        var apps = new List<CatalogApp>();
-        foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
-        {
-            string? Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-            var icon = a.TryGetProperty("icon", out var i) ? i : default;
-            var launch = a.TryGetProperty("launch", out var l) ? l : default;
-            var install = a.TryGetProperty("install", out var ins) && ins.ValueKind == JsonValueKind.Object ? ins : default;
-            apps.Add(new CatalogApp(
-                Str(a, "id")!, Str(a, "name")!, Str(a, "type") ?? "app", Str(a, "url"),
-                a.TryGetProperty("default", out var d) && d.GetBoolean(), Str(a, "preset") ?? "controller",
-                icon.ValueKind == JsonValueKind.Object ? Str(icon, "glyph") ?? "play" : "play",
-                icon.ValueKind == JsonValueKind.Object ? Str(icon, "color") ?? "#F3F2EF" : "#F3F2EF",
-                launch.ValueKind == JsonValueKind.Object ? Str(launch, "exe") : null,
-                launch.ValueKind == JsonValueKind.Object ? Str(launch, "args") : null,
-                install.ValueKind == JsonValueKind.Object,
-                install.ValueKind == JsonValueKind.Object && install.TryGetProperty("asUser", out var u) && u.ValueKind == JsonValueKind.True,
-                launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("fill", out var fill) && fill.ValueKind == JsonValueKind.True));
-        }
-        byId = apps.ToDictionary(a => a.Id);
-        All = apps;
-        Tiles = apps.Where(a => a.Default).ToList();
+        catalog = doc.RootElement.GetProperty("apps").EnumerateArray().Select(Parse).ToList();
+        All = catalog;
+        byId = catalog.ToDictionary(a => a.Id);
+        Tiles = catalog.Where(a => a.Default).ToList();
         if (tileIds is not null) SetTiles(tileIds);
-        Log.Info($"Catalog {catalogPath}: {apps.Count} apps, {Tiles.Count} tiles");
+        Log.Info($"Catalog {catalogPath}: {catalog.Count} apps, {Tiles.Count} tiles");
+    }
+
+    static CatalogApp Parse(JsonElement a)
+    {
+        string? Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        var icon = a.TryGetProperty("icon", out var i) ? i : default;
+        var launch = a.TryGetProperty("launch", out var l) ? l : default;
+        var install = a.TryGetProperty("install", out var ins) && ins.ValueKind == JsonValueKind.Object ? ins : default;
+        var installable = install.ValueKind == JsonValueKind.Object;
+        return new CatalogApp(
+            Str(a, "id")!, Str(a, "name")!, Str(a, "type") ?? "app", Str(a, "url"),
+            a.TryGetProperty("default", out var d) && d.GetBoolean(), Str(a, "preset") ?? "controller",
+            icon.ValueKind == JsonValueKind.Object ? Str(icon, "glyph") ?? "play" : "play",
+            icon.ValueKind == JsonValueKind.Object ? Str(icon, "color") ?? "#F3F2EF" : "#F3F2EF",
+            launch.ValueKind == JsonValueKind.Object ? Str(launch, "exe") : null,
+            launch.ValueKind == JsonValueKind.Object ? Str(launch, "args") : null,
+            installable,
+            installable ? Str(install, "scope") ?? "machine" : "machine",
+            launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("fill", out var fill) && fill.ValueKind == JsonValueKind.True,
+            Str(a, "desc"),
+            installable ? Str(install, "wingetScope") : null,
+            installable ? Str(install, "source") : null,
+            Custom: false,
+            InstallElevated: !(installable && install.TryGetProperty("elevated", out var el) && el.ValueKind == JsonValueKind.False));
+    }
+
+    /// <summary>A custom tile (added website or program) as a CatalogApp, so it launches like any app.</summary>
+    static CatalogApp FromCustom(CustomTile t) => new(
+        t.Id, t.Name, t.Kind == "program" ? "app" : "website",
+        t.Kind == "website" ? t.Url : null,
+        false, t.Preset, t.Glyph, t.Color,
+        t.Kind == "program" ? t.Exe : null, t.Args,
+        Installable: false, Scope: "machine", Fill: false, Custom: true);
+
+    /// <summary>
+    /// Merges the user's added tiles and per-tile edits (rename, icon) into the app list. Called on
+    /// start and whenever the user changes a tile, then SetTiles is called again to refresh the home
+    /// row. Edits change only the name, glyph and colour; everything else stays from the catalog.
+    /// </summary>
+    public void SetCustom(IEnumerable<CustomTile> customs, IReadOnlyDictionary<string, TileEdit> tileEdits)
+    {
+        edits = tileEdits;
+        var merged = catalog.Concat(customs.Select(FromCustom));
+        byId = merged.Select(ApplyEdit).ToDictionary(a => a.Id);
+        All = byId.Values.ToList();
+    }
+
+    CatalogApp ApplyEdit(CatalogApp app)
+    {
+        if (!edits.TryGetValue(app.Id, out var e) || e is null) return app;
+        return app with
+        {
+            Name = string.IsNullOrWhiteSpace(e.Name) ? app.Name : e.Name,
+            Glyph = TileStore.ValidGlyph(e.Glyph) ? e.Glyph! : app.Glyph,
+            Color = TileStore.ValidColor(e.Color) ? e.Color! : app.Color
+        };
     }
 
     public CatalogApp? Get(string id) => byId.GetValueOrDefault(id);
 
+    /// <summary>The name the catalog ships (a renamed tile keeps its installer's Start-menu name).</summary>
+    string ShippedName(CatalogApp app) => catalog.FirstOrDefault(c => c.Id == app.Id)?.Name ?? app.Name;
+
+    /// <summary>
+    /// Sets the home row from an ordered id list. Ids that are not known apps are dropped, but a
+    /// custom-tile id is known as soon as SetCustom has run, so added tiles are kept.
+    /// </summary>
     public void SetTiles(IEnumerable<string> ids) =>
         Tiles = ids.Select(Get).OfType<CatalogApp>().ToList();
 
     public bool IsRunning(string id)
     {
         lock (running) return running.TryGetValue(id, out var p) && !p.HasExited;
+    }
+
+    /// <summary>
+    /// Whether the app is installed: its program is where the catalog says, or its Start-menu
+    /// shortcut exists. Websites (and custom tiles) count as always present. Used by the library to
+    /// show installed vs not installed.
+    /// </summary>
+    public bool IsInstalled(string id)
+    {
+        var app = Get(id);
+        if (app is null) return false;
+        if (app.IsWebsite || app.Custom) return true;
+        if (app.Exe is not null && File.Exists(Environment.ExpandEnvironmentVariables(app.Exe))) return true;
+        return StartMenuTarget(ShippedName(app)) is not null;
     }
 
     public List<string> RunningIds()
@@ -140,18 +211,26 @@ sealed class AppManager
         if (IsRunning(id)) return true;
 
         ProcessStartInfo psi;
-        if (app.Type == "website")
+        if (app.IsWebsite)
         {
+            // Each website tile has its own Edge profile (its own sign-in) and opens as an app
+            // window (no address bar or tabs). The url is passed as a separate argument, not built
+            // into a command-line string, so an added site's address cannot inject Edge switches
+            // (it is validated to a plain http(s) URL when the tile is added).
             var profile = Path.Combine(EdgeProfiles, app.Id);
-            psi = new ProcessStartInfo(EdgeExe,
-                $"--user-data-dir=\"{profile}\" --app={app.Url} --start-fullscreen --no-first-run --no-default-browser-check");
+            psi = new ProcessStartInfo(EdgeExe) { UseShellExecute = false };
+            psi.ArgumentList.Add($"--user-data-dir={profile}");
+            psi.ArgumentList.Add($"--app={app.Url}");
+            psi.ArgumentList.Add("--start-fullscreen");
+            psi.ArgumentList.Add("--no-first-run");
+            psi.ArgumentList.Add("--no-default-browser-check");
         }
         else if (app.Exe is not null && File.Exists(Environment.ExpandEnvironmentVariables(app.Exe)))
         {
             var exe = Environment.ExpandEnvironmentVariables(app.Exe);
             psi = new ProcessStartInfo(exe, Environment.ExpandEnvironmentVariables(app.Args ?? ""));
         }
-        else if (StartMenuTarget(app.Name) is { } target)
+        else if (StartMenuTarget(ShippedName(app)) is { } target)
         {
             // No launch path in the catalog, or not where the catalog says: the Start menu
             // shortcut its installer made.
@@ -282,5 +361,76 @@ sealed class AppManager
             }
             catch (Exception e) { Log.Error($"Closing {id}", e); }
         });
+    }
+
+    /// <summary>
+    /// Opens the app on a page (the phone's "play a link"): a website tile on that page, any
+    /// other app with the link after "--" (Edge opens it in a new tab; VacuumTube reads it as
+    /// its start-up deep link). Arguments go one by one (ArgumentList), and after "--" nothing
+    /// is read as a switch, so no link can add one. If the app is already running, the link goes
+    /// through a second, short-lived process that is not tracked: right for Edge, which hands it
+    /// to the open window; the caller closes VacuumTube and website tiles first (they would open
+    /// a second window). False when the app cannot be found.
+    /// </summary>
+    public bool LaunchWith(string id, Uri page)
+    {
+        var app = Get(id);
+        if (app is null || !page.IsAbsoluteUri || page.Scheme is not ("http" or "https")) return false;
+        Adopt(id);
+        var handOver = IsRunning(id);
+        var psi = new ProcessStartInfo { UseShellExecute = false };
+        if (app.Type == "website")
+        {
+            psi.FileName = EdgeExe;
+            psi.ArgumentList.Add($"--user-data-dir={Path.Combine(EdgeProfiles, app.Id)}");
+            psi.ArgumentList.Add($"--app={page.AbsoluteUri}");
+            foreach (var a in new[] { "--start-fullscreen", "--no-first-run", "--no-default-browser-check" }) psi.ArgumentList.Add(a);
+        }
+        else
+        {
+            var exe = app.Exe is null ? null : Environment.ExpandEnvironmentVariables(app.Exe);
+            if (exe is null || !File.Exists(exe)) exe = StartMenuTarget(ShippedName(app));
+            if (exe is null || !File.Exists(exe)) { Log.Warn($"{id}: not found, cannot open a link in it"); return false; }
+            psi.FileName = exe;
+            // The tile's switches only: a page it opens by itself (the Browser's Google) would open too.
+            foreach (var a in SplitArguments(Environment.ExpandEnvironmentVariables(app.Args ?? "")).Where(a => a.StartsWith('-'))) psi.ArgumentList.Add(a);
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add(page.AbsoluteUri);
+        }
+        psi.WorkingDirectory = Path.GetDirectoryName(psi.FileName)!;
+        try
+        {
+            var process = Process.Start(psi)!;
+            if (handOver) { Log.Info($"Link handed to the running {id} (pid {process.Id})"); return true; }
+            Track(id, process);
+            Log.Info($"Started {id} with a link (pid {process.Id})");
+            RunningChanged?.Invoke(id, true);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Starting {id} with a link", e);
+            return false;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr CommandLineToArgvW(string commandLine, out int count);
+
+    /// <summary>A catalog "args" string as the arguments a program would see (Windows' own rules for quotes).</summary>
+    internal static List<string> SplitArguments(string args)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(args)) return list;
+        // A dummy program name first: the first token follows different quoting rules.
+        var argv = CommandLineToArgvW("x " + args, out var count);
+        if (argv == IntPtr.Zero) return list;
+        try
+        {
+            for (var i = 1; i < count; i++)
+                list.Add(System.Runtime.InteropServices.Marshal.PtrToStringUni(System.Runtime.InteropServices.Marshal.ReadIntPtr(argv, i * IntPtr.Size))!);
+        }
+        finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(argv); }
+        return list;
     }
 }

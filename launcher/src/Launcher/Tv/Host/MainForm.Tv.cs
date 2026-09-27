@@ -12,7 +12,7 @@ sealed partial class MainForm
     {
         var service = new TvService(new TvParts(
             settings.Tvs, settings.Save, TvDrivers.Create(TvNet.Instance), TvNet.Instance, SystemTvClock.Instance,
-            new TvFiles(), Edid.Current, new TvAlerts(new ShimAlerts(alerts), OpenTvSettings, a => BeginInvoke(a), () => setupMode)))
+            new TvFiles(), Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, a => BeginInvoke(a), () => setupMode)))
         {
             HandsOff = options.NoTv,
             InSetup = options.Setup,
@@ -87,17 +87,17 @@ sealed partial class MainForm
 }
 
 /// <summary>The TV's notices as launcher alerts, on the UI thread; none during first-run setup (its TV step says it all).</summary>
-sealed class TvAlerts(IAlerts alerts, Action openSettings, Action<Action> onUi, Func<bool> inSetup) : ITvNotices
+sealed class TvAlerts(Func<IAlerts> alerts, Action openSettings, Action<Action> onUi, Func<bool> inSetup) : ITvNotices
 {
     public void Raise(TvNotice n) => onUi(() =>
     {
         if (inSetup()) return;
-        alerts.Raise(new AlertSpec
+        alerts().Raise(new AlertSpec
         {
             Id = n.Id, Title = n.Title, Body = n.Body, Glyph = n.Glyph,
             Tone = n.Bad ? AlertTone.Bad : AlertTone.Info, Action = n.Action,
         }, n.Action is null ? null : openSettings);
     });
 
-    public void Clear(string id) => onUi(() => alerts.Clear(id));
+    public void Clear(string id) => onUi(() => alerts().Clear(id));
 }

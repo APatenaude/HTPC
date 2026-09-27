@@ -25,7 +25,8 @@ const BUTTONS = [['a', 'A'], ['b', 'B'], ['x', 'X'], ['y', 'Y'], ['lb', 'LB'], [
   ['select', 'Select'], ['start', 'Start'], ['home', 'Home']];
 const STEP_NAMES = { RestorePoint: 'Restore point', Winget: 'App installer', Apps: 'Apps', Codecs: 'Video codecs',
   Edge: 'Edge settings', Power: 'Power and sleep', Updates: 'Windows updates', System: 'No pop-ups, network, time',
-  AutoLogon: 'Sign-in without a password', Launcher: 'Home screen', DecodeCheck: 'Video decoding check' };
+  AutoLogon: 'Sign-in without a password', Launcher: 'Home screen', Library: 'Installing from the TV', PhoneRemote: 'Phone remote',
+  DecodeCheck: 'Video decoding check' };
 
 const state = {
   step: 'welcome',

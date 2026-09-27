@@ -41,6 +41,10 @@ sealed class SleepTimer
 
     public bool Active => endsAt is not null || video is not null;
 
+    /// <summary>For the phone: the label, when the countdown ends (null while waiting for a video to end), whether it waits for one; null when off.</summary>
+    public (string Label, DateTime? EndsAt, bool UntilVideoEnds)? Current =>
+        video is not null ? (label ?? "", null, true) : endsAt is { } end ? (label ?? "", end, false) : null;
+
     /// <summary>In the last minute, warning shown: Home is +15 min.</summary>
     public bool Warned => warned && endsAt is not null;
 

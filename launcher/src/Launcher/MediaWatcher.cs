@@ -76,13 +76,15 @@ sealed class MediaWatcher
             try
             {
                 sessions = await ReadAsync();
-                if (Wanted("standby"))
-                    foreach (var s in sessions.Where(s => s.Status == MediaStatus.Playing))
-                        await SendAsync(s.Source, "pause");
+                if (Wanted("standby") && sessions.Any(s => s.Status == MediaStatus.Playing)) await PausePlayingAsync();
                 Updated?.Invoke();
             }
             catch (Exception e) { Log.Warn($"Reading media sessions: {e.Message}"); }
-            await Task.Delay(1000);
+            // Once a second for the timer and the phone; in standby alone every 3 s is enough
+            // (an autoplay countdown plays a few seconds at most) and wakes the box less.
+            bool standbyOnly;
+            lock (wants) standbyOnly = wants.Count == 1 && wants.Contains("standby");
+            await Task.Delay(standbyOnly ? 3000 : 1000);
         }
     }
 
@@ -98,9 +100,12 @@ sealed class MediaWatcher
     {
         var m = await Manager();
         if (m is null) return Array.Empty<MediaInfo>();
-        var current = m.GetCurrentSession()?.SourceAppUserModelId;
+        string? current;
+        IReadOnlyList<GlobalSystemMediaTransportControlsSession> all;
+        try { current = m.GetCurrentSession()?.SourceAppUserModelId; all = m.GetSessions(); }
+        catch { manager = null; throw; } // asked again next time (the media service restarted)
         var list = new List<MediaInfo>();
-        foreach (var s in m.GetSessions())
+        foreach (var s in all)
         {
             try { list.Add(await Describe(s, s.SourceAppUserModelId == current)); }
             catch (Exception e) { Log.Warn($"Media session {s.SourceAppUserModelId}: {e.Message}"); }
@@ -150,11 +155,29 @@ sealed class MediaWatcher
         catch (Exception e) { Log.Warn($"Media sessions: {e.Message}"); return false; }
     }
 
-    /// <summary>Pauses everything that plays (standby).</summary>
-    public async Task PauseAllAsync()
+    /// <summary>Pauses everything that plays (standby). Never throws.</summary>
+    public Task PauseAllAsync() => PausePlayingAsync();
+
+    // Each playing session object is paused itself: several sessions can share an app id (every
+    // Edge window reports "MSEdge"), so pausing by id could pick an idle one.
+    async Task PausePlayingAsync()
     {
-        foreach (var s in await ReadAsync())
-            if (s.Status == MediaStatus.Playing) await SendAsync(s.Source, "pause");
+        try
+        {
+            var m = await Manager();
+            if (m is null) return;
+            foreach (var s in m.GetSessions())
+            {
+                try
+                {
+                    if (s.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
+                    var ok = await s.TryPauseAsync();
+                    Log.Info($"Media pause to {s.SourceAppUserModelId}: {(ok ? "done" : "refused")}");
+                }
+                catch (Exception e) { Log.Warn($"Pausing {s.SourceAppUserModelId}: {e.Message}"); }
+            }
+        }
+        catch (Exception e) { manager = null; Log.Warn($"Pausing media: {e.Message}"); }
     }
 
     /// <summary>
@@ -163,8 +186,10 @@ sealed class MediaWatcher
     /// </summary>
     public async Task<bool> SendAsync(string source, string command, double seconds = 0)
     {
-        var m = await Manager();
-        var s = m?.GetSessions().FirstOrDefault(x => x.SourceAppUserModelId == source);
+        // "play" goes to a paused session, anything else to the one playing (see Choose).
+        var s = Choose(await Manager(), source, command == "play"
+            ? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused
+            : GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
         if (s is null) return false;
         try
         {
@@ -185,11 +210,29 @@ sealed class MediaWatcher
         catch (Exception e) { Log.Warn($"Media {command} to {source}: {e.Message}"); return false; }
     }
 
+    /// <summary>
+    /// The session of that app id, preferring one in the wanted state: several sessions can share
+    /// an app id (every Edge window is "MSEdge"). A session that vanishes while asked is skipped.
+    /// </summary>
+    GlobalSystemMediaTransportControlsSession? Choose(GlobalSystemMediaTransportControlsSessionManager? m, string source,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus wanted)
+    {
+        if (m is null) return null;
+        List<GlobalSystemMediaTransportControlsSession> same;
+        try { same = m.GetSessions().Where(x => x.SourceAppUserModelId == source).ToList(); }
+        catch (Exception e) { manager = null; Log.Warn($"Media sessions: {e.Message}"); return null; }
+        bool Is(GlobalSystemMediaTransportControlsSession x)
+        {
+            try { return x.GetPlaybackInfo().PlaybackStatus == wanted; }
+            catch (Exception) { return false; }
+        }
+        return same.FirstOrDefault(Is) ?? same.FirstOrDefault();
+    }
+
     /// <summary>The session's cover or video frame (for the phone), or null.</summary>
     public async Task<(byte[] Data, string ContentType)?> ThumbnailAsync(string source)
     {
-        var m = await Manager();
-        var s = m?.GetSessions().FirstOrDefault(x => x.SourceAppUserModelId == source);
+        var s = Choose(await Manager(), source, GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
         if (s is null) return null;
         try
         {
