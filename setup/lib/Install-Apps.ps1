@@ -16,7 +16,8 @@
     Nothing may pop up on the TV:
       - an app its installer starts (Stremio does) is closed again;
       - install.firstRun files are written before the app first starts, when missing (VLC's
-        settings file, so it does not open on a privacy question);
+        settings file, so it opens on neither its privacy question nor an update offer:
+        updates are on demand);
       - programs listed in an entry's install.blockInbound get an inbound Block rule in Windows
         Firewall. Without any rule, Windows asks "allow this app on public and private
         networks?" the first time the program listens (Stremio's streaming service did, on the

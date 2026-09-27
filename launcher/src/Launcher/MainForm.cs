@@ -110,9 +110,12 @@ sealed class MainForm : Form
         mouseWatch.Start();
         try { await InitWebView(); }
         catch (Exception ex) { Log.Error("WebView2 failed to start", ex); }
-        // SPEC N7: the TV turns on (and to the box's input) when the box starts.
+        // SPEC N7: the TV turns on (and to the box's input) when the box starts. Only then: a
+        // launcher restarted later (after a crash, an update, a dev build) leaves the TV as it is.
         await tv.Discover();
-        await tv.TurnOn();
+        var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
+        if (uptime < TimeSpan.FromMinutes(10)) await tv.TurnOn();
+        else Log.Info($"Box up {uptime.TotalHours:0.#} h: the TV is left as it is");
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the

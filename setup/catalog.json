@@ -90,7 +90,7 @@
       "launch": { "exe": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" },
       "install": {
         "source": "winget", "id": "VideoLAN.VLC",
-        "firstRun": [ { "file": "%APPDATA%\\vlc\\vlcrc", "text": "[qt]\nqt-privacy-ask=0\n" } ]
+        "firstRun": [ { "file": "%APPDATA%\\vlc\\vlcrc", "text": "[qt]\nqt-privacy-ask=0\nqt-updates-notif=0\n" } ]
       }
     },
     {
