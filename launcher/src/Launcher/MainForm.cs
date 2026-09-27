@@ -94,6 +94,7 @@ sealed partial class MainForm : Form
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
+        revealTimer.Tick += (_, _) => RevealPending("400 ms");
         Directory.CreateDirectory(captureDir);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
         InitAlerts();   // MainForm.Alerts.cs
@@ -238,6 +239,7 @@ sealed partial class MainForm : Form
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "home": break; // the page reports going home; nothing to do here
+            case "shown": RevealPending("page ready"); break; // ShowOver: the backdrop is in place
             // The TV's messages ("tv.*"): MainForm.Tv.cs.
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
@@ -612,6 +614,8 @@ sealed partial class MainForm : Form
     // appearance starts dark instead of flashing the screen it last showed.
     async void StepAside(string id)
     {
+        revealTimer.Stop();
+        revealPending = false; // a Home menu still waiting to show is not wanted any more
         Post(new { type = "blank" });
         await Task.Delay(150);
         if (LauncherActive) return;
@@ -656,8 +660,26 @@ sealed partial class MainForm : Form
             }
             catch (Exception e) { Log.Warn($"Screen capture failed: {e.Message}"); }
         }
-        Post(new { type = "show", view, current = app?.Id ?? (overDesktop ? DesktopMode.Id : null), backdrop, focus });
+        Post(new { type = "show", view, current = app?.Id ?? (overDesktop ? DesktopMode.Id : null), backdrop, focus, ack = backdrop is not null });
         PushState();
+        if (backdrop is null) { Reveal(); return; }
+        // The hidden page last showed black (StepAside): shown at once it came up dark and faded
+        // in over the app. It now shows once the page has the captured frame in place ("shown"),
+        // or after 400 ms, so the frame on screen stays the app's own until the menu slides in.
+        revealTimer.Stop();
+        revealPending = true;
+        revealTimer.Start();
+    }
+
+    readonly System.Windows.Forms.Timer revealTimer = new() { Interval = 400 };
+    bool revealPending;
+
+    void RevealPending(string why)
+    {
+        revealTimer.Stop();
+        if (!revealPending) return;
+        revealPending = false;
+        if (why != "page ready") Log.Info($"Home menu shown without the page's answer ({why})");
         Reveal();
     }
 

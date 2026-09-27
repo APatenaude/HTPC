@@ -896,7 +896,12 @@ function onHost(msg) {
         else if (msg.view === 'settings') state.memory.settings = null;   // on the section list
         if (msg.section) state.section = msg.section;
         reset(msg.view);
-        $('stage').classList.remove('blank');
+        const stage = $('stage');
+        // Over an app the backdrop is the app's own frame: no fade up from dark, it is there at once.
+        if (msg.backdrop) stage.style.transition = 'none';
+        stage.classList.remove('blank');
+        if (msg.backdrop) { void stage.offsetWidth; stage.style.transition = ''; }
+        if (msg.ack) send({ type: 'shown' });   // the host shows the window now
       };
       if (!msg.backdrop) { apply(); break; }
       // Show the menu once its backdrop has loaded, so it does not flash the home screen first.
