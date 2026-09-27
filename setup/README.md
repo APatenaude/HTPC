@@ -3,6 +3,11 @@
 Scripts that turn a clean Windows 11 IoT Enterprise LTSC 2024 install into the finished box
 (docs/SPEC.md, Architecture > Install). Everything done by hand on the box ends up here.
 
+The usual way in is **TV Box Setup.exe** (`launcher\dev\Publish-Setup.ps1` builds it): the
+launcher in setup mode, one self-contained file with these scripts inside. It asks the
+questions (controller check, TV, apps), then runs setup.ps1 with one Windows permission prompt,
+shows its progress, and hands over to the launcher it installed.
+
 ## setup.ps1
 
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1
@@ -16,14 +21,15 @@ answer file runs it with `-Unattended` at the first sign-in.
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
 | Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store) |
-| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc` |
+| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service) |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual, no driver swaps, Store apps on demand; Edge updates itself |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network, automatic time zone, computer name TV |
-| AutoLogon | `lib/Set-AutoLogon.ps1` | automatic sign-in, password kept as an LSA secret (from the answer file, or typed) |
-| DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 |
+| AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
+| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) into `Program Files\HTPC\Launcher`, these scripts kept in `ProgramData\HTPC\setup`, started at sign-in |
+| DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
 `catalog.json` is the one app list for setup now and the launcher's library later.
 
@@ -60,6 +66,7 @@ Hyper-V test VM. See `autounattend/README.md`.
 | 2026-09-26 | .NET SDK 10.0.401 | `dev/Install-BuildTools.ps1` |
 | 2026-09-26 | setup.ps1: all steps; the Microsoft Store was added (`wsreset -i`) during a first HEVC attempt and left in place | `setup.ps1` |
 | 2026-09-26 | HEVC Video Extensions 2.4.109.0, for this user and provisioned for new ones | `setup.ps1 -Only Codecs` |
+| 2026-09-26 | Windows Firewall: two inbound Allow rules (Public) for `stremio-runtime.exe`, from someone clicking Allow on its prompt | not scripted: setup now answers with a Block rule instead (`install.blockInbound`); remove them for the box to match |
 
 To undo before calling the box finished: remove PortableGit, ffmpeg, mpv and the .NET SDK.
 

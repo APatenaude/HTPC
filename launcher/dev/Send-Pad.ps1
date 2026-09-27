@@ -24,7 +24,8 @@ param(
     [int]$LX, [int]$LY, [int]$RX, [int]$RY,
     [ValidateRange(0, 255)][int]$LT, [ValidateRange(0, 255)][int]$RT,
     [int]$HoldMs = 120,
-    [switch]$Release
+    [switch]$Release,
+    [string]$Process = 'HtpcLauncher'   # 'TV Box Setup' for the setup exe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,7 +36,7 @@ Add-Type -Namespace HtpcDev -Name Pad -MemberDefinition @'
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 '@
 
-$launcher = Get-Process HtpcLauncher -ErrorAction SilentlyContinue | Select-Object -First 1
+$launcher = Get-Process $Process -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $launcher) { throw 'The launcher is not running' }
 $window = [IntPtr]::Zero
 $h = [IntPtr]::Zero

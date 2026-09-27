@@ -23,6 +23,9 @@ sealed class LauncherSettings
     /// <summary>No idle sleep while something plays, even with the controller untouched.</summary>
     public bool StayAwakeWhilePlaying { get; set; } = true;
 
+    /// <summary>The home screen's tiles, in order (catalog ids); null = the catalog's defaults.</summary>
+    public List<string>? Tiles { get; set; }
+
     /// <summary>TV profiles by HDMI identity (EDID key): each TV the box meets gets its own.</summary>
     public Dictionary<string, TvProfile> Tvs { get; set; } = new();
 

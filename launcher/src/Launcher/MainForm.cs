@@ -37,6 +37,8 @@ sealed class MainForm : Form
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
     int ticks;
+    bool setupMode;            // first-run setup (setup.html) instead of the home screen
+    SetupRunner? setup;
 
     bool uiReady;
     int brightness = 100;
@@ -54,7 +56,8 @@ sealed class MainForm : Form
         web.DefaultBackgroundColor = BackColor;
         Controls.Add(web);
 
-        apps = new AppManager(options.CatalogPath);
+        setupMode = options.Setup;
+        apps = new AppManager(options.CatalogPath, settings.Tiles);
         apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
@@ -72,9 +75,9 @@ sealed class MainForm : Form
         clock.Tick += async (_, _) =>
         {
             CheckSleepTimer();
-            // Every 5 s: the idle check, and the TV's power state (its own remote).
+            // Every 5 s: the idle check (not during setup), and the TV's power state (its own remote).
             if (++ticks % 5 != 0) return;
-            await standby.Tick();
+            if (!setupMode) await standby.Tick();
             await tv.Poll();
         };
         // Back from a real sleep or hibernate: the TV comes on with the box.
@@ -156,7 +159,7 @@ sealed class MainForm : Form
             Log.Error($"WebView2 process failed: {args.ProcessFailedKind}");
             if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) core.Reload();
         };
-        core.Navigate("https://launcher.htpc/index.html");
+        core.Navigate(setupMode ? "https://launcher.htpc/setup.html" : "https://launcher.htpc/index.html");
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
@@ -166,11 +169,24 @@ sealed class MainForm : Form
 
     void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        // WebView2 swallows exceptions from this handler: log them.
+        try { HandleWebMessage(e); }
+        catch (Exception ex) { Log.Error($"UI message {e.WebMessageAsJson}", ex); }
+    }
+
+    void HandleWebMessage(CoreWebView2WebMessageReceivedEventArgs e)
+    {
         using var doc = JsonDocument.Parse(e.WebMessageAsJson);
         var m = doc.RootElement;
         string? Str(string name) => m.TryGetProperty(name, out var v) ? v.ToString() : null;
         switch (Str("type"))
         {
+            case "ready" when setupMode:
+                uiReady = true;
+                PostSetupInit();
+                break;
+            case "install": StartSetup(m); break;
+            case "finish": FinishSetup(); break;
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();
@@ -349,6 +365,9 @@ sealed class MainForm : Form
         lastField = field;
         if (dismissedField is { } d && d.ProcessId == field.ProcessId && d.Name == field.Name) return;
         if (standby.Active || LauncherActive || !textFields.Enabled) return;
+        // Someone typing on a real keyboard needs no keyboard on screen: it pops up by itself
+        // only while the controller is in use. (R3 still opens it.)
+        if (DateTime.Now - controller.LastActivity > TimeSpan.FromMinutes(1)) return;
         if (keyboard.Visible && keyboardField == field) return;
         OpenKeyboard(field, auto: true);
     }
@@ -389,6 +408,84 @@ sealed class MainForm : Form
                 CloseKeyboard("B");
                 break;
         }
+    }
+
+    // --- First-run setup ("TV Box Setup") -------------------------------------------------------
+
+    void PostSetupInit()
+    {
+        // Apps setup can install (Spotify must be installed without admin rights: later, from
+        // the library) and websites (nothing to install, just a tile).
+        var list = apps.All.Where(a => (a.Installable && !a.AsUser) || a.Type == "website")
+            // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
+            .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
+        Post(new { type = "init", apps = list, tv = tv.Describe(), controller = controller.Connected, battery = controller.BatteryLevel,
+            canInstall = SetupRunner.FindSetupDir() is not null });
+    }
+
+    void StartSetup(JsonElement m)
+    {
+        var picked = m.GetProperty("apps").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
+        var tiles = m.GetProperty("tiles").EnumerateArray().Select(e => e.GetString()!).Where(id => apps.Get(id) is not null).ToList();
+        settings.Tiles = tiles;
+        settings.Save();
+        apps.SetTiles(tiles);
+        Log.Info($"Setup: install {string.Join(", ", picked)}; tiles {string.Join(", ", tiles)}");
+
+        var dir = SetupRunner.FindSetupDir();
+        if (dir is null)
+        {
+            Post(new { type = "installed", ok = false, results = new { Setup = "FAILED: this copy has no setup scripts" }, restartNeeded = Array.Empty<string>() });
+            return;
+        }
+        if (setup is null)
+        {
+            setup = new SetupRunner(dir);
+            setup.Progress += p => Post(new
+            {
+                type = "progress",
+                steps = p.GetProperty("steps"),
+                running = p.TryGetProperty("running", out var r) ? r.GetString() : null,
+                results = p.GetProperty("results"),
+                done = p.TryGetProperty("done", out var d) && d.GetBoolean()
+            });
+            setup.Finished += (code, summary) =>
+            {
+                Post(new
+                {
+                    type = "installed",
+                    ok = code == 0,
+                    results = summary?.GetProperty("steps"),
+                    restartNeeded = summary?.GetProperty("restartNeeded")
+                });
+                Reveal(); // installers may have put windows over the launcher
+            };
+        }
+        if (!setup.Start(picked, SetupRunner.SelfContainedExe())) Post(new { type = "declined" });
+    }
+
+    /// <summary>
+    /// Setup done: the installed launcher takes over (the setup exe may be on a USB stick about
+    /// to be pulled out). Without an installed copy (a dev build), this window becomes the launcher.
+    /// </summary>
+    void FinishSetup()
+    {
+        var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
+        if (File.Exists(installed) && !string.Equals(Environment.ProcessPath, installed, StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Info($"Setup finished: starting {installed}");
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(installed) { UseShellExecute = true });
+                Close();
+                return;
+            }
+            catch (Exception e) { Log.Error("Starting the installed launcher", e); }
+        }
+        setupMode = false;
+        uiReady = false;
+        Log.Info("Setup finished: home screen");
+        web.CoreWebView2?.Navigate("https://launcher.htpc/index.html");
     }
 
     // --- Apps and the Home menu ----------------------------------------------------------------

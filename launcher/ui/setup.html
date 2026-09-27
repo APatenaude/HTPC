@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TV Box Setup</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="setup.css">
+</head>
+<body>
+<!-- First-run setup ("TV Box Setup", the launcher in setup mode; design: First-run setup).
+     Opened in a normal browser it runs on demo data: arrows, Enter = A, Esc = B. -->
+<div id="stage">
+  <div id="setup">
+    <div class="su-top">
+      <span class="su-muted">Setup</span>
+      <div class="su-dots" id="su-dots"></div>
+      <span class="su-muted" id="su-step"></span>
+    </div>
+    <main class="su-main" id="su-main"></main>
+    <div class="su-buttons" id="su-buttons"></div>
+  </div>
+  <div id="toasts"></div>
+</div>
+<script src="icons.js"></script>
+<script src="setup.js"></script>
+</body>
+</html>

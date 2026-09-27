@@ -10,10 +10,11 @@
       Apps          the apps picked in catalog.json (or -Apps)
       Codecs        HEVC Video Extensions (for Edge)
       Edge          Google search, uBlock Origin Lite, no first-run or promotions
-      Power         never sleeps on its own (the launcher's standby), TV standby plan, wake sources
+      Power         never sleeps on its own (the launcher's standby), wake sources
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
+      Launcher      the launcher (-LauncherExe) into Program Files, started at sign-in
       DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
@@ -23,7 +24,8 @@
     through a one-shot scheduled task, because installers started from there would install
     into that app's private copy of AppData.
 
-    Log: C:\ProgramData\HTPC\logs\setup-<time>.log; step results: setup-last.json.
+    Log: C:\ProgramData\HTPC\logs\setup-<time>.log; step results: setup-last.json; while it
+    runs, setup-progress.json (the setup exe shows it).
 
 .PARAMETER Only
     Run just these steps, e.g. -Only Edge,Power
@@ -31,6 +33,8 @@
     Run everything except these steps.
 .PARAMETER Apps
     Catalog ids to install instead of the default picks.
+.PARAMETER LauncherExe
+    The launcher to install (the setup exe passes itself). Without it the Launcher step skips.
 .PARAMETER Unattended
     First sign-in after a USB install: no prompts, window closes by itself.
 .PARAMETER NoPause
@@ -43,6 +47,7 @@ param(
     [string[]]$Only,
     [string[]]$Skip,
     [string[]]$Apps,
+    [string]$LauncherExe,
     [switch]$Unattended,
     [switch]$NoPause
 )
@@ -67,6 +72,10 @@ $Steps = [ordered]@{
     Updates      = { & "$lib\Set-UpdatePolicy.ps1" }
     System       = { & "$lib\Set-SystemPolicy.ps1" }
     AutoLogon    = { & "$lib\Set-AutoLogon.ps1" }
+    Launcher     = {
+        if (-not $LauncherExe) { Write-Same 'no launcher given (-LauncherExe); skipped'; return }
+        & "$lib\Install-Launcher.ps1" -Exe $LauncherExe -SetupDir $PSScriptRoot
+    }
     DecodeCheck  = {
         $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
         if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
@@ -140,10 +149,18 @@ $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
 Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
 
+# Progress for the setup exe: the steps to run, the one running, the results so far.
+$progressFile = Join-Path $logDir 'setup-progress.json'
+$planned = @($Steps.Keys | Where-Object { -not (($Only -and $Only -notcontains $_) -or $Skip -contains $_) })
+function Save-Progress([string]$Running, [bool]$Done = $false) {
+    [ordered]@{ steps = $planned; running = $Running; results = $results; done = $Done; log = $log } |
+        ConvertTo-Json | Out-File $progressFile -Encoding ascii
+}
+
 $results = [ordered]@{}
-foreach ($name in $Steps.Keys) {
-    if (($Only -and $Only -notcontains $name) -or $Skip -contains $name) { continue }
+foreach ($name in $planned) {
     Write-Host "`n== $name"
+    Save-Progress $name
     try {
         & $Steps[$name]
         $results[$name] = 'OK'
@@ -166,6 +183,7 @@ Write-Host "Log: $log"
 
 [ordered]@{ finished = (Get-Date).ToString('s'); log = $log; restartNeeded = $restart; steps = $results } |
     ConvertTo-Json | Out-File (Join-Path $logDir 'setup-last.json') -Encoding ascii
+Save-Progress '' $true
 Stop-Transcript | Out-Null
 
 if (-not $Unattended -and -not $NoPause) { Read-Host 'Press Enter to close' | Out-Null }

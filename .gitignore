@@ -3,3 +3,6 @@ bin/
 obj/
 .vs/
 *.user
+
+# Published setup exe (launcher\dev\Publish-Setup.ps1)
+dist/

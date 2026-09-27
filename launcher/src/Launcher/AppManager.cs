@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Htpc.Launcher;
 
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
-    string Glyph, string Color, string? Exe, string? Args);
+    string Glyph, string Color, string? Exe, string? Args, bool Installable, bool AsUser);
 
 /// <summary>
 /// The catalog's apps: starts them, tracks the ones running, finds their windows and closes them.
@@ -19,12 +19,16 @@ sealed class AppManager
     readonly Dictionary<string, CatalogApp> byId;
     readonly Dictionary<string, Process> running = new();
 
-    public IReadOnlyList<CatalogApp> Tiles { get; }
+    /// <summary>The home screen's tiles: the ones picked in setup, else the catalog's defaults.</summary>
+    public IReadOnlyList<CatalogApp> Tiles { get; private set; }
+
+    /// <summary>Every app in the catalog (setup's list to pick from).</summary>
+    public IReadOnlyList<CatalogApp> All { get; }
 
     /// <summary>An app started, exited or was closed. Raised on a thread-pool thread.</summary>
     public event Action<string, bool>? RunningChanged;
 
-    public AppManager(string catalogPath)
+    public AppManager(string catalogPath, IReadOnlyList<string>? tileIds = null)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(catalogPath));
         var apps = new List<CatalogApp>();
@@ -33,20 +37,28 @@ sealed class AppManager
             string? Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
             var icon = a.TryGetProperty("icon", out var i) ? i : default;
             var launch = a.TryGetProperty("launch", out var l) ? l : default;
+            var install = a.TryGetProperty("install", out var ins) && ins.ValueKind == JsonValueKind.Object ? ins : default;
             apps.Add(new CatalogApp(
                 Str(a, "id")!, Str(a, "name")!, Str(a, "type") ?? "app", Str(a, "url"),
                 a.TryGetProperty("default", out var d) && d.GetBoolean(), Str(a, "preset") ?? "controller",
                 icon.ValueKind == JsonValueKind.Object ? Str(icon, "glyph") ?? "play" : "play",
                 icon.ValueKind == JsonValueKind.Object ? Str(icon, "color") ?? "#F3F2EF" : "#F3F2EF",
                 launch.ValueKind == JsonValueKind.Object ? Str(launch, "exe") : null,
-                launch.ValueKind == JsonValueKind.Object ? Str(launch, "args") : null));
+                launch.ValueKind == JsonValueKind.Object ? Str(launch, "args") : null,
+                install.ValueKind == JsonValueKind.Object,
+                install.ValueKind == JsonValueKind.Object && install.TryGetProperty("asUser", out var u) && u.ValueKind == JsonValueKind.True));
         }
         byId = apps.ToDictionary(a => a.Id);
+        All = apps;
         Tiles = apps.Where(a => a.Default).ToList();
+        if (tileIds is not null) SetTiles(tileIds);
         Log.Info($"Catalog {catalogPath}: {apps.Count} apps, {Tiles.Count} tiles");
     }
 
     public CatalogApp? Get(string id) => byId.GetValueOrDefault(id);
+
+    public void SetTiles(IEnumerable<string> ids) =>
+        Tiles = ids.Select(Get).OfType<CatalogApp>().ToList();
 
     public bool IsRunning(string id)
     {
@@ -72,14 +84,20 @@ sealed class AppManager
             psi = new ProcessStartInfo(EdgeExe,
                 $"--user-data-dir=\"{profile}\" --app={app.Url} --start-fullscreen --no-first-run --no-default-browser-check");
         }
-        else if (app.Exe is not null)
+        else if (app.Exe is not null && File.Exists(Environment.ExpandEnvironmentVariables(app.Exe)))
         {
             var exe = Environment.ExpandEnvironmentVariables(app.Exe);
             psi = new ProcessStartInfo(exe, Environment.ExpandEnvironmentVariables(app.Args ?? ""));
         }
+        else if (StartMenuTarget(app.Name) is { } target)
+        {
+            // No launch path in the catalog, or not where the catalog says: the Start menu
+            // shortcut its installer made.
+            psi = new ProcessStartInfo(target, Environment.ExpandEnvironmentVariables(app.Args ?? ""));
+        }
         else
         {
-            Log.Warn($"{id}: the catalog has no launch command");
+            Log.Warn($"{id}: not found ({app.Exe ?? "no launch path"}, no Start menu shortcut)");
             return false;
         }
         if (!File.Exists(psi.FileName))
@@ -110,6 +128,35 @@ sealed class AppManager
             Log.Error($"Starting {id}", e);
             return false;
         }
+    }
+
+    /// <summary>
+    /// The program behind the Start menu shortcut named most like the app ("VLC media player"
+    /// for VLC), from all users' Start menu and the user's own; uninstall shortcuts skipped.
+    /// </summary>
+    static string? StartMenuTarget(string name)
+    {
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
+            Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+        };
+        var links = roots.Where(Directory.Exists)
+            .SelectMany(r => Directory.EnumerateFiles(r, "*.lnk", SearchOption.AllDirectories))
+            .Where(l => Path.GetFileNameWithoutExtension(l).Contains(name, StringComparison.OrdinalIgnoreCase)
+                     && !Path.GetFileNameWithoutExtension(l).Contains("uninstall", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(l => Path.GetFileNameWithoutExtension(l).Length);
+        foreach (var link in links)
+        {
+            try
+            {
+                dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+                string target = shell.CreateShortcut(link).TargetPath;
+                if (target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target)) return target;
+            }
+            catch (Exception e) { Log.Warn($"Shortcut {link}: {e.Message}"); }
+        }
+        return null;
     }
 
     static string SafeExitCode(Process p)

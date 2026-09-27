@@ -15,6 +15,8 @@
 
     Nothing may pop up on the TV:
       - an app its installer starts (Stremio does) is closed again;
+      - install.firstRun files are written before the app first starts, when missing (VLC's
+        settings file, so it does not open on a privacy question);
       - programs listed in an entry's install.blockInbound get an inbound Block rule in Windows
         Firewall. Without any rule, Windows asks "allow this app on public and private
         networks?" the first time the program listens (Stremio's streaming service did, on the
@@ -75,6 +77,18 @@ function Stop-StartedByInstaller($App, [int[]]$Before) {
     foreach ($p in $started) {
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
         Write-Change "closed $($p.ProcessName), started by the $($App.name) installer"
+    }
+}
+
+# install.firstRun: files an app reads at its first start (answers to its first-run questions),
+# written only when missing, so the user's own settings are never overwritten.
+function Write-FirstRunFiles($App) {
+    foreach ($entry in @($App.install.firstRun | Where-Object { $_ })) {
+        $path = [Environment]::ExpandEnvironmentVariables($entry.file)
+        if (Test-Path -LiteralPath $path) { Write-Same "$($App.name): $path exists"; continue }
+        New-Item -ItemType Directory -Force (Split-Path $path -Parent) | Out-Null
+        [IO.File]::WriteAllText($path, $entry.text)
+        Write-Change "$($App.name): $path written (first-run answers)"
     }
 }
 
@@ -159,6 +173,7 @@ foreach ($app in $picked) {
             default   { throw "Unknown install source '$($app.install.source)'" }
         }
         Stop-StartedByInstaller $app $before
+        Write-FirstRunFiles $app
     } catch {
         Write-Attention "$($app.name): $($_.Exception.Message)"
         $failed += $app.name

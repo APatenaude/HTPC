@@ -77,6 +77,7 @@
       "default": false,
       "preset": "controller",
       "icon": { "glyph": "play", "color": "#5AB0FF" },
+      "launch": { "exe": "%ProgramFiles%\\Kodi\\kodi.exe" },
       "install": { "source": "winget", "id": "XBMCFoundation.Kodi" }
     },
     {
@@ -86,7 +87,11 @@
       "default": false,
       "preset": "mouse",
       "icon": { "glyph": "play", "color": "#FF8A1F" },
-      "install": { "source": "winget", "id": "VideoLAN.VLC" }
+      "launch": { "exe": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" },
+      "install": {
+        "source": "winget", "id": "VideoLAN.VLC",
+        "firstRun": [ { "file": "%APPDATA%\\vlc\\vlcrc", "text": "[qt]\nqt-privacy-ask=0\n" } ]
+      }
     },
     {
       "id": "plex",
@@ -95,6 +100,7 @@
       "default": false,
       "preset": "controller",
       "icon": { "glyph": "play", "color": "#F5B82E" },
+      "launch": { "exe": "%ProgramFiles%\\Plex\\Plex HTPC\\Plex HTPC.exe" },
       "install": { "source": "winget", "id": "Plex.PlexHTPC" }
     },
     {
