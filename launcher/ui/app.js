@@ -270,8 +270,10 @@ function renderSettings() {
       `<div class="sitem${id === state.section ? ' on' : ''}" data-nav data-id="s-${id}" data-section="${id}">${icon(glyph, 32)}${esc(label)}</div>`).join('') +
     '</nav>';
   const title = SECTIONS.find(([id]) => id === state.section)[2];
+  const added = EXT.sections[state.section];
   const body = state.section === 'sleep' ? renderSleepSection()
     : state.section === 'tv' ? renderTvSection()
+    : added ? added.render()
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
   const entering = state.section !== shownSection;
   shownSection = state.section;
@@ -318,15 +320,18 @@ function renderConfirm() {
 function render() {
   const keep = state.memory[state.view];
   // A confirmation sits over the view it was opened from, which stays visible under it.
-  const under = state.view === 'confirm' ? state.stack[state.stack.length - 1] : null;
+  const over = state.view === 'confirm' || (EXT.views[state.view] && EXT.views[state.view].overlay);
+  const under = over ? state.stack[state.stack.length - 1] : null;
   renderStatus();
   renderTiles();
   if (state.view === 'menu' || under === 'menu') renderMenu();
   if (state.view === 'power') renderPower();
   if (state.view === 'timer') renderTimer();
   if (state.view === 'confirm') renderConfirm();
-  if (state.view === 'settings') renderSettings();
-  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings']) $(v).classList.toggle('on', v === state.view || v === under);
+  if (state.view === 'settings' || under === 'settings') renderSettings();
+  for (const v of [state.view, under]) if (EXT.views[v]) EXT.views[v].render();
+  sectionHooks();
+  for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) $(v).classList.toggle('on', v === state.view || v === under);
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
@@ -360,8 +365,10 @@ function restoreFocus(id) {
   const list = items();
   const kept = list.find((e) => e.dataset.id === id) || list.find((e) => e.dataset.id === state.memory[state.view]);
   if (kept) { setFocus(kept); return; }
-  setFocus((state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
-    (state.view === 'settings' ? list.find((e) => e.classList.contains('srow')) : null) ||
+  const view = EXT.views[state.view];
+  setFocus((view && view.focus ? view.focus(list) : null) ||
+    (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
+    (state.view === 'settings' ? list.find((e) => e.classList.contains('srow')) || list.find((e) => e.dataset.section === state.section) : null) ||
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
@@ -428,6 +435,85 @@ function settingsPress(button, el) {
   return false;
 }
 
+// ---- Added screens ------------------------------------------------------------------------
+// Other scripts, loaded after this one (index.html), add Settings sections, views of their
+// own, actions and host messages here; this file calls them when it renders, handles a button
+// or gets a message. They may use everything above and below (state, send, render, go, back,
+// hints, icon, esc, setFocus, toast...), when called.
+//
+//   settingsSection('wifi', {
+//     render() -> html               the section's pane (a <header> and rows, as renderSleepSection)
+//     press(button, el) -> handled   buttons while the focus is in the pane, before the usual
+//     shown(), left()                the section came into view / went out of it (ask the host
+//                                    for data, stop something live)
+//     demo()                         sample data for index.html#settings/wifi in a browser
+//   })
+//   addView('maps', { render(), press(button, el) -> handled, focus(items) -> element,
+//                     overlay (drawn over the view it opened from), demo(arg) })
+//                                    a <section id="maps" class="view"> of its own; go('maps')
+//   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
+//   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")
+//   ask({ title, text, yes, onYes })          the shared yes / cancel dialog, over any view
+
+const EXT = { sections: {}, views: {}, actions: {}, host: {} };
+
+function settingsSection(id, section) { EXT.sections[id] = section; }
+
+function addView(id, view) {
+  if (!$(id)) {
+    const el = document.createElement('section');
+    el.id = id;
+    el.className = 'view' + (view.overlay ? ' overlay' : '');
+    $('stage').insertBefore(el, $('opening'));   // under the "opening" layer and the toasts
+  }
+  EXT.views[id] = view;
+}
+
+function onAction(name, fn) { EXT.actions[name] = fn; }
+function hostMessage(type, fn) { EXT.host[type] = fn; }
+
+// shown / left for the Settings section in view (none while Settings is not).
+let sectionInView = null;
+function sectionHooks() {
+  const now = state.view === 'settings' ? state.section : null;
+  if (now === sectionInView) return;
+  const was = EXT.sections[sectionInView];
+  sectionInView = now;
+  if (was && was.left) was.left();
+  if (EXT.sections[now] && EXT.sections[now].shown) EXT.sections[now].shown();
+}
+
+// The shared dialog: A on the first button runs onYes; B or Cancel closes it.
+let asking = null;
+function ask(q) { asking = q; go('ask'); }
+addView('ask', {
+  overlay: true,
+  render() {
+    const q = asking || {};
+    $('ask').innerHTML = '<div class="dialog">' +
+      `<h2>${esc(q.title || '')}</h2>${q.text ? `<p>${esc(q.text)}</p>` : ''}` +
+      '<div class="buttons">' +
+        `<div class="button" data-nav data-id="ask-yes" data-act="ask-yes">${esc(q.yes || 'OK')}</div>` +
+        '<div class="button" data-nav data-id="ask-no" data-act="cancel">Cancel</div>' +
+      '</div>' +
+      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`;
+  },
+  focus: (list) => list.find((e) => e.dataset.id === 'ask-no'),
+});
+onAction('ask-yes', () => { const q = asking; back(); if (q && q.onYes) q.onYes(); });
+
+// index.html#view or #view/arg in a plain browser: #settings/wifi opens that section (with
+// its demo data), #maps or #buttons/twitch an added view.
+function demoRoute(hash) {
+  const [view, arg] = hash.split('/');
+  if (view === 'settings' && arg) {
+    state.section = arg;
+    if (EXT.sections[arg] && EXT.sections[arg].demo) EXT.sections[arg].demo();
+  }
+  if (EXT.views[view] && EXT.views[view].demo) EXT.views[view].demo(arg);
+  go(view);
+}
+
 // ---- Actions ------------------------------------------------------------------------------
 
 // go: open a view on top of the current one (B comes back). reset: start over at a view.
@@ -478,6 +564,7 @@ function activate(el) {
     case 'cancel': back(); break;
     case 'settings': go('settings'); break;
     case 'soon': toast(`${arg} come in a later update`); break;
+    default: if (EXT.actions[act]) EXT.actions[act](el, arg);
   }
 }
 
@@ -501,7 +588,14 @@ function back() {
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
   const el = focusedEl();
-  if (state.view === 'settings' && settingsPress(button, el)) return;
+  // Added views and Settings sections first (their own buttons), then the usual.
+  const view = EXT.views[state.view];
+  if (view && view.press && view.press(button, el)) return;
+  if (state.view === 'settings') {
+    const section = EXT.sections[state.section];
+    if (section && section.press && !(el && el.dataset.section) && section.press(button, el)) return;
+    if (settingsPress(button, el)) return;
+  }
   switch (button) {
     case 'up': case 'down': move(button); break;
     case 'left': case 'right':
@@ -592,6 +686,11 @@ function onHost(msg) {
       break;
     }
     case 'toast': toast(msg.text, msg.kind); break;
+    default: {
+      // Added scripts' messages: by type ("wifi.list"), else by prefix ("wifi.").
+      const handler = EXT.host[msg.type] || EXT.host[String(msg.type).split('.')[0] + '.'];
+      if (handler) handler(msg);
+    }
   }
 }
 
@@ -611,12 +710,16 @@ if (host) {
 
 fit();
 render();
-// Demo only: index.html#settings (or #menu, #power...) opens that view, for screenshots.
-if (!host && location.hash) go(location.hash.slice(1));
 // Redraw when the minute (or the timer countdown) changes; render() keeps the focus.
 let shown = '';
 setInterval(() => {
   const now = timeText(new Date()) + timerText();
   if (now !== shown) { shown = now; render(); }
 }, 1000);
-send({ type: 'ready' });
+// Once the scripts after this one have added their screens: the host's first messages may
+// be theirs. Demo only: index.html#settings (or #menu, #settings/sound, #maps...) opens that
+// view, for screenshots.
+addEventListener('DOMContentLoaded', () => {
+  if (!host && location.hash) demoRoute(location.hash.slice(1));
+  send({ type: 'ready' });
+});

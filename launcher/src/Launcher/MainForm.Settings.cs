@@ -1,11 +1,8 @@
-using System.Text.Json;
-
 namespace Htpc.Launcher;
 
 /// <summary>
-/// The launcher side of Settings. Also where MainForm.cs's hooks come in: InitSettings
-/// (constructor), PostSettingsInit (UI ready) and HandleSettingsMessage (any message
-/// MainForm.cs does not handle itself).
+/// The launcher side of Settings. InitSettings runs at the end of MainForm's constructor;
+/// messages come in through [UiMessages] methods (MainForm.Messages.cs).
 /// </summary>
 sealed partial class MainForm
 {
@@ -13,18 +10,5 @@ sealed partial class MainForm
     void InitSettings()
     {
         InitTimer();
-    }
-
-    /// <summary>After the UI's init: what Settings needs up front.</summary>
-    void PostSettingsInit()
-    {
-    }
-
-    void HandleSettingsMessage(string? type, JsonElement m)
-    {
-        switch (type)
-        {
-            case "extend": sleepTimer.Extend(); break;
-        }
     }
 }
