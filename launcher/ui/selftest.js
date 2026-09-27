@@ -333,6 +333,48 @@
   check('TV: the input is not changed by moving over it', state.tv.profile.input === 1);
   reset('home');
 
+  // ---- Settings: a value changing redraws in place; the sleep timer set right there ----------------
+  state.section = 'sleep';
+  reset('settings');
+  const navSleep = sNode('s-sleep');
+  press('down');
+  check('Settings: moving through the sections keeps the list (its ring not drawn again)', sNode('s-sleep') === navSleep && sNode('s-tv').classList.contains('focused') && state.section === 'tv');
+  press('up');
+  setFocus(sNode('set-idleMinutes'));
+  const idleRow = sNode('set-idleMinutes'), timerRow = sNode('set-timer');
+  press('a'); press('right');
+  check('Settings: a stepper changing keeps its row (the ring is not drawn again)', sNode('set-idleMinutes') === idleRow && idleRow.classList.contains('focused') && idleRow.classList.contains('editing'));
+  press('a');
+  setFocus(sNode('set-stayAwakeWhilePlaying'));
+  const awakeRow = sNode('set-stayAwakeWhilePlaying');
+  press('a');
+  check('Settings: a toggle flipping keeps its row', sNode('set-stayAwakeWhilePlaying') === awakeRow && awakeRow.classList.contains('focused'));
+  state.timer = null;
+  setFocus(timerRow);
+  press('a');
+  check('Sleep timer: A picks the row, it does not open the timer screen', state.view === 'settings' && timerRow.classList.contains('editing'));
+  press('right');
+  check('Sleep timer: right sets 15 min, right there', state.view === 'settings' && state.timer && state.timer.label === '15 min' && lastSent('timer').minutes === 15 && sNode('set-timer') === timerRow);
+  press('right');
+  check('Sleep timer: right again, 30 min', state.timer && state.timer.label === '30 min' && lastSent('timer').minutes === 30);
+  press('left'); press('left');
+  check('Sleep timer: left back to Off', state.timer === null && lastSent('timer').minutes === 0);
+  press('left');
+  check('Sleep timer: left from Off goes round to This video ends', state.timer && state.timer.endsAt === 'video');
+  press('right');
+  press('a');
+  // A list that scrolls itself keeps the focus ring of its last row whole.
+  WifiUI.demo('wifi');
+  setFocus(sNode('s-wifi'));
+  const rows = [...$('settings').querySelectorAll('.wifi-scroll [data-nav]')];
+  setFocus(rows[rows.length - 1]);
+  const wl = $('settings').querySelector('.wifi-scroll').getBoundingClientRect(), wr = rows[rows.length - 1].getBoundingClientRect();
+  check('Wi-Fi: the last row of the list shows whole, its ring too', wr.bottom + 4 <= wl.bottom && wr.top >= wl.top, `${wr.bottom} / ${wl.bottom}`);
+  setFocus(rows[0]);
+  const w0 = rows[0].getBoundingClientRect(), wl0 = $('settings').querySelector('.wifi-scroll').getBoundingClientRect();
+  check('Wi-Fi: back on the first row, its ring shows whole', w0.top - 4 >= wl0.top, `${w0.top} / ${wl0.top}`);
+  reset('home');
+
   // ---- Home: tiles updated in place, Tile options, moving a tile, an app installing -------------
   const tileEl = (id) => $('tiles').querySelector(`[data-id="tile:${id}"]`);
   state.current = null; state.backdrop = null;

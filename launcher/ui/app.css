@@ -180,6 +180,8 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .spane { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Room at the bottom: the pane scrolls to the focus (app.js scrollIntoBox) with its ring clear of the hints */
 .spane main { flex-grow: 1; min-height: 0; padding: 72px 96px 32px 80px; display: flex; flex-direction: column; gap: 14px; }
+/* Scrolled into view (the pane, a list scrolling itself), a row keeps room around it for its focus ring */
+.spane [data-nav] { scroll-margin: 20px 0; }
 /* Not squeezed: the pane scrolls instead. A list that scrolls itself (Wi-Fi, Bluetooth, Button maps) still fits in it. */
 .spane main > :not(.wifi-scroll):not(.mlist) { flex-shrink: 0; }
 .spane header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }

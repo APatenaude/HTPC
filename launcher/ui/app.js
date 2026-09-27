@@ -163,7 +163,8 @@ function renderMenu() {
     : '<div class="empty">No apps open</div>';
   // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
   $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
-  $('menu-panel').innerHTML =
+  // In place (patchHtml): the volume changing redraws its value, not the focused row's ring.
+  patchHtml($('menu-panel'),
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
     noticeRowsHtml() + // alerts with something to do (notices.js)
@@ -180,7 +181,7 @@ function renderMenu() {
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
     '</div>' +
-    `<footer class="hints">${hints([['A', 'Select'], ['X', 'Close app'], ['B', 'Back']])}</footer>`;
+    `<footer class="hints">${hints([['A', 'Select'], ['X', 'Close app'], ['B', 'Back']])}</footer>`);
 }
 
 const POWER = [
@@ -278,9 +279,12 @@ function renderSleepSection() {
           stepper('sleepAfterStandbyHours'))
       : '') +
     settingRow('idleMinutes', 'Sleep after', 'When nothing plays and nobody touches the controller', stepper('idleMinutes')) +
-    `<div class="srow" data-nav data-id="set-timer" data-act="view" data-arg="timer">` +
-      '<div class="text"><span class="label">Sleep timer</span><span class="caption">A countdown you set. Also in the Home menu.</span></div>' +
-      `<div class="value link">${esc(state.timer ? timerText() : 'Off')}${icon('chevright', 28, 2)}</div></div>` +
+    // The sleep timer is set right here, as a choice (A, then left/right: stepTimer), not on
+    // the timer screen of the Home menu.
+    '<div class="srow" data-nav data-id="set-timer" data-timer data-edit>' +
+      '<div class="text"><span class="label">Sleep timer</span>' +
+        `<span class="caption">${esc(state.timer ? `${timerText()}. It shows in the top bar.` : 'A countdown, then the box and the TV sleep. Also in the Home menu.')}</span></div>` +
+      `<div class="value">${icon('chevleft', 28, 2)}${esc(state.timer ? state.timer.label : 'Off')}${icon('chevright', 28, 2)}</div></div>` +
     settingRow('stayAwakeWhilePlaying', 'Stay awake while video plays', 'Even if you don’t touch the controller for hours',
       `<div class="toggle${p.stayAwakeWhilePlaying ? ' on' : ''}"><span></span></div>`) +
     '<div class="sbuttons">' +
@@ -306,15 +310,60 @@ function renderSettings() {
     : `<header><h1>${esc(title)}</h1><p>This section comes in a later update.</p></header>`;
   const entering = state.section !== shownSection;
   shownSection = state.section;
-  // The pane keeps its scroll through a redraw (a host push, the clock), not into another section.
   const old = $('settings').querySelector('.spane main');
-  const top = old && !entering ? old.scrollTop : 0;
-  // The hints follow the focus (settingsFocused).
-  $('settings').innerHTML = nav + `<div class="spane"><main${entering ? ' class="enter"' : ''}>${body}</main>` +
-    '<footer class="hints" id="settings-hints"></footer></div>';
-  $('settings').querySelector('.spane main').scrollTop = top;
+  if (old) {
+    // Only what changed is redrawn, in place: the section list (the focused section keeps its
+    // ring as the next one shows), and within a section a value that changed, a host push, the
+    // clock, with the pane's scroll and the focused row left as they were. Another section's
+    // pane is new, animating in.
+    patchHtml($('settings').querySelector('.snav'), nav.replace(/^<nav[^>]*>|<\/nav>$/g, ''));
+    if (!entering) patchHtml(old, body);
+    else {
+      const main = document.createElement('main');
+      main.className = 'enter';
+      main.innerHTML = body;
+      old.replaceWith(main);
+    }
+  } else {
+    // The hints follow the focus (settingsFocused).
+    $('settings').innerHTML = nav + `<div class="spane"><main${entering ? ' class="enter"' : ''}>${body}</main>` +
+      '<footer class="hints" id="settings-hints"></footer></div>';
+  }
+  for (const r of $('settings').querySelectorAll('.editing')) r.classList.remove('editing');
   const row = editing && $('settings').querySelector(`.spane [data-id="${CSS.escape(editing)}"]`);
   if (row) row.classList.add('editing'); else editing = null;
+}
+
+// Puts html into el keeping the elements that stay (same tag and place, same data-id): what
+// changed is updated in place, the rest is left alone, so a value that changes does not redraw
+// its row and the focused element keeps its ring (no ring drawing in again). The focus and
+// edit classes of an element that stays are kept (setFocus and renderSettings manage them).
+// Text fields are always new ones (wifi.js wires each field it draws).
+function patchHtml(el, html) {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  patchChildren(el, t.content);
+}
+
+function patchChildren(from, to) {
+  const want = [...to.childNodes];
+  want.forEach((w, i) => {
+    const have = from.childNodes[i];
+    if (!have) from.appendChild(w);
+    else if (have.nodeType === w.nodeType && (have.nodeType !== 1 ||
+        (have.tagName === w.tagName && have.tagName !== 'INPUT' && have.getAttribute('data-id') === w.getAttribute('data-id')))) patchNode(have, w);
+    else from.replaceChild(w, have);
+  });
+  while (from.childNodes.length > want.length) from.lastChild.remove();
+}
+
+function patchNode(a, b) {
+  if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  const cls = [b.getAttribute('class') || '', ...['focused', 'editing'].filter((c) => a.classList.contains(c))].join(' ').trim();
+  for (const at of [...a.attributes]) if (!b.hasAttribute(at.name) && at.name !== 'class') a.removeAttribute(at.name);
+  for (const at of [...b.attributes]) if (at.name !== 'class' && a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+  if ((a.getAttribute('class') || '') !== cls) { if (cls) a.setAttribute('class', cls); else a.removeAttribute('class'); }
+  patchChildren(a, b);
 }
 
 function changeSetting(key, step) {
@@ -502,6 +551,7 @@ function editPress(button, el) {
       if (section && section.press && section.press(button, el)) return true;
       if (el.dataset.slider) adjust(el, button === 'right' ? 5 : -5);
       else if (el.dataset.setting) changeSetting(el.dataset.setting, button === 'right' ? 1 : -1);
+      else if (el.dataset.timer !== undefined) stepTimer(button === 'right' ? 1 : -1);
       return true;
     }
     case 'a': case 'b': setEditing(null); return true;
@@ -682,13 +732,7 @@ function activate(el) {
         text: 'It turns off completely: the controller can’t turn it back on. Use the box’s power button to start it again.' });
       else send({ type: 'power', action: arg });
       break;
-    case 'timer': {
-      const o = TIMER[Number(arg)];
-      state.timer = o.minutes === 0 ? null : { label: o.label, endsAt: o.minutes === 'video' ? 'video' : Date.now() + o.minutes * 60000 };
-      send({ type: 'timer', minutes: o.minutes });
-      render();
-      break;
-    }
+    case 'timer': setTimer(TIMER[Number(arg)]); break;
     case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
     case 'cancel': back(); break;
     // Settings opens on its section list (restoreFocus), not where the focus was last time.
@@ -696,6 +740,19 @@ function activate(el) {
     case 'soon': toast(`${arg} come in a later update`); break;
     default: if (EXT.actions[act]) EXT.actions[act](el, arg);
   }
+}
+
+function setTimer(o) {
+  state.timer = o.minutes === 0 ? null : { label: o.label, endsAt: o.minutes === 'video' ? 'video' : Date.now() + o.minutes * 60000 };
+  send({ type: 'timer', minutes: o.minutes });
+  render();
+}
+
+// Settings › Sleep timer, left/right: Off, 15 min ... 2 hours, This video ends, round again.
+function stepTimer(step) {
+  const order = [TIMER.length - 1, ...TIMER.keys()].slice(0, TIMER.length);   // Off first
+  const now = order.findIndex((i) => (state.timer ? TIMER[i].label === state.timer.label : TIMER[i].minutes === 0));
+  setTimer(TIMER[order[(Math.max(now, 0) + step + order.length) % order.length]]);
 }
 
 function adjust(el, delta) {
