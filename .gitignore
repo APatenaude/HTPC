@@ -6,3 +6,6 @@ obj/
 
 # Published setup exe (launcher\dev\Publish-Setup.ps1)
 dist/
+
+# Claude Code agent worktrees and local state
+.claude/

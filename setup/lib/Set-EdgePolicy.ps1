@@ -44,6 +44,8 @@ Set-RegValue $edge 'DefaultSearchProviderKeyword' 'google.com' 'String'
 Set-RegValue $edge 'DefaultSearchProviderSearchURL' 'https://www.google.com/search?q={searchTerms}' 'String'
 Set-RegValue $edge 'DefaultSearchProviderSuggestURL' 'https://www.google.com/complete/search?output=chrome&q={searchTerms}' 'String'
 Set-RegValue $edge 'NewTabPageSearchBox' 'redirect' 'String'
+# The Browser tile opens on Google (its command line) and so do its new tabs, not Edge's news page.
+Set-RegValue $edge 'NewTabPageLocation' 'https://www.google.com' 'String'
 
 Write-Host '  Quiet: no first run, promotions, shopping, sidebar or telemetry'
 Set-RegValue $edge 'HideFirstRunExperience' 1

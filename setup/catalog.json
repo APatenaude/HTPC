@@ -65,7 +65,7 @@
     },
     {
       "id": "edge",
-      "name": "Edge",
+      "name": "Browser",
       "type": "app",
       "default": true,
       "preset": "mouse",
@@ -73,7 +73,7 @@
       "icon": { "glyph": "globe", "color": "#3CCB9A" },
       "launch": {
         "exe": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
-        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-fullscreen --no-first-run --no-default-browser-check"
+        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-fullscreen --no-first-run --no-default-browser-check https://www.google.com"
       },
       "install": { "source": "builtin" }
     },

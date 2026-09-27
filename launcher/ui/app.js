@@ -632,7 +632,7 @@ if (host) {
     { id: 'stremio', name: 'Stremio', glyph: 'film', color: '#7C8CFF' },
     { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', color: '#3DC0F0', running: true },
     { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B' },
-    { id: 'edge', name: 'Edge', glyph: 'globe', color: '#3CCB9A' }
+    { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A' }
   ], settings: { controller: true, battery: 'full' } });
 }
 

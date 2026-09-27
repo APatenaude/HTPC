@@ -52,6 +52,7 @@ sealed class MainForm : Form
     {
         this.options = options;
         Text = "TV";
+        Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); // the exe's icon (app.ico), not WinForms' default
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         BackColor = Color.FromArgb(13, 14, 17);
@@ -185,9 +186,16 @@ sealed class MainForm : Form
 
     void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        // WebView2 swallows exceptions from this handler: log them.
+        // WebView2 swallows exceptions from this handler: log them. Only the message type: the
+        // rest can hold what someone typed (a Wi-Fi password, a sign-in).
         try { HandleWebMessage(e); }
-        catch (Exception ex) { Log.Error($"UI message {e.WebMessageAsJson}", ex); }
+        catch (Exception ex) { Log.Error($"UI message \"{MessageType(e.WebMessageAsJson)}\"", ex); }
+    }
+
+    static string MessageType(string json)
+    {
+        try { using var doc = JsonDocument.Parse(json); return doc.RootElement.GetProperty("type").GetString() ?? "?"; }
+        catch (Exception) { return "?"; }
     }
 
     void HandleWebMessage(CoreWebView2WebMessageReceivedEventArgs e)
@@ -201,8 +209,8 @@ sealed class MainForm : Form
                 uiReady = true;
                 PostSetupInit();
                 break;
-            case "install": StartSetup(m); break;
-            case "finish": FinishSetup(); break;
+            case "install" when setupMode: StartSetup(m); break;
+            case "finish" when setupMode: FinishSetup(); break;
             case "ready":
                 uiReady = true;
                 var (s3, s4) = Standby.Capabilities();

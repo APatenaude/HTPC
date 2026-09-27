@@ -8,6 +8,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- launcher\art\icon*.svg, built by launcher\dev\Build-Icon.ps1. -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>HtpcLauncher</AssemblyName>
     <RootNamespace>Htpc.Launcher</RootNamespace>
     <Version>0.1.0</Version>

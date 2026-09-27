@@ -87,7 +87,7 @@ Decisions of 26 September 2026 (building on the box):
 
 | Topic | Decision |
 |---|---|
-| Sleep | Stay-awake standby: Sleep (menu, timer, idle) turns the TV and screen off and pauses playback while the box stays on, so Home on the controller wakes everything. The box has S3 only and the 8BitDo dongle cannot wake from S3. Optional real sleep after some hours; wake from it with the phone (Wake-on-LAN), keyboard or power button |
+| Sleep | Stay-awake standby: Sleep (menu, timer, idle) turns the TV and screen off and pauses playback while the box stays on, so holding Home on the controller (0.5 s) wakes everything. The box has S3 only and the 8BitDo dongle cannot wake from S3. Optional real sleep after some hours; wake from it with the keyboard or power button (phone Wake-on-LAN later, through an iPhone Shortcut: a web page cannot send it) |
 | Windows sign-in | None: no password, automatic sign-in, nothing locks; a PIN in the launcher if ever wanted |
 | Install | One "TV Box Setup" exe from GitHub releases: the launcher's UI in setup mode (pick apps, find the TV, controller check, options), running the setup steps with one admin prompt; it is also the first-run setup. The USB answer file stays for full wipe-and-install |
 | Updates | Windows manual; Edge and WebView2 automatic; other apps on demand (winget); launcher from GitHub releases |
@@ -95,31 +95,49 @@ Decisions of 26 September 2026 (building on the box):
 | Stremio | Stremio 5 (beta) |
 | Test loop | Build on the real box first; a Hyper-V VM checks the clean install |
 
+Decisions of 26 September 2026, evening (with the agents' plans):
+
+| Topic | Decision |
+|---|---|
+| Home button | Hold = 0.5 s everywhere. In Moonlight a tap goes to the game PC, a hold opens our menu |
+| Browser | The Edge tile is called "Browser" and opens on Google (new tabs too). Website tiles are separate app windows with their own sign-in each and no address bar; links they open in a new window open in another app window. Extensions in every Edge profile: uBlock Origin Lite, Dark Reader, FrankerFaceZ, Video Speed Controller |
+| Look | Windows in dark mode. Launcher icon: accent-blue tile with a TV and a play mark |
+| Library | Kodi, VLC, Plex HTPC, Spotify, Feishin; sites Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi, Pluto TV, Kick, Crave, CBC Gem. Install and uninstall from the TV (not the Browser), keeping app data; "Add tile" also lists everything in the Start menu; line icons + colour; installs run right away at low priority |
+| Buttons | Per-app maps only for Mouse/Keyboard apps; YouTube, Jellyfin and Moonlight can only switch preset. Global pointer/scroll speeds. R3 (keyboard) editable, Home not. Extra keys (Tab, refresh, zoom, full screen, volume) on a row of the on-screen keyboard |
+| Sleep timer | "When this video ends": autoplay moving on counts as the end; a 5-minute pause counts; picked with nothing playing it waits; 3-hour cap. During the 1-minute warning, Home = +15 min |
+| Alerts | App didn't open / closed unexpectedly, no internet, idle-sleep warning, headphones, updates (home screen only), phone, TV not responding (when turning it on fails). No controller or battery alerts. Only urgent ones over video. Act on them with Home, then A in the Home menu. The button hint shows each time an app opens, 4 s |
+| Phone remote | http://tv.local on port 80 for good (HTTPS only later, for Android Share); pairing code for new phones; Remote, Type (with Tab/Shift+Tab) and Playing tabs; no app list; Back always goes back; links routed by site; added from a dismissible home-screen card on first boot, not a setup step; casting (N9) in a second phase |
+| Network | Every network the box joins is Private. Firewall: per-app answers (no global off switch); Stremio's service blocked; the phone remote and YouTube cast allowed on Private networks from the local subnet |
+| Wi-Fi and Bluetooth | Built into the launcher (full Wi-Fi incl. hidden networks; Bluetooth headphones and controllers; sound follows headphones); location allowed for the launcher; a Wi-Fi step in first-run setup when there's no cable; setup installs the vendor Bluetooth driver for whatever adapter a box has |
+| Shell | The launcher (via a watchdog) replaces Explorer for the TV account, switched at the end of development; desktop mode from the Power menu (one confirmation); crash loop: restart once, then the desktop with a message; a frozen launcher is restarted; Defender exclusion for C:\Program Files\HTPC |
+| TVs | Roku, LG webOS, Google/Android TV, Sony Bravia, Samsung Tizen (on/off only), the non-Roku ones marked beta until tested on a real TV; no CEC for now. The HDMI input is read from the TV's EDID; a TV is bound only on positive evidence. The TV turns off at sleep and shut down (not restart); polled every 5 s for a fast wake. One user and one setup per box. First-run setup keeps its separate install step |
+| Updates | Quiet daily check, installs only when asked; releases published from v* tags on the public repo, unsigned, trusted by pinned repo + HTTPS + hashes (no signing key); automatic rollback; apps' own updaters off; Windows updates from the TV (now or tonight), quiet boot after a night restart; restore points before Update all and Windows updates; Defender definitions stay manual |
+
 ## Controller map
 
-Always (launcher): Home tap = Home menu · Home hold 1 s = Power · in Moonlight tap goes to the game PC, hold 1 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
+Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power · in Moonlight tap goes to the game PC, hold 0.5 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
 
 Launcher & menus: D-pad/L stick move · A select · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
 
-| Button | Controller preset | Mouse preset (Edge, Twitch, Stremio, websites) | Keyboard preset |
+| Button | Controller preset | Mouse preset (Browser, Twitch, Stremio, websites) | Keyboard preset |
 |---|---|---|---|
 | L stick | app | pointer | arrow keys |
 | R stick | app | scroll | pointer |
-| A | app | click | Enter |
-| B | app | back | Esc |
-| X | app | Enter | Space |
+| A | app | Enter | Enter |
+| B | app | Esc | Esc |
+| X | app | click (hold = drag) | Space |
 | Y | app | Space | Tab |
 | D-pad | app | arrow keys | arrow keys |
-| LB / RB | app | previous / next tab | Page Up / Page Down |
+| LB / RB | app | back / forward (page history) | Page Up / Page Down |
 | LT | app | right-click | Home |
 | RT | app | hold: precise pointer | End |
 | Select | app | Esc | Backspace |
-| Start | app | F11 | Menu key |
-| L3 | app | nothing | click |
+| Start | app | play/pause | Menu key |
+| L3 | app | middle click | click |
 | R3 | keyboard | keyboard | keyboard |
 | Home | launcher | launcher | launcher |
 
-Defaults: YouTube, Jellyfin, Moonlight = Controller; Edge, Twitch, Stremio, website tiles = Mouse. Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
+Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jellyfin, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse. Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
 
 ## Risks and pushback
 
@@ -149,7 +167,7 @@ Defaults: YouTube, Jellyfin, Moonlight = Controller; Edge, Twitch, Stremio, webs
 - **Launcher:** C# host with a WebView2 web UI; registered as the shell for the TV account. Watchdog restarts it.
 - **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button maps (preset + overrides) applied to the foreground window, emitted via SendInput.
 - **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket + Wake-on-LAN), Samsung Tizen (websocket + WoL), Sony / Google / Android TV (Android TV Remote protocol or Bravia API), HDMI-CEC (libCEC). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
-- **Phone:** launcher serves the remote web app at `tv.local` over HTTPS with the box's own CA (installed once on phones that need it); iOS Shortcut or Android Web Share Target posts links; optional 4-digit code for new phones.
+- **Phone:** launcher serves the remote web app at `http://tv.local`; a pairing code for new phones; HTTPS with the box's own CA only later, for Android's Share target; iOS Shortcut or Android Web Share Target posts links.
 - **Link player:** mpv + yt-dlp with hardware decoding (d3d11va).
 - **App catalog:** one list (winget IDs + website tiles) drives the setup picks and the library.
 - **Keyboard and brightness:** launcher overlay layers above every app.
