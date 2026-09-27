@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TV control test bench (dev only, not shipped): the launcher's TV sources against fake TVs
+       on 127.0.0.1 with a virtual clock. See README.md next to this file. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- The launcher's framework: DPAPI (ProtectedData) and file ACLs come with the desktop pack. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Htpc.TvLab</RootNamespace>
+    <AssemblyName>TvLab</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The TV sources as the launcher compiles them, minus the parts that need the launcher's
+         window, settings file or alerts (Host\). Golden traces and fixtures are read from this
+         folder, not copied, so recording writes them back here. -->
+    <Compile Include="..\..\src\Launcher\Tv\**\*.cs" Exclude="..\..\src\Launcher\Tv\Host\**" LinkBase="Tv" />
+  </ItemGroup>
+
+</Project>
