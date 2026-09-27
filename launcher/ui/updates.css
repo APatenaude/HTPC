@@ -32,7 +32,8 @@
 .upd-checked { display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--muted); }
 
 /* "Restarting the TV launcher": the last thing the old launcher shows (exit code 75). */
-#updrestart { display: flex; align-items: center; justify-content: center; background: var(--bg); }
+/* Shown like any view (.view.on in app.css): no display here, or it covers every screen. */
+#updrestart { align-items: center; justify-content: center; background: var(--bg); }
 #updrestart .center { display: flex; flex-direction: column; align-items: center; gap: 22px; }
 #updrestart .accent-icon { color: var(--accent); }
 #updrestart h1 { font-size: 56px; }
