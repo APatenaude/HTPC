@@ -75,19 +75,19 @@ main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; over
 /* Remote fits the screen: the touchpad (or D-pad) gives way first. */
 #tab-remote { height: 100%; min-height: 0; }
 
-/* Send a link: first on the Remote tab, so it is found. */
-.linkbar { display: flex; flex-direction: column; gap: 8px; margin: 4px var(--gutter) 0; padding: 12px; border-radius: 18px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--panel-edge); flex-shrink: 0; }
-.linkbar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.linkbar-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text); }
-.linkbar-title [data-icon] { color: var(--accent); }
-.linkbar-more { height: 32px; padding: 0 10px; border-radius: 10px; background: transparent; font-size: 13px; color: var(--accent); }
+/* Send a link: a sheet pulled up from the tab bar's "Send link". */
+.linksheet { touch-action: none; } /* the swipe down is the page's own */
+.linksheet.dragging { transition: none; }
+.grabber { align-self: center; width: 40px; height: 5px; margin: -10px 0 2px; border-radius: 3px; background: var(--dim); flex-shrink: 0; }
 .linkbar-row { display: flex; gap: 8px; }
 .linkbar-row input { flex: 1; min-width: 0; height: 46px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--button); font-size: 16px; outline: none; }
 .linkbar-row input:focus { box-shadow: 0 0 0 2px var(--accent); }
 .linkbar-row button { height: 46px; padding: 0 18px; border-radius: 12px; font-size: 15px; font-weight: 700; }
-.linkbar-note { margin: 0; font-size: 12px; line-height: 1.35; color: var(--muted); }
+.sheet .linkbar-note { margin: 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.linksheet .send-link { margin: 4px 0 0; }
+#linksheet { transition: padding-bottom 0.15s ease-out; }
 
-.seg { display: flex; gap: 4px; margin: 12px var(--gutter) 0; padding: 4px; border-radius: 14px; background: var(--panel); flex-shrink: 0; }
+.seg { display: flex; gap: 4px; margin: 4px var(--gutter) 0; padding: 4px; border-radius: 14px; background: var(--panel); flex-shrink: 0; }
 .seg button { flex: 1; height: 44px; border-radius: 10px; background: transparent; font-size: 15px; color: var(--text-2); }
 .seg button[aria-checked="true"] { background: var(--button-down); color: #FFF; font-weight: 700; }
 
@@ -208,7 +208,7 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .toast.warn { color: var(--warn); }
 
 /* Bottom navigation ----------------------------------------------------------------------------- */
-.tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex-shrink: 0; height: calc(72px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); background: var(--nav); }
+.tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); flex-shrink: 0; height: calc(72px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); background: var(--nav); }
 .tabs button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: transparent; font-size: 12px; color: var(--muted); }
 .tabs button[aria-current="page"] { color: var(--accent); font-weight: 700; }
 
@@ -218,10 +218,6 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 @media (max-height: 760px) {
   .top { padding-top: 12px; padding-bottom: 8px; }
   .pad-area { margin-top: 10px; min-height: 150px; }
-  .linkbar { padding: 10px; gap: 6px; }
-  .linkbar-row input, .linkbar-row button { height: 42px; }
-  .linkbar-note { display: none; }
-  .seg { margin-top: 10px; }
   .row3 { margin-top: 10px; }
   .tile { height: 56px; }
   .volume button, .slider { height: 48px; }
@@ -231,10 +227,6 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 /* Very short (Safari's bars on a small iPhone): everything a little tighter, so the pad or D-pad keeps room. */
 @media (max-height: 600px) and (orientation: portrait) {
   .top { padding-top: 8px; padding-bottom: 4px; }
-  .linkbar { padding: 8px 10px; gap: 4px; }
-  .linkbar-more { height: 24px; }
-  .linkbar-row input, .linkbar-row button { height: 40px; }
-  .seg { margin-top: 8px; }
   .seg button { height: 36px; }
   .pad-area { margin-top: 8px; min-height: 130px; }
   .row3 { margin-top: 8px; }
@@ -246,17 +238,13 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 }
 /* Landscape: the pad on the left, the buttons on the right. */
 @media (orientation: landscape) and (max-height: 540px) {
-  #tab-remote { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: auto 1fr auto auto auto auto; column-gap: 0; align-content: start; }
+  #tab-remote { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: auto 1fr auto auto auto; column-gap: 0; align-content: start; }
   #tab-remote[hidden] { display: none !important; }
   #tab-remote .seg { grid-column: 1; grid-row: 1; }
-  #tab-remote .pad-area { grid-column: 1; grid-row: 2 / span 5; min-height: 180px; max-height: none; margin-bottom: 8px; }
+  #tab-remote .pad-area { grid-column: 1; grid-row: 2 / span 4; min-height: 180px; max-height: none; margin-bottom: 8px; }
   #tab-remote .row3 { grid-column: 2; grid-row: 1 / span 2; align-self: start; }
   #tab-remote .volume { grid-column: 2; grid-row: 3; margin-left: 0; }
   #tab-remote .slider { grid-column: 2; grid-row: 4; margin-left: 0; }
-  /* Only the field and Paste (Send) here: the title and the note need the room. */
-  #tab-remote .linkbar { grid-column: 2; grid-row: 5; margin: 10px var(--gutter) 0 0; padding: 0; background: none; box-shadow: none; }
-  #tab-remote .linkbar-head, #tab-remote .linkbar-note { display: none; }
-  #tab-remote .linkbar-row input, #tab-remote .linkbar-row button { height: 44px; }
   #tab-remote .row3 { margin-left: 0; }
   .dpad { width: min(220px, 60vh); }
   .tabs { height: calc(56px + env(safe-area-inset-bottom)); }
