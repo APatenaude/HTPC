@@ -240,6 +240,26 @@
   reset('home');
   check('Bluetooth: left, the host stops', lastSent('bt.watch').on === false);
 
+  // ---- Settings › Phone remote (phone-settings.js): Forget asks first -------------------------------
+  EXT.sections.phone.demo();
+  state.section = 'phone';
+  sent.length = 0;
+  reset('settings');
+  for (const [id, what] of [['phone-b2', 'a phone'], ['phone-c3', 'a Shortcut key']]) {
+    setFocus($('settings').querySelector(`[data-id="${id}"]`));
+    press('a');
+    const dialog = state.view === 'ask' && focusedEl() && focusedEl().dataset.id === 'ask-no';
+    check(`Phone remote: Forget on ${what} asks first, Cancel focused`, dialog && !lastSent('phone.forget'));
+    press('a');
+    check(`Phone remote: ... Cancel keeps ${what}`, state.view === 'settings' && !lastSent('phone.forget'));
+  }
+  setFocus($('settings').querySelector('[data-id="phone-c3"]'));
+  press('a');
+  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
+  press('a');
+  check('Phone remote: ... Forget forgets it', lastSent('phone.forget') && lastSent('phone.forget').id === 'c3');
+  reset('home');
+  await tick();
   // ---- Settings: opening, moving, changing a value ----------------------------------------------
   const sNode = (id) => $('settings').querySelector(`[data-id="${id}"]`);
   const focusId = () => focusedEl() && focusedEl().dataset.id;
