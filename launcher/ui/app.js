@@ -168,6 +168,8 @@ function renderMenu() {
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
     noticeRowsHtml() + // alerts with something to do (notices.js)
+    // Over the Windows desktop (desktop mode) the way back comes first.
+    (state.desktop ? `<div class="row big" data-nav data-id="back-tv" data-act="power-action" data-arg="tv">${icon('tv', 38, 2)}Back to TV</div>` : '') +
     `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 38, 2)}Home screen</div>` +
     `<span class="section">Open apps</span><div class="apps">${apps}</div>` +
     '<span class="section quick-label">Quick</span>' +
@@ -735,7 +737,7 @@ function activate(el) {
     case 'power': go('power'); break;
     case 'power-action':
       if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
-        text: 'The desktop, taskbar and Start menu open, for maintenance. Back to TV in the Power menu (or on the desktop) returns here.' });
+        text: 'The desktop, taskbar and Start menu open, for maintenance; open apps go down to the taskbar. To come back, press Home, then Back to TV (or the Back to TV icon on the desktop).' });
       // One wrong press of A must not switch the box off: the controller cannot turn it back on.
       else if (arg === 'shutdown') ask({ title: 'Shut down the box?', yes: 'Shut down', onYes: () => send({ type: 'power', action: 'shutdown' }),
         text: 'It turns off completely: the controller can’t turn it back on. Use the box’s power button to start it again.' });

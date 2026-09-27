@@ -61,8 +61,22 @@ sealed partial class MainForm
         Log.Info($"Desktop mode ({(desktop.ShellSession ? "the launcher is the shell" : "next to Explorer")})");
         desktop.Enter();
         cursor.Show(); // the desktop is for the mouse (or the controller's Mouse preset)
+        // Entered from inside an app: the app would still cover the desktop. Open apps go down
+        // to the taskbar; switching to one later restores it (Native.ForceForeground).
+        foreach (var id in apps.RunningIds())
+            if (apps.MainWindow(id) is var window && window != IntPtr.Zero) Native.ShowWindow(window, 6); // SW_MINIMIZE
         Post(new { type = "blank" });
         Hide();
+        // How to get back, said once on the desktop (the alert cards show over any window).
+        alertCenter.Raise(new AlertSpec
+        {
+            Id = "desktop",
+            Title = "Desktop mode",
+            Body = "Back to TV: press Home on the controller, or the Back to TV icon on the desktop.",
+            Glyph = "desktop",
+            Urgent = true,
+            Duration = TimeSpan.FromSeconds(10),
+        });
     }
 
     /// <summary>Back to TV (Power menu, the desktop shortcut): Explorer closes where the launcher
@@ -70,6 +84,7 @@ sealed partial class MainForm
     async void BackToTv()
     {
         Log.Info("Back to TV");
+        alertCenter.Clear("desktop");
         Post(new { type = "show", view = "home" });
         Reveal();
         await desktop.Leave();
