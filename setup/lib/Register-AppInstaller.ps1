@@ -45,9 +45,21 @@ $SidAdmins = New-Sid 'S-1-5-32-544'
 $SidUsers  = New-Sid 'S-1-5-32-545'
 $Inherit = 'ContainerInherit,ObjectInherit'
 
+# A junction or symbolic link where one of these folders should be (a standard user can plant one
+# before the first lock, or in a folder that stays theirs to write): Set-Acl would change the
+# link's target instead (Program Files\HTPC, state\...). The link goes - only the link, never what
+# it points at - and a real folder takes its place, before any ACL is set.
+function Assert-RealFolder([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        if ($item.PSIsContainer) { [IO.Directory]::Delete($Path) } else { [IO.File]::Delete($Path) }
+        Write-Change "$Path was a link; replaced by a real folder"
+    }
+    New-Item -ItemType Directory -Force $Path | Out-Null
+}
+
 foreach ($sub in @('', 'logs', 'user', 'state', 'tv')) {
-    $path = if ($sub) { Join-Path $HtpcData $sub } else { $HtpcData }
-    New-Item -ItemType Directory -Force $path | Out-Null
+    Assert-RealFolder $(if ($sub) { Join-Path $HtpcData $sub } else { $HtpcData })
 }
 
 # Root and state\: Users read only. logs\, user\ and tv\: Users may write.
@@ -70,6 +82,9 @@ if (-not $current.AreAccessRulesProtected) {
 # the TV code's address cache and its own files, which nothing elevated reads).
 foreach ($sub in @('logs', 'user', 'tv')) {
     $path = Join-Path $HtpcData $sub
+    # Checked again now that the root is locked (Users can no longer create anything in it): a
+    # link planted in a writable sub-folder's place before this run is replaced here.
+    Assert-RealFolder $path
     $subAcl = Get-Acl -LiteralPath $path
     $hasWrite = $subAcl.Access | Where-Object { $_.IdentityReference -eq $SidUsers.Translate([Security.Principal.NTAccount]) -and $_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify -and -not $_.IsInherited }
     if (-not $hasWrite) {
