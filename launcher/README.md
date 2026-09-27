@@ -236,6 +236,7 @@ redirect chain and every file with the box's own code.
 ## Build and run on the box
 
     powershell -ExecutionPolicy Bypass -File launcher\dev\Start-Launcher.ps1 -Dev
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Start-Launcher.ps1 -Restore  # back to the installed launcher
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screen.ps1
     powershell -ExecutionPolicy Bypass -File launcher\dev\Send-Pad.ps1 -Press A      # controller input without a controller
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1           # Mouse preset, end to end, on a test page
@@ -253,5 +254,9 @@ Start-Launcher builds, then starts the launcher outside the Claude desktop app a
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
 `-NoTv` never sends the TV a key (no on at start, no off in standby): for working on the box
 while nobody is watching. It pauses the installed watchdog (if any) for 15 minutes, or until
-the dev build is up, so the installed launcher does not come back meanwhile.
+the dev build is up, so the installed launcher does not come back meanwhile. The pause is
+written through WMI: HKCU written from inside the Claude app stays in its package, where the
+watchdog never sees it (if WMI fails, the watchdog is stopped instead). `-Restore` goes back:
+it lifts the pause, ends the dev build and starts the installed watchdog again (as the
+signed-in user, not elevated) if it is not running, which starts the installed launcher.
 Log: `C:\ProgramData\HTPC\logs\launcher.log`.
