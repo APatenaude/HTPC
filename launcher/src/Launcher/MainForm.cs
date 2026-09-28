@@ -1008,7 +1008,9 @@ sealed partial class MainForm : Form
             apps.SetEfficiencyMode(false);
             var back = appBeforeStandby;
             appBeforeStandby = null; // used once: a later wake must not go back to it
-            if (back is not null && apps.IsRunning(back)) SwitchTo(back);
+            // Its window gone meanwhile (still running, no window: SwitchTo would only say so over
+            // the blank page): the home screen instead.
+            if (back is not null && apps.IsRunning(back) && apps.MainWindow(back) != IntPtr.Zero) SwitchTo(back);
             else { Post(new { type = "show", view = "home" }); Reveal(); }
         }
     }
