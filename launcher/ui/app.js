@@ -416,26 +416,39 @@ function renderConfirm() {
     `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`;
 }
 
+// The views under the one shown, nearest first: an overlay (a confirmation, a dialog) sits over
+// the view it was opened from, which stays visible under it; over another overlay (a question
+// over the TV method dialog over Settings), the whole chain down to the first full view does.
+function underViews() {
+  const isOver = (v) => v === 'confirm' || v === 'power' || v === 'timer' || v === 'menu' || !!(EXT.views[v] && EXT.views[v].overlay);
+  const list = [];
+  for (let v = state.view, i = state.stack.length - 1; isOver(v) && i >= 0; i--) { v = state.stack[i]; list.push(v); }
+  return list;
+}
+
 function render() {
   const keep = state.memory[state.view];
-  // A confirmation sits over the view it was opened from, which stays visible under it.
-  const over = state.view === 'confirm' || (EXT.views[state.view] && EXT.views[state.view].overlay);
-  const under = over ? state.stack[state.stack.length - 1] : null;
+  const unders = underViews();
   if (state.view !== 'settings') editing = null;
   renderStatus();
   renderTiles();
   for (const f of EXT.home) f();
-  if (state.view === 'menu' || under === 'menu') renderMenu();
-  if (state.view === 'power') renderPower();
-  if (state.view === 'timer') renderTimer();
+  if (state.view === 'menu' || unders.includes('menu')) renderMenu();
+  if (state.view === 'power' || unders.includes('power')) renderPower();
+  if (state.view === 'timer' || unders.includes('timer')) renderTimer();
   if (state.view === 'confirm') renderConfirm();
-  if (state.view === 'settings' || under === 'settings') renderSettings();
-  for (const v of [state.view, under]) if (EXT.views[v]) EXT.views[v].render();
-  sectionHooks();
+  if (state.view === 'settings' || unders.includes('settings')) renderSettings();
+  for (const v of [state.view, ...unders]) if (EXT.views[v]) EXT.views[v].render();
+  sectionHooks(unders);
   const home = $('home'), wasBehind = home.classList.contains('behind');
+  const chain = [...unders].reverse().concat(state.view);   // bottom to top
   for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) {
-    $(v).classList.toggle('on', v === state.view || v === under);
-    $(v).classList.toggle('under', v === under);   // its hints hide: one hint bar, the overlay's
+    const at = chain.indexOf(v);
+    $(v).classList.toggle('on', at >= 0);
+    $(v).classList.toggle('under', at >= 0 && v !== state.view);   // its hints hide: one hint bar, the top one's
+    // Stacked in the order they were opened, whatever their order in the page.
+    const z = at >= 0 && chain.length > 1 ? String(at + 1) : '';
+    if ($(v).style.zIndex !== z) $(v).style.zIndex = z;
   }
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
@@ -446,7 +459,7 @@ function render() {
   // along: it must not play its entrance again, a flash of the whole screen.
   if (!home.classList.contains('on')) home.classList.remove('stay');
   else if (wasBehind && !home.classList.contains('behind')) home.classList.add('stay');
-  for (const v of [state.view, under]) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
+  for (const v of chain) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
   restoreFocus(keep);
 }
 
