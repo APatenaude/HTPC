@@ -240,4 +240,19 @@ static class WatchdogPause
         }
         catch (Exception e) { Log.Warn($"Watchdog pause: {e.Message}"); }
     }
+
+    /// <summary>
+    /// The pause in another account's registry (HKEY_USERS\&lt;sid&gt;, there while it is signed in):
+    /// TV Box Setup refused to run as someone else than the signed-in user, whose first, not
+    /// elevated copy set it (SetupElevation.RunsAsSessionUser). Only this one value goes.
+    /// </summary>
+    public static void ClearFor(string sid)
+    {
+        try
+        {
+            using var key = Registry.Users.OpenSubKey($@"{sid}\{Key}", writable: true);
+            key?.DeleteValue(Value, throwOnMissingValue: false);
+        }
+        catch (Exception e) { Log.Warn($"Watchdog pause of {sid}: {e.Message}"); }
+    }
 }

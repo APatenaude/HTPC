@@ -8,13 +8,24 @@ namespace Htpc.Launcher;
 /// </summary>
 sealed partial class MainForm
 {
+    /// <summary>
+    /// TV Box Setup's own TV files (admin-only), which the launcher takes in at its start. Written
+    /// only while Program Files\HTPC\Setup passes the trust check; with no split token (UAC off)
+    /// the folder may be its administrator's own, whose rights are the same either way.
+    /// </summary>
+    static TvFiles SetupTvFiles() => new(Path.Combine(SetupElevation.TrustedDir, "tv"), dir =>
+        SetupElevation.UntrustedReason(dir, Rights.Elevation == Rights.Token.NoSplit ? System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value : null));
+
     TvService CreateTv()
     {
-        // Elevated (TV Box Setup), the TV's files are written only into a locked ProgramData\HTPC.
-        TvFiles.ElevatedTrust = SetupElevation.UntrustedReason;
+        // TV Box Setup (elevated) keeps the TV step's files in its own admin-only folder and reads
+        // nothing from ProgramData\HTPC\tv, the user's to write. The launcher, as the user, takes
+        // them in at its next start, as it does setup's settings.json.
+        var files = Rights.SetupElevated ? SetupTvFiles() : new TvFiles();
+        if (!options.Setup) files.TakeIn(SetupTvFiles());
         var service = new TvService(new TvParts(
             settings.Tvs, settings.Save, TvDrivers.Create(TvNet.Instance), TvNet.Instance, SystemTvClock.Instance,
-            new TvFiles(), Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, OnUi, () => setupMode)))
+            files, Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, OnUi, () => setupMode)))
         {
             HandsOff = options.NoTv,
             InSetup = options.Setup,

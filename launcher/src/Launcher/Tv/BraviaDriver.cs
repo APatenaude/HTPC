@@ -151,10 +151,10 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
             {
                 if (await Vouched(tv, cancel))
                 {
-                    var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel);
+                    var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(tv), null, cancel);
                     if (result is not null && !string.IsNullOrEmpty(cookie))
                     {
-                        credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie });
+                        credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie, Box = PairedUnder(tv) });
                         Log.Info($"Sony {tv.Name}: pairing renewed without a PIN");
                         return true;
                     }
@@ -202,8 +202,11 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         return (At(net, 0) as JsonArray ?? new JsonArray()).Select(n => TvNet.NormalizeMac(Str(Field(n, "hwAddr")))).Where(m => m is not null).Select(m => m!).Distinct().ToList();
     }
 
-    JsonArray Register() => new(
-        new JsonObject { ["clientid"] = $"TVBox:{credentials?.BoxId}", ["nickname"] = "TV Box", ["level"] = "private" },
+    /// <summary>The box id this TV was paired under when not the file's own (paired in TV Box Setup: Secret.Box); null: the file's. Kept as it renews.</summary>
+    string? PairedUnder(TvDevice tv) => credentials?.Get(tv.Key)?.Box;
+
+    JsonArray Register(TvDevice tv) => new(
+        new JsonObject { ["clientid"] = $"TVBox:{PairedUnder(tv) ?? credentials?.BoxId}", ["nickname"] = "TV Box", ["level"] = "private" },
         new JsonArray(new JsonObject { ["value"] = "yes", ["function"] = "WOL" }));
 
     public async Task<bool> Pair(TvDevice tv, Action<string, string> step, Func<CancellationToken, Task<string?>> nextCode, CancellationToken cancel)
@@ -211,7 +214,7 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
         step("working", $"Connecting to {tv.Name}…");
         if (!await Vouched(tv, cancel)) { step("failed", $"{tv.Name} is not answering where it was. Search again, then pick it."); return false; }
         // The first register (no PIN) makes the TV show one; it answers 401.
-        var (_, first, _) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel);
+        var (_, first, _) = await Call(tv, "accessControl", "actRegister", Register(tv), null, cancel);
         if (first is not (200 or 401)) { step("failed", $"{tv.Name} did not answer. Is IP control on (Authentication: Normal)?"); return false; }
         step("code", $"Type the PIN {tv.Name} shows.");
         while (true)
@@ -220,9 +223,9 @@ sealed class BraviaDriver : ITvDriver, ITvPairing
             if (pin is null) { step("failed", "Pairing cancelled."); return false; }
             if (pin.Length != 4 || !pin.All(char.IsDigit)) { step("code", "The PIN is 4 digits. Type it again."); continue; }
             if (!await Vouched(tv, cancel)) { step("failed", $"{tv.Name} is not answering where it was."); return false; }
-            var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(), null, cancel, basicPin: pin);
+            var (result, _, cookie) = await Call(tv, "accessControl", "actRegister", Register(tv), null, cancel, basicPin: pin);
             if (result is null || string.IsNullOrEmpty(cookie)) { step("code", "That PIN was not right. Type the one the TV shows."); continue; }
-            credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie });
+            credentials?.Set(tv.Key, new TvCredentials.Secret { Value = cookie, Box = PairedUnder(tv) });
             renewFailed.TryRemove(tv.Key, out _); // paired by the user: a later expiry may renew silently again
             step("done", $"{tv.Name} is paired.");
             return true;

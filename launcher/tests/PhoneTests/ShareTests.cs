@@ -100,6 +100,91 @@ static partial class Program
         return cert;
     }
 
+    // An intermediate signed by issuer (with its key), as this box makes one unless told otherwise.
+    static X509Certificate2 Intermediate(X509Certificate2 issuer, string subject, IEnumerable<X509Extension> extensions, ECDsa? key = null)
+    {
+        using var own = key is null ? ECDsa.Create(ECCurve.NamedCurves.nistP256) : null;
+        var request = new CertificateRequest(new X500DistinguishedName(subject), key ?? own!, HashAlgorithmName.SHA256);
+        foreach (var e in extensions) request.CertificateExtensions.Add(e);
+        return X509CertificateLoader.LoadCertificate(request.Create(issuer, DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(30), RandomNumberGenerator.GetBytes(8)).RawData);
+    }
+
+    // Name Constraints with dNSName only: every other name form left unconstrained.
+    static X509Extension DnsOnlyConstraints(string dns)
+    {
+        var w = new AsnWriter(AsnEncodingRules.DER);
+        using (w.PushSequence())
+        using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0)))
+        using (w.PushSequence())
+            w.WriteCharacterString(UniversalTagNumber.IA5String, dns, new Asn1Tag(TagClass.ContextSpecific, 2));
+        return new X509Extension("2.5.29.30", w.Encode(), true);
+    }
+
+    // Setup's step (--phone-certificates, elevated) puts the intermediate in the machine's CA store
+    // from files the user can write: only one this box would make goes there (PhoneCertificates.Unfit).
+    static void MachineStoreChecks(X509Certificate2 root, X509Certificate2 inter, string testName)
+    {
+        Check(PhoneCertificates.Unfit(root, inter, testName) is null, $"the box's own pair: fit for the machine store ({PhoneCertificates.Unfit(root, inter, testName)})");
+
+        using var rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var rootRequest = new CertificateRequest($"CN={testName} phone remote root, O=HTPC TV box", rootKey, HashAlgorithmName.SHA256);
+        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 1, true));
+        rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        using var testRoot = rootRequest.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(60));
+        var subject = $"CN={testName} phone remote, O=HTPC TV box";
+        X509Extension[] good =
+        [
+            new X509BasicConstraintsExtension(true, true, 0, true),
+            new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true),
+            new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false),
+            PhoneCertificates.NameConstraints(PhoneCertificates.LocalNames()),
+        ];
+        IEnumerable<X509Extension> With(string oid, X509Extension? instead) =>
+            good.Where(e => e.Oid!.Value != oid).Concat(instead is null ? Array.Empty<X509Extension>() : new[] { instead }).ToList();
+        string? Why(IEnumerable<X509Extension> extensions, string? name = null) => PhoneCertificates.Unfit(testRoot, Intermediate(testRoot, name ?? subject, extensions), testName);
+
+        Check(Why(good) is null, $"one made as this box makes it: fit ({Why(good)})");
+        using (var otherKey = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+        {
+            var otherRequest = new CertificateRequest(testRoot.SubjectName, otherKey, HashAlgorithmName.SHA256);
+            otherRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 1, true));
+            using var lookAlike = otherRequest.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(60));
+            var forged = Intermediate(lookAlike, subject, good);
+            Check(forged.Issuer == testRoot.Subject && PhoneCertificates.Unfit(testRoot, forged, testName) is { } why && why.Contains("not signed"),
+                $"the root's name, another key: refused ({PhoneCertificates.Unfit(testRoot, forged, testName)})");
+        }
+        foreach (var (extensions, what, says) in new (IEnumerable<X509Extension>, string, string)[]
+        {
+            (With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 1, true)), "a CA of path length 1", "path length 0"),
+            (With("2.5.29.19", new X509BasicConstraintsExtension(true, false, 0, true)), "a CA with no path length", "path length 0"),
+            (With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 0, false)), "basic constraints not critical", "path length 0"),
+            (With("2.5.29.19", null), "no basic constraints", "path length 0"),
+            (With("2.5.29.30", null), "no name constraints", "no critical name constraints"),
+            (With("2.5.29.30", new X509Extension("2.5.29.30", PhoneCertificates.NameConstraints(PhoneCertificates.LocalNames()).RawData, false)), "name constraints not critical", "no critical name constraints"),
+            (With("2.5.29.30", PhoneCertificates.NameConstraints(["tv.local", "com"])), "name constraints permitting .com", "permit more"),
+            (With("2.5.29.30", DnsOnlyConstraints("tv.local")), "name constraints on DNS names only (addresses free)", "unconstrained"),
+            (With("2.5.29.37", null), "no extended key usage (any use)", "server authentication only"),
+            (With("2.5.29.37", new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1"), new Oid("1.3.6.1.5.5.7.3.3") }, false)), "code signing too", "server authentication only"),
+        })
+            Check(Why(extensions) is { } why && why.Contains(says), $"{what}: refused ({Why(extensions)})");
+        Check(Why(good, $"CN={testName} phone remote, O=Someone else") is { } other && other.Contains("not named"), $"another O: refused ({Why(good, $"CN={testName} phone remote, O=Someone else")})");
+        Check(Why(good, $"CN=Another box phone remote, O=HTPC TV box") is { } named && named.Contains("not named"), "another box's name: refused");
+
+        // Setup's step itself: a pair the user's files hold that this box would not make never
+        // reaches the machine store (the check comes first, elevated or not).
+        var folder = TempFolder();
+        var keys = new MemoryKeyStore();
+        var forgedPair = Intermediate(testRoot, subject, With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 5, true)), keys.Create(PhoneCertificates.IntermediateKeyName));
+        Directory.CreateDirectory(folder);
+        File.WriteAllBytes(Path.Combine(folder, "root.cer"), testRoot.RawData);
+        File.WriteAllBytes(Path.Combine(folder, "intermediate.cer"), forgedPair.RawData);
+        var step = new PhoneCertificates(folder, keys, testName);
+        Check(step.LoadExisting() && !step.PlaceIntermediateInMachineStore() && !step.IntermediateInMachineStore
+            && Log.Warnings.Any(w => w.Contains("not put in the machine's CA store") && w.Contains("path length 0")),
+            "setup's step: an intermediate this box would not make is loaded, then refused before the machine store");
+        Directory.Delete(folder, true);
+    }
+
     static void CertificateTests()
     {
         var folder = TempFolder();
@@ -172,7 +257,8 @@ static partial class Program
             "setup's step loads the launcher's pair as it is, and makes no key");
         var emptyFolder = TempFolder();
         Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && !Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any(),
-            "before the launcher's first start there is nothing to load, and nothing is made");        var moved = IPAddress.Parse("192.168.1.33");
+            "before the launcher's first start there is nothing to load, and nothing is made");
+        MachineStoreChecks(root, inter, testName);        var moved = IPAddress.Parse("192.168.1.33");
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "the box got a new address: new certificate");
         Check(certs.Current!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateIPAddresses().SequenceEqual(new[] { moved })
             && Chain(root, certs.Intermediate!, certs.Current!) == X509ChainStatusFlags.NoError && certs.Authority!.Thumbprint == root.Thumbprint,

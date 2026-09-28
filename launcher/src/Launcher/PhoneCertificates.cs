@@ -343,13 +343,19 @@ sealed class PhoneCertificates
 
     /// <summary>
     /// With administrator rights (setup): the intermediate (its public certificate only; the key
-    /// stays where it is) in the machine's CA store, this box's older ones out. True when it is there.
+    /// stays where it is) in the machine's CA store, this box's older ones out. Its files are the
+    /// user's to write, so only one this box would have made goes there (Unfit). True when it is there.
     /// </summary>
     public bool PlaceIntermediateInMachineStore()
     {
         lock (gate)
         {
-            if (intermediate is null) return false;
+            if (intermediate is null || root is null) return false;
+            if (Unfit(root, intermediate, name) is { } why)
+            {
+                Log.Warn($"Phone remote: the intermediate certificate was not put in the machine's CA store: {why}");
+                return false;
+            }
             try
             {
                 using var store = new X509Store(StoreName.CertificateAuthority, StoreLocation.LocalMachine);
@@ -439,6 +445,95 @@ sealed class PhoneCertificates
         return (removed, inMachine.Count);
     }
 
+    /// <summary>
+    /// Why an intermediate is not one this box makes, or null. Setup's step (--phone-certificates)
+    /// puts it in the machine's CA store with administrator rights, from files the user can write:
+    /// beyond its key matching the launcher's and its issuer naming the root, it must be signed by
+    /// that root (ECDSA with SHA-256), a CA of path length 0 (critical), carry critical name
+    /// constraints with every name form this box writes and each within what it writes (.local
+    /// names, private IPv4 ranges, the .invalid and O=HTPC TV box placeholders), be for server
+    /// authentication only, and be named "&lt;name&gt; phone remote", O=HTPC TV box.
+    /// </summary>
+    public static string? Unfit(X509Certificate2 root, X509Certificate2 intermediate, string name)
+    {
+        if (intermediate.Issuer != root.Subject) return "its issuer is not the root";
+        if (!SignedBy(intermediate, root)) return "it is not signed by the root";
+        if (intermediate.Extensions.OfType<X509BasicConstraintsExtension>().ToList() is not [{ Critical: true, CertificateAuthority: true, HasPathLengthConstraint: true, PathLengthConstraint: 0 }])
+            return "it is not a CA of path length 0 (critical basic constraints)";
+        if (intermediate.Extensions.Cast<X509Extension>().Count(e => e.Oid?.Value == "2.5.29.30") != 1) return "it has no critical name constraints";
+        if (NameConstraintsUnfit(intermediate.Extensions["2.5.29.30"]) is { } why) return why;
+        if (intermediate.Extensions.OfType<X509EnhancedKeyUsageExtension>().ToList() is not [{ } eku]
+            || eku.EnhancedKeyUsages.Count != 1 || eku.EnhancedKeyUsages[0].Value != "1.3.6.1.5.5.7.3.1")
+            return "it is not for server authentication only";
+        if (!IsOurs(intermediate, $"{name} phone remote")) return $"it is not named \"{name} phone remote\", O={Organization}";
+        return null;
+    }
+
+    /// <summary>The certificate's signature checked with the issuer's public key (ecdsa-with-SHA256 only, as this box signs).</summary>
+    static bool SignedBy(X509Certificate2 cert, X509Certificate2 issuer)
+    {
+        try
+        {
+            var certificate = new AsnReader(cert.RawData, AsnEncodingRules.DER).ReadSequence();
+            var signed = certificate.ReadEncodedValue();                      // tbsCertificate
+            var algorithm = certificate.ReadSequence().ReadObjectIdentifier(); // signatureAlgorithm
+            var signature = certificate.ReadBitString(out var unused);
+            if (algorithm != "1.2.840.10045.4.3.2" || unused != 0) return false;
+            using var key = issuer.GetECDsaPublicKey();
+            return key is not null && key.VerifyData(signed.Span, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+        }
+        catch (Exception e) when (e is AsnContentException or CryptographicException) { return false; }
+    }
+
+    /// <summary>
+    /// Why name constraints are not the kind this box writes (NameConstraints), or null: critical,
+    /// permitted subtrees only, with dNSName, iPAddress, rfc822Name, URI and directoryName all
+    /// there (a form left out is not constrained at all), each within what this box permits.
+    /// </summary>
+    static string? NameConstraintsUnfit(X509Extension? extension)
+    {
+        if (extension is not { Critical: true }) return "it has no critical name constraints";
+        try
+        {
+            var constraints = new AsnReader(extension.RawData, AsnEncodingRules.DER).ReadSequence();
+            var permitted = constraints.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0));
+            if (constraints.HasData) return "its name constraints exclude names (this box's only permit)";
+            var forms = new HashSet<int>();
+            byte[] placeholder;
+            {
+                var b = new X500DistinguishedNameBuilder();
+                b.AddOrganizationName(Organization);
+                placeholder = b.Build().RawData;
+            }
+            while (permitted.HasData)
+            {
+                var subtree = permitted.ReadSequence();
+                var tag = subtree.PeekTag();
+                if (tag.TagClass != TagClass.ContextSpecific) return "its name constraints are unreadable";
+                forms.Add(tag.TagValue);
+                var within = tag.TagValue switch
+                {
+                    2 => subtree.ReadCharacterString(UniversalTagNumber.IA5String, tag).EndsWith(".local", StringComparison.OrdinalIgnoreCase),
+                    7 => subtree.ReadOctetString(tag) is { Length: 8 } range && InPrivateRange(range),
+                    1 or 6 => subtree.ReadCharacterString(UniversalTagNumber.IA5String, tag) == ".invalid",
+                    4 => subtree.ReadSequence(tag).ReadEncodedValue().Span.SequenceEqual(placeholder),
+                    _ => false,
+                };
+                if (!within || subtree.HasData) return "its name constraints permit more than this box's";
+            }
+            if (!new[] { 1, 2, 4, 6, 7 }.All(forms.Contains)) return "its name constraints leave a name form unconstrained";
+            return null;
+        }
+        catch (AsnContentException) { return "its name constraints are unreadable"; }
+    }
+
+    /// <summary>An iPAddress constraint (address, then mask) inside one of PrivateRanges, its mask at least as narrow.</summary>
+    static bool InPrivateRange(byte[] range) => PrivateRanges.Any(r =>
+    {
+        byte[] n = r.Network.GetAddressBytes(), m = r.Mask.GetAddressBytes();
+        return Enumerable.Range(0, 4).All(i => (range[4 + i] & m[i]) == m[i] && (range[i] & m[i]) == n[i]);
+    });
+
     static bool IsOurs(X509Certificate2 cert, string commonName)
     {
         string? cn = null, o = null;
@@ -524,7 +619,7 @@ sealed class PhoneCertificates
     /// under .tv), iPAddress for the private IPv4 ranges, and placeholders that match nothing
     /// real for e-mail (.invalid), URI (.invalid) and directory names (O=HTPC TV box).
     /// </summary>
-    static X509Extension NameConstraints(IEnumerable<string> dns)
+    internal static X509Extension NameConstraints(IEnumerable<string> dns)
     {
         var w = new AsnWriter(AsnEncodingRules.DER);
         using (w.PushSequence())

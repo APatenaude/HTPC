@@ -25,7 +25,6 @@ sealed class NewHost : IRokuHost, IDisposable
 
     public NewHost(RokuWorld world, bool handsOff = false, Func<FakeNet, ITvClock, IReadOnlyList<ITvDriver>>? drivers = null, string? filesDir = null)
     {
-        TvFiles.TestElevated = false;   // the launcher's (standard-rights) path, also on an elevated CI runner
         FilesDir = filesDir ?? Path.Combine(Path.GetTempPath(), "tvlab-" + Guid.NewGuid().ToString("N")[..8]);
         trace = world.Trace;
         Net = new FakeNet(world.Trace, world.Fakes);

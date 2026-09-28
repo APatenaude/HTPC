@@ -15,7 +15,9 @@ namespace Htpc.Launcher;
 /// remote's CA made; ends), --phone-certificates (setup, elevated: its intermediate certificate in the machine's store; ends), 
 /// --restarted (started again by the watchdog: the TV is left as it is) with
 /// --restart-reason=WHY (why the watchdog started it again, for the log: Watchdog.cs lists them),
-/// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one).
+/// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one),
+/// --standard-rights (the copy a launcher started with administrator rights starts at standard
+/// rights: Rights.cs; it never starts another).
 /// </summary>
 sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath, bool NoTv, bool Setup, bool Restarted, string? RestartReason, bool BackToTv)
 {
@@ -118,28 +120,62 @@ static class Program
             Console.Out.Flush();
             return;
         }
+        // Who this process is, once, before anything logs (Rights.cs): TV Box Setup with
+        // administrator rights alone uses setup's admin-only places; the token says how any
+        // rights came (a split token, or none: User Account Control off).
+        var token = Rights.Read();
         // --phone-certificates-create: TV Box Setup's Phone remote step runs this first, through a
         // one-shot task as the signed-in user WITHOUT administrator rights (keys made with them
         // cannot be opened without them): the phone remote's CA made if there is none. Ends; exit
-        // code 0 when there is one, 3 when started with administrator rights (refused).
+        // code 0 when there is one, 3 when started elevated with a split token (refused). With no
+        // split token (User Account Control off) the launcher always has these rights, so its
+        // keys are made with them.
         if (args.Contains("--phone-certificates-create"))
         {
-            if (Environment.IsPrivilegedProcess) { Log.Warn("Phone remote: --phone-certificates-create refused with administrator rights"); Environment.ExitCode = 3; return; }
-            var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
-            try { Environment.ExitCode = certs.MakeAuthorities() ? 0 : 1; }
-            catch (Exception e) { Log.Error("Phone remote: --phone-certificates-create", e); Environment.ExitCode = 1; }
+            Rights.Set(setupElevated: false, token);
+            if (token == Rights.Token.Split) { Log.Warn("Phone remote: --phone-certificates-create refused with administrator rights (the launcher runs without them)"); Environment.ExitCode = 3; }
+            else
+            {
+                var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
+                try { Environment.ExitCode = certs.MakeAuthorities() ? 0 : 1; }
+                catch (Exception e) { Log.Error("Phone remote: --phone-certificates-create", e); Environment.ExitCode = 1; }
+            }
+            Log.Flush();
             return;
-        }        // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
+        }
+        // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
         // phone remote's intermediate (made by the launcher, which runs without them) put in the
         // machine's CA store, where Windows finds it to send with the HTTPS certificate. Nothing is
         // made here. Ends; exit code 0 when it is there, 2 when the launcher has not made it yet.
+        // Setup's own step: elevated, it logs in setup's log.
         if (args.Contains("--phone-certificates"))
         {
+            Rights.Set(setupElevated: token != Rights.Token.Standard, token);
             var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
             try { Environment.ExitCode = !certs.LoadExisting() ? 2 : certs.PlaceIntermediateInMachineStore() ? 0 : 1; }
             catch (Exception e) { Log.Error("Phone remote: --phone-certificates", e); Environment.ExitCode = 1; }
+            Log.Flush();
             return;
-        }        var options = Options.Parse(args);
+        }
+        var options = Options.Parse(args);
+        var plan = Rights.Decide(options.Setup, token, args.Contains(Rights.AtStandardFlag));
+        Rights.Set(plan.SetupElevated, token);
+        // The everyday launcher elevated with a split token (Run as administrator, an elevated
+        // shell): the same launcher at standard rights instead, before any file work here.
+        if (plan.Start == Rights.Start.AgainAtStandard)
+        {
+            Log.Info($"Launcher started with administrator rights ({string.Join(' ', args)}): starting it again at standard rights");
+            if (!Rights.StartAgainAtStandard(args)) Environment.ExitCode = 1;
+            Log.Flush();
+            return;
+        }
+        if (plan.Start == Rights.Start.Stop)
+        {
+            Log.Error("Launcher started again at standard rights, but it still has administrator rights: stopped (no loop)");
+            Environment.ExitCode = 1;
+            Log.Flush();
+            return;
+        }
         // Back to TV with a launcher running: it is told, this copy is not needed. Without one,
         // this becomes the launcher (and closes the desktop once its UI is up).
         if (options.BackToTv && !options.Setup && DesktopMode.SignalRunningLauncher()) return;
@@ -150,8 +186,12 @@ static class Program
         var trusted = SetupElevation.RunsFromTrustedPlace(Environment.ProcessPath, AppContext.BaseDirectory, SetupElevation.TrustedDir);
         var step = SetupElevation.Decide(options.Setup, elevated, trusted, args);
         if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
-        if (options.Setup && elevated)
+        if (Rights.SetupElevated)
         {
+            // Setup sets up the account it runs as: only the one signed in here. A standard account
+            // whose prompt an administrator approved would get the administrator's account set up
+            // (its autologon, its shell), so that is refused before anything else.
+            if (!SetupElevation.RunsAsSessionUser()) { Log.Flush(); return; }
             // Windows' own environment for the elevated setup and all it starts, not the user's
             // (SetupElevation.CleanEnvironment lists it).
             SetupElevation.ApplyCleanEnvironment();
@@ -188,10 +228,13 @@ static class Program
         }
 
         Log.Info($"Launcher {typeof(Program).Assembly.GetName().Version} starting ({string.Join(' ', args)})");
-        // The elevated wizard writes in C:\ProgramData\HTPC (the TV step's tv\) only once that is
-        // locked and Administrators' (TvFiles refuses otherwise); everything else it keeps in
-        // Program Files\HTPC\Setup, never in the user's profile.
-        if (options.Setup && elevated) SetupRunner.LockData();
+        if (args.Contains(Rights.AtStandardFlag)) Log.Info("Started again at standard rights: it was started with administrator rights (Run as administrator, an elevated window)");
+        if (plan.Start == Rights.Start.RunWithFullRights)
+            Log.Warn("Running with administrator rights and no standard-rights token (User Account Control off, or Windows' built-in Administrator): " +
+                "every app opened from here gets them too. A TV account with User Account Control on is safer (Settings › About says so)");
+        // The elevated wizard keeps what it writes in Program Files\HTPC\Setup (its log, settings,
+        // logos, the TV step's files), never in the user's profile or ProgramData\HTPC\tv; the
+        // launcher takes the settings and the TV's files in, as the user, at its next start.
         // The elevated setups' WebView2 profiles, one per run in the user's profile: the launcher removes them, as the user.
         if (!options.Setup) SetupElevation.ClearSetupWebViews();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);

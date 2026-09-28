@@ -132,9 +132,13 @@ an update from the previous release, and `setup.ps1 -Uninstall` run as the TV us
   every view in its stress state before anyone else sees a change.
 - **PowerShell:** `.ps1` files are ASCII (5.1 reads BOM-less UTF-8 as ANSI). `Set-ExecutionPolicy`
   under `-ExecutionPolicy Bypass` throws even when it worked: catch it.
-- **Least privilege:** the launcher never runs elevated. Setup elevates once, at launch, and runs
-  from Program Files; anything SYSTEM runs comes from admin-only folders and reads nothing
-  user-writable.
+- **Least privilege:** users run things as administrator whenever they can, so rights never mean
+  "setup": `Rights.cs` decides once, in `Program.Main`. Only TV Box Setup (setup mode, elevated:
+  once, at launch, from Program Files, as the signed-in user only) uses admin-only places and reads
+  nothing user-writable; neither does anything SYSTEM runs. The everyday launcher and the watchdog,
+  elevated with a split token (UAC on), start again at standard rights; with none (UAC off, the
+  built-in Administrator) they run as usual in the user's folders, warned. **Test every change as a
+  normal user AND elevated** (UAC on, and UAC off).
 
 ### Working with the owner
 
