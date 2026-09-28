@@ -165,21 +165,18 @@ Done:
   folder ownership, the \HTPC\Jobs task, a restart into the launcher, and `-Uninstall` twice as
   the TV user. Report: `.claude/vm-report-1.0.md` on the old machine (not in git).
 - GitHub: pushes work; the "Release tags" ruleset protects `refs/tags/v*` from deletion and moves.
+- Released (28 Sept): 1.0.2, then 1.0.3 (the uninstall's logs reach Documents\HTPC logs again,
+  VM run 3). v1.0.0 and v1.0.1 were tagged but their runs failed in the tests (then part of the
+  release workflow), so nothing was published under those numbers. Immutable releases are on
+  since 1.0.3, which the release workflow created, checked and marked latest with it on.
 
 Left, in order:
 
-1. `New-Release.ps1 -Version 1.0.2` (it pushes, waits for Tests, then tags), watch the release
-   workflow. v1.0.0 and v1.0.1 were tagged but their runs failed in the tests (then part of the
-   release workflow), so nothing was published under those numbers.
-2. Then turn on immutable releases (Settings › General › Releases, or
-   `gh api -X PUT repos/APatenaude/HTPC/immutable-releases`), and check the next release's
-   workflow still creates, checks and marks it latest. It was left until after 1.0 so the first
-   real release does not also test that setting. The owner confirms two-factor sign-in on the
-   account.
-3. On the owner's box (on 0.1.1): install 1.0 with TV Box Setup rather than Settings › Updates,
+1. The owner confirms two-factor sign-in on the GitHub account.
+2. On the owner's box (on 0.1.1): install 1.0 with TV Box Setup rather than Settings › Updates,
    because 0.1.1's own update code does that update and the new setup steps (Drivers, the phone
    certificate in the machine store, the sign-in colour) come only from setup. Restart after.
-4. On real phones: QR pairing moves to tv.local only for this box; the iPhone Home Screen app's
+3. On real phones: QR pairing moves to tv.local only for this box; the iPhone Home Screen app's
    pairing text; quick reconnect after 15 s in the background; no zoom on the copy fields; Send
    link while disconnected keeps the link; the "went to sleep" cover in Sleep/Hibernate mode.
    Android: pairing over HTTPS again (new secure cookie), the Share target end to end, `/send`
