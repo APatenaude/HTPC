@@ -43,11 +43,13 @@ $unknown = $Only | Where-Object { $_ -notin 'Match', 'Guard', 'Prefs', 'Catalog'
 if ($unknown) { throw "Unknown section(s): $($unknown -join ', ')" }
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $lib = Join-Path $repo 'setup\lib'
+# The work folder before Common.ps1: elevated, it points TEMP at Program Files\HTPC\Setup\temp,
+# and fakes under Program Files\HTPC are what the guard never touches (nine false failures).
+$work = Join-Path ([IO.Path]::GetTempPath()) 'htpc-autotest'
 . "$lib\Common.ps1"
 . "$lib\AppCore.ps1"
 . "$lib\AppAutostart.ps1"
 
-$work = Join-Path $env:TEMP 'htpc-autotest'
 $pass = 0; $fail = 0
 function Check([bool]$ok, [string]$what) {
     if ($ok) { $script:pass++; Write-Host "  PASS  $what" } else { $script:fail++; Write-Host "  FAIL  $what" -ForegroundColor Red }
