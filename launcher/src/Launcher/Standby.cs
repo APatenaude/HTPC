@@ -55,6 +55,19 @@ sealed class LauncherSettings
     /// <summary>The on-screen keyboard pops up by itself on text fields (SPEC N11).</summary>
     public bool ShowKeyboardAutomatically { get; set; } = true;
 
+    /// <summary>
+    /// The brightness layer (SPEC N12) as last set, 10 to 100: a start comes back at it, never
+    /// darker than Dimmer.FloorAtStart (MainForm.Settings.cs).
+    /// </summary>
+    public int Brightness { get; set; } = 100;
+
+    /// <summary>
+    /// The volume last set on the box (0 to 100; null before any). Windows keeps a level per
+    /// output and a boot can bring the TV's HDMI output back at another one: each output that
+    /// becomes the default gets this level, logged (MainForm.Timer.cs KeepVolume).
+    /// </summary>
+    public int? Volume { get; set; }
+
     // (Older files also have "showAppHints", the in-app hint's switch: the hint is gone, and
     // unknown keys are skipped when reading.)
 

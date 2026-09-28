@@ -11,11 +11,15 @@ sealed partial class MainForm
 {
     readonly DecodeCheck decodeCheck = new();
     readonly System.Windows.Forms.Timer padTest = new() { Interval = 33 };
+    readonly System.Windows.Forms.Timer saveSoon = new() { Interval = 1000 };
     bool audioSwitchFailed;
 
     /// <summary>End of the constructor.</summary>
     void InitSettings()
     {
+        // Values that move in steps (the brightness and volume sliders) are saved once they rest.
+        saveSoon.Tick += (_, _) => { saveSoon.Stop(); settings.Save(); };
+        FormClosed += (_, _) => { if (saveSoon.Enabled) { saveSoon.Stop(); settings.Save(); } };
         InitTimer();
         InitMaps();
         padTest.Tick += (_, _) =>
@@ -70,6 +74,38 @@ sealed partial class MainForm
         audioSwitchFailed |= switchFailed;
         var list = await Task.Run(AudioOutputs.List);
         Post(new { type = "sound.outputs", outputs = list.Select(o => new { id = o.Id, name = o.Name, isDefault = o.IsDefault }), canSwitch = !audioSwitchFailed });
+    }
+
+    // --- Brightness ------------------------------------------------------------------------------
+
+    /// <summary>settings.json in a second, once a slider rests (a save per step is wasted work).</summary>
+    void SaveSoon()
+    {
+        saveSoon.Stop();
+        saveSoon.Start();
+    }
+
+    /// <summary>
+    /// Start, before the first frame: the brightness set last (it used to come back at 100 after
+    /// every start), never darker than Dimmer.FloorAtStart.
+    /// </summary>
+    void RestoreBrightness()
+    {
+        brightness = Dimmer.StartLevel(settings.Brightness);
+        if (brightness == 100) return;
+        dimmer.SetBrightness(brightness);
+        Log.Info($"Brightness {brightness}{(brightness != settings.Brightness ? $" (set to {settings.Brightness} last; a start is never darker than {Dimmer.FloorAtStart})" : "")}");
+    }
+
+    /// <summary>The Home menu's slider or the phone: at once on screen, kept for the next start.</summary>
+    void SetBrightness(int percent)
+    {
+        brightness = percent;
+        dimmer.SetBrightness(percent);
+        var kept = Math.Clamp(percent, Dimmer.Darkest, 100);
+        if (kept == settings.Brightness) return;
+        settings.Brightness = kept;
+        SaveSoon();
     }
 
     // --- Display: the decode check ---------------------------------------------------------------

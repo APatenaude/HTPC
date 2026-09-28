@@ -14,7 +14,10 @@ namespace Htpc.Launcher;
 /// Windows keeps a volume per output (the TV's HDMI output sat at 100 while the speakers were at
 /// 58), so a switch gives the new output the level the box is at before it becomes the default:
 /// nothing plays louder or quieter for a moment, and the slider stays true. The same goes when
-/// sound follows Bluetooth headphones (SoundSwitcher, SoundSwitch.cs).
+/// sound follows Bluetooth headphones (SoundSwitcher, SoundSwitch.cs), and for any output that
+/// becomes the default by itself: at a boot the TV's HDMI output comes up only after the TV's
+/// handshake, the USB speakers being the default until then; it gets the level the user set last,
+/// kept in settings (MainForm.Timer.cs KeepVolume, through VolumeWatch.Arrived).
 /// </summary>
 static class AudioOutputs
 {
@@ -425,6 +428,12 @@ sealed class VolumeWatch : IDisposable
     /// <summary>The level now, and the output's name when it has just become the default. Any thread.</summary>
     public event Action<SoundLevel, string?>? Changed;
 
+    /// <summary>
+    /// An output has become the default (the first look included), before it is watched: the
+    /// box's level goes onto it here (MainForm.Timer.cs KeepVolume). UI thread.
+    /// </summary>
+    public Action<string>? Arrived { get; set; }
+
     string? watching;
     IDisposable? watch;
     bool started;
@@ -440,6 +449,7 @@ sealed class VolumeWatch : IDisposable
         watch = null;
         watching = id;
         if (id is null) return;
+        Arrived?.Invoke(id);
         try { watch = CoreAudio.Watch(id, level => Changed?.Invoke(level, null)); }
         catch (Exception e) { Log.Warn($"Watching the volume: {e.Message}"); }
         if (!first && CoreAudio.TryLevel(id) is { } now) Changed?.Invoke(now, AudioOutputs.NameOf(id));

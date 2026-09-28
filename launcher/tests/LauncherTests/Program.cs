@@ -548,6 +548,16 @@ Console.WriteLine("== Alerts overlay");
     VolumeShot("keyboard-top", new SoundLevel(80, false), null, hd, new Rectangle(0, 0, 1920, 560), at => Check(at.Top >= 560 - 40, "keyboard at the top: the volume below it"));
 }
 
+// ---------------------------------------------------------------- Brightness kept across a start
+Console.WriteLine("== Brightness at start");
+{
+    Check(Dimmer.StartLevel(100) == 100 && Dimmer.StartLevel(55) == 55, "the level set last comes back");
+    Check(Dimmer.StartLevel(Dimmer.FloorAtStart - 5) == Dimmer.FloorAtStart && Dimmer.StartLevel(0) == Dimmer.FloorAtStart && Dimmer.StartLevel(-20) == Dimmer.FloorAtStart,
+        "never darker than the floor at start");
+    Check(Dimmer.StartLevel(250) == 100, "never past 100");
+    Check(new LauncherSettings().Brightness == 100 && new LauncherSettings().Volume is null, "defaults: full brightness, no volume kept yet");
+}
+
 // ---------------------------------------------------------------- Core Audio (reads only)
 Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
 {
@@ -589,14 +599,17 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     // The volume indicator's watch: registers with Windows and stops, changing nothing. The
     // first look only starts watching (no indicator at start).
     var changes = 0;
+    var arrived = new List<string>();
     using (var watch = new VolumeWatch())
     {
         watch.Changed += (_, _) => Interlocked.Increment(ref changes);
+        watch.Arrived = id => arrived.Add(id); // the launcher's KeepVolume sets the level here; this only counts
         On(ApartmentState.STA, () => { watch.Poll(); watch.Poll(); });
     }
     int watchBefore;
     lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume"));
     Check(changes == 0 && watchBefore == 0, $"volume watch: starts and stops quietly ({changes} changes)");
+    Check(!hasAudio || (arrived.Count == 1 && arrived[0] == CoreAudio.DefaultId()), $"volume watch: the default output 'arrives' once, at the first look ({arrived.Count})");
     Check(!hasAudio || CoreAudio.DefaultId() == outputs.First(o => o.IsDefault).Id, "the default output's id");
 }
 

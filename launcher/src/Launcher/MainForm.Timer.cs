@@ -24,6 +24,9 @@ sealed partial class MainForm
         volumeOsd.Avoid = overlay.Avoid;
         // Any change of the volume or mute, whoever made it; the output changing (checked each second).
         volumeWatch.Changed += (level, output) => OnUiQueued(() => ShowVolume(level, output));
+        // The level someone sets is kept; an output that becomes the default gets it.
+        volumeWatch.Changed += (level, output) => { if (output is null) OnUiQueued(() => RememberVolume(level)); };
+        volumeWatch.Arrived = KeepVolume;
         clock.Tick += (_, _) => { if (!setupMode && standby is { Active: false }) volumeWatch.Poll(); };
         controller.Chord += (command, repeat) => OnUiQueued(() => OnChord(command, repeat));
         sleepTimer = new SleepTimer(() => media.Sessions, on => media.Want("timer", on));
@@ -121,6 +124,36 @@ sealed partial class MainForm
         if (!LauncherActive && foregroundApp?.Id == "moonlight") return;
         if (!repeat) Log.Info($"Start + D-pad: {command}");
         Volume(command, step: 2);
+    }
+
+    /// <summary>
+    /// The default output's volume changed, just after someone used the box (the controller, the
+    /// Home menu's slider, the phone, a keyboard's volume keys): that is the box's level, kept in
+    /// settings. Not a change nobody made (Windows' own, a boot's).
+    /// </summary>
+    void RememberVolume(SoundLevel level)
+    {
+        if (setupMode || standby is not { Active: false } || settings.Volume == level.Volume) return;
+        if (DateTime.Now - standby.LastUserInput() > TimeSpan.FromSeconds(10)) return;
+        settings.Volume = level.Volume;
+        SaveSoon();
+    }
+
+    /// <summary>
+    /// An output became the default: at start, the TV's HDMI output appearing after the TV's
+    /// handshake (a boot), a switch. It gets the level last set on the box when Windows has it at
+    /// another (the user, 27 Sept 2026: "volume doesn't seem to persist"). Logged. A switch made
+    /// by the launcher carried that level already (AudioOutputs, SoundSwitcher): nothing to do.
+    /// </summary>
+    void KeepVolume(string id)
+    {
+        if (setupMode || settings.Volume is not { } wanted || CoreAudio.TryLevel(id) is not { } now || now.Volume == wanted) return;
+        try
+        {
+            CoreAudio.SetVolume(id, wanted);
+            Log.Info($"Volume: {wanted} on {AudioOutputs.NameOf(id) ?? id}, the level set last (Windows had it at {now.Volume})");
+        }
+        catch (Exception e) { Log.Warn($"Volume: {wanted} on {id}: {e.Message}"); }
     }
 
     /// <summary>The volume indicator, over whatever is on screen (not in setup or standby).</summary>
