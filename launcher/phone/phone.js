@@ -234,6 +234,7 @@ function renderStatus() {
   const el = $('status');
   el.className = 'status' + (asleep ? ' asleep' : state.conn === 'open' ? ' open' : '');
   $('status-text').textContent = asleep ? 'Asleep' : state.conn === 'open' ? 'Connected' : 'Connecting…';
+  if (asleep && $('asleep').hidden) $('main').scrollTop = 0; // the cover sits at the top of the area
   $('asleep').hidden = !asleep;
   const power = $('power');
   power.setAttribute('aria-label', asleep ? 'Wake the TV box' : 'Sleep the TV box');
