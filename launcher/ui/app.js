@@ -705,7 +705,9 @@ function sectionHooks() {
 
 // The shared dialog: A on the first button runs onYes; B or Cancel closes it.
 let asking = null;
-function ask(q) { asking = q; go('ask'); }
+// Always on Cancel, never where the last question's focus was left: after one Yes, the next
+// question (Shut down) would otherwise open on Yes.
+function ask(q) { asking = q; state.memory.ask = null; go('ask'); }
 addView('ask', {
   overlay: true,
   render() {
