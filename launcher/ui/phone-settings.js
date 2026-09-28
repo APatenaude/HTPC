@@ -157,6 +157,7 @@ onAction('phone-forget', (el, id) => {
   ask({
     title: `Forget ${p.name}?`,
     text: p.shortcut ? 'The Shortcut that uses this key stops working. The phone can make a new key.'
+      : !state.phoneSettings.requireCode ? 'With “Ask for a code on new phones” off, it can still connect without one: turn that on to keep it out.'
       : (state.phoneSettings.phones || []).some((k) => k.shortcut && k.owner === p.id) ? 'Its Shortcut keys stop working too. To be a remote again, it pairs again: Show a code on the TV, on the phone.'
       : 'To be a remote again, it pairs again: Show a code on the TV, on the phone.',
     yes: 'Forget',
