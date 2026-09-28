@@ -174,12 +174,17 @@ $UninstallSteps = [ordered]@{
         # HTPC\setup) may be one, so the working directory moves out too.
         Set-Location $env:SystemRoot
         [Environment]::CurrentDirectory = $env:SystemRoot
+        $ended = @()
         foreach ($name in 'HtpcWatchdog', 'HtpcLauncher', 'TV Box Setup') {
             foreach ($p in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 Write-Change "$name ended (pid $($p.Id))"
+                $ended += $p.Id
             }
         }
+        # Stop-Process returns before a program has gone and let go of its exe (the VM run found
+        # HtpcLauncher.exe "in use" right after): up to 15 s for them to exit.
+        if ($ended) { Wait-Process -Id $ended -Timeout 15 -ErrorAction SilentlyContinue }
         # The box's logs, kept for the user (the uninstall's own log is in the same folder).
         $keep = Join-Path $logDir ('box logs {0:yyyyMMdd-HHmmss}' -f (Get-Date))
         foreach ($sub in 'logs', 'state') {
@@ -193,6 +198,8 @@ $UninstallSteps = [ordered]@{
         foreach ($dir in $HtpcProgramFiles, $HtpcData) {
             if (-not (Test-Path -LiteralPath $dir)) { Write-Same "$dir absent"; continue }
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            # Once more after a moment: a file an ended program held a little longer.
+            if (Test-Path -LiteralPath $dir) { Start-Sleep -Seconds 3; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
             if (Test-Path -LiteralPath $dir) { Write-Attention "$dir partly left (files in use): delete it after the restart" }
             else { Write-Change "removed $dir" }
         }
