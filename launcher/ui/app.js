@@ -783,13 +783,23 @@ function demoRoute(hash) {
 function go(view) { state.stack.push(state.view); state.view = view; render(); }
 function reset(view) { state.stack = []; state.view = view; render(); }
 
+// "Opening X" covers the page until the host says the app's window is up ('opened', also when
+// it did not open). Home or B take it away at once (press), and it never stays past 40 s (the
+// host gives up at 30 s, with an alert).
+let opening = null;   // { id, timer }
 function showOpening(t) {
   const el = $('opening');
   el.innerHTML = `<span class="logo">${appIcon(t, 160, 1.5)}</span>` +
     `<span class="name">Opening ${esc(t.name)}</span><span class="sub">Home comes back here anytime</span>`;
   el.classList.add('on');
+  if (opening) clearTimeout(opening.timer);
+  opening = { id: t.id, timer: setTimeout(hideOpening, 40000) };
 }
-function hideOpening() { $('opening').classList.remove('on'); }
+function hideOpening() {
+  $('opening').classList.remove('on');
+  if (opening) clearTimeout(opening.timer);
+  opening = null;
+}
 
 // A short message from the page, drawn with the alerts (notices.js).
 function toast(text, kind) { if (text) noticeOwn(text, kind); }
@@ -863,6 +873,14 @@ function back() {
 function press(button) {
   timePress(button);
   if (typeof soundsHear === 'function') soundsHear(button);   // interface sounds (sounds.js): what this press does picks one
+  // "Opening X" is up: nothing under it takes a press. Home or B take it away (the host then
+  // leaves the app behind the launcher when its window comes); Home goes on to the menu.
+  if (opening) {
+    if (button !== 'home' && button !== 'homeHold' && button !== 'b') return;
+    send({ type: 'launchDismissed', id: opening.id });
+    hideOpening();
+    if (button === 'b') return;
+  }
   const el = focusedEl();
   // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
   if (state.moving && EXT.actions['tile-move'] && EXT.actions['tile-move'](el, button)) return;
