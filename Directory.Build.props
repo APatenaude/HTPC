@@ -8,7 +8,7 @@
     Plain numeric SemVer (major.minor.patch): boxes compare the numbers, so 0.10.0 > 0.9.0.
   -->
   <PropertyGroup>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
   </PropertyGroup>
 
 </Project>
