@@ -89,10 +89,13 @@ const vibrate = (ms = 8) => { try { if (navigator.vibrate) navigator.vibrate(ms)
 let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0, failures = 0;
 const sentLog = [];   // demo and self-test: what would have gone to the box
 
+// False when it could not go (no connection yet): what the user asked for must not claim success.
 function send(msg) {
-  if (demo) { sentLog.push(msg); return; }
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  if (demo) { sentLog.push(msg); return true; }
+  if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); return true; }
+  return false;
 }
+const notConnected = () => toast('Not connected to the TV box yet', 'warn');
 
 function connect() {
   clearTimeout(reconnectTimer);
@@ -420,7 +423,7 @@ slider('volume', (v) => ({ t: 'volume', v }));
 $('power').addEventListener('click', () => {
   if (state.box.standby) { send({ t: 'wake' }); return; }
   openSheet('Sleep the TV box?', 'The TV turns off. Wake it from here, or hold Home on the controller.',
-    [{ label: 'Sleep', primary: true, full: true, run: () => send({ t: 'sleep' }) }]);
+    [{ label: 'Sleep', primary: true, full: true, run: () => { if (!send({ t: 'sleep' })) notConnected(); } }]);
 });
 $('wake').addEventListener('click', () => send({ t: 'wake' }));
 
@@ -588,7 +591,7 @@ $('linkbar').addEventListener('submit', (e) => {
   const field = $('linkbar-url');
   const url = field.value.trim();
   if (!url) { field.focus(); return; }
-  send({ t: 'open', url: url.slice(0, 2048) });
+  if (!send({ t: 'open', url: url.slice(0, 2048) })) { notConnected(); return; } // the link stays in the field
   field.value = '';
   closeLinkSheet();
   toast('Sent to the TV');
@@ -763,7 +766,13 @@ function handleShare(ticketLink) {
   pendingShare = undefined;
   if (!demo) history.replaceState(null, '', '/');
   if (!url) { toast('No link in what was shared', 'warn'); return; }
-  const go = () => { send({ t: 'open', url, share: true }); toast('Sent to the TV'); };
+  const go = () => {
+    if (send({ t: 'open', url, share: true })) { toast('Sent to the TV'); return; }
+    // Not connected yet: the link waits in Send link's field, one tap away.
+    notConnected();
+    $('linkbar-url').value = url;
+    openLinkSheet();
+  };
   if (ticketLink && ticketLink === url) { go(); return; }
   openSheet('Play this on the TV?', url, [{ label: 'Play on the TV', primary: true, full: true, run: go }]);
 }
@@ -794,7 +803,7 @@ function closeSend() {
 }
 $('send-open').addEventListener('click', openSend);
 $('send-close').addEventListener('click', closeSend);
-$('shortcut-make').addEventListener('click', () => send({ t: 'shortcutKey' }));
+$('shortcut-make').addEventListener('click', () => { if (!send({ t: 'shortcutKey' })) notConnected(); });
 $('retry').addEventListener('click', () => { failures = 0; $('lost').hidden = true; connect(); });
 
 // Copy: the clipboard API needs HTTPS; over plain HTTP, the old way (select, copy).
