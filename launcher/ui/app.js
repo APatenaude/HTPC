@@ -426,8 +426,13 @@ function underViews() {
   return list;
 }
 
+let renderedView = null;
 function render() {
   const keep = state.memory[state.view];
+  // Where the focus is: if its element goes (a network, a device, a TV no longer found), the one
+  // now nearest its place takes it (restoreFocus), not the view's first element.
+  const was = renderedView === state.view ? focusedEl() : null;
+  const wasAt = was && { rect: was.getBoundingClientRect(), section: !!was.dataset.section };
   const unders = underViews();
   if (state.view !== 'settings') editing = null;
   renderStatus();
@@ -460,7 +465,8 @@ function render() {
   if (!home.classList.contains('on')) home.classList.remove('stay');
   else if (wasBehind && !home.classList.contains('behind')) home.classList.add('stay');
   for (const v of chain) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
-  restoreFocus(keep);
+  renderedView = state.view;
+  restoreFocus(keep, was && !was.isConnected ? wasAt : null);
 }
 
 // ---- Focus and spatial navigation ---------------------------------------------------------
@@ -493,10 +499,22 @@ function setFocus(el, chosen = true) {
   noticeAvoid(el);   // the alerts' cards move off it (notices.js)
 }
 
-function restoreFocus(id) {
+// gone: { rect, section } of a focused element the render took away (render), else null.
+function restoreFocus(id, gone) {
   const list = items();
   const kept = list.find((e) => e.dataset.id === id) || list.find((e) => e.dataset.id === state.memory[state.view]);
   if (kept) { setFocus(kept); return; }
+  if (gone) {
+    const r = gone.rect, cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let best = null, bestD = Infinity;
+    for (const e of list) {
+      if (!!e.dataset.section !== gone.section) continue;   // Settings: in the same column
+      const q = e.getBoundingClientRect();
+      const d = Math.abs(q.left + q.width / 2 - cx) + 2 * Math.abs(q.top + q.height / 2 - cy);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (best) { setFocus(best); return; }
+  }
   const view = EXT.views[state.view];
   setFocus((view && view.focus ? view.focus(list) : null) ||
     (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||

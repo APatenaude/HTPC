@@ -65,8 +65,10 @@ const WifiUI = (() => {
     }
     const others = (st.networks || []).filter((n) => !n.connected);
     h += '<span class="section">Other networks</span><div class="wifi-scroll">';
-    h += others.map((n, i) =>
-      row('wifi-net:' + i, 'wifi', n.ssid, [n.saved ? 'Saved' : '', esc(n.words)].filter(Boolean).join(' · '),
+    // Rows by name, not place: the host sorts the list again with each scan, and the focus stays on
+    // its network (A must never join the one that moved under it).
+    h += others.map((n) =>
+      row('wifi-net:' + esc(n.ssid), 'wifi', n.ssid, [n.saved ? 'Saved' : '', esc(n.words)].filter(Boolean).join(' · '),
         n.security === 'open' || n.security === 'owe' ? '' : `<span class="wifi-lock">${icon('lock', 28)}</span>`)).join('');
     h += row('wifi-hidden', 'plus', 'Hidden network', 'A network that does not show its name', '');
     h += '</div>';
@@ -228,12 +230,12 @@ const WifiUI = (() => {
         if (id === 'wifi-radio') { setRadio(st.radio !== 'on'); return true; }
         if (id === 'wifi-allow') { send({ type: 'wifi.allowLocation' }); return true; }
         if (id === 'wifi-hidden') { openForm({ ssid: '', hidden: true, security: 'wpa2psk' }, 'wifi-name'); return true; }
-        if (id.startsWith('wifi-net:')) { const n = others()[Number(id.slice(9))]; if (n) pickNetwork(n); return true; }
+        if (id.startsWith('wifi-net:')) { const n = others().find((x) => x.ssid === id.slice(9)); if (n) pickNetwork(n); return true; }
         return id.startsWith('wifi-');
       }
       if (button === 'x') {
         if (id === 'wifi-current' && st.current) { forget(st.current.ssid); return true; }
-        if (id.startsWith('wifi-net:')) { const n = others()[Number(id.slice(9))]; if (n && n.saved) forget(n.ssid); return true; }
+        if (id.startsWith('wifi-net:')) { const n = others().find((x) => x.ssid === id.slice(9)); if (n && n.saved) forget(n.ssid); return true; }
       }
       return false;
     },
