@@ -35,11 +35,9 @@ sealed class TvNet : ITvNet
 {
     public static readonly TvNet Instance = new();
 
-    // Virtual, VPN and tunnel adapters: Hyper-V's switch takes the multicast otherwise (and no TV is there).
-    static readonly string[] NotLan = { "Hyper-V", "Virtual", "VPN", "VMware", "VirtualBox", "TAP-", "WireGuard", "Tailscale", "ZeroTier", "Loopback", "Bluetooth", "Npcap" };
-
     /// <summary>
-    /// The adapters a TV can be on: up, Ethernet or Wi-Fi, with an IPv4 address, and not virtual.
+    /// The adapters a TV can be on: up, Ethernet or Wi-Fi, with an IPv4 address, and not virtual
+    /// (NetCable.IsVirtual: Hyper-V's switch takes the multicast otherwise, and no TV is there).
     /// Those with an IPv4 gateway are the LAN; only if none has one (a network without a router),
     /// the others count.
     /// </summary>
@@ -50,7 +48,7 @@ sealed class TvNet : ITvNet
             a.Type is NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet or NetworkInterfaceType.FastEthernetT
                 or NetworkInterfaceType.FastEthernetFx or NetworkInterfaceType.Wireless80211 &&
             a.Address is not null &&
-            !NotLan.Any(w => a.Description.Contains(w, StringComparison.OrdinalIgnoreCase) || a.Name.Contains(w, StringComparison.OrdinalIgnoreCase))).ToList();
+            !NetCable.IsVirtual(a.Name, a.Description)).ToList();
         var routed = candidates.Where(a => a.HasGateway).ToList();
         return routed.Count > 0 ? routed : candidates;
     }
@@ -72,8 +70,11 @@ sealed class TvNet : ITvNet
         return Pick(list);
     }
 
-    /// <summary>True when a LAN adapter is on a cable (setup offers a Wi-Fi step otherwise).</summary>
-    public static bool Wired() => Adapters().Any(a => a.Type != NetworkInterfaceType.Wireless80211);
+    /// <summary>
+    /// True when a network cable is plugged in (setup offers a Wi-Fi step otherwise): NetCable's
+    /// check, the Wi-Fi list's cable row's too, so the two never disagree.
+    /// </summary>
+    public static bool Wired() => NetCable.Plugged();
 
     public async Task<IReadOnlyList<SsdpReply>> Ssdp(IReadOnlyCollection<string> searchTargets, TimeSpan wait, CancellationToken cancel)
     {

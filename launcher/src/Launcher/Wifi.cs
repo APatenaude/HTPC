@@ -411,8 +411,8 @@ sealed class WifiService : IDisposable
     // --- The cable ------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The network cable: the physical Ethernet adapters (not Hyper-V's "vEthernet (...)"
-    /// switches, not Bluetooth's network), the one that is up first. CarriesInternet: Windows'
+    /// The network cable: the physical Ethernet adapters (NetCable.IsCable: not Hyper-V's switches or a
+    /// VM's adapter, not a VPN or Bluetooth's network), the one that is up first. CarriesInternet: Windows'
     /// internet connection goes through it (or through a vEthernet switch bound to it).
     /// </summary>
     public static WiredLink? Wired()
@@ -424,7 +424,7 @@ sealed class WifiService : IDisposable
             var all = NetworkInterface.GetAllNetworkInterfaces();
             var viaSwitch = all.Any(n => n.Name.StartsWith("vEthernet (", StringComparison.OrdinalIgnoreCase) && internetId is { } v && Guid.TryParse(n.Id, out var g) && g == v);
             var wired = all
-                .Where(IsCable)
+                .Where(NetCable.IsCable)
                 .Select(n => new WiredLink(n.Name, n.OperationalStatus == OperationalStatus.Up ? n.Speed : 0, n.OperationalStatus == OperationalStatus.Up,
                     internet is { IsWlanConnectionProfile: false, IsWwanConnectionProfile: false } && n.OperationalStatus == OperationalStatus.Up &&
                     ((internetId is { } id && Guid.TryParse(n.Id, out var g2) && g2 == id) || viaSwitch)))
@@ -434,13 +434,6 @@ sealed class WifiService : IDisposable
         }
         catch (Exception e) { Log.Warn($"Network cable: {e.Message}"); return null; }
     }
-
-    /// <summary>A physical Ethernet port, by what Windows calls it: no "vEthernet (...)" switch, Bluetooth network or debugger.</summary>
-    public static bool IsCable(NetworkInterface n) =>
-        n.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet or NetworkInterfaceType.FastEthernetT or NetworkInterfaceType.Ethernet3Megabit
-        && !n.Name.StartsWith("vEthernet (", StringComparison.OrdinalIgnoreCase)
-        && !n.Description.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase)
-        && !n.Description.Contains("Kernel Debug", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The cable is up and carries the internet, and the Wi-Fi is joined to no network (standby may switch its radio off).</summary>
     public static bool CableOnly()
