@@ -225,10 +225,9 @@ static class Program
         if (plan.Start == Rights.Start.RunWithFullRights)
             Log.Warn("Running with administrator rights and no standard-rights token (User Account Control off, or Windows' built-in Administrator): " +
                 "every app opened from here gets them too. A TV account with User Account Control on is safer (Settings › About says so)");
-        // The elevated wizard writes in C:\ProgramData\HTPC (the TV step's tv\) only once that is
-        // locked and Administrators' (TvFiles refuses otherwise); everything else it keeps in
-        // Program Files\HTPC\Setup, never in the user's profile.
-        if (Rights.SetupElevated) SetupRunner.LockData();
+        // The elevated wizard keeps what it writes in Program Files\HTPC\Setup (its log, settings,
+        // logos, the TV step's files), never in the user's profile or ProgramData\HTPC\tv; the
+        // launcher takes the settings and the TV's files in, as the user, at its next start.
         // The elevated setups' WebView2 profiles, one per run in the user's profile: the launcher removes them, as the user.
         if (!options.Setup) SetupElevation.ClearSetupWebViews();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);

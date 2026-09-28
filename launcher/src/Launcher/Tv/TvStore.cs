@@ -9,12 +9,27 @@ namespace Htpc.Launcher;
 /// The TV code's own files, one set per box (there is one user): %ProgramData%\HTPC\tv. The TV
 /// profiles themselves stay in the launcher's settings.json; what changes by itself (addresses,
 /// last seen) lives here, so settings.json is only written when a setting changes.
+///
+/// TV Box Setup (elevated) has a set of its own in its admin-only Program Files\HTPC\Setup\tv
+/// (the host passes it, with its trust check): it reads nothing from ProgramData\HTPC\tv, which
+/// the user can write (a cache, a kill switch or pairing keys planted there would be trusted by an
+/// elevated process). The launcher takes setup's in, as the user, at its next start (TakeIn), as
+/// it does setup's settings.json.
 /// </summary>
 sealed class TvFiles
 {
     public string Dir { get; }
-    public TvFiles(string? dir = null) =>
+
+    /// <summary>Setup's own set: why the folder tv\ sits in is not safe to write elevated, or null (SetupElevation.UntrustedReason).</summary>
+    readonly Func<string, string?>? trust;
+
+    /// <param name="dir">Default: %ProgramData%\HTPC\tv, the launcher's.</param>
+    /// <param name="trust">TV Box Setup's own folder: every write checks the folder tv\ sits in first, and that tv\ is no link.</param>
+    public TvFiles(string? dir = null, Func<string, string?>? trust = null)
+    {
         Dir = dir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "tv");
+        this.trust = trust;
+    }
 
     public string Cache => Path.Combine(Dir, "cache.json");
     public string Credentials => Path.Combine(Dir, "credentials.dat");
@@ -24,30 +39,19 @@ sealed class TvFiles
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     /// <summary>
-    /// Why a folder is not safe for an elevated write, or null (the launcher's
-    /// SetupElevation.UntrustedReason, set by the host; TvLab never runs elevated). Elevated
-    /// without one, nothing is written.
-    /// </summary>
-    internal static Func<string, string?>? ElevatedTrust;
-
-    /// <summary>Tests only: run the standard-rights path even when the test runs elevated (CI).</summary>
-    internal static bool? TestElevated;
-
-    /// <summary>
     /// Written in full to a new file of an unguessable name, then moved over the old one: never
     /// half a file, and never through a file already there (tv\ is the user's to write: a link or
     /// hard link planted in the old one's or a temp name's place is replaced, not written through).
-    /// Elevated (TV Box Setup), only once C:\ProgramData\HTPC is setup's (owned by Administrators,
-    /// locked: SetupRunner.LockData), so tv\ cannot be a link or be swapped for one.
+    /// Setup's own set only into a folder its trust check passes (admin-only Program Files\HTPC\
+    /// Setup), where tv\ cannot be a link or be swapped for one.
     /// </summary>
-    internal static void WriteAtomic(string path, byte[] data, FileSecurity? security = null)
+    internal void WriteAtomic(string path, byte[] data, FileSecurity? security = null)
     {
         var dir = Path.GetDirectoryName(path)!;
-        if (TestElevated ?? Environment.IsPrivilegedProcess)
+        if (trust is not null)
         {
-            var why = ElevatedTrust is null ? "no trust check" : ElevatedTrust(Path.GetDirectoryName(dir)!);
-            if (why is not null) throw new IOException($"not written elevated: {why}");
-            if (Directory.Exists(dir) && File.GetAttributes(dir).HasFlag(FileAttributes.ReparsePoint)) throw new IOException($"not written elevated: {dir} is a link");
+            if (trust(Path.GetDirectoryName(dir)!) is { } why) throw new IOException($"not written: {why}");
+            if (Directory.Exists(dir) && File.GetAttributes(dir).HasFlag(FileAttributes.ReparsePoint)) throw new IOException($"not written: {dir} is a link");
         }
         Directory.CreateDirectory(dir);
         var temp = Path.Combine(dir, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
@@ -55,6 +59,32 @@ sealed class TvFiles
                    : new FileInfo(temp).Create(FileMode.CreateNew, FileSystemRights.FullControl, FileShare.None, 4096, FileOptions.None, security))
             stream.Write(data);
         File.Move(temp, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// The launcher at its start, as the user (never TV Box Setup): what setup's TV step left in
+    /// its own set (setup: cache.json and credentials.dat, Program Files\HTPC\Setup\tv), taken in
+    /// once each time setup wrote it (the newest write time, kept as cache.json's SetupTakenUtc).
+    /// The TVs setup saw and the pairing keys it made join these; a TV in both takes setup's.
+    /// Nothing of setup's is ever written back there. True when something was taken in.
+    /// </summary>
+    public bool TakeIn(TvFiles setup)
+    {
+        try
+        {
+            var times = new[] { setup.Cache, setup.Credentials }.Where(File.Exists).Select(File.GetLastWriteTimeUtc).ToList();
+            if (times.Count == 0) return false;
+            var at = times.Max();
+            var cache = TvCache.Load(this);
+            if (cache.SetupTakenUtc is { } taken && at <= taken) return false;
+            cache.TakeIn(TvCache.Load(setup));
+            if (File.Exists(setup.Credentials)) TvCredentials.Load(this).TakeIn(TvCredentials.Load(setup));
+            cache.SetupTakenUtc = at;
+            cache.Save();
+            Log.Info($"TV: took in what setup's TV step left ({setup.Dir}, {at:u})");
+            return true;
+        }
+        catch (Exception e) { Log.Warn($"TV: setup's TV files not taken in: {e.Message}"); return false; }
     }
 
     public HashSet<string> DriversOff()
@@ -91,8 +121,10 @@ sealed class TvCache
     public Dictionary<string, CachedTv> Devices { get; set; } = new();
     /// <summary>When the box was last on each TV (EDID key), for Settings' "last used".</summary>
     public Dictionary<string, DateTime> LastUsed { get; set; } = new();
+    /// <summary>The newest of TV Box Setup's own TV files this set last took in (TvFiles.TakeIn); null: none yet.</summary>
+    public DateTime? SetupTakenUtc { get; set; }
 
-    string path = "";
+    TvFiles? files;
     string saved = "";
 
     public static TvCache Load(TvFiles files)
@@ -100,7 +132,7 @@ sealed class TvCache
         TvCache cache;
         try { cache = File.Exists(files.Cache) ? JsonSerializer.Deserialize<TvCache>(File.ReadAllText(files.Cache), TvFiles.Json) ?? new() : new(); }
         catch (Exception e) { Log.Warn($"TV cache unreadable, starting afresh: {e.Message}"); cache = new(); }
-        cache.path = files.Cache;
+        cache.files = files;
         cache.saved = JsonSerializer.Serialize(cache, TvFiles.Json);
         return cache;
     }
@@ -109,9 +141,19 @@ sealed class TvCache
     public void Save()
     {
         var json = JsonSerializer.Serialize(this, TvFiles.Json);
-        if (json == saved || path.Length == 0) return;
-        try { TvFiles.WriteAtomic(path, System.Text.Encoding.UTF8.GetBytes(json)); saved = json; }
+        if (json == saved || files is null) return;
+        try { files.WriteAtomic(files.Cache, System.Text.Encoding.UTF8.GetBytes(json)); saved = json; }
         catch (Exception e) { Log.Warn($"Saving the TV cache: {e.Message}"); }
+    }
+
+    /// <summary>TvFiles.TakeIn: the TVs setup saw (a newer sighting wins), its "last used" times, its screen.</summary>
+    internal void TakeIn(TvCache fromSetup)
+    {
+        foreach (var (key, tv) in fromSetup.Devices)
+            if (!Devices.TryGetValue(key, out var mine) || mine.LastSeen < tv.LastSeen) Devices[key] = tv;
+        foreach (var (key, at) in fromSetup.LastUsed)
+            if (!LastUsed.TryGetValue(key, out var mine) || mine < at) LastUsed[key] = at;
+        if (fromSetup.Screen is not null) Screen = fromSetup.Screen;
     }
 
     /// <summary>Remembers a TV's address; its "last seen" moves at most every 10 minutes (no file write every poll).</summary>
@@ -167,12 +209,17 @@ sealed class TvCredentials
         public string? Scheme { get; set; }
         /// <summary>The TV's TLS key hash (SHA-256 of its public key), for connections that must reach that TV only (Samsung, LG over wss).</summary>
         public string? Pin { get; set; }
+        /// <summary>
+        /// The box id the TV was paired under when it is not the file's own: paired in TV Box Setup
+        /// under setup's, then taken in (TakeIn). The id a Sony knows the box by (its clientid).
+        /// </summary>
+        public string? Box { get; set; }
     }
 
-    readonly string path;
+    readonly TvFiles files;
     readonly Content content;
 
-    TvCredentials(string path, Content content) { this.path = path; this.content = content; }
+    TvCredentials(TvFiles files, Content content) { this.files = files; this.content = content; }
 
     public string BoxId => content.BoxId;
 
@@ -183,11 +230,30 @@ sealed class TvCredentials
             if (File.Exists(files.Credentials))
             {
                 var plain = ProtectedData.Unprotect(File.ReadAllBytes(files.Credentials), Entropy, DataProtectionScope.LocalMachine);
-                return new TvCredentials(files.Credentials, JsonSerializer.Deserialize<Content>(plain, TvFiles.Json) ?? new());
+                return new TvCredentials(files, JsonSerializer.Deserialize<Content>(plain, TvFiles.Json) ?? new());
             }
         }
         catch (Exception e) { Log.Warn($"TV pairing keys unreadable ({e.GetType().Name}): TVs that need them will ask to pair again"); }
-        return new TvCredentials(files.Credentials, new Content());
+        return new TvCredentials(files, new Content());
+    }
+
+    /// <summary>
+    /// TvFiles.TakeIn: the keys TV Box Setup made join these (setup's win for a TV in both). This
+    /// file keeps its box id, unless it has no keys yet (then it takes setup's); a key paired under
+    /// another id keeps that one (Secret.Box).
+    /// </summary>
+    internal void TakeIn(TvCredentials fromSetup)
+    {
+        lock (gate)
+        {
+            if (content.Items.Count == 0) content.BoxId = fromSetup.BoxId;
+            foreach (var (key, secret) in fromSetup.content.Items)
+            {
+                if (fromSetup.BoxId != content.BoxId) secret.Box ??= fromSetup.BoxId;
+                content.Items[key] = secret;
+            }
+            Save();
+        }
     }
 
     // The pairing task writes while the poll reads: one lock, and Save writes under it (temp file then move).
@@ -204,7 +270,7 @@ sealed class TvCredentials
         try
         {
             var data = ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(content, TvFiles.Json), Entropy, DataProtectionScope.LocalMachine);
-            TvFiles.WriteAtomic(path, data, OwnerOnly());
+            files.WriteAtomic(files.Credentials, data, OwnerOnly());
         }
         catch (Exception e) { Log.Error($"Saving TV pairing keys failed ({e.GetType().Name})"); }
     }

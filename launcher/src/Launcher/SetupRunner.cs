@@ -56,39 +56,6 @@ sealed class SetupRunner
     }
 
     /// <summary>
-    /// C:\ProgramData\HTPC locked and owned by Administrators before the elevated wizard writes
-    /// there (tv\, the TV step; TvFiles refuses an unlocked one): setup\lib\Register-AppInstaller.ps1
-    /// -LockOnly from this exe's own setup folder, as setup.ps1 does first too. Waits for it (a few
-    /// seconds, once per setup). False when it failed or there is no such folder (logged).
-    /// </summary>
-    public static bool LockData()
-    {
-        var script = Path.Combine(AppContext.BaseDirectory, "setup", "lib", "Register-AppInstaller.ps1");
-        if (!File.Exists(script)) { Log.Warn($"Setup: {script} missing; ProgramData\\HTPC not locked yet"); return false; }
-        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
-            $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{script}\" -LockOnly")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(script)!,
-        };
-        SetPowerShellEnvironment(psi);
-        try
-        {
-            using var p = Process.Start(psi)!;
-            var output = p.StandardOutput.ReadToEndAsync();
-            var errors = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(90_000)) { try { p.Kill(true); } catch (Exception) { } Log.Warn("Setup: locking ProgramData\\HTPC took over 90 s; stopped"); return false; }
-            var said = (output.Result + errors.Result).Trim();
-            Log.Info($"Setup: ProgramData\\HTPC locked (exit {p.ExitCode}){(said.Length > 0 ? ": " + said.Replace(Environment.NewLine, " | ") : "")}");
-            return p.ExitCode == 0;
-        }
-        catch (Exception e) { Log.Error("Setup: locking ProgramData\\HTPC", e); return false; }
-    }
-
-    /// <summary>
     /// For the PowerShell the elevated wizard starts: modules from Windows' and Program Files'
     /// folders only (SetupElevation.SystemModulePath: never the user's Documents folder), and
     /// HTPC_SETUP_WIZARD=1 (setup.ps1: TV Box Setup started it, elevated and outside any package,
