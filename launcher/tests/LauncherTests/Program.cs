@@ -640,7 +640,8 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
     var catalog = Path.Combine(root!.FullName, "setup", "catalog.json");
     using var doc = JsonDocument.Parse(File.ReadAllText(catalog));
-    string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen" };
+    // --start-maximized: the Browser, which fills the screen with the launcher as the shell (no taskbar).
+    string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen", "--start-maximized" };
     foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
     {
         var id = a.GetProperty("id").GetString();
@@ -663,6 +664,12 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     var browser = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "edge").GetProperty("launch");
     Check(site.Contains(EdgeSiteApp.DarkPages) && AppManagerArgs(browser).Contains(EdgeSiteApp.DarkPages),
         "website tiles and the Browser: light pages drawn dark by Edge itself (no Dark Reader)");
+    // The Browser (the user, 27 Sept 2026: "Edge still says press Esc to exit full screen"): a
+    // plain maximized window, its tabs and address bar showing, no full-screen bubble.
+    var browserArgs = AppManagerArgs(browser);
+    Check(browserArgs.Contains("--start-maximized") && !browserArgs.Any(a => a is "--start-fullscreen" or "--force-app-mode" || a.StartsWith("--app=") || a.StartsWith("--kiosk")),
+        "the Browser: maximized with tabs and an address bar, not full screen or an app window");
+    Check(!(browser.TryGetProperty("fill", out var browserFill) && browserFill.ValueKind == JsonValueKind.True), "the Browser: not filled (its frame holds the tabs)");
     Check(!site.Any(a => a.StartsWith("--kiosk") || a.StartsWith("--inprivate") || a.StartsWith("--incognito") || a.StartsWith("--guest")),
         "website tiles: never kiosk, InPrivate or guest (their sign-ins would be lost)");
     Check(site[0] == @"--user-data-dir=C:\Users\u\AppData\Local\HTPC\edge\twitch" && site[1] == "--app=https://www.twitch.tv/" && site.Count(a => a.Contains("twitch.tv")) == 1,
