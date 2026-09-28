@@ -102,7 +102,7 @@ function views() {
   if (s === 'apps') {
     // Windows' permission was asked for once, as the setup exe opened: Install asks nothing more.
     const note = state.starting ? 'Starting…'
-      : `${state.picked.size} picked · ${state.canInstall ? 'Install starts right away, with no more questions' : 'this copy cannot install (not the setup exe)'}`;
+      : `${state.picked.size} picked · ${state.canInstall ? 'Install starts right away, with no more questions' : 'installing needs TV Box Setup: open it from its own icon'}`;
     return {
       main: '<div class="su-col"><div class="su-head"><h1>Pick your apps</h1>' +
         '<p>Ticked apps install now and get a tile on the home screen. The rest stay in the library for later.</p></div>' +
@@ -173,7 +173,7 @@ function tvView() {
       `<div class="su-row" data-nav data-id="tv-other">${icon('pencil', 34)}` +
         `${p && p.method === 'none' ? 'No TV control (its own remote). Change?' : 'Not listed? Pick your TV’s brand, or skip TV control'}</div>` +
       `<div class="su-row" data-nav data-id="tv-refresh">${icon('restart', 34)}Search again</div>` +
-      (tv.caps && tv.caps.test && p ? `<div class="su-btn" data-nav data-id="tv-test" style="align-self:flex-start;margin-top:12px">Test: turn the TV off, then back on</div>` : '') +
+      (tv.caps && tv.caps.test && p ? `<div class="su-btn" data-nav data-id="tv-test" style="align-self:flex-start;margin-top:12px">Test: turn the TV off and back on</div>` : '') +
       (showStatus ? `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` : '') +
       '</div>' +
       // Pairing the picked TV takes the side panel's place while it runs (or while the TV waits for it).

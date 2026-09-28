@@ -152,7 +152,7 @@ const TvUi = {
   statusLine(tv) {
     const p = tv.profile;
     const s = tv.status;
-    if (tv.handsOff) return { kind: 'warn', text: 'Hands off (--no-tv): the TV is watched but sent nothing.' };
+    if (tv.handsOff) return { kind: 'warn', text: 'TV control is off on this box for now: it watches the TV but sends it nothing.' };
     if (s === 'ok') return { kind: 'ok', text: 'Connected. Found by name, so a move or a new network address is fine.' };
     if (s === 'locked') return { kind: 'warn', text: 'This TV blocks control: on the TV, Settings › System › Advanced system settings › Control by mobile apps, set Network access to Enabled.' };
     if (s === 'missing') return { kind: 'warn', text: `${p.name} is not answering on the network. Is it plugged in and connected? Find it again below.` };
@@ -271,7 +271,7 @@ if (typeof settingsSection === 'function') (() => {
     if (hint && (!p || p.method !== hint)) right += TvUi.checklistHtml(tv, hint, 'tv-side inline');
     right += `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` +
       '<div class="sbuttons">' +
-        (tv.caps.test && p ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: off and on</div>' : '') +
+        (tv.caps.test && p ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: turn the TV off and back on</div>' : '') +
         '<div class="sbutton" data-nav data-id="tv-refresh" data-act="tv-refresh">Find it again</div>' +
       '</div>';
     return '<header><h1>TV</h1><p>The box recognises which TV it’s plugged into and uses that TV’s settings.</p></header>' +
