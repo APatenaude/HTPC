@@ -86,6 +86,13 @@ jobs:
         run: |
           $manifest = Get-Content release\update.json -Raw | ConvertFrom-Json
           $manifest.notes | Out-File -Encoding utf8 "$env:RUNNER_TEMP\notes.txt"
+          # What an update from the TV applies and what it leaves to setup (setup/README.md).
+          @(
+            '',
+            '---',
+            'Updating from the TV (Settings > Updates) replaces the launcher, the watchdog, the job runner, the app catalog and the kept setup scripts, and applies again the machine part of the Edge and System setup steps when their scripts changed (the Edge policies, the HKLM system settings, the sign-in screen).',
+            'It does not apply the signed-in user''s settings (HKCU), the phone remote''s HTTPS certificate or any other setup step: for those, run TV Box Setup again (setup/README.md, "What an update applies").'
+          ) | Out-File -Append -Encoding utf8 "$env:RUNNER_TEMP\notes.txt"
           $files = @(Get-ChildItem release -File | ForEach-Object { $_.FullName })
           gh release create $env:TAG @files --verify-tag --title "TV box $($manifest.version)" --notes-file "$env:RUNNER_TEMP\notes.txt"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

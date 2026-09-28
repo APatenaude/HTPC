@@ -79,6 +79,23 @@ run as SYSTEM, take no argument unless shown, and first put right an interrupted
 | `upgrade:<id>` | also GitHub-zip apps (VacuumTube: `lib/AppUpdaters.ps1`) |
 | `winget-update` | winget itself, as the signed-in user (not the task) |
 
+### What an update applies
+
+A launcher update from the TV (`launcher-update`) replaces files: the launcher, the watchdog, the
+job runner (`lib\`, `jobs\`), the trusted `catalog.json` and the kept setup scripts. Of setup's
+steps it applies again only their machine part, as SYSTEM, from the new `lib\`, and only for the
+steps whose script changed since the last time (`state\machine-settings.json`; also at the next
+reconcile after an update made by an older runner, or after one that failed):
+
+| Step | Applied by an update | Needs TV Box Setup again |
+|---|---|---|
+| Edge | every Edge policy (HKLM: extensions and uBOL's lists, search, password saving, startup boost...) | the startup boost's HKCU Run value (the launcher and the jobs remove it anyway) |
+| System | the HKLM values, the services, the sign-in screen's picture and colour | this user's settings (HKCU: notifications, accessibility keys, dark mode, location consent), the networks, the "Networks private" task, the computer name |
+| PhoneRemote | nothing (the firewall rules name the same exe) | the certificate: made as the signed-in user and put in the machine's CA store (Settings > Phone says "Run TV Box Setup again for Android's Share" when it is missing) |
+| every other step | nothing | all of it |
+
+Release notes say when a release needs setup to run again for something it brings.
+
 On a box that runs a dev build of the launcher (launcher\dev\Start-Launcher.ps1), the phone
 remote's rule must name that exe too, before the build first runs (else Windows asks over the TV):
 

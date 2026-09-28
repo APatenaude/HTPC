@@ -325,6 +325,25 @@ try {
         Check ($LASTEXITCODE -ne 0) 'the runner refuses a jobs folder of the caller''s choosing'
         & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Start-Job.ps1" -Job reconcile -DataRoot $env:TEMP 2>&1 | Out-Null }
         Check ($LASTEXITCODE -ne 0) 'the bootstrap refuses -DataRoot without -Resolve'
+
+        # What an update applies of setup: each machine step once per change of its script (the
+        # steps faked: nothing on this machine changes), a failed one again next time.
+        $box = Join-Path $work 'machine'
+        New-AdminFolder $box
+        $mp = Get-LauncherPaths -InstallRoot "$box\PF\HTPC" -DataRoot "$box\PD\HTPC"
+        New-Item -ItemType Directory -Force (Join-Path $mp.LauncherDir 'lib'), $mp.StateRoot | Out-Null
+        foreach ($s in $MachineSteps.Values) { Copy-Item (Join-Path $lib $s) (Join-Path $mp.LauncherDir "lib\$s") }
+        $ran = New-Object Collections.ArrayList
+        $fake = { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)) }
+        Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-EdgePolicy.ps1,Set-SystemPolicy.ps1') "an update applies the machine part of the Edge and System steps ($($ran -join ','))"
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check ($ran.Count -eq 0) '  not again while their scripts stay the same'
+        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-EdgePolicy.ps1') '# changed'
+        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-SystemPolicy.ps1') '# changed'
+        $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*') { throw 'failed' } }
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
     }
 
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) { Start-FakeGitHub }

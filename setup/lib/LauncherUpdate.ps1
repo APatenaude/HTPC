@@ -336,8 +336,60 @@ function Sync-JobBootstrap($Paths) {
         Write-Host "  the task's bootstrap is left as it is: $($_.Exception.Message)"
         return
     }
-    $onBox = [string]::Equals($Paths.InstallRoot.TrimEnd('\'), (Join-Path $env:ProgramFiles 'HTPC'), [StringComparison]::OrdinalIgnoreCase)
-    if ($onBox -and [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18') { Update-JobsTaskAction $Paths }
+    if (Test-BoxJob $Paths) { Update-JobsTaskAction $Paths }
+}
+
+# The box's own job (SYSTEM, the real install folder), not a test's: only that one changes the
+# task or the machine's settings.
+function Test-BoxJob($Paths) {
+    [string]::Equals($Paths.InstallRoot.TrimEnd('\'), (Join-Path $env:ProgramFiles 'HTPC'), [StringComparison]::OrdinalIgnoreCase) -and
+        [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18'
+}
+
+# What a launcher update applies of setup besides its files (setup\README.md, "What an update
+# applies"): the machine part of these steps, run again from the trusted runner (lib\, admin-only)
+# whenever its script differs from the one last applied (state\machine-settings.json). Each is
+# idempotent and reads nothing a user can write. The parts that need the signed-in user (HKCU,
+# the phone remote's certificate, made as the user) wait for TV Box Setup.
+$MachineSteps = [ordered]@{ Edge = 'Set-EdgePolicy.ps1'; System = 'Set-SystemPolicy.ps1' }
+
+# $Run (tests): runs one script with -MachineOnly; by default in its own PowerShell. A failed step
+# is tried again at the next reconcile; the update itself stands.
+function Update-MachineSettings($Paths, [scriptblock]$Run) {
+    if (-not $Run) {
+        if (-not (Test-BoxJob $Paths)) { return }
+        $Run = {
+            param($Script)
+            $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $out = & { $ErrorActionPreference = 'Continue'; & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Script -MachineOnly 2>&1 | Out-String }
+            $out.Trim() -split "`r?`n" | Where-Object { $_ -match '^\s*[+!]' } | ForEach-Object { Write-Host "  $_" }
+            if ($LASTEXITCODE -ne 0) { throw "exit code $LASTEXITCODE" }
+        }
+    }
+    $record = Join-Path $Paths.StateRoot 'machine-settings.json'
+    $applied = @{}
+    if (Test-Path -LiteralPath $record) {
+        Assert-TrustedPath $record $Paths.StateRoot
+        try { ([IO.File]::ReadAllText($record) | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $applied[$_.Name] = [string]$_.Value } } catch { }
+    }
+    $changed = $false
+    foreach ($name in $MachineSteps.Keys) {
+        $script = Join-Path $Paths.LauncherDir "lib\$($MachineSteps[$name])"
+        if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { continue }
+        Assert-TrustedPath $script $Paths.InstallRoot
+        $hash = (Get-FileHash -LiteralPath $script -Algorithm SHA256).Hash
+        if ($applied[$name] -eq $hash) { continue }
+        Write-UpdateProgress 'verify' 97 "Applying this version's $name settings"
+        try {
+            & $Run $script
+            $applied[$name] = $hash
+            $changed = $true
+            Write-Host "  $name settings (the machine's part) applied"
+        } catch {
+            Write-Host "  $name settings not applied ($($_.Exception.Message)); tried again at the next reconcile"
+        }
+    }
+    if ($changed) { Write-AtomicText $record (([pscustomobject]$applied) | ConvertTo-Json -Compress) }
 }
 
 # A \HTPC\Jobs task registered before the bootstrap (it starts lib\Invoke-AppJob.ps1 itself)
@@ -530,6 +582,7 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
     $result = Wait-LauncherHealthy $Paths $Journal.to $Wait
     if ($result -eq 'healthy') {
         Save-LauncherJournal $Paths $Journal 'done' "Updated to $($Journal.to)"
+        Update-MachineSettings $Paths
         Write-UpdateProgress 'done' 100 "The launcher is now version $($Journal.to)"
         return
     }
@@ -672,6 +725,8 @@ function Invoke-LauncherReconcile {
     if (-not $journal -or $journal.step -in 'done', 'rolledback', 'aborted', 'superseded', '') {
         Clear-WatchdogPause $Paths -OnlyStale
         Sync-JobBootstrap $Paths
+        # A box updated by an older runner (0.1.1), or a step that failed last time.
+        Update-MachineSettings $Paths
         return
     }
     # A journal of another job still running (the launcher's own update waiting on it) is its own:
