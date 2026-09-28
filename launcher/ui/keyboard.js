@@ -58,18 +58,24 @@ function render() {
   const layout = rows();
   focus.row = Math.min(focus.row, layout.length - 1);
   focus.col = Math.min(focus.col, layout[focus.row].length - 1);
-  document.getElementById('kb-rows').innerHTML = layout.map((row, r) =>
+  // The keys are drawn again only when they change (shift, symbols); a move only moves the
+  // ring, so a key's press flash (flash) is seen and nothing else redraws.
+  const rowsEl = document.getElementById('kb-rows');
+  const html = layout.map((row, r) =>
     `<div class="kb-row">${row.map((k, c) => {
       const cls = ['kb-key'];
       if (k.w) cls.push('w' + k.w);
       if (k.primary) cls.push('primary');
       if (k.id === 'extra') cls.push('extra');
-      if (r === focus.row && c === focus.col) cls.push('on');
       if (k.id === 'shift' && shift === 'once') cls.push('latched');
       if (k.id === 'shift' && shift === 'lock') cls.push('locked');
       const face = k.icon ? icon(k.icon, 28, 2) : esc(k.label || (k.text === ' ' ? '' : k.text));
       return `<div class="${cls.join(' ')}" data-r="${r}" data-c="${c}" role="button" aria-label="${esc(k.aria || k.label || k.text)}">${face}</div>`;
     }).join('')}</div>`).join('');
+  if (rowsEl.dataset.html !== html) { rowsEl.innerHTML = html; rowsEl.dataset.html = html; }
+  for (const el of rowsEl.querySelectorAll('.kb-key.on')) el.classList.remove('on');
+  const on = rowsEl.querySelector(`.kb-key[data-r="${focus.row}"][data-c="${focus.col}"]`);
+  if (on) on.classList.add('on');
   document.getElementById('kb-field').textContent = field || 'the app';
   document.getElementById('kb-typed').textContent = password ? (reveal ? typed : '•'.repeat(typed.length)) : '';
   const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['LT', 'Shift'], ['LB', '←'], ['RB', '→'], ['Start', 'Enter']];
@@ -130,8 +136,9 @@ function onButton(button) {
   switch (button) {
     case 'up': moveVertical(-1); break;
     case 'down': moveVertical(1); break;
-    case 'left': focus.col = (focus.col - 1 + count) % count; break;
-    case 'right': focus.col = (focus.col + 1) % count; break;
+    // Nothing wraps round (as everywhere on the TV): the ends of a row stop the focus.
+    case 'left': focus.col = Math.max(0, focus.col - 1); break;
+    case 'right': focus.col = Math.min(count - 1, focus.col + 1); break;
     case 'a': flash(focus.row, focus.col); press(layout[focus.row][focus.col]); break;
     case 'x': backspace(); break;
     case 'y': typeText(' '); break;
