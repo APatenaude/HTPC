@@ -515,6 +515,22 @@
   check('Menu over the home screen: no app card', $('menu-app').textContent === '');
   reset('home');
 
+  // The Home menu coming over an app: built at once under the blank stage while its backdrop
+  // decodes, shown then, and 'shown' said to the host once drawn (it shows its window on that).
+  const frame = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  onHost({ type: 'blank' });
+  sent.length = 0;
+  onHost({ type: 'show', view: 'menu', current: 'twitch', backdrop: frame, ack: true });
+  check('Menu over an app: built at once, under the blank stage', state.view === 'menu' && $('stage').classList.contains('blank') && !lastSent('shown'));
+  check('Menu over an app: its panel waits to slide in until it shows', getComputedStyle($('menu').querySelector('.panel')).animationName === 'none');
+  await new Promise((r) => setTimeout(r, 500));
+  const said = lastSent('shown');
+  check('Menu over an app: shown with its backdrop, then the host is told', !$('stage').classList.contains('blank') && $('backdrop').classList.contains('on')
+    && said && typeof said.painted === 'boolean' && said.ms >= 0 && said.load >= 0, JSON.stringify(said));
+  check('Menu over an app: the panel slides in once shown', getComputedStyle($('menu').querySelector('.panel')).animationName === 'slide-in');
+  state.current = null; state.backdrop = null;
+  reset('home');
+
   // ---- Logos: the app's own where the host has one, the glyph otherwise --------------------------
   const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
   const plain = document.createElement('div');

@@ -131,7 +131,7 @@ sealed partial class MainForm : Form
         mouseWatch.Start();
         await StartWebView(); // MainForm.Shell.cs: tries again, else exits for the watchdog
         StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
-        _ = Task.Run(ScreenCapture.Prepare); // the capture's GPU device, before the first Home
+        _ = Task.Run(() => ScreenCapture.Prepare(captureDir)); // a first capture, so the first Home is quick too
         // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
         // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
         await StartTv(handoff);
@@ -249,7 +249,7 @@ sealed partial class MainForm : Form
                 break;
             case "wake": standby.Wake("keyboard"); break;
             case "home": break; // the page reports going home; nothing to do here
-            case "shown": RevealPending("page ready"); break; // ShowOver: the backdrop is in place
+            case "shown": RevealPending("page ready", m); break; // ShowOver: the backdrop is in place
             // The TV's messages ("tv.*"): MainForm.Tv.cs.
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
@@ -334,8 +334,9 @@ sealed partial class MainForm : Form
         // Text fields are watched (for the keyboard to pop up) only while a Mouse or Keyboard
         // preset app is in front, and only if the keyboard is to pop up by itself: Chromium-based
         // apps build their accessibility tree while anyone listens. Apps on the Controller
-        // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard.
-        textFields.Enabled = settings.ShowKeyboardAutomatically && preset is "mouse" or "keyboard";
+        // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard. Not while the
+        // launcher is on its way up (Home pressed): it would take 2 s to come (Reveal).
+        textFields.Enabled = settings.ShowKeyboardAutomatically && (preset is "mouse" or "keyboard") && !LauncherComing;
         if (keyboard.Visible) map = null; // the controller drives the keyboard
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
@@ -609,7 +610,7 @@ sealed partial class MainForm : Form
         AppDidntOpen(id, $"{name} is taking long to open", "It may still appear. Home comes back here.", retry: false);
     }
 
-    void SwitchTo(string id)
+    void SwitchTo(string id, bool waited = false)
     {
         if (id == DesktopMode.Id) { ShowDesktop(); return; } // B in the menu opened over the desktop
         var window = apps.MainWindow(id);
@@ -617,6 +618,9 @@ sealed partial class MainForm : Form
         // Back to the app (B or its row in the Home menu): one change on screen, the app raised
         // and activated over the launcher. Its window is not otherwise touched (FillScreen only
         // when it does not fill the screen already), and the launcher hides behind it later.
+        // Not while UI Automation listens (Reveal says why): it is off while the launcher is in
+        // front, unless B came right after the launcher did.
+        if (!waited && !textFields.Quiet) { _ = WhenTextFieldsQuiet(() => SwitchTo(id, waited: true)); return; }
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
         var how = Native.ForceForeground(window);
@@ -651,6 +655,7 @@ sealed partial class MainForm : Form
         revealTimer.Stop();
         revealPending = false; // a Home menu still waiting to show is not wanted any more
         showOverTurn++;        // nor one still waiting for its backdrop
+        launcherComingUntil = 0;
         Post(new { type = "blank" });
         await Task.Delay(150);
         if (LauncherActive) return;
@@ -658,28 +663,70 @@ sealed partial class MainForm : Form
         Log.Info($"Launcher hidden behind {id}");
     }
 
+    // Home pressed over an app, until the launcher is up (3 s at most: a press that brought no
+    // menu, the sleep timer's +15): UI Automation stays off (UpdateMapper, Reveal).
+    long launcherComingUntil;
+    bool LauncherComing => Environment.TickCount64 < launcherComingUntil;
+
+    /// <summary>The launcher is about to take the focus: UI Automation stops listening now.</summary>
+    void LauncherComes()
+    {
+        launcherComingUntil = Environment.TickCount64 + 3000;
+        textFields.Enabled = false;
+    }
+
+    /// <summary>
+    /// Then, once UI Automation has stopped listening for text fields (half a second at most),
+    /// unless something else happened meanwhile (another Home, an app coming forward).
+    /// </summary>
+    async Task WhenTextFieldsQuiet(Action then)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        LauncherComes();
+        var turn = showOverTurn;
+        await Task.WhenAny(textFields.WhenDone(), Task.Delay(500));
+        if (turn != showOverTurn) return;
+        Log.Info(textFields.Quiet ? $"UI Automation stopped listening in {clock.ElapsedMilliseconds} ms" : "UI Automation still listening after 500 ms: going on");
+        then();
+    }
+
     // The launcher over an app (the Home menu) or the desktop: one change on screen, the
     // launcher shown on top and activated (Show alone may leave it behind the app in front:
     // no foreground rights yet). The app's window is not touched. The pointer is parked only
     // then, over the launcher: the app does not see it move, nor move back (CursorHider).
-    void Reveal()
+    //
+    // Never while UI Automation listens for an app's text fields (the Mouse preset: Twitch, the
+    // Browser, the desktop): on the box each such change took 2.0-2.2 s ("Launcher up ... 2110
+    // ms" over Twitch, 40-100 ms over VacuumTube). It is stopped first, from Home's press on.
+    // homeAt: the Home the menu is for, to log when it came on screen.
+    void Reveal(long homeAt = 0, bool waited = false)
     {
+        if (!waited && !textFields.Quiet) { _ = WhenTextFieldsQuiet(() => Reveal(homeAt, waited: true)); return; }
         var clock = System.Diagnostics.Stopwatch.StartNew();
         mapper.Map = null; // at once, not at the next UpdateMapper: the launcher takes the controller
         CloseKeyboard("launcher");
         var shown = !Visible;
         if (shown) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        var showMs = clock.ElapsedMilliseconds;
         var how = Native.ForceForeground(Handle);
+        var foregroundMs = clock.ElapsedMilliseconds;
         cursor.Hide();
+        var pointerMs = clock.ElapsedMilliseconds;
         web.Focus();
-        if (shown || how != "already") Log.Info($"Launcher up ({(shown ? "shown, " : "")}foreground {how}, {clock.ElapsedMilliseconds} ms)");
+        var ms = clock.ElapsedMilliseconds;
+        launcherComingUntil = 0; // up: UpdateMapper keeps UI Automation off while it is in front
+        if (shown || how != "already" || homeAt != 0)
+            Log.Info($"Launcher up in {ms} ms ({(shown ? $"shown {showMs} ms, " : "")}foreground {how} {foregroundMs - showMs} ms, " +
+                $"pointer {pointerMs - foregroundMs} ms, focus {ms - pointerMs} ms)" +
+                (homeAt != 0 ? $"; menu on screen {Environment.TickCount64 - homeAt} ms after Home" : ""));
     }
 
     /// <summary>Brings the launcher over the current app (or the desktop) with the given view.</summary>
     async void ShowOver(CatalogApp? app, string view)
     {
         var asked = Environment.TickCount64;
+        LauncherComes(); // from Home's press already (CaptureEarly), or a button map's Home menu
         var focus = LauncherComingForward(view); // the alerts' cards leave the app for the launcher's own
         var overDesktop = app is null && desktop.Active; // desktop mode: B goes back to it
         var current = app?.Id ?? (overDesktop ? DesktopMode.Id : null);
@@ -703,10 +750,11 @@ sealed partial class MainForm : Form
         }
         Post(new { type = "show", view, current, backdrop, focus, ack = backdrop is not null });
         PushState();
-        if (backdrop is null) { Reveal(); return; }
+        if (backdrop is null) { Reveal(asked); return; }
         // The hidden page last showed black (StepAside): shown at once it came up dark and faded
-        // in over the app. It now shows once the page has the captured frame in place ("shown"),
-        // or after 400 ms, so the frame on screen stays the app's own until the menu slides in.
+        // in over the app. It now shows once the page has drawn the menu over the captured frame
+        // ("shown": the page still draws while the window is hidden), or after 400 ms, so the
+        // frame on screen stays the app's own until the menu is there.
         menuAskedAt = asked;
         revealTimer.Stop();
         revealPending = true;
@@ -721,27 +769,38 @@ sealed partial class MainForm : Form
     long earlyAt;
     IntPtr earlyOver;                              // the window in front then
 
-    void RevealPending(string why)
+    /// <summary>The page's answer (page: its "shown" message: painted, load, ms), or the 400 ms timer.</summary>
+    void RevealPending(string why, JsonElement? page = null)
     {
         revealTimer.Stop();
         if (!revealPending) return;
         revealPending = false;
         var after = Environment.TickCount64 - menuAskedAt;
-        Log.Info(why == "page ready" ? $"Home menu: page ready {after} ms after Home" : $"Home menu shown without the page's answer ({why}, {after} ms after Home)");
-        Reveal();
+        Log.Info(page is { } p ? $"Home menu: page ready {after} ms after Home ({DescribePage(p)})" : $"Home menu shown without the page's answer ({why}, {after} ms after Home)");
+        Reveal(menuAskedAt);
+    }
+
+    // "backdrop decoded in 40 ms, drawn after 75 ms", from the page's "shown" (app.js ackShown).
+    static string DescribePage(JsonElement m)
+    {
+        long Ms(string name) => m.TryGetProperty(name, out var v) && v.TryGetInt64(out var n) ? n : -1;
+        var painted = m.TryGetProperty("painted", out var p) && p.ValueKind == JsonValueKind.True;
+        return $"backdrop decoded in {Ms("load")} ms, {(painted ? "drawn" : "not drawn yet")} after {Ms("ms")} ms";
     }
 
     /// <summary>
     /// Home pressed over an app or the desktop, not yet told from a hold: the Home menu is
-    /// coming either way, so its backdrop's capture starts now and is mostly done by the release.
-    /// Not in Moonlight (a tap there is the game PC's) nor with the keyboard up (Home closes it
-    /// first: it must not be in the picture).
+    /// coming either way, so UI Automation stops listening (Reveal) and the backdrop's capture
+    /// starts now, mostly done by the release. Not in Moonlight (a tap there is the game PC's).
+    /// No capture with the keyboard up (Home closes it first: it must not be in the picture).
     /// </summary>
     void CaptureEarly()
     {
-        if (setupMode || keyboard.Visible || LauncherActive) return;
+        if (setupMode || LauncherActive) return;
         var app = apps.ForegroundApp();
         if (app is null ? !desktop.Active : app.Id == "moonlight") return;
+        LauncherComes();
+        if (keyboard.Visible) return;
         earlyAt = Environment.TickCount64;
         earlyOver = Native.GetForegroundWindow();
         earlyCapture = CaptureBackdrop();
@@ -752,9 +811,10 @@ sealed partial class MainForm : Form
     {
         try
         {
-            // The two newest stay: the page may still be loading one while the next is made.
+            // The two newest stay: the page may still be loading one while the next is made. One
+            // it still holds is left for next time (access denied made the capture fail, 27 Sept).
             foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg").OrderDescending().Skip(2))
-                try { File.Delete(old); } catch (IOException) { }
+                try { File.Delete(old); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             return (ScreenCapture.Shot?)ScreenCapture.Save(Path.Combine(captureDir, $"screen-{DateTime.Now.Ticks}.jpg"));
         }
         catch (Exception e)
@@ -818,8 +878,10 @@ sealed partial class MainForm : Form
             CloseKeyboard("standby");
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
             Post(new { type = "blank" });
-            if (!Visible) Show();
-            Native.ForceForeground(Handle);
+            // Not while UI Automation listens for an app's text fields (Reveal says why).
+            void Front() { if (!Visible) Show(); Native.ForceForeground(Handle); }
+            if (textFields.Quiet) Front();
+            else _ = WhenTextFieldsQuiet(() => { if (standby.Active) Front(); });
             apps.SetEfficiencyMode(true);
         }
         else

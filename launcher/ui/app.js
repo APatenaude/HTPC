@@ -929,7 +929,8 @@ function onHost(msg) {
     case 'input': press(msg.button); break;
     case 'show': {
       hideOpening();
-      const apply = () => {
+      const asked = performance.now();
+      const view = () => {
         state.current = msg.current || null;
         state.backdrop = msg.backdrop || null;
         // focus: the element to land on (an alert's row, the tile of an app that just closed);
@@ -938,22 +939,31 @@ function onHost(msg) {
         else if (msg.view === 'settings') state.memory.settings = null;   // on the section list
         if (msg.section) state.section = msg.section;
         reset(msg.view);
+      };
+      const unblank = () => {
         const stage = $('stage');
         // Over an app the backdrop is the app's own frame: no fade up from dark, it is there at once.
         if (msg.backdrop) stage.style.transition = 'none';
         stage.classList.remove('blank');
         if (msg.backdrop) { void stage.offsetWidth; stage.style.transition = ''; }
-        if (msg.ack) send({ type: 'shown' });   // the host shows the window now
       };
-      if (!msg.backdrop) { apply(); break; }
-      // Show the menu once its backdrop has loaded, so it does not flash the home screen first.
+      if (!msg.backdrop) { view(); unblank(); if (msg.ack) ackShown(asked, 0); break; }
+      // Shown once its backdrop is decoded, so it does not flash the home screen first. The view
+      // is built meanwhile under the blank stage (the window is still hidden behind the app).
+      const early = $('stage').classList.contains('blank');
+      if (early) view();
       const img = new Image();
       let done = false;
-      const once = () => { if (!done) { done = true; apply(); } };
-      img.onload = once;
-      img.onerror = once;
-      setTimeout(once, 400);
+      const once = () => {
+        if (done) return;
+        done = true;
+        if (!early) view();
+        unblank();
+        if (msg.ack) ackShown(asked, Math.round(performance.now() - asked));
+      };
       img.src = msg.backdrop;
+      img.decode().then(once, once);
+      setTimeout(once, 400);
       break;
     }
     case 'toast': toast(msg.text, msg.kind); break;
@@ -963,6 +973,23 @@ function onHost(msg) {
       if (handler) handler(msg);
     }
   }
+}
+
+// The Home menu over an app is drawn: the host shows its window now (MainForm.RevealPending).
+// The page keeps drawing while the window is hidden, so this waits for the frame with the menu
+// in it (two animation frames), and the first frame the TV gets is that one, not the black the
+// page last showed. A page that draws nothing (hidden) answers at once, a slow one after 150 ms.
+// load: ms to decode the backdrop; ms: from the host's message to this answer.
+function ackShown(asked, load) {
+  let sent = false;
+  const answer = (painted) => {
+    if (sent) return;
+    sent = true;
+    send({ type: 'shown', painted, load, ms: Math.round(performance.now() - asked) });
+  };
+  if (document.hidden) { answer(false); return; }
+  requestAnimationFrame(() => requestAnimationFrame(() => answer(true)));
+  setTimeout(() => answer(false), 150);
 }
 
 if (host) {

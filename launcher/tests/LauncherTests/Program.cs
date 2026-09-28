@@ -723,6 +723,18 @@ unsafe
     File.Delete(file);
 }
 
+// ---------------------------------------------------------------- The text-field watcher, quiet
+// The launcher waits for it to be quiet before it takes the focus (MainForm.Reveal: 2 s per switch
+// while UI Automation listened). Not started here: it would listen to this desktop for real.
+Console.WriteLine("== Text-field watcher: quiet");
+using (var watcher = new TextFieldWatcher())
+{
+    Check(watcher.Quiet, "new: quiet");
+    Check(watcher.WhenDone().IsCompleted, "quiet: nothing to wait for");
+    watcher.Enabled = false;
+    Check(watcher.Quiet && watcher.WhenDone().IsCompleted, "turned off while off: still quiet, nothing queued");
+}
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 

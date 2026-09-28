@@ -54,6 +54,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 /* Coming back from a hidden launcher or standby: fade up from dark */
 #stage { transition: opacity 0.35s ease-out; }
 #stage.blank { opacity: 0; transition: none; }
+/* The Home menu over an app is built under the blank stage while its backdrop decodes: the
+   entrances start when it shows, not unseen before */
+#stage.blank .view.on, #stage.blank .panel, #stage.blank .ma-card, #stage.blank .dialog { animation: none; }
 
 /* Home tiles appear in a short cascade. Backwards, not both: an animation that holds its end
    state overrides the tile's own transform and opacity (the focused tile's zoom, move mode). */

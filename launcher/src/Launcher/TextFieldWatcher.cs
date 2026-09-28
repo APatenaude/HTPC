@@ -16,6 +16,11 @@ sealed record TextField(int ProcessId, string Name, bool IsPassword, Rectangle B
 /// UI Automation through its COM interface on a thread of its own (MTA): events arrive on
 /// UI Automation's threads, never on the launcher's UI thread, which UI Automation itself may
 /// be waiting on.
+///
+/// While it listens, the launcher's own windows must not change the focus: on the box (0.1.1)
+/// every foreground change between the launcher and an app took 2.0-2.2 s then (the Home menu
+/// over Twitch or the desktop, and B back), and 40-100 ms without it. The launcher stops it
+/// first and waits for Quiet (MainForm.Reveal).
 /// </summary>
 sealed class TextFieldWatcher : IDisposable
 {
@@ -30,10 +35,19 @@ sealed class TextFieldWatcher : IDisposable
     IUIAutomation? automation;
     Handler? handler;
     volatile bool enabled;
+    volatile bool listening;   // a focus handler is registered with UI Automation
+    int queued;                // jobs added and not yet done (Interlocked)
 
     public TextFieldWatcher()
     {
-        thread = new Thread(() => { foreach (var job in work.GetConsumingEnumerable()) Try(job); }) { IsBackground = true, Name = "UI Automation" };
+        thread = new Thread(() =>
+        {
+            foreach (var job in work.GetConsumingEnumerable())
+            {
+                Try(job);
+                Interlocked.Decrement(ref queued);
+            }
+        }) { IsBackground = true, Name = "UI Automation" };
         thread.SetApartmentState(ApartmentState.MTA);
         thread.Start();
     }
@@ -45,8 +59,30 @@ sealed class TextFieldWatcher : IDisposable
         {
             if (value == enabled) return;
             enabled = value;
-            work.Add(value ? Start : Stop);
+            Queue(value ? Start : Stop);
         }
+    }
+
+    /// <summary>Not listening, and nothing on its way to change that: the launcher can take the focus.</summary>
+    public bool Quiet => !listening && Volatile.Read(ref queued) == 0;
+
+    /// <summary>
+    /// Completes once what was asked so far is done (a Stop after Enabled = false): at once when
+    /// already Quiet. On the UI thread's context when awaited there.
+    /// </summary>
+    public Task WhenDone()
+    {
+        if (Quiet) return Task.CompletedTask;
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Queue(() => done.TrySetResult());
+        return done.Task;
+    }
+
+    void Queue(Action job)
+    {
+        Interlocked.Increment(ref queued);
+        try { work.Add(job); }
+        catch (InvalidOperationException) { Interlocked.Decrement(ref queued); } // disposed
     }
 
     void Start()
@@ -55,6 +91,7 @@ sealed class TextFieldWatcher : IDisposable
         automation ??= (IUIAutomation)new CUIAutomation();
         handler = new Handler(this);
         Check(automation.AddFocusChangedEventHandler(IntPtr.Zero, handler));
+        listening = true;
         Log.Info("Watching for text fields");
         // A field that already had the focus (a page that focuses its search box as it opens,
         // before this started) counts too.
@@ -64,15 +101,20 @@ sealed class TextFieldWatcher : IDisposable
     void Stop()
     {
         if (handler is null || automation is null) return;
-        Check(automation.RemoveFocusChangedEventHandler(handler));
-        handler = null;
-        Log.Info("Stopped watching for text fields");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try { Check(automation.RemoveFocusChangedEventHandler(handler)); }
+        finally
+        {
+            handler = null;
+            listening = false;
+        }
+        Log.Info($"Stopped watching for text fields{(clock.ElapsedMilliseconds > 100 ? $" (took {clock.ElapsedMilliseconds} ms)" : "")}");
     }
 
     public void Dispose()
     {
         enabled = false;
-        work.Add(Stop);
+        Queue(Stop);
         work.CompleteAdding();
     }
 

@@ -50,14 +50,22 @@ static unsafe class ScreenCapture
         form.HandleCreated += (_, _) => Apply();
     }
 
-    /// <summary>At start, on a worker thread: the duplication's device, so the first Home is quick too.</summary>
-    public static void Prepare()
+    /// <summary>
+    /// At start, on a worker thread: a whole capture into dir, thrown away, so the first Home is
+    /// quick too. The device alone was not enough: the first Home after a restart still took
+    /// 1452 ms to capture on the box (the duplication, the GPU's mip shader, the JPEG encoder and
+    /// this code's first run), the next ones 60-300 ms.
+    /// </summary>
+    public static void Prepare(string dir)
     {
         try
         {
-            lock (Gate) Duplication(Screen.PrimaryScreen!.Bounds);
+            var path = Path.Combine(dir, "warm-up.jpg");
+            var shot = Save(path);
+            File.Delete(path);
+            Log.Info($"Screen capture ready: a first capture in {shot.Milliseconds} ms ({shot.How})");
         }
-        catch (Exception e) { Log.Warn($"Screen capture: no duplication yet ({e.Message}); GDI until it works"); }
+        catch (Exception e) { Log.Warn($"Screen capture: the first capture failed ({e.Message})"); }
     }
 
     /// <summary>Captures the primary screen into a JPEG at path (1920 wide). Throws when neither way works.</summary>
@@ -72,8 +80,10 @@ static unsafe class ScreenCapture
             try
             {
                 if (Environment.TickCount64 < noDuplicationUntil) throw new CaptureException("off for a minute after a failure");
-                Duplication(screen).Save(size, path);
-                how = "duplication";
+                var device = duplicator is null ? "device made, " : "";
+                var steps = Duplication(screen).Save(size, path);
+                // Where the time went, when there was much of it (the log is read on the box).
+                how = clock.ElapsedMilliseconds > 200 ? $"duplication: {device}{steps}" : "duplication";
             }
             catch (Exception e)
             {
@@ -292,14 +302,17 @@ static unsafe class ScreenCapture
             finally { Release(adapter); Release(dxgiDevice); }
         }
 
-        /// <summary>The screen now, scaled to size, into a JPEG.</summary>
-        public void Save(Size size, string path)
+        /// <summary>The screen now, scaled to size, into a JPEG. Returns how long each step took, for the log.</summary>
+        public string Save(Size size, string path)
         {
             IntPtr dup = IntPtr.Zero, resource = IntPtr.Zero, frame = IntPtr.Zero, mips = IntPtr.Zero, view = IntPtr.Zero, staging = IntPtr.Zero;
             var held = false;
+            var clock = Stopwatch.StartNew();
+            long duplicated, framed, copied;
             try
             {
                 Ok(((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr*, int>)Slots(output)[22])(output, device, &dup), "DuplicateOutput", keepDevice: true);
+                duplicated = clock.ElapsedMilliseconds;
                 // The first frame of a new duplication can be the pointer only (no image yet): the next one.
                 var info = stackalloc byte[64];   // DXGI_OUTDUPL_FRAME_INFO: AccumulatedFrames at 16
                 var until = Environment.TickCount64 + 250;
@@ -317,6 +330,7 @@ static unsafe class ScreenCapture
                     held = false;
                 }
                 frame = Query(resource, ID3D11Texture2D, "ID3D11Texture2D");
+                framed = clock.ElapsedMilliseconds;
 
                 // Halved on the GPU as long as it stays at least the target's width (a 4K screen:
                 // once, to 1920), so only that is read back.
@@ -345,8 +359,10 @@ static unsafe class ScreenCapture
                 // The GPU is done with the frame: DWM may have it back before the JPEG.
                 ((delegate* unmanaged[Stdcall]<IntPtr, int>)Slots(dup)[14])(dup);
                 held = false;
+                copied = clock.ElapsedMilliseconds;
                 try { SaveScaled((byte*)mapped.Data, width, height, (int)mapped.RowPitch, size, path); }
                 finally { ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, uint, void>)Slots(context)[15])(context, staging, 0); }   // Unmap
+                return $"duplicate {duplicated} ms, frame {framed - duplicated} ms, GPU copy {copied - framed} ms, JPEG {clock.ElapsedMilliseconds - copied} ms";
             }
             finally
             {
