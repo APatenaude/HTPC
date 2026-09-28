@@ -45,7 +45,7 @@ function updStatus(row) {
     if (j.status === 'done') return ['ok', 'check', 'Updated'];
     if (j.status === 'failed') return ['bad', 'warn', 'Not updated'];
   }
-  if (row.update) return ['update', 'download', 'Update'];
+  if (row.update) return ['update', 'download', row.skipped ? 'Try again' : 'Update'];
   if (row.error) return ['quiet', 'warn', 'Not checked'];
   return ['ok', 'check', 'Up to date'];
 }
@@ -65,8 +65,11 @@ function updVersions(a) {
   return a.installed || '';
 }
 
+// A launcher version rolled back here (launcher.skipped) is not counted and not in Update all.
+function updLauncherOffered(s) { return s.launcher.update && !s.launcher.skipped; }
+
 function updPending(s) {
-  return s.apps.filter((a) => a.update).length + (s.launcher.update ? 1 : 0);
+  return s.apps.filter((a) => a.update).length + (updLauncherOffered(s) ? 1 : 0);
 }
 
 function updRunningApps(s) {
@@ -81,7 +84,7 @@ function renderUpdatesSection() {
   const list = [];
   const L = s.launcher;
   list.push(updRow('launcher', 'app', '#8CC2FF', 'TV launcher',
-    L.update ? `${L.installed} → ${L.latest}` : L.installed, { update: L.update, job: L.job },
+    L.update ? `${L.installed} → ${L.latest}${L.skipped ? ' · did not start here last time' : ''}` : L.installed, { update: L.update, skipped: L.skipped, job: L.job },
     L.update && L.notes ? `<span class="notes">${esc(L.notes)}</span>` : ''));
   for (const a of s.apps) list.push(updRow(a.id, a.id === 'winget' ? 'download' : a.glyph, a.id === 'winget' ? '#B3B5BC' : a.color, a.name, updVersions(a), a));
   const self = (id, glyph, color, name, version) =>
@@ -171,8 +174,9 @@ onAction('upd-row', (el, id) => {
     const L = s.launcher;
     if (!L.update || L.job) return;
     ask({
-      title: `Update the TV launcher to ${L.latest}?`,
-      text: 'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
+      title: `${L.skipped ? 'Try' : 'Update'} the TV launcher ${L.skipped ? 'again ' : ''}to ${L.latest}?`,
+      text: (L.skipped ? `Last time ${L.latest} did not start here and the box went back to ${L.installed}. ` : '') +
+        'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
       yes: 'Update', onYes: () => send({ type: 'updates.app', id: 'launcher' }),
     });
     return;
@@ -192,12 +196,12 @@ onAction('upd-all', () => {
   if (!s) return;
   const apps = s.apps.filter((a) => a.update);
   const open = updRunningApps(s);
-  const n = apps.length + (s.launcher.update ? 1 : 0);
+  const n = apps.length + (updLauncherOffered(s) ? 1 : 0);
   ask({
     title: `Update ${n === 1 ? 'it' : `all ${n}`}?`,
     text: 'A restore point is saved first.' +
       (open.length ? ` Open apps close first: ${open.map((a) => a.name).join(', ')}.` : '') +
-      (s.launcher.update ? ' The TV launcher goes last and restarts by itself.' : ''),
+      (updLauncherOffered(s) ? ' The TV launcher goes last and restarts by itself at Home.' : ''),
     yes: 'Update all', onYes: () => send({ type: 'updates.all', close: open.map((a) => a.id) }),
   });
 });

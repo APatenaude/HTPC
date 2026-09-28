@@ -38,6 +38,11 @@ sealed class UpdatesSaved
     public TonightPlan? Tonight { get; set; }
     /// <summary>The launcher update journal entry already told to the user (its updatedUtc).</summary>
     public string? JournalShown { get; set; }
+    /// <summary>
+    /// A launcher version rolled back on this box (the journal said "rolledback"): left out of the
+    /// count and of Update all while it is the newest; its row still offers it.
+    /// </summary>
+    public string? LauncherSkipped { get; set; }
 }
 
 /// <summary>
@@ -268,7 +273,7 @@ sealed class UpdateService
         lock (gate)
         {
             var n = saved.Apps.Count(a => a.Update && !Done(Token(a)));
-            if (LauncherNewer() && !Done(LauncherToken())) n++;
+            if (LauncherOffered() && !Done(LauncherToken())) n++;
             var w = ReadWindows();
             if (w is { Result: "ok" }) n += w.Counted;
             return n;
@@ -296,6 +301,12 @@ sealed class UpdateService
         var latest = ParseSemVer(saved.Launcher?.Version);
         return mine is not null && latest is not null && latest > mine;
     }
+
+    // The newest release is the one rolled back here: its row offers it, nothing else does.
+    bool LauncherSkipped() => ParseSemVer(saved.LauncherSkipped) is { } s && ParseSemVer(saved.Launcher?.Version) == s;
+
+    /// <summary>A newer launcher that counts and goes with Update all (not one rolled back here).</summary>
+    bool LauncherOffered() => LauncherNewer() && !LauncherSkipped();
 
     /// <summary>Updates one app (no restore point: that is for Update all and Windows). Null, or why not.</summary>
     public string? UpdateApp(string id)
@@ -344,7 +355,7 @@ sealed class UpdateService
     {
         List<AppUpdateInfo> apps;
         lock (gate) apps = saved.Apps.Where(a => a.Update && !Done(Token(a))).ToList();
-        var launcher = LauncherNewer() && !Done(LauncherToken());
+        var launcher = LauncherOffered() && !Done(LauncherToken());
         if (apps.Count == 0 && !launcher) return "Everything is up to date";
         lock (gate)
         {
@@ -549,8 +560,31 @@ sealed class UpdateService
     public void OnStart()
     {
         CleanUserLeftovers();
+        NoteRolledBack();
         TellLauncherResult();
         UpdatePill();
+    }
+
+    // A launcher update rolled back (the SYSTEM job's journal, state\, readable by everyone): that
+    // version is not counted or put in Update all again, until a newer one comes.
+    void NoteRolledBack()
+    {
+        try
+        {
+            if (!File.Exists(JournalFile)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(JournalFile));
+            var r = doc.RootElement;
+            string S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+            if (S("step") != "rolledback" || ParseSemVer(S("to")) is null) return;
+            lock (gate)
+            {
+                if (saved.LauncherSkipped == S("to")) return;
+                saved.LauncherSkipped = S("to");
+            }
+            Log.Info($"Updates: launcher {S("to")} was rolled back here; not offered again until a newer one");
+            Save();
+        }
+        catch (Exception e) { Log.Warn($"Updates: reading the launcher journal: {e.Message}"); }
     }
 
     // install.selfUpdate.userDirs (VacuumTube's %LOCALAPPDATA%\vacuumtube-updater): deleted as the
@@ -671,6 +705,8 @@ sealed class UpdateService
                     installed = Program.Version,
                     latest = saved.Launcher?.Version,
                     update = LauncherNewer() && !Done(LauncherToken()),
+                    // Rolled back here: not counted, not in Update all; its row still offers it.
+                    skipped = LauncherNewer() && LauncherSkipped(),
                     notes = saved.Launcher?.Notes,
                     job = LauncherNewer() ? Row(LauncherToken()) : null,
                 },
@@ -711,7 +747,7 @@ sealed class UpdateService
     int PendingCountUnlocked(WindowsState? w)
     {
         var n = saved.Apps.Count(a => a.Update && !Done(Token(a)));
-        if (LauncherNewer() && !Done(LauncherToken())) n++;
+        if (LauncherOffered() && !Done(LauncherToken())) n++;
         if (w is { Result: "ok" }) n += w.Counted;
         return n;
     }
