@@ -70,6 +70,10 @@ sealed class UpdateService
     static readonly string HtpcData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
     static readonly string WindowsFile = Path.Combine(HtpcData, "state", "windows-updates.json");
     static readonly string JournalFile = Path.Combine(HtpcData, "state", "launcher-update.json");
+    // The SYSTEM jobs' progress (state\: only SYSTEM and Administrators write it). A launcher update
+    // at "ready" says so again every minute: older than this, it is not waiting any more.
+    static readonly string MachineProgressFile = Path.Combine(HtpcData, "state", "library-progress.json");
+    static readonly TimeSpan ReadyStaleAfter = TimeSpan.FromMinutes(3);
     static readonly string SavedFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "updates.json");
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
@@ -85,6 +89,8 @@ sealed class UpdateService
     readonly HashSet<string> batch = new();       // tokens of the running "Update all"
     DateTime? standbySinceUtc;
     System.Threading.Timer? homeWatch;   // the launcher update is at "ready": looking for Home or standby
+    System.Threading.Timer? follow;      // a launcher update this launcher's lane did not start (FollowWaitingUpdate)
+    string? followed;                    // its token
     bool leaveSaid;                      // TryLeave said yes: "Restarting..." shows, the job was told
     bool checking;
     bool tonightRunning;
@@ -432,7 +438,7 @@ sealed class UpdateService
     }
 
     // Once a second until TryLeave says yes (the job waits for that, 3 hours at most). A launcher
-    // started again meanwhile does not follow that job: it gives up after its wait, nothing moved.
+    // started again meanwhile follows the job through its progress file (FollowWaitingUpdate).
     void WatchForHome(string version)
     {
         lock (gate)
@@ -471,6 +477,60 @@ sealed class UpdateService
             leaveSaid = false;
         }
         if (said) LauncherStay?.Invoke();
+    }
+
+    // --- A launcher update this launcher did not start ------------------------------------------------
+
+    sealed record JobState(string Token, string Phase, string Message);
+
+    // The SYSTEM jobs' progress file, when written in the last 3 minutes; null otherwise.
+    static JobState? ReadJobProgress()
+    {
+        try
+        {
+            if (!File.Exists(MachineProgressFile) || DateTime.UtcNow - File.GetLastWriteTimeUtc(MachineProgressFile) > ReadyStaleAfter) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(MachineProgressFile));
+            var r = doc.RootElement;
+            string S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+            return new JobState(S("jobId"), S("phase"), S("message"));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    // At start: a launcher update waiting at "ready" that this launcher's lane knows nothing of (this
+    // launcher was started again while the job waited: a crash, a restart by setup). The job waits
+    // for every launcher running to say it is leaving, so this one follows it through the job's
+    // progress file: at Home or in standby it says so (WatchForHome), told "leave" it leaves, and
+    // once the job moves on or stops saying "ready" it stops following ("Restarting..." goes).
+    void FollowWaitingUpdate()
+    {
+        if (ReadJobProgress() is not { Phase: "ready" } p || !p.Token.StartsWith("launcher-update:", StringComparison.Ordinal)) return;
+        var version = p.Token["launcher-update:".Length..];
+        lock (gate)
+        {
+            if (follow is not null) return;
+            followed = p.Token;
+            follow = new System.Threading.Timer(_ => FollowTick(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+        Log.Info($"Updates: a launcher update to {version} started before this launcher waits for Home; following it");
+        WatchForHome(version);
+        Changed?.Invoke();
+    }
+
+    void FollowTick()
+    {
+        string? token;
+        lock (gate) token = followed;
+        if (token is null) return;
+        var p = ReadJobProgress();
+        if (p is { Phase: "ready" } && p.Token == token) return;   // still waiting for Home
+        lock (gate) { follow?.Dispose(); follow = null; followed = null; }
+        Changed?.Invoke();
+        if (p is { Phase: "leave" } && p.Token == token) { LauncherLeave?.Invoke(); return; }
+        // Over (it gave up, failed or was stopped), or silent for 3 minutes.
+        StopWatchingForHome();
+        if (p is { Phase: "failed" } && p.Token == token)
+            alerts.Raise(new AlertSpec { Id = "updates-result", Title = "The TV launcher was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
     }
 
     void OnFinished(LibraryJob job, bool ok, string message)
@@ -579,6 +639,7 @@ sealed class UpdateService
         CleanUserLeftovers();
         NoteRolledBack();
         TellLauncherResult();
+        FollowWaitingUpdate();
         UpdatePill();
     }
 
@@ -732,6 +793,8 @@ sealed class UpdateService
                     message = waitingForHome ? "Waits until you are back at Home" : progress?.Message ?? "",
                 };
             }
+            // A launcher update started before this launcher, followed at "ready" (FollowWaitingUpdate).
+            lock (gate) if (followed == token) return new { status = "waiting", percent = 90, message = "Waits until you are back at Home" };
             if (waiting.Any(j => j.Token == token))
                 return new { status = "queued", percent = 0, message = current?.Token.StartsWith("windows-") == true ? "Waiting for Windows updates" : "Waiting" };
             lock (gate) return results.TryGetValue(token, out var r) ? new { status = r.Status, percent = 100, message = r.Message } : null;

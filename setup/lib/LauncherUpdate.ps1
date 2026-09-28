@@ -28,10 +28,14 @@
 #              "leave": it exits with code 75 (after 20 s it is ended). Not at Home within 3
 #              hours: the update stops there (aborted), nothing moved, nothing stopped
 #   swapping   per file: current -> .prev, .new -> current (MoveFileEx, write-through)
-#   swapped    the pause lifted: the watchdog starts the new launcher (SYSTEM never starts it)
+#   swapped    the pause lifted: the watchdog starts the new launcher (SYSTEM never starts it).
+#              A watch (state\watchdog-watch) is set before the pause goes and stays until the
+#              new launcher is judged: meanwhile the watchdog counts none of its exits and never
+#              restarts the box or falls back to the desktop; this job decides
 #   verifying  the new launcher must say it is healthy (UI ready, controller thread running)
 #              within 3 minutes, by creating the event Local\HtpcHealthy_<version>_<pid>;
-#              otherwise, or when it restarts twice, the job rolls back
+#              otherwise, or when it restarts twice, the job rolls back (pausing the watchdog
+#              before the watch goes)
 #   rollingback  journaled before a rollback's first move (with its reason): one a power cut
 #              stopped is finished by the reconcile; slots it put back already are left as they are
 #   done | rolledback | aborted
@@ -45,6 +49,8 @@ $ExitWait = [TimeSpan]::FromSeconds(20)
 $LeaveWait = [TimeSpan]::FromHours(3)
 # Free space left over after an update's download, its copies and the unpacked setup.
 $UpdateMinFree = 500MB
+# How long the watchdog's watch lasts at most (the check waits 3 min, the reconcile's 5).
+$WatchWait = [TimeSpan]::FromMinutes(15)
 
 # Where everything is. Tests pass their own roots (made admin-only first).
 function Get-LauncherPaths {
@@ -67,6 +73,7 @@ function Get-LauncherPaths {
         Bootstrap   = Join-Path $launcherDir 'Start-Job.ps1'
         Journal     = Join-Path $stateRoot 'launcher-update.json'
         Pause       = Join-Path $stateRoot 'watchdog-pause'
+        Watch       = Join-Path $stateRoot 'watchdog-watch'
         Staging     = Join-Path $stateRoot 'staging'
         Slots       = @(
             & $slot 'launcher' 'file' (Join-Path $launcherDir 'HtpcLauncher.exe') $null $InstallRoot
@@ -118,24 +125,37 @@ function Invoke-UpdateFault([string]$Step) {
     }
 }
 
-# --- Watchdog pause (state\watchdog-pause: {jobPid, expiresUtc}; the watchdog ignores it once
-# it expires or this process is gone) --------------------------------------------------------------
+# --- Watchdog pause and watch ({jobPid, expiresUtc}; the watchdog ignores either once it expires,
+# this process is gone, or it was written before the box started) ---------------------------------
+#   state\watchdog-pause  (default) nothing is started: the launcher is stopped or swapped
+#   state\watchdog-watch  (-Watch) the launcher is started as usual, but its exits are this job's
+#                         to judge: none counts, no restart of the box, no desktop. Set before the
+#                         pause is lifted after the swap, cleared once the new launcher is judged
+#                         (a rollback pauses first). A watchdog from before it (0.1.1) ignores it.
 
-function Set-WatchdogPause($Paths, [TimeSpan]$For = [TimeSpan]::FromMinutes(10)) {
+function Set-WatchdogPause($Paths, [TimeSpan]$For = [TimeSpan]::FromMinutes(10), [switch]$Watch) {
     $o = [ordered]@{ jobPid = $PID; expiresUtc = [DateTime]::UtcNow.Add($For).ToString('o') }
-    Write-AtomicText $Paths.Pause ($o | ConvertTo-Json -Compress)
+    Write-AtomicText $(if ($Watch) { $Paths.Watch } else { $Paths.Pause }) ($o | ConvertTo-Json -Compress)
 }
 
-function Clear-WatchdogPause($Paths, [switch]$OnlyStale) {
-    if (-not (Test-Path -LiteralPath $Paths.Pause)) { return }
+function Clear-WatchdogPause($Paths, [switch]$OnlyStale, [switch]$Watch) {
+    $file = if ($Watch) { $Paths.Watch } else { $Paths.Pause }
+    if (-not (Test-Path -LiteralPath $file)) { return }
     if ($OnlyStale) {
         try {
-            $p = [IO.File]::ReadAllText($Paths.Pause) | ConvertFrom-Json
+            $p = [IO.File]::ReadAllText($file) | ConvertFrom-Json
             $alive = $p.jobPid -and (Get-Process -Id ([int]$p.jobPid) -ErrorAction SilentlyContinue)
             if ($alive -and [int]$p.jobPid -ne $PID -and [DateTime]::Parse($p.expiresUtc).ToUniversalTime() -gt [DateTime]::UtcNow) { return }
         } catch { }
     }
-    Remove-Item -LiteralPath $Paths.Pause -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+}
+
+# The new launcher is about to be checked: the watch first, then the pause goes (never a moment
+# with neither, so no exit of the launcher being checked is ever counted by the watchdog).
+function Switch-WatchdogToWatch($Paths) {
+    Set-WatchdogPause $Paths -Watch -For $WatchWait
+    Clear-WatchdogPause $Paths
 }
 
 # --- The running launcher ------------------------------------------------------------------------
@@ -472,6 +492,7 @@ function Invoke-LauncherUpdate {
         Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
         Save-LauncherJournal $Paths $journal 'aborted' $problem.Exception.Message
         Clear-WatchdogPause $Paths
+        Clear-WatchdogPause $Paths -Watch
         throw $problem
     }
 
@@ -497,7 +518,7 @@ function Invoke-LauncherUpdate {
         Restore-PreviousLauncher $Paths $journal "The new version could not be put in place ($($_.Exception.Message))"
         return
     }
-    Clear-WatchdogPause $Paths
+    Switch-WatchdogToWatch $Paths
     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 
     Save-LauncherJournal $Paths $journal 'verifying'
@@ -591,6 +612,7 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
     $result = Wait-LauncherHealthy $Paths $Journal.to $Wait
     if ($result -eq 'healthy') {
         Save-LauncherJournal $Paths $Journal 'done' "Updated to $($Journal.to)"
+        Clear-WatchdogPause $Paths -Watch
         # A failed version kept by an earlier rollback (.bad) is no use once one works: only the
         # previous one (.prev) stays, for a rollback.
         foreach ($slot in $Paths.Slots) { try { Remove-TrustedItem (Get-SlotNames $slot).Bad $slot.Root } catch { } }
@@ -610,6 +632,8 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
         Restore-PreviousLauncher $Paths $Journal "Version $($Journal.to) did not start properly"
         return
     }
+    # Nobody judges it until the next reconcile (which watches again): the watchdog's own rules.
+    Clear-WatchdogPause $Paths -Watch
     Write-Host '  the new launcher has not been seen healthy yet; checked again at the next reconcile'
     Write-UpdateProgress 'verify' 95 'Waiting for the launcher to start'
 }
@@ -630,6 +654,7 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
     if (-not $resuming -and $launcherSlot -and $Journal.toSha256 -and (Get-SlotState $launcherSlot) -eq 'placed' -and
         (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash -ne $Journal.toSha256) {
         Save-LauncherJournal $Paths $Journal 'superseded' 'The launcher was replaced since (setup ran again)'
+        Clear-WatchdogPause $Paths -Watch
         Write-Host '  not rolled back: setup replaced the launcher meanwhile'
         return
     }
@@ -659,7 +684,8 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
         [pscustomobject]@{ Slot = $slot; Names = $names; State = $state; IsNew = $isNew }
     }
 
-    # From the first move on, a power cut leaves "rollingback": the reconcile finishes it.
+    # From the first move on, a power cut leaves "rollingback": the reconcile finishes it. The
+    # pause comes before the watch (if any) goes: the launcher this stops is never counted either.
     Save-LauncherJournal $Paths $Journal 'rollingback' $Reason
     Set-WatchdogPause $Paths
     foreach ($p in Get-LauncherProcesses $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -680,6 +706,7 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
         Invoke-UpdateFault "restored-$(Get-SlotKey $slot)"
     }
     Save-LauncherJournal $Paths $Journal 'rolledback' "$Reason; back on $($Journal.from)"
+    Clear-WatchdogPause $Paths -Watch
     Clear-WatchdogPause $Paths
     Write-UpdateProgress 'failed' 100 "$Reason. Back on version $($Journal.from)."
 }
@@ -736,6 +763,7 @@ function Invoke-LauncherReconcile {
     $journal = Read-LauncherJournal $Paths
     if (-not $journal -or $journal.step -in 'done', 'rolledback', 'aborted', 'superseded', '') {
         Clear-WatchdogPause $Paths -OnlyStale
+        Clear-WatchdogPause $Paths -Watch -OnlyStale
         Sync-JobBootstrap $Paths
         # A box updated by an older runner (0.1.1), or a step that failed last time.
         Update-MachineSettings $Paths
@@ -756,6 +784,7 @@ function Invoke-LauncherReconcile {
         (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash -ne $journal.toSha256) {
         Save-LauncherJournal $Paths $journal 'superseded' 'The launcher was replaced since (setup ran again)'
         Clear-WatchdogPause $Paths -OnlyStale
+        Clear-WatchdogPause $Paths -Watch -OnlyStale
         return
     }
     Write-Host "  reconcile: launcher update $($journal.from) -> $($journal.to) stopped at '$($journal.step)'"
@@ -766,6 +795,7 @@ function Invoke-LauncherReconcile {
             Remove-Item -LiteralPath (Join-Path $Paths.Staging "launcher-$($journal.to)") -Recurse -Force -ErrorAction SilentlyContinue
             Save-LauncherJournal $Paths $journal 'aborted' 'Interrupted before the swap'
             Clear-WatchdogPause $Paths
+            Clear-WatchdogPause $Paths -Watch
         }
         '^(swapping|moved-|placed-)' {
             Restore-PreviousLauncher $Paths $journal 'The update was interrupted'
@@ -775,11 +805,12 @@ function Invoke-LauncherReconcile {
             Restore-PreviousLauncher $Paths $journal $(if ($journal.message) { $journal.message } else { 'The update was interrupted' })
         }
         '^(swapped|verifying)$' {
-            Clear-WatchdogPause $Paths
+            # This job judges the new launcher now: the watchdog watches (in this job's name).
+            Switch-WatchdogToWatch $Paths
             if ($journal.step -eq 'swapped') { Save-LauncherJournal $Paths $journal 'verifying' }
             $wait = if ($Quick) { [TimeSpan]::FromSeconds(5) } else { [TimeSpan]::FromMinutes(5) }
             Complete-LauncherCheck $Paths $journal $wait -Quick:$Quick
         }
-        default { Clear-WatchdogPause $Paths -OnlyStale }
+        default { Clear-WatchdogPause $Paths -OnlyStale; Clear-WatchdogPause $Paths -Watch -OnlyStale }
     }
 }
