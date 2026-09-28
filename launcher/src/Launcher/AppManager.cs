@@ -259,8 +259,9 @@ sealed class AppManager
 
     void Track(string id, Process process, bool adopted = false)
     {
+        // In UTC: how long it ran must not gain or lose the hour of a daylight-saving change.
         DateTime since;
-        try { since = adopted ? process.StartTime : DateTime.Now; } catch (Exception) { since = DateTime.Now; }
+        try { since = adopted ? process.StartTime.ToUniversalTime() : DateTime.UtcNow; } catch (Exception) { since = DateTime.UtcNow; }
         process.EnableRaisingEvents = true;
         process.Exited += (_, _) =>
         {
@@ -276,7 +277,7 @@ sealed class AppManager
                 started.Remove(process);
             }
             RunningChanged?.Invoke(id, false);
-            Exited?.Invoke(new AppExit(id, ExitCodeOf(process), closedBy, DateTime.Now - info.Started, info.Adopted));
+            Exited?.Invoke(new AppExit(id, ExitCodeOf(process), closedBy, DateTime.UtcNow - info.Started, info.Adopted));
         };
         lock (running)
         {

@@ -9,11 +9,11 @@ namespace Htpc.Launcher;
 sealed class AudioVolume
 {
     // Without an audio device (the TV off on an HDMI-only box) every read fails: once a minute in the log is enough.
-    static DateTime quietUntil;
+    static long quietUntil = long.MinValue; // tick count: the clock can jump an hour
     static void Warn(string message)
     {
-        if (DateTime.Now < quietUntil) return;
-        quietUntil = DateTime.Now.AddMinutes(1);
+        if (Environment.TickCount64 < quietUntil) return;
+        quietUntil = Environment.TickCount64 + 60_000;
         Log.Warn(message);
     }
 

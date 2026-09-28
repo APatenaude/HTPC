@@ -135,7 +135,8 @@ sealed class ControllerService : IDisposable
     public string? BatteryLevel { get; private set; }
     /// <summary>
     /// Someone at the controller: a button held, a trigger or a stick past its dead zone. Not any
-    /// new packet (analog noise sends them too): what counts as the box being used.
+    /// new packet (analog noise sends them too): what counts as the box being used. UTC, as the
+    /// TV code's clock is (SystemTvClock).
     /// </summary>
     public DateTime LastInput { get; private set; } = DateTime.MinValue;
 
@@ -232,7 +233,7 @@ sealed class ControllerService : IDisposable
             if (pad.Buttons != 0 || pad.LeftTrigger >= TriggerUp || pad.RightTrigger >= TriggerUp ||
                 Math.Max(Math.Abs((int)pad.LX), Math.Abs((int)pad.LY)) > StickDeadzone || Math.Max(Math.Abs((int)pad.RX), Math.Abs((int)pad.RY)) > StickDeadzone)
             {
-                LastInput = DateTime.Now;
+                LastInput = DateTime.UtcNow;
                 Interlocked.Exchange(ref lastInputTick, Environment.TickCount64);
             }
             LastState = new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY);

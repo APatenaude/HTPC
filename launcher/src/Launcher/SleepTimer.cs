@@ -5,6 +5,11 @@ namespace Htpc.Launcher;
 /// the Home menu, the Power menu, Settings or the phone. A warning comes 1 minute before, and
 /// +15 min (Extend) puts it off. Tick it once a second on one thread (MainForm's clock); the
 /// events come from Tick and the setters, on that thread.
+///
+/// It counts on the tick count, not the clock on the wall: a daylight-saving change, a time-zone
+/// change or the time being set moves the clock by up to an hour, never the timer. The wall clock
+/// only says when the countdown ends, for the screen and the phone, and is what the media
+/// sessions' times are on (MediaWatcher).
 /// </summary>
 sealed class SleepTimer
 {
@@ -13,8 +18,10 @@ sealed class SleepTimer
     readonly Func<IReadOnlyList<MediaInfo>> sessions;
     readonly Action<bool> watch;
     readonly Func<DateTime> clock;
+    readonly Func<long> ticks;
 
-    DateTime? endsAt;              // countdown (also the minute after a video ended)
+    long? endsAt;                  // countdown, in ticks (also the minute after a video ended)
+    DateTime endsAtUtc;            // the same on the wall clock, for the screen and the phone
     string? label;
     VideoEndDetector? video;       // "when this video ends", until it has
     bool warned;
@@ -22,12 +29,14 @@ sealed class SleepTimer
 
     /// <param name="sessions">The media sessions as last read (MediaWatcher.Sessions).</param>
     /// <param name="watch">Starts or stops reading media sessions (MediaWatcher.Want("timer", on)).</param>
-    /// <param name="clock">Now; a fake clock in tests.</param>
-    public SleepTimer(Func<IReadOnlyList<MediaInfo>> sessions, Action<bool> watch, Func<DateTime>? clock = null)
+    /// <param name="clock">The wall clock, local time (the sessions' times are); a fake one in tests.</param>
+    /// <param name="ticks">Milliseconds that never jump (Environment.TickCount64); a fake count in tests.</param>
+    public SleepTimer(Func<IReadOnlyList<MediaInfo>> sessions, Action<bool> watch, Func<DateTime>? clock = null, Func<long>? ticks = null)
     {
         this.sessions = sessions;
         this.watch = watch;
         this.clock = clock ?? (() => DateTime.Now);
+        this.ticks = ticks ?? (() => Environment.TickCount64);
     }
 
     /// <summary>Anything the status bar shows changed (set, off, minutes left, warning).</summary>
@@ -41,9 +50,9 @@ sealed class SleepTimer
 
     public bool Active => endsAt is not null || video is not null;
 
-    /// <summary>For the phone: the label, when the countdown ends (null while waiting for a video to end), whether it waits for one; null when off.</summary>
+    /// <summary>For the phone: the label, when the countdown ends (local time; null while waiting for a video to end), whether it waits for one; null when off.</summary>
     public (string Label, DateTime? EndsAt, bool UntilVideoEnds)? Current =>
-        video is not null ? (label ?? "", null, true) : endsAt is { } end ? (label ?? "", end, false) : null;
+        video is not null ? (label ?? "", null, true) : endsAt is not null ? (label ?? "", endsAtUtc.ToLocalTime(), false) : null;
 
     /// <summary>In the last minute, warning shown: Home is +15 min.</summary>
     public bool Warned => warned && endsAt is not null;
@@ -56,7 +65,7 @@ sealed class SleepTimer
         if (minutes <= 0) { endsAt = null; label = null; Log.Info("Sleep timer off"); }
         else
         {
-            endsAt = clock().AddMinutes(minutes);
+            EndIn(TimeSpan.FromMinutes(minutes));
             label = minutes switch { 60 => "1 hour", 90 => "1 h 30", 120 => "2 hours", _ => $"{minutes} min" };
             Log.Info($"Sleep timer: {label}");
         }
@@ -69,7 +78,7 @@ sealed class SleepTimer
         endsAt = null;
         warned = false;
         label = "This video ends";
-        video = new VideoEndDetector(clock());
+        video = new VideoEndDetector(Mono(ticks()));
         watch(true);
         Log.Info("Sleep timer: when this video ends");
         Raise(force: true);
@@ -82,10 +91,9 @@ sealed class SleepTimer
     public void Extend(int minutes = 15)
     {
         if (!Active) return;
-        var now = clock();
-        var from = endsAt is { } e && e > now ? e : now;
+        var left = endsAt is { } e ? Math.Max(0, e - ticks()) : 0;
         StopVideo();
-        endsAt = from.AddMinutes(minutes);
+        EndIn(TimeSpan.FromMilliseconds(left) + TimeSpan.FromMinutes(minutes));
         label = $"+{minutes} min";
         warned = false;
         Log.Info($"Sleep timer: +{minutes} min");
@@ -97,15 +105,15 @@ sealed class SleepTimer
     /// <summary>Once a second.</summary>
     public void Tick()
     {
-        var now = clock();
+        var now = ticks();
         if (video is not null)
         {
-            video.Feed(sessions(), now);
+            video.Feed(OnTicks(sessions(), now), Mono(now));
             if (video.Ended is { } why)
             {
                 // The video is over: the usual last minute, with its warning and +15 min.
                 StopVideo();
-                endsAt = now + WarningTime;
+                EndIn(WarningTime);
                 label = "The video ended";
                 warned = false;
                 Log.Info($"Sleep timer: video ended ({why}), sleeping in 1 minute");
@@ -113,7 +121,7 @@ sealed class SleepTimer
         }
         if (endsAt is { } end)
         {
-            var left = end - now;
+            var left = TimeSpan.FromMilliseconds(end - now);
             if (left <= TimeSpan.Zero)
             {
                 var why = label == "The video ended" ? "sleep timer: the video ended" : "sleep timer";
@@ -124,6 +132,9 @@ sealed class SleepTimer
                 Expired?.Invoke(why);
                 return;
             }
+            // The wall clock was moved (the time set, a network time step): the end shown follows.
+            var shown = clock().ToUniversalTime() + left;
+            if ((shown - endsAtUtc).Duration() > TimeSpan.FromSeconds(2)) endsAtUtc = shown;
             if (!warned && left <= WarningTime)
             {
                 warned = true;
@@ -135,11 +146,30 @@ sealed class SleepTimer
         Raise(force: false);
     }
 
+    void EndIn(TimeSpan span)
+    {
+        endsAt = ticks() + (long)span.TotalMilliseconds;
+        endsAtUtc = clock().ToUniversalTime() + span;
+    }
+
     void StopVideo()
     {
         if (video is null) return;
         video = null;
         watch(false);
+    }
+
+    // The detector runs on the tick count too (its 3 hours, 5 minutes paused...): a tick count as
+    // a DateTime, and each session's time moved onto it by its age on the wall clock. The age is
+    // a second or two (sessions are read every second); at most a minute is taken, so a clock
+    // moved between the read and now does not move a playing video on by an hour.
+    static DateTime Mono(long ms) => new DateTime(2000, 1, 1).AddMilliseconds(ms);
+
+    IReadOnlyList<MediaInfo> OnTicks(IReadOnlyList<MediaInfo> read, long now)
+    {
+        var wall = clock();
+        return read.Select(s => s with { At = Mono(now) - Clamp(wall - s.At) }).ToList();
+        static TimeSpan Clamp(TimeSpan age) => age < TimeSpan.Zero ? TimeSpan.Zero : age > TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : age;
     }
 
     /// <summary>
@@ -149,7 +179,6 @@ sealed class SleepTimer
     /// </summary>
     public object? Describe()
     {
-        var now = clock();
         if (video is not null)
         {
             int? left = video.SecondsLeft is { } s ? (int)Math.Ceiling(s / 60) : null;
@@ -159,8 +188,8 @@ sealed class SleepTimer
         return new
         {
             label,
-            endsAt = new DateTimeOffset(end).ToUnixTimeMilliseconds(),
-            minutesLeft = (int)Math.Ceiling(Math.Max(0, (end - now).TotalMinutes)),
+            endsAt = new DateTimeOffset(endsAtUtc, TimeSpan.Zero).ToUnixTimeMilliseconds(),
+            minutesLeft = (int)Math.Ceiling(Math.Max(0, (end - ticks()) / 60000.0)),
             warning = warned,
             waiting = false,
         };

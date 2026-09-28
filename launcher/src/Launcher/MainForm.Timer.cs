@@ -134,7 +134,7 @@ sealed partial class MainForm
     void RememberVolume(SoundLevel level)
     {
         if (setupMode || standby is not { Active: false } || settings.Volume == level.Volume) return;
-        if (DateTime.Now - standby.LastUserInput() > TimeSpan.FromSeconds(10)) return;
+        if (standby.LastUseTick() is var used && (used == long.MinValue || Environment.TickCount64 - used > 10_000)) return;
         settings.Volume = level.Volume;
         SaveSoon();
     }

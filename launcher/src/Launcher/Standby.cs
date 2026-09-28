@@ -457,12 +457,12 @@ sealed class Standby
     /// When someone last used the box: a controller button, trigger or stick past its dead zone,
     /// a key or the mouse (not the launcher's own Alt tap or mouse nudge), the phone remote. Not
     /// the launcher merely being on screen, nor a controller's analog noise. The TV's binding check
-    /// counts only this as "in use".
+    /// counts only this as "in use". UTC, as the TV code's clock is (SystemTvClock).
     /// </summary>
     public DateTime LastUserInput()
     {
         var last = LastUseTick();
-        return last == long.MinValue ? DateTime.MinValue : DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64 - last);
+        return last == long.MinValue ? DateTime.MinValue : DateTime.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64 - last);
     }
 
     /// <summary>LastUserInput as a tick count (Environment.TickCount64); long.MinValue: none since the box started.</summary>

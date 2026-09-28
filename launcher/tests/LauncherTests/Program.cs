@@ -414,16 +414,19 @@ Console.WriteLine("== Media calls: a player that never answers");
 // ---------------------------------------------------------------- SleepTimer
 Console.WriteLine("== SleepTimer");
 {
+    // The wall clock and the tick count (ms since boot) move together, until the clock is moved.
     var now = new DateTime(2026, 9, 26, 22, 0, 0);
+    long ms = 3_600_000;
     IReadOnlyList<MediaInfo> sessions = Array.Empty<MediaInfo>();
     var watching = false;
-    var timer = new SleepTimer(() => sessions, on => watching = on, () => now);
+    var timer = new SleepTimer(() => sessions, on => watching = on, () => now, () => ms);
     int warnings = 0, expired = 0, changed = 0;
     string? lastReason = null;
     timer.Warning += _ => warnings++;
     timer.Expired += why => { expired++; lastReason = why; };
     timer.Changed += () => changed++;
-    void Advance(int seconds) { for (var i = 0; i < seconds; i++) { now = now.AddSeconds(1); timer.Tick(); } }
+    void Second() { now = now.AddSeconds(1); ms += 1000; }
+    void Advance(int seconds) { for (var i = 0; i < seconds; i++) { Second(); timer.Tick(); } }
 
     timer.Set(30);
     Check(timer.Active && !timer.Warned, "30 min set");
@@ -457,7 +460,7 @@ Console.WriteLine("== SleepTimer");
     Check(((dynamic)timer.Describe()!).waiting == false, "follows the playing video");
     for (var i = 0; i < 120; i++)
     {
-        now = now.AddSeconds(1);
+        Second();
         sessions = new[] { new MediaInfo("MSEdge", "twitch", "Video", null, (now - t).TotalSeconds >= 100 ? MediaStatus.Paused : MediaStatus.Playing, Math.Min(600, 500 + (now - t).TotalSeconds), 600, 1, now, true) };
         timer.Tick();
     }
@@ -486,6 +489,39 @@ Console.WriteLine("== SleepTimer");
     Check(((dynamic)timer.Describe()!).minutesLeft == 16, "+15 after a video: on top of its last minute");
     timer.Cancel();
     Check(changed > 10, $"Changed raised ({changed})");
+
+    // The clock moved (daylight saving ends, the time set): the timer counts on regardless, and
+    // the end shown to the screen and the phone follows the clock.
+    long ShownEnd() => (long)((dynamic)timer.Describe()!).endsAt;
+    timer.Set(30);
+    Advance(10 * 60);
+    var endBefore = ShownEnd();
+    now = now.AddHours(-1);
+    Advance(1);
+    Check(((dynamic)timer.Describe()!).minutesLeft == 20 && Math.Abs(endBefore - 3_600_000 - ShownEnd()) <= 1000,
+        "clock back an hour: still 20 min left, the end shown an hour earlier on the clock");
+    Advance(20 * 60 - 62);
+    Check(expired == 3 && warnings == 5, $"... 61 s left: no warning yet ({warnings})");
+    now = now.AddHours(1);
+    Advance(1);
+    Check(expired == 3 && warnings == 6, $"clock forward an hour: the warning at 60 s left, no sleep yet ({warnings}, {expired})");
+    Advance(60);
+    Check(expired == 4 && lastReason == "sleep timer", "... sleeps at the 30 minutes, not an hour early or late");
+
+    // "When this video ends" with the clock moved while it plays: not 3 hours, nor paused for 5 minutes.
+    sessions = new[] { new MediaInfo("MSEdge", "twitch", "Long video", null, MediaStatus.Playing, 0, 7200, 1, now, true) };
+    timer.SetVideo();
+    Advance(5);
+    now = now.AddHours(3);
+    for (var i = 0; i < 10; i++)
+    {
+        Second();
+        sessions = new[] { new MediaInfo("MSEdge", "twitch", "Long video", null, MediaStatus.Playing, 15 + i, 7200, 1, now, true) };
+        timer.Tick();
+    }
+    Check(timer.Active && timer.Describe() is { } d && ((dynamic)d).endsAt == "video" && ((dynamic)d).minutesLeft == 120,
+        "video mode, clock 3 hours on: still following it, 2 hours left");
+    timer.Cancel();
 }
 
 // ---------------------------------------------------------------- DecodeCheck.Parse
