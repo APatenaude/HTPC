@@ -780,6 +780,9 @@ function activate(el) {
       // One wrong press of A must not switch the box off: the controller cannot turn it back on.
       else if (arg === 'shutdown') ask({ title: 'Shut down the box?', yes: 'Shut down', onYes: () => send({ type: 'power', action: 'shutdown' }),
         text: 'It turns off completely: the controller can’t turn it back on. Use the box’s power button to start it again.' });
+      // Nor close every app (a film half watched) by restarting it.
+      else if (arg === 'restart') ask({ title: 'Restart the box?', yes: 'Restart', onYes: () => send({ type: 'power', action: 'restart' }),
+        text: 'Apps close and the box starts again; it comes back to the TV screen by itself.' });
       else send({ type: 'power', action: arg });
       break;
     case 'timer': setTimer(TIMER[Number(arg)]); break;
