@@ -242,10 +242,12 @@ static class PhaseBChecks
 
         await h.Tv.Poll();
         await h.Sleep();
-        Check.That(await Eventually(() => atv.Keys.Contains(223) && !atv.On), "Google TV: SLEEP when the box sleeps");
+        // 30 s: each key opens a TLS connection with a client certificate (Schannel), which took
+        // over 10 s on a busy box and on GitHub's runner (the v1.0.0 release run failed on it).
+        Check.That(await Eventually(() => atv.Keys.Contains(223) && !atv.On, 30), "Google TV: SLEEP when the box sleeps");
         await w.RunFor(10);
         await h.Wake();
-        Check.That(await Eventually(() => atv.Keys.Contains(224) && atv.On), "Google TV: WAKEUP when the box wakes");
+        Check.That(await Eventually(() => atv.Keys.Contains(224) && atv.On, 30), "Google TV: WAKEUP when the box wakes");
 
         // Another TV at the address (a different key): the pinned handshake fails, nothing sent.
         var keys = atv.Keys.Count;
