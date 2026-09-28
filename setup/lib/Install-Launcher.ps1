@@ -97,6 +97,15 @@ Get-ChildItem -LiteralPath $installDir -Filter '*.old' | ForEach-Object {
     Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
 }
 
+# Read-only files and folders made writable: the .NET delete refuses them, and a copy from install
+# media (an ISO) keeps the flag, so an old kept setup was never deleted (VM run 2). A file, or a tree
+# Test-OwnTree passed, or one setup just made: no link in it to follow.
+function Clear-ReadOnly([string]$Dir) {
+    foreach ($item in @(Get-Item -LiteralPath $Dir -Force) + @(Get-ChildItem -LiteralPath $Dir -Recurse -Force)) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReadOnly) { $item.Attributes = $item.Attributes -band -bnot [IO.FileAttributes]::ReadOnly }
+    }
+}
+
 # Copies $From to $To unless it is the same file; true when it changed.
 function Install-File([string]$From, [string]$To) {
     if ((Test-Path -LiteralPath $To) -and (Get-FileHash -LiteralPath $From).Hash -eq (Get-FileHash -LiteralPath $To).Hash) {
@@ -107,6 +116,7 @@ function Install-File([string]$From, [string]$To) {
         Rename-Item -LiteralPath $To -NewName ("{0}.{1:yyyyMMddHHmmss}.old" -f (Split-Path -Leaf $To), (Get-Date))
     }
     Copy-Item -LiteralPath $From $To -Force
+    Clear-ReadOnly $To   # from read-only media: renamed aside and deleted later all the same
     Write-Change "installed $To ($((Get-Item -LiteralPath $To).VersionInfo.FileVersion))"
     $true
 }
@@ -190,6 +200,7 @@ function Test-OwnTree([string]$Path) {
 # (renamed aside already), never opened through.
 function Remove-OwnTree([string]$Dir) {
     if (-not (Test-OwnTree $Dir)) { Write-Attention "$Dir holds something setup did not make; left as it is"; return }
+    Clear-ReadOnly $Dir
     try { [IO.Directory]::Delete($Dir, $true) } catch { Write-Attention "$Dir could not be removed yet: $($_.Exception.Message)" }
 }
 
@@ -208,6 +219,7 @@ function Sync-Folder([string]$From, [string]$To) {
     if (Test-Path -LiteralPath $new) { throw "$new is in the way" }
     New-Item -ItemType Directory $new | Out-Null
     Copy-Item (Join-Path $From '*') $new -Recurse -Force
+    Clear-ReadOnly $new   # never kept from read-only media: the next run could not replace it
     $old = $null
     if (Test-Path -LiteralPath $To) {
         $old = '{0}.old-{1}' -f $To, [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -237,6 +249,7 @@ if (Test-Path (Join-Path $from 'jobs')) { Sync-Folder (Join-Path $from 'jobs') (
 # What the task runs (lib\Start-Job.ps1 says why it sits outside lib\ and jobs\).
 Copy-Item (Join-Path $from 'lib\Start-Job.ps1') (Join-Path $installDir 'Start-Job.ps1') -Force 
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
+Clear-ReadOnly (Join-Path $installDir 'Start-Job.ps1'); Clear-ReadOnly (Join-Path $installDir 'catalog.json')
 Write-Change "job runner and trusted catalog in $installDir"
 
 # Setup replaces whatever a launcher update left: its journal (cleared above, so nothing ever

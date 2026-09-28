@@ -557,7 +557,10 @@ function restoreFocus(id, prev) {
   }
   const view = EXT.views[state.view];
   setFocus((view && view.focus ? view.focus(list) : null) ||
-    (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
+    // Home: the first tile as shown (CSS order). The "+" tile, made by the first render before the
+    // tiles came, is first in the page but shows last: after a first boot the focus sat on it.
+    (state.view === 'home' ? list.filter((e) => e.classList.contains('tile'))
+      .sort((a, b) => (Number(a.style.order) || 0) - (Number(b.style.order) || 0))[0] : null) ||
     // Settings opens on the section list, on the section last shown (A or right goes into it).
     (state.view === 'settings' ? list.find((e) => e.dataset.section === state.section) : null) ||
     // A confirmation opens on Cancel: one press of A never closes an app by mistake.

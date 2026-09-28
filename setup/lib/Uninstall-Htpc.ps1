@@ -6,8 +6,8 @@
 #   Apps        nothing: the apps are ordinary apps, kept (it lists the installed catalog apps)
 #   Shell       Explorer back as this account's shell, the HKCU Run start removed; Defender
 #               exclusion and "Back to TV" shortcuts removed (Set-Shell.ps1 -Undo); next sign-in
-#   AutoLogon   no automatic sign-in any more, the lock and Windows Hello back; the account keeps
-#               its (blank) password: set one
+#   AutoLogon   no automatic sign-in any more; the lock screen, sign-in on wake, the lock and
+#               Windows Hello back; the account keeps its (blank) password: it says so plainly
 #   Updates     Windows Update and Store policies back to Windows' defaults
 #   Edge        the Edge policies setup set, its force-installed extensions and the fake MDM
 #               enrollment removed
@@ -16,8 +16,9 @@
 #   Certificates the phone remote's certificates (O=HTPC TV box) from the CA stores
 #   System      the sign-in screen and the desktop back to Windows' look (default wallpaper),
 #               Windows Search and SysMain back on; the computer name kept
-#   Files       the launcher and watchdog ended; a copy of the box's logs in Documents\HTPC logs;
-#               Program Files\HTPC and ProgramData\HTPC removed
+#   Files       the launcher and watchdog ended; a copy of the box's logs, and of this setup (to
+#               run it again), in Documents\HTPC logs; Program Files\HTPC and ProgramData\HTPC
+#               removed
 # Kept (and said so): the apps, winget, the HEVC extension, power settings, the privacy and
 # no-pop-up settings, dark mode, Private networks, automatic time zone, the computer name, and
 # %LOCALAPPDATA%\HTPC (the launcher's settings and the website tiles' Edge profiles, with their
@@ -29,6 +30,34 @@ $HtpcProgramFiles = Join-Path $env:ProgramFiles 'HTPC'
 function Remove-EmptyKey([string]$Path) {
     $key = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
     if ($key -and $key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0) { Remove-Item -LiteralPath $Path -Force; Write-Change "removed $Path (empty)" }
+}
+
+# Whether this account has no password, asked once (a wrong try counts toward Windows' lockout):
+# Windows refuses a blank-password logon outside the console with ERROR_ACCOUNT_RESTRICTION (1327),
+# a wrong password with ERROR_LOGON_FAILURE (1326).
+function Test-BlankPassword {
+    if ($null -ne $global:HtpcBlankPassword) { return $global:HtpcBlankPassword }
+    if (-not ('HtpcUninstall.Logon' -as [type])) {
+        Add-Type -Namespace HtpcUninstall -Name Logon -MemberDefinition @'
+[DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool LogonUser(string user, string domain, string password, int type, int provider, out IntPtr token);
+[DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+public static bool Blank(string user) {
+    IntPtr token;
+    if (LogonUser(user, ".", "", 2, 0, out token)) { CloseHandle(token); return true; }
+    return Marshal.GetLastWin32Error() == 1327;
+}
+'@
+    }
+    $global:HtpcBlankPassword = [HtpcUninstall.Logon]::Blank($env:USERNAME)
+    $global:HtpcBlankPassword
+}
+
+# Said plainly, by the AutoLogon step and as the uninstall's last words (setup.ps1): with no
+# password Windows still signs this account in by itself.
+function Write-PasswordNote {
+    if (-not (Test-BlankPassword)) { return }
+    Write-Attention 'This account has no password (setup removed it). Set one: Ctrl+Alt+Del > Change a password'
+    Write-Host '    Until then Windows signs it in by itself at every start, and anyone at this PC can use it.'
 }
 
 function Remove-RegKey([string]$Path) {
@@ -54,7 +83,22 @@ $UninstallSteps = [ordered]@{
     AutoLogon = {
         $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
         Set-RegValue $winlogon 'AutoAdminLogon' '0' 'String'
-        foreach ($name in 'DefaultPassword', 'ForceAutoLogon', 'AutoLogonCount') { Remove-RegValue $winlogon $name }
+        foreach ($name in 'DefaultPassword', 'ForceAutoLogon', 'AutoLogonCount', 'AutoLogonSID') { Remove-RegValue $winlogon $name }
+        # Sign-in as Windows has it: the lock screen (the System step's NoLockScreen, one of its
+        # "nothing over the TV" settings) and sign-in on wake (the Power step's). Without them a
+        # password-less account went straight to the desktop, which looked like the box's
+        # automatic sign-in still on (VM run 2).
+        Remove-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' 'NoLockScreen'
+        Remove-EmptyKey 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization'
+        $balanced = '381b4222-f694-41f0-9685-ff5bb260df2e'; $noGroup = 'fea3413e-7e05-4911-9a71-700331f1c294'; $consoleLock = '0e796bdb-100d-47d6-a2d5-f7d2daa51f51'
+        $now = (powercfg /query $balanced $noGroup $consoleLock) -join "`n"
+        if ($now -match 'AC Power Setting Index: 0x0*1\b' -and $now -match 'DC Power Setting Index: 0x0*1\b') { Write-Same 'sign-in on wake on' }
+        else {
+            powercfg /setacvalueindex $balanced $noGroup $consoleLock 1
+            powercfg /setdcvalueindex $balanced $noGroup $consoleLock 1
+            powercfg /setactive SCHEME_CURRENT
+            Write-Change 'sign-in on wake back on (Balanced plan)'
+        }
         Remove-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' 'DisableLockWorkstation'
         Remove-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork' 'Enabled'
         Remove-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork' 'DisablePostLogonProvisioning'
@@ -63,7 +107,8 @@ $UninstallSteps = [ordered]@{
         $protection = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Account protection'
         Remove-RegValue $protection 'UILockdown'
         Remove-EmptyKey $protection
-        Write-Attention "$env:USERNAME has no password (the box was open): anyone at this PC can sign in. Set one: Ctrl+Alt+Del > Change a password, or Settings > Accounts > Sign-in options."
+        Write-PasswordNote
+
     }
 
     Updates = {
@@ -137,6 +182,7 @@ $UninstallSteps = [ordered]@{
         $policies = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows'
         # The sign-in ("Welcome") screen: Windows' own picture and its blur again.
         Remove-RegValue "$policies\Personalization" 'LockScreenImage'
+        Remove-EmptyKey "$policies\Personalization"
         $csp = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP'
         foreach ($name in 'LockScreenImagePath', 'LockScreenImageUrl', 'LockScreenImageStatus') { Remove-RegValue $csp $name }
         Remove-EmptyKey $csp
@@ -174,12 +220,17 @@ $UninstallSteps = [ordered]@{
         # HTPC\setup) may be one, so the working directory moves out too.
         Set-Location $env:SystemRoot
         [Environment]::CurrentDirectory = $env:SystemRoot
+        $ended = @()
         foreach ($name in 'HtpcWatchdog', 'HtpcLauncher', 'TV Box Setup') {
             foreach ($p in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 Write-Change "$name ended (pid $($p.Id))"
+                $ended += $p.Id
             }
         }
+        # Stop-Process returns before a program has gone and let go of its exe (the VM run found
+        # HtpcLauncher.exe "in use" right after): up to 15 s for them to exit.
+        if ($ended) { Wait-Process -Id $ended -Timeout 15 -ErrorAction SilentlyContinue }
         # The box's logs, kept for the user (the uninstall's own log is in the same folder).
         $keep = Join-Path $logDir ('box logs {0:yyyyMMdd-HHmmss}' -f (Get-Date))
         foreach ($sub in 'logs', 'state') {
@@ -190,9 +241,21 @@ $UninstallSteps = [ordered]@{
                 Write-Change "$from copied to $keep"
             }
         }
+        # This setup too, beside the logs: ProgramData\HTPC\setup goes below, and a second run
+        # (after a restart, for what was in use) starts from this copy.
+        $setupFrom = [IO.Path]::GetFullPath((Split-Path $lib -Parent)).TrimEnd('\')
+        $setupCopy = [IO.Path]::GetFullPath((Join-Path $logDir 'setup')).TrimEnd('\')
+        if ($setupFrom -ieq $setupCopy) { Write-Same "setup runs from $setupCopy" }
+        else {
+            if (Test-Path -LiteralPath $setupCopy) { Remove-Item -LiteralPath $setupCopy -Recurse -Force }
+            Copy-Item -LiteralPath $setupFrom -Destination $setupCopy -Recurse -Force
+            Write-Change "setup copied to $setupCopy (to run this again: $setupCopy\setup.ps1 -Uninstall)"
+        }
         foreach ($dir in $HtpcProgramFiles, $HtpcData) {
             if (-not (Test-Path -LiteralPath $dir)) { Write-Same "$dir absent"; continue }
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            # Once more after a moment: a file an ended program held a little longer.
+            if (Test-Path -LiteralPath $dir) { Start-Sleep -Seconds 3; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
             if (Test-Path -LiteralPath $dir) { Write-Attention "$dir partly left (files in use): delete it after the restart" }
             else { Write-Change "removed $dir" }
         }

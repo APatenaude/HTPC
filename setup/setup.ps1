@@ -269,6 +269,7 @@ if (-not $Uninstall -and $results['Shell'] -eq 'OK' -and (& "$lib\Set-Shell.ps1"
 Write-Host "`n== Summary"
 foreach ($name in $results.Keys) { Write-Host ('  {0,-13} {1}' -f $name, $results[$name]) }
 if ($restart) { Write-Attention "Restart needed for: $($restart -join ', ')" }
+if ($Uninstall) { Write-PasswordNote }   # its last words: the account's password (lib\Uninstall-Htpc.ps1)
 Write-Host "Log: $log"
 
 [ordered]@{ finished = (Get-Date).ToString('s'); log = $log; restartNeeded = $restart; steps = $results } |

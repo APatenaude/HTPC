@@ -273,6 +273,8 @@ function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switc
 
 # Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would:
 # with the fake box's own lib\ (what its task runs), or the one its bootstrap picked (-Lib).
+# The fake launcher gets 30 s to be back at Home (LeaveWait): 10 s was missed on a busy 2-vCPU
+# guest (VM run 2), which aborted an update before the case under test.
 function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [string]$Lib) {
     if (-not $Lib) { $Lib = Join-Path $Root 'PF\HTPC\Launcher\lib' }
     $script = Join-Path $work "job-$PID.ps1"
@@ -281,7 +283,7 @@ function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [strin
 . '$Lib\LauncherUpdate.ps1'
 `$UpdateProgressFile = '$Root\PD\HTPC\state\test-progress.json'
 `$HealthyWait = [TimeSpan]::FromSeconds(25)
-`$LeaveWait = [TimeSpan]::FromSeconds(10)
+`$LeaveWait = [TimeSpan]::FromSeconds(30)
 `$UpdateFaultAt = $(if ($FaultAt) { "'$FaultAt'" } else { '$null' })
 `$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 `$paths = Get-LauncherPaths -InstallRoot '$Root\PF\HTPC' -DataRoot '$Root\PD\HTPC'

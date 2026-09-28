@@ -59,21 +59,29 @@ Back to a plain Windows PC (desktop mode, or Ctrl+Shift+Esc > Run new task, then
     powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
 
 It asks for elevation like setup, undoes what the steps can (`lib/Uninstall-Htpc.ps1`), each step
-saying what it did (`+` changed, `=` already so), and can be run again. Its log, and a copy of the
-box's logs (`logs\`, `state\`), go to `Documents\HTPC logs`. Then restart.
+saying what it did (`+` changed, `=` already so). Its log, and a copy of the box's logs
+(`logs\`, `state\`) and of setup itself, go to `Documents\HTPC logs`. Then restart. To run it
+again (it removes `C:\ProgramData\HTPC\setup`, and a second run changes only what the first
+could not), use that copy (the first run prints its path):
+
+    powershell -ExecutionPolicy Bypass -File "C:\Users\<account>\Documents\HTPC logs\setup\setup.ps1" -Uninstall
+
+**This account has no password (setup removed it). Set one: Ctrl+Alt+Del > Change a password.**
+Until then Windows still signs it in by itself at every start (the uninstall says so as its last
+words).
 
 | Step | Undoes |
 |---|---|
 | Apps | nothing: the apps are ordinary apps and stay (it lists them; Settings > Apps removes them) |
 | Shell | Explorer as the shell again, the HKCU Run start of the watchdog removed, the Defender exclusion and "Back to TV" shortcuts removed (`Set-Shell.ps1 -Undo`); next sign-in |
-| AutoLogon | automatic sign-in off; the lock, Windows Hello offers and Account protection back. The account keeps its blank password: it says so, and to set one |
+| AutoLogon | automatic sign-in off; the lock screen (the System step's `NoLockScreen`), sign-in on wake (the Power step's), the lock, Windows Hello offers and Account protection back. The account keeps its blank password, and Windows signs a password-less account in by itself: it says so plainly, at the end too |
 | Updates | the Windows Update and Store policies removed: Windows' defaults, drivers from Windows Update included |
 | Edge | the policies the Edge step set (read from `Set-EdgePolicy.ps1`), the force-installed extensions and uBlock Origin Lite's settings, the fake MDM enrollment; other Edge policies are kept and named |
 | Tasks | the `\HTPC\` tasks (`Jobs`, `Networks private`) and the folder, the one-shot `HTPC ...` tasks |
 | Firewall | the `HTPC` rule group and the apps' `HTPC block inbound` rules |
 | Certificates | the phone remote's certificates (`O=HTPC TV box`) in the machine's and the user's CA stores |
 | System | the sign-in screen's picture and blur, Windows' default wallpaper, Windows Search and SysMain on again; the computer name is kept (it says so) |
-| Files | the launcher and watchdog ended, `Program Files\HTPC` and `ProgramData\HTPC` removed (the logs copied first), `HKCU\Software\HTPC` and the launcher's unpack folder variable removed |
+| Files | the launcher and watchdog ended (and waited for), `Program Files\HTPC` and `ProgramData\HTPC` removed (the logs and setup copied to `Documents\HTPC logs` first), `HKCU\Software\HTPC` and the launcher's unpack folder variable removed |
 
 Kept: the apps, winget, the HEVC extension, the power settings, the privacy and no-pop-up
 settings, dark mode, Private networks, automatic time zone, the computer name, and
