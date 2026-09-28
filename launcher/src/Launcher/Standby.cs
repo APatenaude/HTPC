@@ -260,25 +260,38 @@ sealed class Standby
         }
     }
 
+    // Each Enter and Wake moves this on: an Enter still waiting (for the players, for the
+    // launcher to come forward) that finds it moved was overtaken by a wake, and stops there.
+    int turn;
+    // Changed(true) went out for this standby: a wake raises Changed(false) only then (woken
+    // while the players were being paused, nobody had heard of the standby).
+    bool announced;
+
     public async void Enter(string reason)
     {
         if (Active) return;
+        var mine = ++turn;
         Log.Info($"Standby ({reason})");
         Active = true;
         controller.Slow = true;
         controller.WakeMode = true;
-        await media.PauseAllAsync();
-        if (!Active) return; // woken while pausing: nothing more to do
+        // A frozen player may never answer (each call has 2 s: MediaWatcher): 5 s in all, then
+        // on without it. The display goes off whatever the players did.
+        try { await media.PauseAllAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch (Exception e) { Log.Warn($"Standby: the players were not all paused ({e.Message}); going on"); }
+        if (mine != turn) return; // woken while pausing: nothing more to do
         // And whatever starts playing meanwhile (an autoplay countdown running out).
         media.Want("standby", true);
         // The launcher goes in front first: bringing a window forward can inject a key press,
         // which would turn the display straight back on. Then the video output goes off
         // (the TV sees no signal), and again a moment later in case something woke it.
-        Changed?.Invoke(true);
+        announced = true;
+        try { Changed?.Invoke(true); }
+        catch (Exception e) { Log.Error("Standby: entering", e); }
         await Task.Delay(300);
-        if (!Active) return;
+        if (mine != turn) return;
         display.Off();
-        _ = Task.Delay(3000).ContinueWith(_ => { if (Active) display.Off(); });
+        _ = Task.Delay(3000).ContinueWith(_ => { if (mine == Volatile.Read(ref turn)) display.Off(); }, TaskScheduler.Default);
 
         // No XInput power-off here: the 8BitDo ignores it (it switches itself off after 15 idle
         // minutes) and it was a suspect in missed wake presses.
@@ -335,11 +348,23 @@ sealed class Standby
         return (s3, s4);
     }
 
+    /// <summary>
+    /// A Modern Standby PC (S0 low-power idle, "AoAc"): no S3 (Capabilities says so), and Windows
+    /// may take it into its own standby while the display is off. Asked, never assumed: the
+    /// boxes vary. Sleep there is this class's standby; a resume (MainForm) wakes from it.
+    /// </summary>
+    public static bool ModernStandby()
+    {
+        var caps = new byte[128];
+        return GetPwrCapabilities(caps) && caps[20] != 0;
+    }
+
     [DllImport("powrprof.dll")] static extern bool GetPwrCapabilities(byte[] capabilities);
 
     public void Wake(string reason)
     {
         if (!Active) return;
+        turn++; // an Enter still waiting stops there
         Log.Info($"Wake ({reason})");
         var clock = System.Diagnostics.Stopwatch.StartNew();
         countFrom = Environment.TickCount64; // woken by the TV's own remote, say: no input of ours to count from
@@ -350,7 +375,11 @@ sealed class Standby
         display.On();
         NudgeMouse();
         var screenMs = clock.ElapsedMilliseconds;
-        Changed?.Invoke(false);
+        if (announced)
+        {
+            announced = false;
+            Changed?.Invoke(false);
+        }
         Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
         _ = WifiBack("wake"); // after the screen: nothing of the wake waits for it
     }

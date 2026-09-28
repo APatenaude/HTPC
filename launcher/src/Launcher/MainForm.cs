@@ -44,6 +44,14 @@ sealed partial class MainForm : Form
 
     bool uiReady;
     int brightness = 100;      // as the UI and phones show it; kept in settings (MainForm.Settings.cs)
+    Task? idleCheck, tvPoll;   // the clock's 5 s work, while it runs
+
+    // Work left to run on its own: a failure is logged, as the clock's awaits once had it.
+    static async Task Logged(Task work, string what)
+    {
+        try { await work; }
+        catch (Exception e) { Log.Error(what, e); }
+    }
 
     public MainForm(Options options)
     {
@@ -84,18 +92,23 @@ sealed partial class MainForm : Form
             PushState();
         });
         tv = CreateTv(); // MainForm.Tv.cs
-        clock.Tick += async (_, _) =>
+        clock.Tick += (_, _) =>
         {
             CheckSleepTimer();
             KeepFilled();
             // Every 5 s: the idle check (not during setup), and the TV's power state (its own remote).
+            // Neither waits for the other (a frozen player held the TV's poll up), and one still
+            // running is not started again on top of itself.
             if (++ticks % 5 != 0) return;
-            if (!setupMode) await standby.Tick();
-            await tv.Poll();
+            if (!setupMode && idleCheck is not { IsCompleted: false }) idleCheck = Logged(standby.Tick(), "Idle check");
+            if (tvPoll is not { IsCompleted: false }) tvPoll = Logged(tv.Poll(), "TV poll");
         };
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUi(OnResumed);
+            // A Modern Standby PC may go into Windows' own standby from ours (the display off):
+            // the log says so, since the controller cannot wake it from there (a key or the power button can).
+            else if (e.Mode == Microsoft.Win32.PowerModes.Suspend) Log.Info($"Windows is suspending{(standby is { Active: true } ? " (from standby)" : "")}");
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         revealTimer.Tick += (_, _) => RevealPending("400 ms");
@@ -130,7 +143,7 @@ sealed partial class MainForm : Form
         };
         AlertsLoaded(); // MainForm.Alerts.cs
         var (hasS3, hasS4) = Standby.Capabilities();
-        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
+        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}, Modern Standby {Standby.ModernStandby()}");
         controller.Start();
         clock.Start();
         mouseWatch.Start();
@@ -950,7 +963,9 @@ sealed partial class MainForm : Form
         else
         {
             apps.SetEfficiencyMode(false);
-            if (appBeforeStandby is not null && apps.IsRunning(appBeforeStandby)) SwitchTo(appBeforeStandby);
+            var back = appBeforeStandby;
+            appBeforeStandby = null; // used once: a later wake must not go back to it
+            if (back is not null && apps.IsRunning(back)) SwitchTo(back);
             else { Post(new { type = "show", view = "home" }); Reveal(); }
         }
     }

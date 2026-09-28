@@ -1,3 +1,4 @@
+using Windows.Foundation;
 using Windows.Media.Control;
 
 namespace Htpc.Launcher;
@@ -59,9 +60,15 @@ sealed class LiveGuess
 /// "when this video ends" (SPEC N14), the idle check, standby (pause everything) and the
 /// phone's Playing tab. Sessions are read once a second, only while someone needs them
 /// (Want); a read is a cross-process call into every player.
+///
+/// Every asynchronous call has 2 s (Timed): a frozen player never answers, and standby, the idle
+/// check and the phone go on without it.
 /// </summary>
 sealed class MediaWatcher
 {
+    /// <summary>How long one call into the media service (and through it into a player) may take.</summary>
+    public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(2);
+
     GlobalSystemMediaTransportControlsSessionManager? manager;
     readonly HashSet<string> wants = new();
     Task? loop;
@@ -104,17 +111,18 @@ sealed class MediaWatcher
             {
                 if (wants.Count == 0) { sessions = Array.Empty<MediaInfo>(); loop = null; return; }
             }
+            // Once a second for the timer and the phone; in standby alone every 3 s is enough
+            // (an autoplay countdown plays a few seconds at most) and wakes the box less, and
+            // only the playback status is read there (not the titles: nobody shows them).
+            bool standbyOnly;
+            lock (wants) standbyOnly = wants.Count == 1 && wants.Contains("standby");
             try
             {
-                sessions = await ReadAsync();
+                sessions = await ReadAsync(properties: !standbyOnly);
                 if (Wanted("standby") && sessions.Any(s => s.Status == MediaStatus.Playing)) await PausePlayingAsync();
                 Updated?.Invoke();
             }
             catch (Exception e) { Log.Warn($"Reading media sessions: {e.Message}"); }
-            // Once a second for the timer and the phone; in standby alone every 3 s is enough
-            // (an autoplay countdown plays a few seconds at most) and wakes the box less.
-            bool standbyOnly;
-            lock (wants) standbyOnly = wants.Count == 1 && wants.Contains("standby");
             await Task.Delay(standbyOnly ? 3000 : 1000);
         }
     }
@@ -122,12 +130,41 @@ sealed class MediaWatcher
     async Task<GlobalSystemMediaTransportControlsSessionManager?> Manager()
     {
         if (manager is not null) return manager;
-        try { return manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync(); }
+        try { return manager = await Timed(GlobalSystemMediaTransportControlsSessionManager.RequestAsync(), "the media sessions"); }
         catch (Exception e) { Log.Warn($"Media sessions unavailable: {e.Message}"); return null; }
     }
 
-    /// <summary>Reads every session now.</summary>
-    public async Task<IReadOnlyList<MediaInfo>> ReadAsync()
+    // A frozen player is asked again every second or three: once a minute in the log is enough.
+    long quietUntil;
+    void WarnSometimes(string message)
+    {
+        var now = Environment.TickCount64;
+        if (now < Interlocked.Read(ref quietUntil)) return;
+        Interlocked.Exchange(ref quietUntil, now + 60_000);
+        Log.Warn(message);
+    }
+
+    /// <summary>
+    /// A WinRT call, waited for CallTimeout at most: then it is cancelled (if the other side
+    /// listens) and left behind, and a TimeoutException says who did not answer.
+    /// </summary>
+    internal static async Task<T> Timed<T>(IAsyncOperation<T> operation, string what)
+    {
+        var task = operation.AsTask();
+        try { return await task.WaitAsync(CallTimeout); }
+        catch (TimeoutException)
+        {
+            try { operation.Cancel(); } catch (Exception) { }
+            _ = task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted); // observed, whatever it ends with
+            throw new TimeoutException($"{what}: no answer within {CallTimeout.TotalSeconds:0} s");
+        }
+    }
+
+    /// <summary>
+    /// Reads every session now. Without properties: the status, timeline and controls only (no
+    /// title or artist, which is a call into the player itself).
+    /// </summary>
+    public async Task<IReadOnlyList<MediaInfo>> ReadAsync(bool properties = true)
     {
         var m = await Manager();
         if (m is null) return Array.Empty<MediaInfo>();
@@ -138,25 +175,29 @@ sealed class MediaWatcher
         var list = new List<MediaInfo>();
         foreach (var s in all)
         {
-            try { list.Add(await Describe(s, s.SourceAppUserModelId == current)); }
+            try { list.Add(await Describe(s, s.SourceAppUserModelId == current, properties)); }
             catch (Exception e) { Log.Warn($"Media session {s.SourceAppUserModelId}: {e.Message}"); }
         }
         return list;
     }
 
-    async Task<MediaInfo> Describe(GlobalSystemMediaTransportControlsSession s, bool isCurrent)
+    async Task<MediaInfo> Describe(GlobalSystemMediaTransportControlsSession s, bool isCurrent, bool properties)
     {
         var now = DateTime.Now;
         var playback = s.GetPlaybackInfo();
         var status = (MediaStatus)(int)playback.PlaybackStatus;
         string? title = null, artist = null;
-        try
+        if (properties)
         {
-            var props = await s.TryGetMediaPropertiesAsync();
-            title = string.IsNullOrWhiteSpace(props.Title) ? null : props.Title;
-            artist = string.IsNullOrWhiteSpace(props.Artist) ? null : props.Artist;
+            try
+            {
+                var props = await Timed(s.TryGetMediaPropertiesAsync(), $"media session {s.SourceAppUserModelId}");
+                title = string.IsNullOrWhiteSpace(props.Title) ? null : props.Title;
+                artist = string.IsNullOrWhiteSpace(props.Artist) ? null : props.Artist;
+            }
+            catch (TimeoutException e) { WarnSometimes(e.Message); }
+            catch (Exception) { } // some players have no properties between items
         }
-        catch (Exception) { } // some players have no properties between items
 
         // The timeline: many web players report none (EndTime 0). The position is as of
         // LastUpdatedTime; move it on to now while playing.
@@ -179,11 +220,21 @@ sealed class MediaWatcher
             controls.IsPlayEnabled, controls.IsPauseEnabled, controls.IsNextEnabled, controls.IsPreviousEnabled, controls.IsPlaybackPositionEnabled);
     }
 
-    /// <summary>Any app reporting playback through Windows' media controls (the idle check).</summary>
+    /// <summary>Any app reporting playback through Windows' media controls (the idle check): the status only.</summary>
     public async Task<bool> IsPlayingAsync()
     {
-        try { return (await ReadAsync()).Any(s => s.Status == MediaStatus.Playing); }
-        catch (Exception e) { Log.Warn($"Media sessions: {e.Message}"); return false; }
+        try
+        {
+            var m = await Manager();
+            if (m is null) return false;
+            foreach (var s in m.GetSessions())
+            {
+                try { if (s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) return true; }
+                catch (Exception) { } // gone meanwhile
+            }
+            return false;
+        }
+        catch (Exception e) { manager = null; Log.Warn($"Media sessions: {e.Message}"); return false; }
     }
 
     /// <summary>Pauses everything that plays (standby). Never throws.</summary>
@@ -202,7 +253,7 @@ sealed class MediaWatcher
                 try
                 {
                     if (s.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
-                    var ok = await s.TryPauseAsync();
+                    var ok = await Timed(s.TryPauseAsync(), $"pausing {s.SourceAppUserModelId}");
                     Log.Info($"Media pause to {s.SourceAppUserModelId}: {(ok ? "done" : "refused")}");
                 }
                 catch (Exception e) { Log.Warn($"Pausing {s.SourceAppUserModelId}: {e.Message}"); }
@@ -224,17 +275,18 @@ sealed class MediaWatcher
         if (s is null) return false;
         try
         {
-            var ok = command switch
+            var operation = command switch
             {
-                "play" => await s.TryPlayAsync(),
-                "pause" => await s.TryPauseAsync(),
-                "playPause" => await s.TryTogglePlayPauseAsync(),
-                "next" => await s.TrySkipNextAsync(),
-                "previous" => await s.TrySkipPreviousAsync(),
-                "stop" => await s.TryStopAsync(),
-                "seek" => await s.TryChangePlaybackPositionAsync(s.GetTimelineProperties().StartTime.Ticks + (long)(seconds * TimeSpan.TicksPerSecond)),
-                _ => false,
+                "play" => s.TryPlayAsync(),
+                "pause" => s.TryPauseAsync(),
+                "playPause" => s.TryTogglePlayPauseAsync(),
+                "next" => s.TrySkipNextAsync(),
+                "previous" => s.TrySkipPreviousAsync(),
+                "stop" => s.TryStopAsync(),
+                "seek" => s.TryChangePlaybackPositionAsync(s.GetTimelineProperties().StartTime.Ticks + (long)(seconds * TimeSpan.TicksPerSecond)),
+                _ => null,
             };
+            var ok = operation is not null && await Timed(operation, $"media {command} to {source}");
             Log.Info($"Media {command} to {source}: {(ok ? "done" : "refused")}");
             return ok;
         }
@@ -267,12 +319,12 @@ sealed class MediaWatcher
         if (s is null) return null;
         try
         {
-            var props = await s.TryGetMediaPropertiesAsync();
+            var props = await Timed(s.TryGetMediaPropertiesAsync(), $"media session {source}");
             if (props.Thumbnail is null) return null;
-            using var stream = await props.Thumbnail.OpenReadAsync();
+            using var stream = await Timed(props.Thumbnail.OpenReadAsync(), $"thumbnail of {source}");
             using var read = stream.AsStreamForRead();
             using var copy = new MemoryStream();
-            await read.CopyToAsync(copy);
+            await read.CopyToAsync(copy).WaitAsync(CallTimeout);
             return (copy.ToArray(), string.IsNullOrEmpty(stream.ContentType) ? "image/png" : stream.ContentType);
         }
         catch (Exception e) { Log.Warn($"Thumbnail of {source}: {e.Message}"); return null; }

@@ -397,6 +397,20 @@ Console.WriteLine("== VideoEndDetector");
     Check(ad.All(l => !l), "an ad then the video (15 s, then 600 s, a length settling by a second): not live");
 }
 
+// ---------------------------------------------------------------- Media calls, a frozen player
+// Standby's pause, the idle check and the phone must go on without a player that never answers.
+Console.WriteLine("== Media calls: a player that never answers");
+{
+    var never = new TaskCompletionSource<bool>().Task.AsAsyncOperation();
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    string? error = null;
+    try { MediaWatcher.Timed(never, "a frozen player").GetAwaiter().GetResult(); }
+    catch (TimeoutException e) { error = e.Message; }
+    Check(error?.Contains("a frozen player") == true, $"no answer: a TimeoutException that names the call ({error})");
+    Check(clock.Elapsed < MediaWatcher.CallTimeout + TimeSpan.FromSeconds(2), $"given up after the timeout, not later ({clock.ElapsedMilliseconds} ms)");
+    Check(MediaWatcher.Timed(Task.FromResult(true).AsAsyncOperation(), "a player").GetAwaiter().GetResult(), "an answer comes through");
+}
+
 // ---------------------------------------------------------------- SleepTimer
 Console.WriteLine("== SleepTimer");
 {
