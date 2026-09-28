@@ -420,7 +420,7 @@ function renderConfirm() {
 // the view it was opened from, which stays visible under it; over another overlay (a question
 // over the TV method dialog over Settings), the whole chain down to the first full view does.
 function underViews() {
-  const isOver = (v) => v === 'confirm' || v === 'power' || v === 'timer' || v === 'menu' || !!(EXT.views[v] && EXT.views[v].overlay);
+  const isOver = (v) => v === 'confirm' || !!(EXT.views[v] && EXT.views[v].overlay);
   const list = [];
   for (let v = state.view, i = state.stack.length - 1; isOver(v) && i >= 0; i--) { v = state.stack[i]; list.push(v); }
   return list;
@@ -434,8 +434,8 @@ function render() {
   renderTiles();
   for (const f of EXT.home) f();
   if (state.view === 'menu' || unders.includes('menu')) renderMenu();
-  if (state.view === 'power' || unders.includes('power')) renderPower();
-  if (state.view === 'timer' || unders.includes('timer')) renderTimer();
+  if (state.view === 'power') renderPower();
+  if (state.view === 'timer') renderTimer();
   if (state.view === 'confirm') renderConfirm();
   if (state.view === 'settings' || unders.includes('settings')) renderSettings();
   for (const v of [state.view, ...unders]) if (EXT.views[v]) EXT.views[v].render();
@@ -706,9 +706,10 @@ function hostMessage(type, fn) { EXT.host[type] = fn; }
 
 // shown / left for the Settings section in view (none while Settings is not).
 let sectionInView = null;
-function sectionHooks() {
-  // The TV method dialog over Settings is still the TV section (its list keeps refreshing).
-  const now = state.view === 'settings' || state.view === 'tvmethod' ? state.section : null;
+function sectionHooks(unders) {
+  // A dialog or a question over Settings (the TV method dialog, "Forget this TV?") leaves the
+  // section in view: its list keeps refreshing, and nothing stops and starts again under it.
+  const now = state.view === 'settings' || unders.includes('settings') ? state.section : null;
   if (now === sectionInView) return;
   const was = EXT.sections[sectionInView];
   sectionInView = now;
