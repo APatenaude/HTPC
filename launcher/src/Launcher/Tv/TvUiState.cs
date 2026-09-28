@@ -15,8 +15,7 @@ static class TvDrivers
 
 /// <summary>
 /// What setup and Settings › TV show (the "tv.state" message): the screen, its profile, the TVs
-/// found, the methods on offer and what the profile's method can do. Beta methods are offered
-/// only when a TV of theirs was found on the network.
+/// found, the methods on offer (every brand; beta ones marked) and what the profile's method can do.
 /// </summary>
 static class TvUiState
 {
@@ -88,7 +87,9 @@ static class TvUiState
                 paired = tv.IsPaired(t),
                 twin = tv.HasTwin(t),
             }),
-            methods = tv.Drivers.Where(d => !d.Info.Beta || tv.Found.Any(t => t.Method == d.Info.Id)).Select(d => new
+            // Every brand, the beta ones marked (the user, 27 Sept 2026: hidden until one of their
+            // TVs was found, the list looked like Roku was the only brand supported).
+            methods = tv.Drivers.Select(d => new
             {
                 d.Info.Id,
                 d.Info.Label,

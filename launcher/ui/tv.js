@@ -58,7 +58,7 @@ const TvUi = {
         (t.picked ? `<span class="tv-pickmark">${icon('check', 36, 2.5)}</span>` : '') + '</div>').join('');
   },
 
-  /** The brands on offer (beta ones only when one of theirs was found) and "No TV control". */
+  /** Every brand (the beta ones marked; one whose TV was found says Detected) and "No TV control". */
   methodRows(tv, rowClass, hint) {
     const methods = (tv.methods || []).map((m) =>
       `<div class="${rowClass}${hint === m.id ? ' picked' : ''}" data-nav data-id="tvbrand:${m.id}" data-act="tv-brand" data-arg="${m.id}">${icon('wifi', 34)}` +
