@@ -692,6 +692,8 @@ sealed class AdminNeededForm : Form
     readonly ControllerService controller = new();
     readonly Label note;
     long quietUntil;                   // presses made while the prompt was up arrive once it is gone
+    readonly System.Windows.Forms.Timer front = new() { Interval = 250 };
+    long frontUntil;                   // until then, taken back to the front whenever it is not
 
     /// <summary>The elevated copy runs: this one only ends.</summary>
     public bool HandedOver { get; private set; }
@@ -766,17 +768,36 @@ sealed class AdminNeededForm : Form
         {
             if (!repeat && IsHandleCreated) BeginInvoke(() => OnPad(pad));
         };
+        front.Tick += (_, _) =>
+        {
+            if (Environment.TickCount64 >= frontUntil) { front.Stop(); return; }
+            if (Native.GetForegroundWindow() != Handle) Log.Info($"Setup screen: taken back to the front ({Native.ForceForeground(Handle)})");
+        };
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        Native.ForceForeground(Handle);
+        HoldFront();
         controller.Start();
+    }
+
+    /// <summary>
+    /// In front for the first seconds, not only once: the permission prompt closing (or the account
+    /// switch behind it) can hand the foreground back to the window that started setup after this
+    /// one took it, and Enter and Esc then reached nothing until Alt+Tab (seen in the test VM). The
+    /// controller is read directly: A and B worked all along.
+    /// </summary>
+    void HoldFront()
+    {
+        frontUntil = Environment.TickCount64 + 3000;
+        Log.Info($"Setup screen: in front ({Native.ForceForeground(Handle)})");
+        front.Start();
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        front.Dispose();
         controller.Dispose();
         base.OnFormClosed(e);
     }
@@ -798,5 +819,6 @@ sealed class AdminNeededForm : Form
         if (why is null) { HandedOver = true; Close(); return; }
         note.ForeColor = Warn;
         note.Text = why;
+        HoldFront();
     }
 }
