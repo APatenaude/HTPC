@@ -29,8 +29,8 @@
     it opens, and starts this script already elevated and outside any package: it runs the
     steps straight away (no prompt, no relaunch task).
 
-    Log: C:\ProgramData\HTPC\logs\setup-<time>.log; step results: setup-last.json; while it
-    runs, setup-progress.json (the setup exe shows it).
+    Log: C:\ProgramData\HTPC\logs\setup-<time>.log (the last 10 kept); step results:
+    setup-last.json; while it runs, setup-progress.json (the setup exe shows it).
 
 .PARAMETER Only
     Run just these steps, e.g. -Only Edge,Power
@@ -161,6 +161,11 @@ if ($unknown) { throw "Unknown step(s): $($unknown -join ', '). Steps: $($Steps.
 
 $logDir = Join-Path $HtpcData 'logs'
 New-Item -ItemType Directory -Force $logDir | Out-Null
+# Only the last 10 setup logs are kept (setup runs again for repairs, and the box runs for
+# years): the 9 newest stay, this run's makes 10. The names sort by time.
+Get-ChildItem -Path $logDir -Filter 'setup-*.log' -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^setup-\d{8}-\d{6}\.log$' } | Sort-Object Name -Descending |
+    Select-Object -Skip 9 | Remove-Item -Force -ErrorAction SilentlyContinue
 $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
 Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
