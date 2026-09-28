@@ -50,13 +50,14 @@
 .PARAMETER Keep
     Keep %TEMP%\htpc-updtest afterwards (to look at the journals).
 .PARAMETER Parallel
-    How many cases run side by side in Swap, Faults and Planting: twice the processors, 2 to 8.
-    1 runs them one at a time (the same checks, printed in the same order).
+    How many cases run side by side in Swap, Faults and Planting: one per processor, 2 to 8 (the cases'
+    waits are short, so more at once only adds timing risk). 1 runs them one at a time (the same
+    checks, printed in the same order).
 #>
 param(
     [string[]]$Only,
     [switch]$Keep,
-    [int]$Parallel = [Math]::Max(2, [Math]::Min(8, 2 * [Environment]::ProcessorCount))
+    [int]$Parallel = [Math]::Max(2, [Math]::Min(8, [Environment]::ProcessorCount))
 )
 
 $ErrorActionPreference = 'Stop'
