@@ -14,6 +14,6 @@
     <Src>..\..\src\Launcher\</Src>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(Src)ButtonMap.cs;$(Src)ButtonMapStore.cs;$(Src)PadMapper.cs;$(Src)MediaWatcher.cs;$(Src)SleepTimer.cs;$(Src)DecodeCheck.cs;$(Src)SetupRunner.cs;$(Src)Standby.cs;$(Src)ControllerService.cs;$(Src)SystemControls.cs;$(Src)AudioOutputs.cs;$(Src)SoundSwitch.cs;$(Src)Native.cs;$(Src)Tv\TvModel.cs;$(Src)AlertsForm.cs;$(Src)VolumeOsd.cs;$(Src)TileStore.cs;$(Src)PhonePointer.cs;$(Src)LogoSources.cs;$(Src)AppLogos.cs;$(Src)EdgeSiteApp.cs;$(Src)ScreenCapture.cs;$(Src)AutostartGuard.cs;$(Src)AppManager.cs;$(Src)Shell.cs;$(Src)AppExits.cs;$(Src)SetupElevation.cs;$(Src)TextFieldWatcher.cs" />
+    <Compile Include="$(Src)ButtonMap.cs;$(Src)ButtonMapStore.cs;$(Src)PadMapper.cs;$(Src)MediaWatcher.cs;$(Src)SleepTimer.cs;$(Src)DecodeCheck.cs;$(Src)SetupRunner.cs;$(Src)Standby.cs;$(Src)ControllerService.cs;$(Src)SystemControls.cs;$(Src)AudioOutputs.cs;$(Src)SoundSwitch.cs;$(Src)Native.cs;$(Src)Tv\TvModel.cs;$(Src)AlertsForm.cs;$(Src)VolumeOsd.cs;$(Src)TileStore.cs;$(Src)PhonePointer.cs;$(Src)LogoSources.cs;$(Src)AppLogos.cs;$(Src)EdgeSiteApp.cs;$(Src)ScreenCapture.cs;$(Src)AutostartGuard.cs;$(Src)AppManager.cs;$(Src)Shell.cs;$(Src)AppExits.cs;$(Src)SetupElevation.cs;$(Src)TextFieldWatcher.cs;$(Src)UpdateRules.cs" />
   </ItemGroup>
 </Project>

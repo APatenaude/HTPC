@@ -31,8 +31,12 @@ sealed class TonightPlan
 /// <summary>What the update checks found, kept across launcher restarts (%LOCALAPPDATA%\HTPC\updates.json).</summary>
 sealed class UpdatesSaved
 {
+    /// <summary>The last check that worked (what "Checked 2 h ago" says).</summary>
     public DateTime? LastCheckUtc { get; set; }
     public string? LastCheckError { get; set; }
+    /// <summary>The last try, and how many in a row failed (then tried again after an hour, a few times).</summary>
+    public DateTime? LastTryUtc { get; set; }
+    public int FailedChecks { get; set; }
     public LauncherRelease? Launcher { get; set; }
     public List<AppUpdateInfo> Apps { get; set; } = new();
     public TonightPlan? Tonight { get; set; }
@@ -62,15 +66,14 @@ sealed class UpdatesSaved
 /// </summary>
 sealed class UpdateService
 {
-    const string Repo = "APatenaude/HTPC";
+    const string Repo = UpdateRules.Repo;
     static readonly string HtpcData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
     static readonly string WindowsFile = Path.Combine(HtpcData, "state", "windows-updates.json");
     static readonly string JournalFile = Path.Combine(HtpcData, "state", "launcher-update.json");
-    static readonly string MachineProgressFile = Path.Combine(HtpcData, "state", "library-progress.json");
     static readonly string SavedFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "updates.json");
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
-    static readonly TimeSpan CheckEvery = TimeSpan.FromHours(20);
+    static readonly TimeSpan StandbySettles = TimeSpan.FromMinutes(2);
 
     readonly LibraryService lane;
     readonly IAlerts alerts;
@@ -80,7 +83,7 @@ sealed class UpdateService
     readonly object gate = new();
     readonly Dictionary<string, (string Status, string Message)> results = new();   // token -> last result
     readonly HashSet<string> batch = new();       // tokens of the running "Update all"
-    System.Threading.Timer? standbyCheck;
+    DateTime? standbySinceUtc;
     System.Threading.Timer? homeWatch;   // the launcher update is at "ready": looking for Home or standby
     bool leaveSaid;                      // TryLeave said yes: "Restarting..." shows, the job was told
     bool checking;
@@ -159,7 +162,10 @@ sealed class UpdateService
             lock (gate)
             {
                 checking = false;
-                saved.LastCheckUtc = DateTime.UtcNow;
+                // Only a check that worked counts as one: a failed one is tried again (CheckDue).
+                saved.LastTryUtc = DateTime.UtcNow;
+                if (error is null) { saved.LastCheckUtc = saved.LastTryUtc; saved.FailedChecks = 0; }
+                else saved.FailedChecks++;
                 saved.LastCheckError = error;
             }
             Save();
@@ -189,17 +195,9 @@ sealed class UpdateService
         if ((int)latest.StatusCode is 403 or 429) throw new InvalidOperationException(RateLimited(latest) ?? $"releases/latest answered {(int)latest.StatusCode}");
         if ((int)latest.StatusCode is not (301 or 302 or 303 or 307 or 308) || latest.Headers.Location is null)
             throw new InvalidOperationException($"releases/latest answered {(int)latest.StatusCode}");
-        var to = new Uri(new Uri($"https://github.com/{Repo}/releases/latest"), latest.Headers.Location);
-        var releases = $"/{Repo}/releases";
-        var prefix = $"{releases}/tag/";
-        if (to.Scheme != "https" || !to.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"releases/latest pointed away from github.com ({to.Host})");
-        if (to.AbsolutePath.TrimEnd('/').Equals(releases, StringComparison.OrdinalIgnoreCase)) return null;   // no release yet
-        // Anywhere else: the repository was renamed or moved. An error, not "no release".
-        if (!to.AbsolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"{Repo} seems to have moved (its releases/latest points to {to.AbsolutePath})");
-        var tag = Uri.UnescapeDataString(to.AbsolutePath[prefix.Length..]);
-        if (ParseSemVer(tag) is null) return null;   // not a v<major.minor.patch> release
+        // No release yet: null. A renamed or moved repository: an error, not "no release".
+        var tag = UpdateRules.LatestTag(new Uri(new Uri($"https://github.com/{Repo}/releases/latest"), latest.Headers.Location));
+        if (tag is null || ParseSemVer(tag) is null) return null;   // none, or not a v<major.minor.patch> release
 
         var text = await GetPinnedText(http, new Uri($"https://github.com/{Repo}/releases/download/{Uri.EscapeDataString(tag)}/update.json"));
         using var doc = JsonDocument.Parse(text);
@@ -211,28 +209,13 @@ sealed class UpdateService
         return new LauncherRelease(version, S("notes") ?? "", S("minimumFrom"));
     }
 
-    /// <summary>
-    /// Where a redirect may take a read that started at github.com/&lt;Repo&gt;/ (the same rules as
-    /// setup\lib\UpdateCore.ps1): HTTPS on 443 only; github.com again only under the repository's
-    /// own path (elsewhere it was renamed or moved: an error, not followed); or any host under
-    /// githubusercontent.com, where GitHub serves release files (TLS and the job's SHA-256 check
-    /// carry the integrity, not that host's exact name). Null when allowed, else why not.
-    /// </summary>
-    public static string? RefusedHop(Uri uri)
-    {
-        if (!uri.IsAbsoluteUri || uri.Scheme != "https" || uri.Port != 443 || uri.UserInfo.Length > 0) return $"Refused to read from {uri.Host}";
-        var host = uri.Host.ToLowerInvariant();
-        if (host == "github.com")
-            return uri.AbsolutePath.StartsWith($"/{Repo}/", StringComparison.OrdinalIgnoreCase) ? null : $"{Repo} seems to have moved (GitHub sent {uri.AbsolutePath})";
-        return host == "githubusercontent.com" || host.EndsWith(".githubusercontent.com") ? null : $"Refused to read from {uri.Host}";
-    }
-
-    // A small file, following redirects (RefusedHop) at most 5 times.
+    // A small file, following redirects (UpdateRules.RefusedHop: github.com under the repository,
+    // then *.githubusercontent.com) at most 5 times.
     static async Task<string> GetPinnedText(HttpClient http, Uri uri)
     {
         for (var hop = 0; hop <= 5; hop++)
         {
-            if (RefusedHop(uri) is { } refused) throw new InvalidOperationException(refused);
+            if (UpdateRules.RefusedHop(uri) is { } refused) throw new InvalidOperationException(refused);
             using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
             var code = (int)response.StatusCode;
             if (code is 301 or 302 or 303 or 307 or 308 && response.Headers.Location is { } location)
@@ -248,23 +231,15 @@ sealed class UpdateService
         throw new InvalidOperationException("Too many redirects");
     }
 
-    // GitHub's rate limit: 429, or a 403 that says so (X-RateLimit-Remaining: 0, or Retry-After).
-    // Any other 403 is a plain refusal. The message to show, or null when it is not a rate limit.
+    // GitHub's rate limit (UpdateRules.IsRateLimit): the message to show, or null when it is not one.
     static string? RateLimited(HttpResponseMessage r)
     {
-        var code = (int)r.StatusCode;
-        var limited = code == 429 || code == 403 && (r.Headers.RetryAfter is not null ||
-            r.Headers.TryGetValues("X-RateLimit-Remaining", out var left) && left.FirstOrDefault()?.Trim() == "0");
-        return limited ? "GitHub is limiting requests from this box; try again later" : null;
+        var remaining = r.Headers.TryGetValues("X-RateLimit-Remaining", out var left) ? left.FirstOrDefault() : null;
+        return UpdateRules.IsRateLimit((int)r.StatusCode, r.Headers.RetryAfter is not null, remaining)
+            ? "GitHub is limiting requests from this box; try again later" : null;
     }
 
-    /// <summary>"0.10.2" or "v0.10.2" as a number triple; null otherwise (no pre-releases: stable channel only).</summary>
-    public static Version? ParseSemVer(string? text)
-    {
-        if (text is null) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(text, @"^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})$");
-        return m.Success ? new Version(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value)) : null;
-    }
+    static Version? ParseSemVer(string? text) => UpdateRules.ParseSemVer(text);
 
     // setup\tools\Get-AppUpdates.ps1, as the user, at low priority, 5 minutes at most.
     async Task<List<AppUpdateInfo>> CheckAppsAsync()
@@ -557,24 +532,27 @@ sealed class UpdateService
 
     // --- Standby, the clock, the start -------------------------------------------------------------------
 
-    /// <summary>In standby: the daily check, two minutes in (the box has settled, nobody is watching).</summary>
-    public void OnStandbyChanged(bool active)
+    /// <summary>In standby: the daily check, two minutes in (the box has settled, nobody is watching); see OnMinute.</summary>
+    public void OnStandbyChanged(bool active) => standbySinceUtc = active ? DateTime.UtcNow : null;
+
+    // 20 hours after the last check that worked; an hour after one that failed, a few times (UpdateRules.CheckDue).
+    bool CheckDue()
     {
-        standbyCheck?.Dispose();
-        standbyCheck = null;
-        if (!active) return;
-        DateTime? last;
-        lock (gate) last = saved.LastCheckUtc;
-        if (last is not null && DateTime.UtcNow - last < CheckEvery) return;
-        standbyCheck = new System.Threading.Timer(_ =>
-        {
-            if (InStandby() && !lane.Busy) _ = CheckAsync(quiet: true);
-        }, null, TimeSpan.FromMinutes(2), Timeout.InfiniteTimeSpan);
+        lock (gate) return UpdateRules.CheckDue(DateTime.UtcNow, saved.LastCheckUtc, saved.LastTryUtc, saved.FailedChecks);
     }
 
-    /// <summary>Once a minute: "tonight" happens between 02:00 and 05:00, in standby, with the lane free.</summary>
+    /// <summary>
+    /// Once a minute: the quiet check when due and the box has been in standby for two minutes
+    /// with the lane free (so a failed one is tried again an hour on, even through the night);
+    /// "tonight" happens between 02:00 and 05:00, in standby, with the lane free.
+    /// </summary>
     public void OnMinute()
     {
+        bool busyChecking;
+        lock (gate) busyChecking = checking;
+        if (standbySinceUtc is { } since && DateTime.UtcNow - since >= StandbySettles && !busyChecking && !lane.Busy && CheckDue() && InStandby())
+            _ = CheckAsync(quiet: true);
+
         TonightPlan? plan;
         lock (gate) plan = saved.Tonight;
         if (plan is null || tonightRunning) return;
