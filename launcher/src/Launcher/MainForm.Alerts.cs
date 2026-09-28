@@ -22,7 +22,7 @@ sealed partial class MainForm
     AlertPlace alertPlace = AlertPlace.Launcher;
     string? lastFrontApp;                          // the catalog app last seen in front, and when
     DateTime lastFrontSeen;
-    DateTime? idleWarnedAt;
+    long? idleWarnedAt;                            // tick count (the clock can jump)
     int alertTicks;
 
     /// <summary>What sources raise alerts through (the sleep timer, volume, updates, the phone).</summary>
@@ -147,7 +147,7 @@ sealed partial class MainForm
     {
         alertCenter.Tick();
         // Any button ends the idle warning at once (the idle check itself runs every 5 s).
-        if (idleWarnedAt is { } warned && controller.LastActivity > warned)
+        if (idleWarnedAt is { } warned && standby.LastUseTick() > warned)
         {
             idleWarnedAt = null;
             alertCenter.Clear("idle");
@@ -160,7 +160,7 @@ sealed partial class MainForm
     void OnIdleWarning(bool on)
     {
         if (!on) { idleWarnedAt = null; alertCenter.Clear("idle"); return; }
-        idleWarnedAt = DateTime.Now;
+        idleWarnedAt = Environment.TickCount64;
         alertCenter.Raise(new AlertSpec
         {
             Id = "idle", Title = "Going to sleep in 1 minute", Body = "Press any button to stay awake.",

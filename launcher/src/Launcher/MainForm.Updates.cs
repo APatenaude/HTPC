@@ -211,32 +211,14 @@ sealed partial class MainForm
         });
     }
 
+    // The WebViews closed and opened again on a new browser process (MainForm.Shell.cs
+    // RecreateWebViews): it waits for the old browser to end, tries again, and else exits for
+    // the watchdog, so a failure never leaves an empty window (a black TV the watchdog thinks fine).
     async Task RefreshWebViewsSoon()
     {
         await Task.Delay(TimeSpan.FromSeconds(10));   // standby settles (display off, apps paused) first
         if (!standby.Active || refreshingWebViews || !webViewUpdatePending) return;
-        refreshingWebViews = true;
-        try
-        {
-            var env = web.CoreWebView2?.Environment;
-            var gone = new TaskCompletionSource();
-            if (env is not null) env.BrowserProcessExited += (_, _) => gone.TrySetResult();
-            Log.Info("Closing the WebViews for the new WebView2 runtime");
-            uiReady = false;
-            keyboard.ReleaseWebView();
-            Controls.Remove(web);
-            web.Dispose();
-            web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
-            Controls.Add(web);
-            // Every WebView of the environment closed: its browser processes end, then the new
-            // environment can start on the newer runtime.
-            if (env is not null && await Task.WhenAny(gone.Task, Task.Delay(TimeSpan.FromSeconds(30))) != gone.Task)
-                Log.Warn("WebView2 processes did not end within 30 s; starting again anyway");
-            webViewUpdatePending = false;
-            await InitWebView();
-            Log.Info($"WebViews back on WebView2 {web.CoreWebView2?.Environment.BrowserVersionString}");
-        }
-        catch (Exception e) { Log.Error("Moving to the new WebView2 runtime", e); }
-        finally { refreshingWebViews = false; }
+        webViewUpdatePending = false;
+        await RecreateWebViews("a runtime update");
     }
 }

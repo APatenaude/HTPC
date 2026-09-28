@@ -23,7 +23,8 @@ function askPhoneInfo(force) {
   phoneInfoAsked = Date.now();
   send({ type: 'phone.info' });
 }
-setInterval(() => { if (state.view === 'settings' && state.section === 'phone') askPhoneInfo(false); }, 15000);
+// Only while it is on screen (app.js sectionInView): not behind an app, nor all night in standby.
+setInterval(() => { if (sectionInView === 'phone') askPhoneInfo(false); }, 15000);
 
 function phoneDate(ms) {
   const days = Math.floor((Date.now() - ms) / 86400000);

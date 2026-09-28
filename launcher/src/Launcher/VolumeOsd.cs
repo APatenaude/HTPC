@@ -94,6 +94,9 @@ sealed class VolumeOsd : Form
         if (on) Clear();
     }
 
+    /// <summary>The primary screen changed (MainForm.Screen.cs): a card on the old one goes (the next change paints on the new one).</summary>
+    public void ScreenChanged() => Clear();
+
     void Clear()
     {
         hideSoon.Stop();
