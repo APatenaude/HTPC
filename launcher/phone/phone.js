@@ -786,6 +786,13 @@ async function submitCode() {
   if (res.data.error === 'expired' || res.data.error === 'locked') { $('pair-form').hidden = true; $('pair-start').hidden = false; }
 }
 $('pair-form').addEventListener('submit', (e) => { e.preventDefault(); submitCode(); });
+// "Show a code" tapped by mistake: the code leaves the TV now, not in 2 minutes.
+$('pair-cancel').addEventListener('click', async () => {
+  await post('/api/pair/cancel', {});
+  $('pair-form').hidden = true;
+  $('pair-start').hidden = false;
+  $('pair-error').textContent = '';
+});
 $('pair-code').addEventListener('input', () => { if ($('pair-code').value.replace(/\D/g, '').length === 4) submitCode(); });
 
 // ---- Send to TV from other apps ---------------------------------------------------------------------------
