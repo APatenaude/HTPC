@@ -792,7 +792,10 @@ $('pair-code').addEventListener('input', () => { if ($('pair-code').value.replac
 
 // Android's Share target (/share?url=...&text=...): the link in what was shared, if any.
 function sharedLink() {
-  for (const name of ['url', 'text', 'title']) {
+  // The box's redirect puts the link it found in url=, as it is (bare domains, a ")" at the end).
+  const given = (params.get('url') || '').trim();
+  if (given) return given.slice(0, 2048);
+  for (const name of ['text', 'title']) {
     const m = /https?:\/\/[^\s<>"]+/i.exec(params.get(name) || '');
     if (m) return m[0].replace(/[.,;:!?)\]'"]+$/, '');
   }
