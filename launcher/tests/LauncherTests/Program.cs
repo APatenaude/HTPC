@@ -678,6 +678,8 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     var browser = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "edge").GetProperty("launch");
     Check(site.Contains(EdgeSiteApp.DarkPages) && AppManagerArgs(browser).Contains(EdgeSiteApp.DarkPages),
         "website tiles and the Browser: light pages drawn dark by Edge itself (no Dark Reader)");
+    Check(site.Contains(EdgeSiteApp.DiskCache) && AppManagerArgs(browser).Contains(EdgeSiteApp.DiskCache),
+        "website tiles and the Browser: each profile's cache capped (small disks)");
     // The Browser (the user, 27 Sept 2026: "Edge still says press Esc to exit full screen"): a
     // plain maximized window, its tabs and address bar showing, no full-screen bubble.
     var browserArgs = AppManagerArgs(browser);

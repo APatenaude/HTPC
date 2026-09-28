@@ -484,6 +484,53 @@ sealed class AppManager
     }
 
     /// <summary>
+    /// A website the user added is being removed: its Edge profile folder goes with it (the site's
+    /// sign-in, cookies and cache, hundreds of MB once used), or folders of removed sites would
+    /// pile up on a small disk. Closed first if it runs (Edge holds the folder), then deleted on a
+    /// pool thread, tried again for a few seconds while Edge lets go of its files. A catalog
+    /// site keeps its folder: added back from the library, it is still signed in. Call it before
+    /// the tile leaves the app list.
+    /// </summary>
+    public void DeleteProfile(string id)
+    {
+        if (Get(id) is not { Custom: true, IsWebsite: true } || !TileStore.IsWebsiteId(id)) return;
+        Process? p;
+        lock (running)
+        {
+            if (running.TryGetValue(id, out p)) closing.TryAdd(id, "its tile was removed");
+        }
+        var folder = Path.Combine(EdgeProfiles, id);
+        Task.Run(async () =>
+        {
+            try
+            {
+                if (p is { HasExited: false })
+                {
+                    p.CloseMainWindow();
+                    if (!p.WaitForExit(4000)) p.Kill(entireProcessTree: true);
+                    p.WaitForExit(4000);
+                }
+            }
+            catch (Exception e) { Log.Warn($"Closing {id} before removing its profile: {e.Message}"); }
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    if (!Directory.Exists(folder)) return;
+                    Directory.Delete(folder, recursive: true);
+                    Log.Info($"Removed the Edge profile of {id} (its sign-in)");
+                    return;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    if (attempt == 5) { Log.Warn($"The Edge profile of {id} was not removed ({folder}): {e.Message}"); return; }
+                    await Task.Delay(2000);
+                }
+            }
+        });
+    }
+
+    /// <summary>
     /// Opens the app on a page (the phone's "play a link"): a website tile on that page, any
     /// other app with the link after "--" (Edge opens it in a new tab; VacuumTube reads it as
     /// its start-up deep link). Arguments go one by one (ArgumentList), and after "--" nothing

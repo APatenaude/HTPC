@@ -381,7 +381,7 @@ sealed partial class MainForm : Form
     object TileList() => apps.Tiles.Select(t => new
     {
         id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, logo = LogoFor(t), logoUrl = logos.Url(t.Id),
-        running = apps.IsRunning(t.Id), custom = t.Custom
+        running = apps.IsRunning(t.Id), custom = t.Custom, website = t.IsWebsite
     }).ToList();
 
     object StateObject() => new

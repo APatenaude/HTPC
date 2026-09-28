@@ -193,7 +193,9 @@ sealed partial class MainForm
         EnsureTiles();
         settings.Tiles!.RemoveAll(t => t == id);
         // A custom tile's details would be lost, so it is dropped from the store too (the user is
-        // asked first in the UI). Its Edge profile folder (website sign-in) is left on disk.
+        // asked first in the UI, told that a website's sign-in goes too): an added website's Edge
+        // profile folder is deleted, while it is still in the app list.
+        apps.DeleteProfile(id);
         settings.CustomTiles.RemoveAll(c => c.Id == id);
         settings.TileEdits.Remove(id);
         ApplyTiles();
