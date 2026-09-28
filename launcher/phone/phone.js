@@ -86,7 +86,7 @@ const vibrate = (ms = 8) => { try { if (navigator.vibrate) navigator.vibrate(ms)
 
 // ---- Connection -----------------------------------------------------------------------------------
 
-let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0, failures = 0;
+let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0, failures = 0, lastHeard = 0, hiddenAt = 0;
 const sentLog = [];   // demo and self-test: what would have gone to the box
 
 // False when it could not go (no connection yet): what the user asked for must not claim success.
@@ -107,26 +107,48 @@ function connect() {
   socket.onopen = () => {
     retryMs = 500;
     failures = 0;
+    lastHeard = Date.now();
     $('lost').hidden = true;
     clearInterval(pingTimer);
-    pingTimer = setInterval(() => send({ t: 'ping' }), 5000); // the box drops a phone silent for 15 s
+    // The box drops a phone silent for 15 s, and answers each ping: 12 s without a word from it,
+    // and the connection is dead (Wi-Fi gone, the box asleep): start again.
+    pingTimer = setInterval(() => {
+      if (Date.now() - lastHeard > 12000) { lostSocket(socket); return; }
+      send({ t: 'ping' });
+    }, 4000);
   };
   socket.onmessage = (e) => {
+    lastHeard = Date.now();
     let m;
     try { m = JSON.parse(e.data); } catch (err) { return; }
     onBox(m);
   };
-  socket.onclose = () => {
-    if (ws !== socket) return;
-    clearInterval(pingTimer);
-    ws = null;
-    if (state.conn === 'pairing') return; // connects again once paired
-    setConn('connecting');
-    // About 10 s without the box: say so (it may be off, or have a new address: the QR code again).
-    if (++failures >= 4) $('lost').hidden = false;
-    reconnectTimer = setTimeout(connect, retryMs);
-    retryMs = Math.min(retryMs * 2, 5000);
-  };
+  socket.onclose = () => lostSocket(socket);
+}
+
+// The socket closed or went silent: try again (backing off), and after about 10 s say so.
+function lostSocket(socket) {
+  if (ws !== socket) return;
+  clearInterval(pingTimer);
+  ws = null;
+  try { socket.close(); } catch (e) { /* already closing */ }
+  if (state.conn === 'pairing') return; // connects again once paired
+  setConn('connecting');
+  if (++failures >= 4) showLost();
+  reconnectTimer = setTimeout(connect, retryMs);
+  retryMs = Math.min(retryMs * 2, 5000);
+}
+
+// "Can't reach the TV box", with what wakes it where it can sleep for real (Sleep, Hibernate).
+function showLost(asleep) {
+  const b = state.box;
+  const deep = b.sleepMode === 'sleep' || b.sleepMode === 'hibernate' || b.deepSleepHours > 0;
+  $('lost-title').textContent = asleep ? 'The TV box went to sleep' : 'Can’t reach the TV box';
+  $('lost-text').textContent = asleep ? 'Only its power button wakes it now (not this phone, not the controller).'
+    : 'Is it on, and this phone on the same Wi-Fi?' + (deep ? ' If it went to sleep, press its power button.' : '') +
+      ' If the TV box has a new address on your network, scan the code in Settings › Phone remote on the TV again.';
+  $('main').scrollTop = 0;
+  $('lost').hidden = false;
 }
 
 // Back from the background (iPhone suspends the page): connect at once. Only once boot() has
@@ -134,7 +156,13 @@ function connect() {
 // pairing screen, paired but never told); pageshow only when the page comes back from the cache.
 // From the pairing screen, coming back tries once more (a pairing may have finished meanwhile).
 let booted = false;
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !demo && booted) connect(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (demo || !booted) return;
+  // Hidden over 15 s: the box has dropped this phone, though the socket may not know yet.
+  if (ws && hiddenAt && Date.now() - hiddenAt > 15000) { const old = ws; ws = null; clearInterval(pingTimer); try { old.close(); } catch (e) { /* gone */ } }
+  connect();
+});
 addEventListener('pageshow', (e) => { if (e.persisted && !demo && booted && state.conn !== 'pairing') connect(); });
 addEventListener('online', () => { if (!demo && booted && state.conn !== 'pairing') connect(); });
 
@@ -158,7 +186,10 @@ function onBox(m) {
     case 'state': applyState(m.state); break;
     case 'toast': toast(m.text, m.kind); break;
     case 'warn': showBanner(m.text, m.extend ? '+15 min' : null, () => send({ t: 'timerExtend' })); timerBanner = !!m.extend; break;
-    case 'bye': toast('This phone was removed on the TV', 'warn'); break;
+    case 'bye':
+      if (m.reason === 'sleep') showLost(true);
+      else toast('This phone was removed on the TV', 'warn');
+      break;
   }
 }
 
@@ -422,7 +453,12 @@ slider('volume', (v) => ({ t: 'volume', v }));
 // The power button: sleep (asked first) or, while asleep, wake.
 $('power').addEventListener('click', () => {
   if (state.box.standby) { send({ t: 'wake' }); return; }
-  openSheet('Sleep the TV box?', 'The TV turns off. Wake it from here, or hold Home on the controller.',
+  const b = state.box;
+  const text = b.sleepMode === 'sleep' || b.sleepMode === 'hibernate'
+    ? 'The TV and the box turn off. Only the box’s power button wakes it (not this phone, not the controller).'
+    : 'The TV turns off. Wake it from here, or hold Home on the controller.' +
+      (b.deepSleepHours > 0 ? ` After ${b.deepSleepHours} h asleep, only the box’s power button wakes it.` : '');
+  openSheet('Sleep the TV box?', text,
     [{ label: 'Sleep', primary: true, full: true, run: () => { if (!send({ t: 'sleep' })) notConnected(); } }]);
 });
 $('wake').addEventListener('click', () => send({ t: 'wake' }));
@@ -889,7 +925,8 @@ function runDemo(view) {
     box.media = { app: box.app, title: 'An extremely long episode title that goes on and on, to see where it wraps and where it stops on a small phone',
       subtitle: 'A show with a long name · Season 12 · Episode 345 · The director’s cut', playing: false, position: 5400, duration: 10800, art: 0, canSeek: true, canNext: true, canPrevious: true };
   }
-  if (view === 'connecting' || view === 'lost') state.conn = 'connecting';
+  if (view === 'connecting' || view === 'lost' || view === 'gone') state.conn = 'connecting';
+  if (params.get('mode')) box.sleepMode = params.get('mode'); // &mode=sleep: the Sleep sheet for Sleep/Hibernate
   if (view === 'link') $('linkbar-url').value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
   if (view === 'type') text.value = 'severance';
   if (view === 'asleep') box.standby = true;
@@ -912,7 +949,8 @@ function runDemo(view) {
     $('send-iphone').scrollIntoView();
   }
   if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
-  if (view === 'lost') $('lost').hidden = false;
+  if (view === 'lost') showLost(false);
+  if (view === 'gone') showLost(true); // the box said it goes to sleep (Sleep, Hibernate)
   // &kbd=300: as if iOS's keyboard covered the bottom 300 px (what visualViewport then reports).
   const kbd = Number(params.get('kbd'));
   if (kbd > 0) window.visualViewport = { height: innerHeight - kbd, offsetTop: 0 };
