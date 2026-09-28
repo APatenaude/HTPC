@@ -73,10 +73,14 @@ sealed partial class MainForm : Form
         };
         textFields.FocusChanged += (field, pid) => BeginInvoke(() => OnTextField(field, pid));
         controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
-        controller.StatusChanged += (connected, _) => BeginInvoke(() =>
+        var padConnected = false;
+        controller.StatusChanged += (connected, _) => OnUi(() =>
         {
             // A sleeping 8BitDo controller reconnects on the first press: that press wakes the box.
-            if (connected && standby.Active) standby.Wake("controller reconnected");
+            // Only a connection does, not a new battery level (a pad draining at night, a failed read).
+            var reconnected = connected && !padConnected;
+            padConnected = connected;
+            if (reconnected && standby is { Active: true }) standby.Wake("controller reconnected");
             PushState();
         });
         tv = CreateTv(); // MainForm.Tv.cs
