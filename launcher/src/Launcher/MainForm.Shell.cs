@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Web.WebView2.WinForms;
 
 namespace Htpc.Launcher;
 
@@ -126,9 +127,82 @@ sealed partial class MainForm
         }
     }
 
+    /// <summary>
+    /// Closes the WebViews (this window's and the keyboard's: one environment) and opens them
+    /// again on a new browser process: a newer WebView2 runtime (MainForm.Updates.cs), or the
+    /// GPU process lost (ProcessFailed: Chromium composites in software for the rest of its
+    /// browser's life). The new environment is made only once the old browser has ended: made
+    /// earlier it would join the old one. Three tries, a new control each (one that failed half
+    /// way keeps its environment), then the launcher exits for the watchdog: an empty window is
+    /// a black TV that still answers the watchdog.
+    /// </summary>
+    async Task RecreateWebViews(string why)
+    {
+        if (refreshingWebViews || exitingForRestart) return;
+        refreshingWebViews = true;
+        try
+        {
+            Log.Info($"Closing the WebViews ({why})");
+            var env = web.CoreWebView2?.Environment;
+            var gone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (env is not null) env.BrowserProcessExited += (_, _) => gone.TrySetResult();
+            uiReady = false;
+            ReplaceWebViews();
+            if (env is not null && await Task.WhenAny(gone.Task, Task.Delay(TimeSpan.FromSeconds(30))) != gone.Task)
+            {
+                ExitForRestart($"the WebView2 browser did not end within 30 s after {why}");
+                return;
+            }
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await InitWebView();
+                    Log.Info($"WebViews back on WebView2 {web.CoreWebView2?.Environment.BrowserVersionString} after {why}");
+                    return;
+                }
+                catch (Exception e) when (attempt < 3)
+                {
+                    Log.Error($"WebView2 did not start again after {why} (try {attempt} of 3)", e);
+                    ReplaceWebViews();
+                    await Task.Delay(TimeSpan.FromSeconds(5 * attempt));
+                }
+                catch (Exception e)
+                {
+                    Log.Error($"WebView2 did not start again after {why}", e);
+                    ExitForRestart($"no web view after {why}");
+                    return;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Closing the WebViews ({why})", e);
+            ExitForRestart($"no web view after {why}");
+        }
+        finally { refreshingWebViews = false; }
+    }
+
+    // New, empty WebView2 controls in place of the old ones (closing them ends their pages).
+    void ReplaceWebViews()
+    {
+        keyboard.ReleaseWebView();
+        Controls.Remove(web);
+        web.Dispose();
+        web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
+        Controls.Add(web);
+    }
+
+    bool exitingForRestart;
+
     void ExitForRestart(string why)
     {
+        if (exitingForRestart) return;
+        exitingForRestart = true;
         Log.Error($"Exiting to be started again: {why}");
+        // In standby the next launcher goes straight back to it: the TV off, the screen dark.
+        if (standby is { Active: true })
+            new LauncherHandoff("launcher-restart", Standby: true, QuietBoot: false, EfficiencyPids(), DateTime.UtcNow, Program.Version).Save();
         Environment.ExitCode = 3;
         BeginInvoke(Close);
     }
