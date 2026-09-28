@@ -455,11 +455,15 @@ namespace Htpc.Watchdog
         {
             if (path != null) return path;
             if (ToTemp) return path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "htpc-watchdog.log");
-            foreach (var root in new[] { Environment.SpecialFolder.CommonApplicationData, Environment.SpecialFolder.LocalApplicationData })
+            // ProgramData\HTPC only once setup made it: made here, at standard rights, it would be
+            // the user's, and its owner could undo setup's lock (the launcher's Log.cs does the same).
+            var data = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
+            var local = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC");
+            foreach (var root in Directory.Exists(data) ? new[] { data, local } : new[] { local })
             {
                 try
                 {
-                    var dir = System.IO.Path.Combine(Environment.GetFolderPath(root), @"HTPC\logs");
+                    var dir = System.IO.Path.Combine(root, "logs");
                     Directory.CreateDirectory(dir);
                     var file = System.IO.Path.Combine(dir, "watchdog.log");
                     if (File.Exists(file) && new FileInfo(file).Length > 512 * 1024)

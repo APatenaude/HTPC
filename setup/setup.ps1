@@ -151,6 +151,13 @@ if (-not (Test-Admin)) {
 
 Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
 
+# C:\ProgramData\HTPC locked and owned by Administrators first of all, before this log or any
+# step writes there: made by a standard process (the launcher, or TV Box Setup before it asked for
+# administrator rights) it is the user's, who could plant links where the steps write. The
+# Library step does it again, with the task.
+try { & "$lib\Register-AppInstaller.ps1" -LockOnly }
+catch { Write-Attention "could not lock $HtpcData yet: $($_.Exception.Message)" }
+
 # --- Run the steps -------------------------------------------------------------------------
 
 $Only = Split-List $Only

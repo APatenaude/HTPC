@@ -17,7 +17,8 @@
       Faults    the job ended hard after each journal step, then reconcile: the old launcher or
                 the new one, never half of each, and the launcher running is the one on disk
       Planting  a junction for the staging folder, a user-owned .new file, a Users write entry
-                on state\: all refused (run it as SYSTEM in the VM too: -Only Planting)
+                on state\: all refused (run it as SYSTEM in the VM too: -Only Planting); a
+                ProgramData\HTPC the user owns: Administrators' after the lock, and trusted
       Wua       the Windows Update child faked: a hang is ended in time, the count leaves out
                 Defender's definitions and the removal tool, installs report "n of m", a stuck
                 service answers "busy" without starting anything
@@ -417,6 +418,25 @@ try {
         $r = Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths'
         Check ($r -like 'refused*' -and (Get-ExeVersion $root) -eq '0.1.0') "state\ that Users can change: refused ($r)"
         Remove-FakeBox $root
+
+        # ProgramData\HTPC made at standard rights (TV Box Setup's log before it asked for the
+        # rights), so the user's, with state\, setup\ and a journal of theirs in it: the lock
+        # (Register-AppInstaller -LockOnly) gives the folders to Administrators and renames the
+        # journal aside, and the jobs then trust them.
+        $data = Join-Path $work 'owner\HTPC'
+        New-Item -ItemType Directory -Force (Join-Path $data 'state'), (Join-Path $data 'setup\lib') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $data 'state\launcher-update.json'), '{}')
+        foreach ($p in $data, "$data\state", "$data\state\launcher-update.json", "$data\setup") { & icacls $p /setowner "*$me" | Out-Null }
+        $ownerOf = { param($p) (Get-Acl -LiteralPath $p).GetOwner([Security.Principal.SecurityIdentifier]).Value }
+        Check ((& $ownerOf $data) -eq $me) "  (the fake ProgramData\HTPC is $me's to start with)"
+        $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
+        $owners = @($data, "$data\state", "$data\setup") | ForEach-Object { & $ownerOf $_ }
+        Check (@($owners | Where-Object { $_ -ne 'S-1-5-32-544' }).Count -eq 0) "ProgramData\HTPC, state\ and setup\ the user made: now Administrators' ($($owners -join ', '))"
+        Check ($null -eq (Get-UntrustedReason $data) -and $null -eq (Get-UntrustedReason "$data\state") -and $null -eq (Get-UntrustedReason "$data\setup")) "  and the SYSTEM jobs trust them ($(Get-UntrustedReason $data)$(Get-UntrustedReason "$data\state"))"
+        Check (-not (Test-Path -LiteralPath "$data\state\launcher-update.json") -and @(Get-ChildItem "$data\state" -Filter 'launcher-update.json.untrusted-*').Count -eq 1) '  the journal the user owned: renamed aside, never read'
+        Check ((Get-Acl -LiteralPath "$data\logs").Access | Where-Object { $_.IdentityReference -eq (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545').Translate([Security.Principal.NTAccount]) -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) -eq [Security.AccessControl.FileSystemRights]::Modify }) '  logs\ still user-writable'
+        $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
+        Check ($out -notmatch 'now by Administrators|renamed aside|threw') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
     }
 
     if (Section 'Wua') {
