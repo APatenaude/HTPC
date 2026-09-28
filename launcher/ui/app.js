@@ -214,7 +214,7 @@ function renderMenu() {
 }
 
 const POWER = [
-  { id: 'sleep', glyph: 'moon', label: 'Sleep', caption: 'Press Home on the controller to wake' },
+  { id: 'sleep', glyph: 'moon', label: 'Sleep', caption: 'Hold Home on the controller to wake' },
   { id: 'timer', glyph: 'timer', label: 'Sleep timer', caption: 'Count down, then sleep' },
   { id: 'restart', glyph: 'restart', label: 'Restart', caption: '' },
   { id: 'shutdown', glyph: 'power', label: 'Shut down', caption: '' },
@@ -268,11 +268,11 @@ const CHOICES = {
 
 // What each sleep mode means, shown under the choice and on the Power screen.
 const SLEEP_MODES = {
-  standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Tap Home on the controller to wake it.',
-             wake: 'Tap Home on the controller to wake' },
+  standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Hold Home on the controller to wake it.',
+             wake: 'Hold Home on the controller to wake' },
   sleep: { caption: 'Windows sleep (S3), about 1 W. The controller and the phone can’t wake it: use the power button or the keyboard.',
            wake: 'Wake with the power button or the keyboard' },
-  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button or the keyboard.',
+  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. The controller and the phone can’t wake it: use the power button.',
                wake: 'Wake with the power button' }
 };
 
