@@ -146,6 +146,8 @@ sealed partial class MainForm : Form
             standby.GoingDown += () =>
             {
                 Post(new { type = "show", view = "home" });
+                // Phones hear it now: once Windows sleeps, only the box's power button wakes it.
+                phones?.Broadcast(new { t = "bye", reason = "sleep" });
                 // Before Windows sleeps, or the key never goes out. On the thread pool: waiting on the
                 // UI thread would deadlock the awaits inside.
                 Task.Run(() => tv.TurnOff()).Wait(3000);

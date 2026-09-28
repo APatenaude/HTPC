@@ -66,7 +66,7 @@ function renderPhoneSection() {
     body += `<div class="srow phone-warn"><div class="text"><span class="label">${esc(problem[0])}</span>` +
       `<span class="caption">${esc(problem[1])}</span></div></div>`;
   }
-  body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'The first time a phone connects, a 4-digit code shows on the TV', toggle(p.requireCode));
+  body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'A new phone asks for a 4-digit code, and it shows on the TV. The QR code above needs none.', toggle(p.requireCode));
   body += '<span class="ssection">Phones</span>';
   const shown = p.phones.filter((ph) => !ph.shortcut);
   // Shortcut keys under the phone that made them (forgetting the phone forgets them); older ones
@@ -158,8 +158,9 @@ onAction('phone-forget', (el, id) => {
   ask({
     title: `Forget ${p.name}?`,
     text: p.shortcut ? 'The Shortcut that uses this key stops working. The phone can make a new key.'
-      : (state.phoneSettings.phones || []).some((k) => k.shortcut && k.owner === p.id) ? 'Its Shortcut keys stop working too. To be a remote again, it has to pair again.'
-      : 'To be a remote again, it has to pair again: scan the code on this screen.',
+      : !state.phoneSettings.requireCode ? 'With “Ask for a code on new phones” off, it can still connect without one: turn that on to keep it out.'
+      : (state.phoneSettings.phones || []).some((k) => k.shortcut && k.owner === p.id) ? 'Its Shortcut keys stop working too. To be a remote again, it pairs again: Show a code on the TV, on the phone.'
+      : 'To be a remote again, it pairs again: Show a code on the TV, on the phone.',
     yes: 'Forget',
     onYes: () => send({ type: 'phone.forget', id }),
   });

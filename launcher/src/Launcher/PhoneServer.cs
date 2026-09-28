@@ -391,6 +391,7 @@ sealed class PhoneServer
                 case "/api/hello": await Hello(ctx); break;
                 case "/api/pair/start": await PairStart(ctx); break;
                 case "/api/pair": await Pair(ctx); break;
+                case "/api/pair/cancel": PairCancel(ctx); break;
                 case "/art": await Art(ctx); break;
                 case "/ca.crt": await ServeAuthority(ctx); break;
                 case "/api/open": await OpenShared(ctx); break;
@@ -479,6 +480,15 @@ sealed class PhoneServer
         await Reply(ctx, 200, new { ok = true, seconds = (int)PhonePairing.CodeLife.TotalSeconds });
     }
 
+    /// <summary>The phone's Cancel under the code field: a code shown by mistake leaves the TV at once (the usual 30 s before the next one).</summary>
+    void PairCancel(HttpContext ctx)
+    {
+        if (!HttpMethods.IsPost(ctx.Request.Method) || !FromOurPage(ctx)) { ctx.Response.StatusCode = 403; return; }
+        pairing.CancelCode();
+        host.HidePairingCode(false);
+        ctx.Response.StatusCode = StatusCodes.Status204NoContent;
+    }
+
     async Task Pair(HttpContext ctx)
     {
         if (!HttpMethods.IsPost(ctx.Request.Method) || !FromOurPage(ctx)) { ctx.Response.StatusCode = 403; return; }
@@ -497,9 +507,9 @@ sealed class PhoneServer
 
         if (key is { Length: > 0 and <= 64 })
         {
-            var (outcome, token, phone) = pairing.TryKey(key, name);
+            var (outcome, token, phone) = pairing.TryKey(key, name, PairedPhone(ctx));
             if (outcome != PairOutcome.Paired) { await Reply(ctx, 410, new { error = "expired" }); return; }
-            SetCookie(ctx, token!);
+            if (token is not null) SetCookie(ctx, token);   // null: this phone was paired already (it stays the one it is)
             host.PhonesChanged();
             await Reply(ctx, 200, new { ok = true, name = phone!.Name });
             return;
@@ -844,6 +854,8 @@ sealed class PhoneServer
                 // A message that does not check out is dropped (and never logged: it may be typed text).
                 if (PhoneProtocol.Parse(buffer.AsMemory(0, count)) is not { } command) continue;
                 if (command is ShortcutKeyCommand) { NewShortcutKey(client); continue; }
+                // The phone's heartbeat: answered, so the phone notices a dead connection too (12 s of silence).
+                if (command is PingCommand) { Send(client, new { t = "pong" }); continue; }
                 try { host.OnCommand(client, command); }
                 catch (Exception e) { Log.Error($"Phone remote: handling {command.GetType().Name}", e); }
             }
