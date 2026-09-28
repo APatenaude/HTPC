@@ -36,6 +36,7 @@ sealed class FakeHost : IPhoneHost
     public bool ShowPairingCode(string code) { if (Asleep) return false; Code = code; Shown++; return true; }
     public void HidePairingCode(bool paired) { Code = null; Events.Enqueue($"hide paired={paired}"); }
     public void PhonesChanged() { }
+    public void ShortcutKeyMade(string phoneName) => Events.Enqueue("shortcut " + phoneName);
     public (byte[] Data, string ContentType)? Artwork() => Art;
     public void OpenShared(string url) => Events.Enqueue("shared " + url);
 }
@@ -243,7 +244,7 @@ static partial class Program
         Check(!reloaded.RequireCode && reloaded.Find(ok.Token)?.Name == "iPhone" && reloaded.Phones.Count == 2, "kept in the file");
         var text = File.ReadAllText(file);
         Check(!text.Contains(ok.Token!) && !text.Contains(k1.Token!), "the file holds hashes, not tokens");
-        Check(reloaded.Forget(reloaded.Find(ok.Token)!.Id) && reloaded.Find(ok.Token) is null, "forget");
+        Check(reloaded.Forget(reloaded.Find(ok.Token)!.Id).Count == 1 && reloaded.Find(ok.Token) is null, "forget");
         File.Delete(file);
     }
 
@@ -469,8 +470,7 @@ static partial class Program
         server.DisconnectUnpaired();
         Check(open is not null && await Receive(open, 2000) is null && ws!.State == WebSocketState.Open, "codes on again: the code-less phone is dropped, the paired one stays");
         var id = pairing.Find(cookie.Split('=', 2)[1])!.Id;
-        pairing.Forget(id);
-        server.Disconnect(id);
+        server.Disconnect(pairing.Forget(id));
         // Other messages (a state push, a heartbeat answer) may come first on a busy machine: up to "bye".
         string? last = null;
         for (var i = 0; i < 10 && last != "bye"; i++)

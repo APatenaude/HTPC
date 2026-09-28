@@ -68,7 +68,13 @@ function renderPhoneSection() {
   body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'The first time a phone connects, a 4-digit code shows on the TV', toggle(p.requireCode));
   body += '<span class="ssection">Phones</span>';
   const shown = p.phones.filter((ph) => !ph.shortcut);
-  const shortcuts = p.phones.filter((ph) => ph.shortcut);
+  // Shortcut keys under the phone that made them (forgetting the phone forgets them); older ones
+  // (no phone) in their own list.
+  const keysOf = (id) => p.phones.filter((k) => k.shortcut && k.owner === id);
+  const loose = p.phones.filter((k) => k.shortcut && !shown.some((ph) => ph.id === k.owner));
+  const keyRow = (k, under) => `<div class="srow phone-row${under ? ' phone-key' : ''}" data-nav data-id="phone-${esc(k.id)}" data-act="phone-forget" data-arg="${esc(k.id)}">` +
+    `${icon('share', 34)}<div class="text"><span class="label">${esc(under ? 'Shortcut key' : k.name)}</span>` +
+    `<span class="caption">Last used ${esc(phoneDate(k.lastSeen))}</span></div><span class="phone-forget">Forget</span></div>`;
   if (!shown.length && !p.unpaired) {
     body += '<div class="srow"><div class="text"><span class="label">No phones yet</span>' +
       '<span class="caption">Scan the code above with your phone.</span></div></div>';
@@ -78,17 +84,13 @@ function renderPhoneSection() {
       `${icon('phone', 34)}<div class="text"><span class="label">${esc(ph.name)}</span>` +
       `<span class="caption${ph.connected ? ' good' : ''}">${ph.connected ? 'Connected now' : 'Last used ' + esc(phoneDate(ph.lastSeen))}</span></div>` +
       '<span class="phone-forget">Forget</span></div>';
+    for (const k of keysOf(ph.id)) body += keyRow(k, true);
   }
   if (p.unpaired) body += `<p class="phone-more">${p.unpaired} connected without a code</p>`;
-  if (shortcuts.length) {
+  if (loose.length) {
     body += '<span class="ssection">Share-sheet Shortcut keys</span>';
-    for (const k of shortcuts) {
-      body += `<div class="srow phone-row" data-nav data-id="phone-${esc(k.id)}" data-act="phone-forget" data-arg="${esc(k.id)}">` +
-        `${icon('share', 34)}<div class="text"><span class="label">${esc(k.name)}</span>` +
-        `<span class="caption">Last used ${esc(phoneDate(k.lastSeen))}</span></div><span class="phone-forget">Forget</span></div>`;
-    }
-  }
-  return body;
+    for (const k of loose) body += keyRow(k, false);
+  }  return body;
 }
 
 // "AB:CD:..." as 4 lines of 8 bytes (Android shows it the same way, colons and all).
@@ -155,6 +157,7 @@ onAction('phone-forget', (el, id) => {
   ask({
     title: `Forget ${p.name}?`,
     text: p.shortcut ? 'The Shortcut that uses this key stops working. The phone can make a new key.'
+      : (state.phoneSettings.phones || []).some((k) => k.shortcut && k.owner === p.id) ? 'Its Shortcut keys stop working too. To be a remote again, it has to pair again.'
       : 'To be a remote again, it has to pair again: scan the code on this screen.',
     yes: 'Forget',
     onYes: () => send({ type: 'phone.forget', id }),
@@ -179,7 +182,7 @@ settingsSection('phone', {
       phones: [
         { id: 'a1', name: 'iPhone', connected: true, lastSeen: Date.now() },
         { id: 'b2', name: 'Android phone', connected: false, lastSeen: Date.now() - 5 * 86400000 },
-        { id: 'c3', name: 'iPhone Shortcut', connected: false, lastSeen: Date.now() - 86400000, shortcut: true },
+        { id: 'c3', name: 'iPhone Shortcut', connected: false, lastSeen: Date.now() - 86400000, shortcut: true, owner: 'a1' },
         ...more,
       ] } });
   },

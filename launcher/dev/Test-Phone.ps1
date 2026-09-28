@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Read-only: sends the launcher no input and changes nothing (the page's /api/hello answers
-    "204 No Content"). Requests from the box itself never meet the inbound firewall rule, so
+    with this launcher run's id). Requests from the box itself never meet the inbound firewall rule, so
     these probes show the server answers, not that phones get in: the rule is checked here
     field by field, and the real test is from a phone (or another PC) on the same network, as
     listed at the end.
