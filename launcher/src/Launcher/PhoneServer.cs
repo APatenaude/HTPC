@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
@@ -39,6 +40,9 @@ interface IPhoneHost
 
     /// <summary>Paired or connected phones changed (Settings › Phone remote lists them).</summary>
     void PhonesChanged();
+
+    /// <summary>A phone made a Shortcut key (/api/open): the TV says so, since a key opens links without the phone.</summary>
+    void ShortcutKeyMade(string phoneName);
 
     /// <summary>The current video's artwork, if there is one.</summary>
     (byte[] Data, string ContentType)? Artwork();
@@ -137,6 +141,9 @@ sealed class PhoneServer
 
     public const int MaxPhones = 8;
     public const string CookieName = "htpc_phone";
+    /// <summary>Over HTTPS its own cookie, Secure (never sent to http://tv.local) and host-only.</summary>
+    public const string SecureCookieName = "__Host-htpc_phone";
+    static string PhoneCookie(HttpContext ctx) => ctx.Request.IsHttps ? SecureCookieName : CookieName;
     const string ShareCookie = "htpc_share";
     static readonly TimeSpan ShareTicketLife = TimeSpan.FromSeconds(60);
     const int OpenPerMinute = 20, WrongKeysPerMinute = 10;
@@ -316,9 +323,13 @@ sealed class PhoneServer
             k.Limits.MaxConcurrentConnections = 64;
             k.Limits.MaxConcurrentUpgradedConnections = MaxPhones + 2;
             k.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(10);
+            // An idle kept-alive connection goes after 15 s (not Kestrel's 130 s): one device holding
+            // many open cannot use up the 64 (LimitPerAddress caps each address too).
+            k.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(15);
             // The server certificate and the intermediate (phones hold only the root), taken at each handshake: a new one works at once.
             void Https(ListenOptions o)
             {
+                o.Use(LimitPerAddress);
                 if (secure) o.UseHttps(new TlsHandshakeCallbackOptions
                 {
                     OnConnection = _ => ValueTask.FromResult(new SslServerAuthenticationOptions { ServerCertificateContext = certificates!.Context }),
@@ -338,6 +349,28 @@ sealed class PhoneServer
         return web;
     }
 
+    /// <summary>At most this many connections from one address at a time (a page, its files, its socket, a second tab: well under).</summary>
+    public const int MaxConnectionsPerAddress = 12;
+    readonly Dictionary<IPAddress, int> connectionsFrom = new();
+
+    // Connection middleware, before TLS: one more from an address that has 12 open is closed at once.
+    ConnectionDelegate LimitPerAddress(ConnectionDelegate next) => async connection =>
+    {
+        var from = (connection.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.None;
+        lock (connectionsFrom)
+        {
+            connectionsFrom.TryGetValue(from, out var open);
+            if (open >= MaxConnectionsPerAddress) { connection.Abort(); return; }
+            connectionsFrom[from] = open + 1;
+        }
+        try { await next(connection); }
+        finally
+        {
+            lock (connectionsFrom)
+                if (--connectionsFrom[from] <= 0) connectionsFrom.Remove(from);
+        }
+    };
+
     // --- Requests ---------------------------------------------------------------------------------
 
     async Task Handle(HttpContext ctx)
@@ -355,9 +388,10 @@ sealed class PhoneServer
             switch (ctx.Request.Path.Value)
             {
                 case "/ws": await Socket(ctx); break;
-                case "/api/hello": response.StatusCode = StatusCodes.Status204NoContent; break; // "is tv.local reachable?"
+                case "/api/hello": await Hello(ctx); break;
                 case "/api/pair/start": await PairStart(ctx); break;
                 case "/api/pair": await Pair(ctx); break;
+                case "/api/pair/cancel": PairCancel(ctx); break;
                 case "/art": await Art(ctx); break;
                 case "/ca.crt": await ServeAuthority(ctx); break;
                 case "/api/open": await OpenShared(ctx); break;
@@ -374,7 +408,7 @@ sealed class PhoneServer
 
     bool FromOurPage(HttpContext ctx) => Allowed.IsAllowedOrigin(ctx.Request.Headers.Origin);
 
-    PairedPhone? PairedPhone(HttpContext ctx) => pairing.Find(ctx.Request.Cookies[CookieName]);
+    PairedPhone? PairedPhone(HttpContext ctx) => pairing.Find(ctx.Request.Cookies[PhoneCookie(ctx)]);
 
     static Task Reply(HttpContext ctx, int status, object body)
     {
@@ -446,6 +480,15 @@ sealed class PhoneServer
         await Reply(ctx, 200, new { ok = true, seconds = (int)PhonePairing.CodeLife.TotalSeconds });
     }
 
+    /// <summary>The phone's Cancel under the code field: a code shown by mistake leaves the TV at once (the usual 30 s before the next one).</summary>
+    void PairCancel(HttpContext ctx)
+    {
+        if (!HttpMethods.IsPost(ctx.Request.Method) || !FromOurPage(ctx)) { ctx.Response.StatusCode = 403; return; }
+        pairing.CancelCode();
+        host.HidePairingCode(false);
+        ctx.Response.StatusCode = StatusCodes.Status204NoContent;
+    }
+
     async Task Pair(HttpContext ctx)
     {
         if (!HttpMethods.IsPost(ctx.Request.Method) || !FromOurPage(ctx)) { ctx.Response.StatusCode = 403; return; }
@@ -464,9 +507,9 @@ sealed class PhoneServer
 
         if (key is { Length: > 0 and <= 64 })
         {
-            var (outcome, token, phone) = pairing.TryKey(key, name);
+            var (outcome, token, phone) = pairing.TryKey(key, name, PairedPhone(ctx));
             if (outcome != PairOutcome.Paired) { await Reply(ctx, 410, new { error = "expired" }); return; }
-            SetCookie(ctx, token!);
+            if (token is not null) SetCookie(ctx, token);   // null: this phone was paired already (it stays the one it is)
             host.PhonesChanged();
             await Reply(ctx, 200, new { ok = true, name = phone!.Name });
             return;
@@ -575,15 +618,19 @@ sealed class PhoneServer
 
     /// <summary>
     /// The link a ticket carries, for the /share page's WebSocket only (/ws?share=1: another tab
-    /// connecting does not use it up); once, within 60 s, and only if it is still the link it was
-    /// issued for.
+    /// connecting does not use it up); once, within 60 s, and only for the link it was issued for
+    /// (the page sends its own: /ws?share=1&url=...).
     /// </summary>
     string? TakeShareTicket(HttpContext ctx)
     {
         if (ctx.Request.Query["share"] != "1") return null;
         if (ctx.Request.Cookies[ShareCookie] is not { Length: > 0 and <= 64 } ticket) return null;
+        // The link in the page's address (/ws?share=1&url=...): the ticket is used up either way,
+        // and hands its link back only when it is that one.
+        var asked = Encoding.UTF8.GetBytes(Hash(ctx.Request.Query["url"].ToString()));
         lock (shareTickets)
-            return shareTickets.Remove(Hash(ticket), out var t) && t.Until > now() && Hash(t.Link) == t.LinkHash ? t.Link : null;
+            return shareTickets.Remove(Hash(ticket), out var t) && t.Until > now()
+                && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(t.LinkHash), asked) ? t.Link : null;
     }
 
     public int ShareTicketCount { get { lock (shareTickets) return shareTickets.Count; } }
@@ -599,13 +646,14 @@ sealed class PhoneServer
             Send(client, new { t = "toast", text = "Pair this phone first: scan the code in Settings › Phone remote on the TV", kind = "warn" });
             return;
         }
-        if (pairing.NewShortcut(client.Name) is not { } token)
+        if (pairing.NewShortcut(client.Phone) is not { } made)
         {
             Send(client, new { t = "toast", text = "Ten Shortcut keys already: remove one in Settings › Phone remote on the TV", kind = "warn" });
             return;
         }
         var suffix = Port is 0 or 80 ? "" : $":{Port}";
-        Send(client, new { t = "shortcutKey", token, url = $"http://tv.local{suffix}/api/open" });
+        Send(client, new { t = "shortcutKey", token = made.Token, url = $"http://tv.local{suffix}/api/open" });
+        host.ShortcutKeyMade(client.Phone.Name);
         host.PhonesChanged();
     }
 
@@ -709,10 +757,29 @@ sealed class PhoneServer
     }
 
     static void SetCookie(HttpContext ctx, string token) =>
-        ctx.Response.Cookies.Append(CookieName, token, new CookieOptions
+        ctx.Response.Cookies.Append(PhoneCookie(ctx), token, new CookieOptions
         {
             HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/", MaxAge = TimeSpan.FromDays(3650), IsEssential = true,
+            Secure = ctx.Request.IsHttps,
         });
+
+    /// <summary>
+    /// "Is tv.local this box?" The page opened on the box's IP address (the QR code, with a
+    /// one-time key) asks tv.local and itself for this id, and moves to tv.local only when both
+    /// answer the same: whatever else answers to tv.local on the network never sees the key.
+    /// Readable across our own origins only (the IP page asking tv.local).
+    /// </summary>
+    Task Hello(HttpContext ctx)
+    {
+        var origin = ctx.Request.Headers.Origin.ToString();
+        if (origin.Length > 0 && Allowed.IsAllowedOrigin(origin)) ctx.Response.Headers.AccessControlAllowOrigin = origin;
+        ctx.Response.Headers.Vary = "Origin";
+        ctx.Response.Headers.CacheControl = "no-store";
+        return Reply(ctx, 200, new { box = BoxId });
+    }
+
+    /// <summary>This launcher run's id for /api/hello (random, not a secret).</summary>
+    public string BoxId { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(12)).ToLowerInvariant();
 
     // --- WebSocket --------------------------------------------------------------------------------
 
@@ -787,6 +854,8 @@ sealed class PhoneServer
                 // A message that does not check out is dropped (and never logged: it may be typed text).
                 if (PhoneProtocol.Parse(buffer.AsMemory(0, count)) is not { } command) continue;
                 if (command is ShortcutKeyCommand) { NewShortcutKey(client); continue; }
+                // The phone's heartbeat: answered, so the phone notices a dead connection too (12 s of silence).
+                if (command is PingCommand) { Send(client, new { t = "pong" }); continue; }
                 try { host.OnCommand(client, command); }
                 catch (Exception e) { Log.Error($"Phone remote: handling {command.GetType().Name}", e); }
             }
@@ -838,10 +907,11 @@ sealed class PhoneServer
     }
 
     /// <summary>A phone was forgotten in Settings: its open sockets close.</summary>
-    public void Disconnect(string phoneId)
+    public void Disconnect(IEnumerable<string> phoneIds)
     {
+        var ids = phoneIds.ToHashSet();
         var bytes = Serialize(new { t = "bye", reason = "forgotten" });
-        foreach (var c in Clients.Where(c => c.Phone?.Id == phoneId))
+        foreach (var c in Clients.Where(c => c.Phone is { } p && ids.Contains(p.Id)))
             _ = c.SendAndClose(bytes);
     }
 

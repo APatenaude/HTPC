@@ -56,7 +56,7 @@ sealed partial class MainForm
             case "sound.output":
                 var id = m.GetProperty("id").GetString() ?? "";
                 // At the level the box is at (AudioOutputs): the slider then reads the new output.
-                _ = Task.Run(() => AudioOutputs.SwitchKeepingLevel(id)).ContinueWith(t => BeginInvoke(() =>
+                _ = Task.Run(() => AudioOutputs.SwitchKeepingLevel(id)).ContinueWith(t => OnUi(() =>
                 {
                     if (!t.Result) Post(new { type = "toast", text = "Windows did not switch the sound output", kind = "warn" });
                     _ = PostAudio(switchFailed: !t.Result);
@@ -139,7 +139,7 @@ sealed partial class MainForm
                     string text;
                     try { text = SystemInfo.SaveLogs() is { } folder ? $"Logs saved to {folder}" : "No USB stick found"; }
                     catch (Exception e) { Log.Error("Saving logs", e); text = "The logs could not be saved"; }
-                    BeginInvoke(() => Post(new { type = "toast", text }));
+                    OnUi(() => Post(new { type = "toast", text }));
                 });
                 break;
             case "system.restart": RestartLauncher(); break;

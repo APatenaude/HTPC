@@ -86,58 +86,97 @@ const vibrate = (ms = 8) => { try { if (navigator.vibrate) navigator.vibrate(ms)
 
 // ---- Connection -----------------------------------------------------------------------------------
 
-let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0, failures = 0;
+let ws = null, retryMs = 500, pingTimer = 0, reconnectTimer = 0, failures = 0, lastHeard = 0, hiddenAt = 0;
 const sentLog = [];   // demo and self-test: what would have gone to the box
 
+// False when it could not go (no connection yet): what the user asked for must not claim success.
 function send(msg) {
-  if (demo) { sentLog.push(msg); return; }
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  if (demo) { sentLog.push(msg); return true; }
+  if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); return true; }
+  return false;
 }
+const notConnected = () => toast('Not connected to the TV box yet', 'warn');
 
 function connect() {
   clearTimeout(reconnectTimer);
   if (ws && ws.readyState <= WebSocket.OPEN) return;
   if (state.conn !== 'pairing') setConn('connecting');
   // The /share page asks for the Share sheet's ticket (share=1); other tabs leave it alone.
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${pendingShare !== undefined ? '?share=1' : ''}`);
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${pendingShare !== undefined ? `?share=1&url=${encodeURIComponent(pendingShare || '')}` : ''}`);
   ws = socket;
   socket.onopen = () => {
     retryMs = 500;
     failures = 0;
+    lastHeard = Date.now();
     $('lost').hidden = true;
     clearInterval(pingTimer);
-    pingTimer = setInterval(() => send({ t: 'ping' }), 5000); // the box drops a phone silent for 15 s
+    // The box drops a phone silent for 15 s, and answers each ping: 12 s without a word from it,
+    // and the connection is dead (Wi-Fi gone, the box asleep): start again.
+    pingTimer = setInterval(() => {
+      if (Date.now() - lastHeard > 12000) { lostSocket(socket); return; }
+      send({ t: 'ping' });
+    }, 4000);
   };
   socket.onmessage = (e) => {
+    lastHeard = Date.now();
     let m;
     try { m = JSON.parse(e.data); } catch (err) { return; }
     onBox(m);
   };
-  socket.onclose = () => {
-    if (ws !== socket) return;
-    clearInterval(pingTimer);
-    ws = null;
-    if (state.conn === 'pairing') return; // connects again once paired
-    setConn('connecting');
-    // About 10 s without the box: say so (it may be off, or have a new address: the QR code again).
-    if (++failures >= 4) $('lost').hidden = false;
-    reconnectTimer = setTimeout(connect, retryMs);
-    retryMs = Math.min(retryMs * 2, 5000);
-  };
+  socket.onclose = () => lostSocket(socket);
 }
 
-// Back from the background (iPhone suspends the page): connect at once.
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !demo && state.conn !== 'pairing') connect(); });
-addEventListener('pageshow', () => { if (!demo && state.conn !== 'pairing') connect(); });
-addEventListener('online', () => { if (!demo && state.conn !== 'pairing') connect(); });
+// The socket closed or went silent: try again (backing off), and after about 10 s say so.
+function lostSocket(socket) {
+  if (ws !== socket) return;
+  clearInterval(pingTimer);
+  ws = null;
+  try { socket.close(); } catch (e) { /* already closing */ }
+  if (state.conn === 'pairing') return; // connects again once paired
+  setConn('connecting');
+  if (++failures >= 4) showLost();
+  reconnectTimer = setTimeout(connect, retryMs);
+  retryMs = Math.min(retryMs * 2, 5000);
+}
+
+// "Can't reach the TV box", with what wakes it where it can sleep for real (Sleep, Hibernate).
+function showLost(asleep) {
+  const b = state.box;
+  const deep = b.sleepMode === 'sleep' || b.sleepMode === 'hibernate' || b.deepSleepHours > 0;
+  $('lost-title').textContent = asleep ? 'The TV box went to sleep' : 'Can’t reach the TV box';
+  $('lost-text').textContent = asleep ? 'Only its power button wakes it now (not this phone, not the controller).'
+    : 'Is it on, and this phone on the same Wi-Fi?' + (deep ? ' If it went to sleep, press its power button.' : '') +
+      ' If the TV box has a new address on your network, scan the code in Settings › Phone remote on the TV again.';
+  $('main').scrollTop = 0;
+  $('lost').hidden = false;
+}
+
+// Back from the background (iPhone suspends the page): connect at once. Only once boot() has
+// connected (before that, a socket could beat the QR key's /api/pair and leave the phone on the
+// pairing screen, paired but never told); pageshow only when the page comes back from the cache.
+// From the pairing screen, coming back tries once more (a pairing may have finished meanwhile).
+let booted = false;
+let sendAfterHello = !demo && location.pathname === '/send';
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (demo || !booted) return;
+  // Hidden over 15 s: the box has dropped this phone, though the socket may not know yet.
+  if (ws && hiddenAt && Date.now() - hiddenAt > 15000) { const old = ws; ws = null; clearInterval(pingTimer); try { old.close(); } catch (e) { /* gone */ } }
+  connect();
+});
+addEventListener('pageshow', (e) => { if (e.persisted && !demo && booted && state.conn !== 'pairing') connect(); });
+addEventListener('online', () => { if (!demo && booted && state.conn !== 'pairing') connect(); });
 
 function onBox(m) {
   switch (m.t) {
     case 'hello':
       if (m.v !== PROTOCOL) { reloadOnce(); return; }
-      if (!m.paired) { showPairing(); return; }
+      // Not paired: the pairing screen (as it is, when it shows already: a code may be half typed).
+      if (!m.paired) { if (state.conn !== 'pairing') showPairing(); return; }
       hidePairing();
       setConn('open');
+      // /send (card 2's code): the Send page once this phone may use the box, never over pairing.
+      if (sendAfterHello) { sendAfterHello = false; openSend(); }
       applyState(m.state);
       if (m.ca) { $('ca-fingerprint').textContent = groupFingerprint(m.ca); $('ca-here').hidden = false; }
       if (pendingShare !== undefined) handleShare(m.share || null);
@@ -150,7 +189,10 @@ function onBox(m) {
     case 'state': applyState(m.state); break;
     case 'toast': toast(m.text, m.kind); break;
     case 'warn': showBanner(m.text, m.extend ? '+15 min' : null, () => send({ t: 'timerExtend' })); timerBanner = !!m.extend; break;
-    case 'bye': toast('This phone was removed on the TV', 'warn'); break;
+    case 'bye':
+      if (m.reason === 'sleep') showLost(true);
+      else toast('This phone was removed on the TV', 'warn');
+      break;
   }
 }
 
@@ -195,6 +237,7 @@ function renderStatus() {
   const el = $('status');
   el.className = 'status' + (asleep ? ' asleep' : state.conn === 'open' ? ' open' : '');
   $('status-text').textContent = asleep ? 'Asleep' : state.conn === 'open' ? 'Connected' : 'Connecting…';
+  if (asleep && $('asleep').hidden) $('main').scrollTop = 0; // the cover sits at the top of the area
   $('asleep').hidden = !asleep;
   const power = $('power');
   power.setAttribute('aria-label', asleep ? 'Wake the TV box' : 'Sleep the TV box');
@@ -414,8 +457,13 @@ slider('volume', (v) => ({ t: 'volume', v }));
 // The power button: sleep (asked first) or, while asleep, wake.
 $('power').addEventListener('click', () => {
   if (state.box.standby) { send({ t: 'wake' }); return; }
-  openSheet('Sleep the TV box?', 'The TV turns off. Wake it from here, or hold Home on the controller.',
-    [{ label: 'Sleep', primary: true, full: true, run: () => send({ t: 'sleep' }) }]);
+  const b = state.box;
+  const text = b.sleepMode === 'sleep' || b.sleepMode === 'hibernate'
+    ? 'The TV and the box turn off. Only the box’s power button wakes it (not this phone, not the controller).'
+    : 'The TV turns off. Wake it from here, or hold Home on the controller.' +
+      (b.deepSleepHours > 0 ? ` After ${b.deepSleepHours} h asleep, only the box’s power button wakes it.` : '');
+  openSheet('Sleep the TV box?', text,
+    [{ label: 'Sleep', primary: true, full: true, run: () => { if (!send({ t: 'sleep' })) notConnected(); } }]);
 });
 $('wake').addEventListener('click', () => send({ t: 'wake' }));
 
@@ -583,7 +631,7 @@ $('linkbar').addEventListener('submit', (e) => {
   const field = $('linkbar-url');
   const url = field.value.trim();
   if (!url) { field.focus(); return; }
-  send({ t: 'open', url: url.slice(0, 2048) });
+  if (!send({ t: 'open', url: url.slice(0, 2048) })) { notConnected(); return; } // the link stays in the field
   field.value = '';
   closeLinkSheet();
   toast('Sent to the TV');
@@ -687,7 +735,12 @@ async function post(path, body) {
   }
 }
 
+// The Home Screen app (iPhone) or installed app (Android): scanning the TV's code opens the
+// browser, which pairs itself, not this app.
+const standalone = () => navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+
 function showPairing() {
+  if (standalone()) $('pair-note').textContent = 'Use the button above: scanning the code on the TV pairs the browser, not this app.';
   state.conn = 'pairing';
   $('pair').hidden = false;
   $('pair-start').hidden = false;
@@ -733,13 +786,23 @@ async function submitCode() {
   if (res.data.error === 'expired' || res.data.error === 'locked') { $('pair-form').hidden = true; $('pair-start').hidden = false; }
 }
 $('pair-form').addEventListener('submit', (e) => { e.preventDefault(); submitCode(); });
+// "Show a code" tapped by mistake: the code leaves the TV now, not in 2 minutes.
+$('pair-cancel').addEventListener('click', async () => {
+  await post('/api/pair/cancel', {});
+  $('pair-form').hidden = true;
+  $('pair-start').hidden = false;
+  $('pair-error').textContent = '';
+});
 $('pair-code').addEventListener('input', () => { if ($('pair-code').value.replace(/\D/g, '').length === 4) submitCode(); });
 
 // ---- Send to TV from other apps ---------------------------------------------------------------------------
 
 // Android's Share target (/share?url=...&text=...): the link in what was shared, if any.
 function sharedLink() {
-  for (const name of ['url', 'text', 'title']) {
+  // The box's redirect puts the link it found in url=, as it is (bare domains, a ")" at the end).
+  const given = (params.get('url') || '').trim();
+  if (given) return given.slice(0, 2048);
+  for (const name of ['text', 'title']) {
     const m = /https?:\/\/[^\s<>"]+/i.exec(params.get(name) || '');
     if (m) return m[0].replace(/[.,;:!?)\]'"]+$/, '');
   }
@@ -758,7 +821,13 @@ function handleShare(ticketLink) {
   pendingShare = undefined;
   if (!demo) history.replaceState(null, '', '/');
   if (!url) { toast('No link in what was shared', 'warn'); return; }
-  const go = () => { send({ t: 'open', url, share: true }); toast('Sent to the TV'); };
+  const go = () => {
+    if (send({ t: 'open', url, share: true })) { toast('Sent to the TV'); return; }
+    // Not connected yet: the link waits in Send link's field, one tap away.
+    notConnected();
+    $('linkbar-url').value = url;
+    openLinkSheet();
+  };
   if (ticketLink && ticketLink === url) { go(); return; }
   openSheet('Play this on the TV?', url, [{ label: 'Play on the TV', primary: true, full: true, run: go }]);
 }
@@ -789,7 +858,7 @@ function closeSend() {
 }
 $('send-open').addEventListener('click', openSend);
 $('send-close').addEventListener('click', closeSend);
-$('shortcut-make').addEventListener('click', () => send({ t: 'shortcutKey' }));
+$('shortcut-make').addEventListener('click', () => { if (!send({ t: 'shortcutKey' })) notConnected(); });
 $('retry').addEventListener('click', () => { failures = 0; $('lost').hidden = true; connect(); });
 
 // Copy: the clipboard API needs HTTPS; over plain HTTP, the old way (select, copy).
@@ -810,12 +879,23 @@ const isLoopback = () => ['127.0.0.1', 'localhost', '[::1]'].includes(location.h
 
 // Opened on the box's IP address (the QR code): if this phone can reach tv.local, move there,
 // so the Home Screen app keeps a name that survives the router handing the box a new address.
-function probeTvLocal() {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1500);
-    fetch(`${location.protocol}//tv.local${location.port ? ':' + location.port : ''}/api/hello`, { mode: 'no-cors', cache: 'no-store' })
-      .then(() => { clearTimeout(timer); resolve(true); }, () => { clearTimeout(timer); resolve(false); });
-  });
+// Only when tv.local is this very box (the same id from both): the one-time key in the address
+// must not go to whatever else answers to tv.local.
+async function boxId(base, signal) {
+  const res = await fetch(`${base}/api/hello`, { cache: 'no-store', signal });
+  return res.ok ? (await res.json()).box : null;
+}
+async function probeTvLocal() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const [here, there] = await Promise.all([boxId('', ctl.signal), boxId(`${location.protocol}//tv.local${location.port ? ':' + location.port : ''}`, ctl.signal)]);
+    return !!here && here === there;
+  } catch (e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function boot() {
@@ -833,8 +913,9 @@ async function boot() {
     history.replaceState(null, '', location.pathname + (rest.toString() ? '?' + rest : ''));
     const res = await post('/api/pair', { key: oneTimeKey });
     if (res.status === 200) toast('Paired');
+    else toast(res.status === 410 ? 'That code was used already or is too old: scan the one on the TV again' : pairError(res), 'warn');
   }
-  if (location.pathname === '/send') openSend();
+  booted = true;
   connect();
 }
 
@@ -863,7 +944,8 @@ function runDemo(view) {
     box.media = { app: box.app, title: 'An extremely long episode title that goes on and on, to see where it wraps and where it stops on a small phone',
       subtitle: 'A show with a long name · Season 12 · Episode 345 · The director’s cut', playing: false, position: 5400, duration: 10800, art: 0, canSeek: true, canNext: true, canPrevious: true };
   }
-  if (view === 'connecting' || view === 'lost') state.conn = 'connecting';
+  if (view === 'connecting' || view === 'lost' || view === 'gone') state.conn = 'connecting';
+  if (params.get('mode')) box.sleepMode = params.get('mode'); // &mode=sleep: the Sleep sheet for Sleep/Hibernate
   if (view === 'link') $('linkbar-url').value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
   if (view === 'type') text.value = 'severance';
   if (view === 'asleep') box.standby = true;
@@ -886,7 +968,8 @@ function runDemo(view) {
     $('send-iphone').scrollIntoView();
   }
   if (view === 'share') { pendingShare = 'https://vimeo.com/76979871'; handleShare(false); }
-  if (view === 'lost') $('lost').hidden = false;
+  if (view === 'lost') showLost(false);
+  if (view === 'gone') showLost(true); // the box said it goes to sleep (Sleep, Hibernate)
   // &kbd=300: as if iOS's keyboard covered the bottom 300 px (what visualViewport then reports).
   const kbd = Number(params.get('kbd'));
   if (kbd > 0) window.visualViewport = { height: innerHeight - kbd, offsetTop: 0 };

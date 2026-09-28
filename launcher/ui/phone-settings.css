@@ -20,6 +20,7 @@
 .spane main:has(.phone-cards) > * { flex-shrink: 0; }
 .ssection { margin-top: 18px; font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .phone-row { min-height: 88px; gap: 24px; }
+.phone-row.phone-key { margin-left: 64px; min-height: 76px; } /* a phone's Shortcut key, under it */
 .srow .caption.good { color: #7FD1AE; }
 .phone-forget { display: flex; align-items: center; height: 56px; padding: 0 26px; border-radius: 16px; background: #22252B; font-size: 22px; }
 .phone-row.focused .phone-forget { background: #3A3F48; }

@@ -12,6 +12,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
     [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
@@ -96,7 +97,10 @@ static class Native
 
         var fgThread = GetWindowThreadProcessId(foreground, out _);
         var me = GetCurrentThreadId();
-        var attached = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
+        // Never tied to a hung app's thread (5 s without handling its messages): sharing its input
+        // state, the launcher's own UI thread could hang with it. The Alt tap below does without.
+        var hung = foreground != IntPtr.Zero && IsHungAppWindow(foreground);
+        var attached = !hung && fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
         SetForegroundWindow(hWnd);
         if (attached) AttachThreadInput(me, fgThread, false);
         if (GetForegroundWindow() == hWnd) return attached ? "attached" : "direct";

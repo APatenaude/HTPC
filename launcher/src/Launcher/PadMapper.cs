@@ -51,7 +51,6 @@ sealed class PadMapper
     uint inherited;                       // down when the map took over: not pressed, so not released either
     readonly long[] nextRepeat = new long[16];
     double pointerX, pointerY, scrollX, scrollY;   // sub-pixel and sub-unit remainders (frame thread)
-    readonly int screenHeight = Screen.PrimaryScreen?.Bounds.Height ?? 1080;
     volatile Motion? motion;                        // null: sticks at rest, nothing to move
     Motion? lastMotion;                             // controller thread: what it last handed over
     readonly ManualResetEventSlim moving = new(false);
@@ -213,7 +212,9 @@ sealed class PadMapper
     {
         var (cx, cy) = Curve(x, y);
         if (cx == 0 && cy == 0) { pointerX = pointerY = 0; return; }
-        var speed = PointerSpeed * screenHeight * dt * factor;
+        // The screen's height read at each step, not once: the primary screen can change under the
+        // launcher (Windows' placeholder monitor all night, then the TV on at 4K).
+        var speed = PointerSpeed * (Screen.PrimaryScreen?.Bounds.Height ?? 1080) * dt * factor;
         pointerX += cx * speed;
         pointerY -= cy * speed; // stick up is positive, screen up is negative
         int dx = (int)pointerX, dy = (int)pointerY;

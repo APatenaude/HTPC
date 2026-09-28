@@ -44,6 +44,14 @@ sealed partial class MainForm : Form
 
     bool uiReady;
     int brightness = 100;      // as the UI and phones show it; kept in settings (MainForm.Settings.cs)
+    Task? idleCheck, tvPoll;   // the clock's 5 s work, while it runs
+
+    // Work left to run on its own: a failure is logged, as the clock's awaits once had it.
+    static async Task Logged(Task work, string what)
+    {
+        try { await work; }
+        catch (Exception e) { Log.Error(what, e); }
+    }
 
     public MainForm(Options options)
     {
@@ -60,39 +68,48 @@ sealed partial class MainForm : Form
         apps = new AppManager(options.CatalogPath);
         apps.SetCustom(settings.CustomTiles, settings.TileEdits);   // added websites and programs, tile edits
         if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
-        apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        apps.RunningChanged += (id, started) => OnUi(() => OnRunningChanged(id, started));
         library = new LibraryService(apps, settings, options.CatalogPath);
         library.Changed += () => OnUi(PushLibraryProgress);
         library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
+        keyboard.Broken += why => ExitForRestart($"the on-screen keyboard: {why}");
         closeSoon.Tick += (_, _) =>
         {
             closeSoon.Stop();
             if (keyboard.Visible && keyboardAuto) CloseKeyboard("the text field lost the focus");
         };
-        textFields.FocusChanged += (field, pid) => BeginInvoke(() => OnTextField(field, pid));
-        controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
-        controller.StatusChanged += (connected, _) => BeginInvoke(() =>
+        textFields.FocusChanged += (field, pid) => OnUi(() => OnTextField(field, pid));
+        controller.Pressed += (pad, repeat) => OnUi(() => OnPad(pad, repeat));
+        var padConnected = false;
+        controller.StatusChanged += (connected, _) => OnUi(() =>
         {
             // A sleeping 8BitDo controller reconnects on the first press: that press wakes the box.
-            if (connected && standby.Active) standby.Wake("controller reconnected");
+            // Only a connection does, not a new battery level (a pad draining at night, a failed read).
+            var reconnected = connected && !padConnected;
+            padConnected = connected;
+            if (reconnected && standby is { Active: true }) standby.Wake("controller reconnected");
             PushState();
         });
         tv = CreateTv(); // MainForm.Tv.cs
-        clock.Tick += async (_, _) =>
+        clock.Tick += (_, _) =>
         {
             CheckSleepTimer();
             KeepFilled();
             // Every 5 s: the idle check (not during setup), and the TV's power state (its own remote).
+            // Neither waits for the other (a frozen player held the TV's poll up), and one still
+            // running is not started again on top of itself.
             if (++ticks % 5 != 0) return;
-            if (!setupMode) await standby.Tick();
-            await tv.Poll();
+            if (!setupMode && idleCheck is not { IsCompleted: false }) idleCheck = Logged(standby.Tick(), "Idle check");
+            if (tvPoll is not { IsCompleted: false }) tvPoll = Logged(tv.Poll(), "TV poll");
         };
-        // Back from a real sleep or hibernate: the TV comes on with the box.
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
-            if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUi(OnResumed);
+            // A Modern Standby PC may go into Windows' own standby from ours (the display off):
+            // the log says so, since the controller cannot wake it from there (a key or the power button can).
+            else if (e.Mode == Microsoft.Win32.PowerModes.Suspend) Log.Info($"Windows is suspending{(standby is { Active: true } ? " (from standby)" : "")}");
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         revealTimer.Tick += (_, _) => RevealPending("400 ms");
@@ -104,40 +121,75 @@ sealed partial class MainForm : Form
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
         InitAlerts();   // MainForm.Alerts.cs
         InitSettings(); // MainForm.Settings.cs
+        InitScreen();   // MainForm.Screen.cs: display changes
     }
 
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        // A launcher update or a restart for Windows updates left word (MainForm.Updates.cs).
-        var handoff = TakeHandoffAtStart();
-        var screen = Screen.PrimaryScreen!.Bounds;
-        Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
-        RestoreBrightness(); // MainForm.Settings.cs: the level set last, before the first frame
-        apps.Adopt(); // apps left open by a previous launcher
-        standby = new Standby(controller, settings, media);
-        standby.Changed += OnStandbyChanged;
-        InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
-        standby.GoingDown += () =>
+        // Up to the controller and the page, a failure is a black window without a controller
+        // that still answers the watchdog: it exits for the watchdog instead (async void: an
+        // exception would only reach the log).
+        LauncherHandoff? handoff;
+        try
         {
-            Post(new { type = "show", view = "home" });
-            // Before Windows sleeps, or the key never goes out. On the thread pool: waiting on the
-            // UI thread would deadlock the awaits inside.
-            Task.Run(() => tv.TurnOff()).Wait(3000);
-        };
-        AlertsLoaded(); // MainForm.Alerts.cs
-        var (hasS3, hasS4) = Standby.Capabilities();
-        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}");
-        controller.Start();
-        clock.Start();
-        mouseWatch.Start();
+            // A launcher update or a restart for Windows updates left word (MainForm.Updates.cs).
+            handoff = TakeHandoffAtStart();
+            var screen = Screen.PrimaryScreen!.Bounds;
+            Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+            fittedTo = screen; // and again at each display change (MainForm.Screen.cs)
+            RestoreBrightness(); // MainForm.Settings.cs: the level set last, before the first frame
+            apps.Adopt(); // apps left open by a previous launcher
+            standby = new Standby(controller, settings, media);
+            standby.Changed += OnStandbyChanged;
+            InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
+            standby.GoingDown += () =>
+            {
+                Post(new { type = "show", view = "home" });
+                // Phones hear it now: once Windows sleeps, only the box's power button wakes it.
+                phones?.Broadcast(new { t = "bye", reason = "sleep" });
+                // Before Windows sleeps, or the key never goes out. On the thread pool: waiting on the
+                // UI thread would deadlock the awaits inside.
+                Task.Run(() => tv.TurnOff()).Wait(3000);
+            };
+            AlertsLoaded(); // MainForm.Alerts.cs
+            var (hasS3, hasS4) = Standby.Capabilities();
+            Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}, Modern Standby {Standby.ModernStandby()}");
+            controller.Start();
+            clock.Start();
+            mouseWatch.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Starting the launcher", ex);
+            ExitForRestart("the launcher did not start");
+            return;
+        }
         await StartWebView(); // MainForm.Shell.cs: tries again, else exits for the watchdog
-        StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
+        // From here the launcher works: a part that fails is logged and the rest goes on.
+        StartPhone(); // the phone remote (MainForm.Phone.cs), in the background; logs its own failures
         _ = Task.Run(() => ScreenCapture.Prepare(captureDir)); // a first capture, so the first Home is quick too
         // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
         // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
-        await StartTv(handoff);
-        ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
+        try { await StartTv(handoff); }
+        catch (Exception ex) { Log.Error("The TV at start", ex); }
+        try { ResumeAfterHandoff(); } // back to standby if the launcher before this one was in it
+        catch (Exception ex) { Log.Error("Back to standby after a handoff", ex); }
+    }
+
+    // Back from a real sleep or hibernate (the keyboard, the power button, the phone's
+    // Wake-on-LAN; Windows says Resume only for those, not for a wake timer): the TV comes on
+    // with the box, and idle counts from now, not from before the sleep. Slept from standby (its
+    // hours were up), the box wakes from that too (SPEC: keyboard or power button): left in
+    // standby, the page the sleep brought back ("show home") stayed on screen with the display
+    // on for good, the controller's taps swallowed and the keyboard driving the page.
+    void OnResumed()
+    {
+        Log.Info("Resumed");
+        if (standby is null) { _ = tv.TurnOn(); return; }
+        standby.Resumed();
+        if (standby.Active) standby.Wake("resumed"); // the TV comes on with it (OnStandbyChanged)
+        else _ = tv.TurnOn();
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
@@ -199,26 +251,50 @@ sealed partial class MainForm : Form
         // Nothing typed in the launcher (a Wi-Fi password) is kept or offered by WebView2.
         core.Settings.IsPasswordAutosaveEnabled = false;
         core.Settings.IsGeneralAutofillEnabled = false;
-        core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
+        WebViewGuard.KeepToLauncher(core, "Launcher page"); // its own pages only, no new windows
+        core.SetVirtualHostNameToFolderMapping(LauncherOrigin.Host, options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping(AppLogos.Host, logos.Folder, CoreWebView2HostResourceAccessKind.Allow); // MainForm.Logos.cs
         core.WebMessageReceived += OnWebMessage;
-        core.ProcessFailed += (_, args) =>
-        {
-            Log.Error($"WebView2 process failed: {args.ProcessFailedKind}");
-            if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) core.Reload();
-            else if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited) ExitForRestart("the WebView2 browser process ended");
-        };
+        core.ProcessFailed += (_, args) => OnProcessFailed(core, args);
         core.Navigate(setupMode ? "https://launcher.htpc/setup.html" : "https://launcher.htpc/index.html");
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
     }
 
+    readonly WebViewRecovery pageRecovery = new();
+
+    // A WebView2 process failed (WebViewRecovery decides: reload, a new browser, a restart).
+    // The GPU and browser processes are the keyboard's too: they are handled here only.
+    void OnProcessFailed(CoreWebView2 core, CoreWebView2ProcessFailedEventArgs args)
+    {
+        var d = pageRecovery.OnFailure(args.ProcessFailedKind.ToString(), Environment.TickCount64);
+        Log.Error($"WebView2 process failed: {args.ProcessFailedKind} ({args.Reason}, exit code {args.ExitCode}" +
+            $"{(string.IsNullOrEmpty(args.ProcessDescription) ? "" : $", {args.ProcessDescription}")}): {d.Why}");
+        switch (d.Step)
+        {
+            case WebViewRecovery.Step.Reload: _ = ReloadPage(core, d.Delay); break;
+            case WebViewRecovery.Step.NewBrowser: _ = RecreateWebViews("the GPU process was lost"); break;
+            case WebViewRecovery.Step.Restart: ExitForRestart($"the launcher's page: {d.Why}"); break;
+        }
+    }
+
+    async Task ReloadPage(CoreWebView2 core, TimeSpan delay)
+    {
+        if (delay > TimeSpan.Zero) await Task.Delay(delay);
+        if (!ReferenceEquals(web.CoreWebView2, core)) return; // the WebViews were made again meanwhile
+        uiReady = false; // the page says "ready" again once loaded, and gets everything then
+        try { core.Reload(); }
+        catch (Exception e) { Log.Error("Reloading the launcher's page", e); }
+    }
+
     // --- Messages from the UI ----------------------------------------------------------------
 
     void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        // Only from the launcher's own page (WebViewGuard keeps it there anyway).
+        if (!WebViewGuard.FromLauncher(e, "Launcher page")) return;
         // WebView2 swallows exceptions from this handler: log them. Only the message type: the
         // rest can hold what someone typed (a Wi-Fi password, a sign-in).
         try { HandleWebMessage(e); }
@@ -469,8 +545,10 @@ sealed partial class MainForm : Form
         if (standby.Active || LauncherActive || !textFields.Enabled) return;
         // Someone typing on a real keyboard needs no keyboard on screen: it pops up by itself
         // only while the controller is in use. (R3 still opens it.)
-        if (DateTime.Now - controller.LastActivity > TimeSpan.FromMinutes(1)) return;
-        if (PhoneActivity > controller.LastActivity) return; // the phone is in use: it has its own keyboard
+        // A button, trigger or stick (not the controller's analog noise), as tick counts (the clock can jump).
+        var padUsed = controller.LastInputTick;
+        if (padUsed == long.MinValue || Environment.TickCount64 - padUsed > 60_000) return;
+        if (standby.PhoneActivityTick > padUsed) return; // the phone is in use: it has its own keyboard
         if (keyboard.Visible && SameField(keyboardField, field)) return; // still typing there
         OpenKeyboard(field, auto: true);
     }
@@ -850,6 +928,8 @@ sealed partial class MainForm : Form
     {
         try
         {
+            // Made again if gone (Disk Cleanup empties %TEMP%): every Home would lack its backdrop.
+            Directory.CreateDirectory(captureDir);
             // The two newest stay: the page may still be loading one while the next is made. One
             // it still holds is left for next time (access denied made the capture fail, 27 Sept).
             foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg").OrderDescending().Skip(2))
@@ -920,7 +1000,8 @@ sealed partial class MainForm : Form
             mapper.Map = null;
             CloseKeyboard("standby");
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
-            Post(new { type = "blank" });
+            Post(new { type = "blank" }); // the page's sections stop their timers (app.js sectionHooks)
+            tv.UiShowing(false);          // no TV search every 10 s all night, whatever the page did
             // Not while UI Automation listens for an app's text fields (Reveal says why).
             void Front() { if (!Visible) Show(); Native.ForceForeground(Handle); }
             if (textFields.Quiet) Front();
@@ -930,7 +1011,11 @@ sealed partial class MainForm : Form
         else
         {
             apps.SetEfficiencyMode(false);
-            if (appBeforeStandby is not null && apps.IsRunning(appBeforeStandby)) SwitchTo(appBeforeStandby);
+            var back = appBeforeStandby;
+            appBeforeStandby = null; // used once: a later wake must not go back to it
+            // Its window gone meanwhile (still running, no window: SwitchTo would only say so over
+            // the blank page): the home screen instead.
+            if (back is not null && apps.IsRunning(back) && apps.MainWindow(back) != IntPtr.Zero) SwitchTo(back);
             else { Post(new { type = "show", view = "home" }); Reveal(); }
         }
     }
@@ -949,6 +1034,7 @@ sealed partial class MainForm : Form
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == DesktopMode.BackToTvMessage) { BackToTv(); return; } // HtpcLauncher.exe --tv
+        if (m.Msg == WM_DISPLAYCHANGE) ScreenChanged("display change"); // MainForm.Screen.cs; on to WinForms too
         if (m.Msg == StandbyMessage && standby is not null)
         {
             if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone
