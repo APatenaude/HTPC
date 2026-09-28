@@ -232,6 +232,22 @@ function Sync-Folder([string]$From, [string]$To) {
 
 $keep = Join-Path $HtpcData 'setup'
 $from = (Resolve-Path -LiteralPath $SetupDir).Path.TrimEnd('\')
+# Elevated, the files SYSTEM will run (lib\, jobs\, catalog.json, and the kept setup below) must not
+# be copied straight from a place the user can write, where they could be changed between the
+# elevation and now (setup.ps1 run from the repo, an unzipped setup.zip, or a USB stick on FAT).
+# When the source is user-writable it is staged into an admin-only folder first and everything is
+# installed from there; an already-trusted source (TV Box Setup's admin-only bundle, or the kept
+# ProgramData\HTPC\setup on a re-run) is used as it is.
+$stagedFrom = $null
+if ($from -ne $keep -and (Get-UntrustedReason $from)) {
+    $stagedFrom = New-AdminWorkDir 'setup-src'
+    Copy-Item (Join-Path $from '*') $stagedFrom -Recurse -Force
+    Clear-ReadOnly $stagedFrom
+    $why = Get-UntrustedReason $stagedFrom
+    if ($why) { throw "the staged setup source is not admin-only ($why)" }
+    Write-Change "setup source staged to an admin-only folder (the source $from is user-writable)"
+    $from = $stagedFrom
+}
 if ($from -ne $keep) {
     Sync-Folder $from $keep
 } else {
@@ -251,6 +267,8 @@ Copy-Item (Join-Path $from 'lib\Start-Job.ps1') (Join-Path $installDir 'Start-Jo
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
 Clear-ReadOnly (Join-Path $installDir 'Start-Job.ps1'); Clear-ReadOnly (Join-Path $installDir 'catalog.json')
 Write-Change "job runner and trusted catalog in $installDir"
+# The staged copy of a user-writable source is no longer needed once everything is installed.
+if ($stagedFrom) { Remove-OwnTree $stagedFrom }
 
 # Setup replaces whatever a launcher update left: its journal (cleared above, so nothing ever
 # "rolls back" to the launcher before that update) and the copies it kept (.prev, .new, .bad,

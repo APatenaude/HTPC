@@ -33,6 +33,7 @@ param(
 )
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\UpdateCore.ps1"   # Get-UntrustedReason (an exe run elevated must be from a trusted place)
 Assert-Admin
 
 $Group = 'HTPC'
@@ -129,13 +130,22 @@ $exe = @($Program | Where-Object { Test-Path -LiteralPath $_ }) | Select-Object 
 if (-not $exe) {
     Write-Attention 'no launcher to run: the HTTPS certificate is left for the next setup'
 } else {
+    # Making the CA runs as the signed-in user, not elevated (Invoke-AsUser): fine even for a dev
+    # build (the user's own rights). Putting the intermediate in the machine store runs the exe
+    # elevated, so it must not be one the user can write (a dev build in a user folder, -Program):
+    # that step is refused for such an exe. The installed launcher in admin-only Program Files is fine.
     $made = Invoke-AsUser $exe '--phone-certificates-create'
     if ($made -eq 0) { Write-Same 'HTTPS: the phone remote has its certificate authority' }
     else { Write-Attention "HTTPS: the launcher could not make its certificate as $env:USERNAME (result $made; the launcher log says why)" }
-    $run = Start-Process -FilePath $exe -ArgumentList '--phone-certificates' -Wait -PassThru -WindowStyle Hidden
-    if ($run.ExitCode -eq 0) { Write-Same 'HTTPS: the intermediate certificate is in the machine store' }
-    elseif ($run.ExitCode -eq 2) { Write-Attention 'HTTPS: the launcher has not made its certificate yet (on its first start): run setup again after that for Android''s Share' }
-    else { Write-Attention "HTTPS: the intermediate certificate is not in the machine store (exit code $($run.ExitCode); the launcher log says why)" }
+    $untrusted = Get-UntrustedReason $exe
+    if ($untrusted) {
+        Write-Attention "HTTPS: not running $exe elevated to put the intermediate in the machine store ($untrusted). Install the launcher (Program Files) and run setup again for Android's Share."
+    } else {
+        $run = Start-Process -FilePath $exe -ArgumentList '--phone-certificates' -Wait -PassThru -WindowStyle Hidden
+        if ($run.ExitCode -eq 0) { Write-Same 'HTTPS: the intermediate certificate is in the machine store' }
+        elseif ($run.ExitCode -eq 2) { Write-Attention 'HTTPS: the launcher has not made its certificate yet (on its first start): run setup again after that for Android''s Share' }
+        else { Write-Attention "HTTPS: the intermediate certificate is not in the machine store (exit code $($run.ExitCode); the launcher log says why)" }
+    }
 }
 
 Write-Host '  Casting from the phone (catalog install.allowInbound)'
