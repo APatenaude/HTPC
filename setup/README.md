@@ -200,6 +200,10 @@ answering; not while Windows signs out or restarts, not while a pause is set
 SYSTEM jobs), and not for exit code 75 (a planned exit). Three exits within a minute of starting
 in a row: the box restarts once (at most every 6 hours), then the Windows desktop with "The TV
 launcher keeps closing. Back to TV to try again.", with new tries after 30 s, 2 min and 10 min.
+While a launcher update checks the launcher it just put in place
+(`C:\ProgramData\HTPC\state\watchdog-watch`, set before its pause is lifted and kept until the
+new launcher is judged), the launcher is started as usual but none of its exits counts and there
+is no restart or desktop: a crash loop there is the update's to roll back.
 Log: `C:\ProgramData\HTPC\logs\watchdog.log`.
 
 Desktop mode (Power menu, one confirmation) starts Explorer: desktop, taskbar, Start menu. The

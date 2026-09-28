@@ -34,6 +34,12 @@
 //   C:\ProgramData\HTPC\state\watchdog-pause  {"jobPid": N, "expiresUtc": "..."}, written by
 //       SYSTEM jobs (launcher updates; the folder is admin-only). Over when it expires or the job
 //       process is gone; ignored when written before the box started.
+// Watch (the launcher is still started, as usual):
+//   C:\ProgramData\HTPC\state\watchdog-watch  the same format and rules, written by a launcher
+//       update from before it lifts its pause after the swap until the new launcher is judged
+//       (done, or rolled back: its rollback pauses first). Meanwhile the launcher's exits are the
+//       job's to judge: none counts, and there is no restart of the box, no desktop and no wait
+//       between tries, so the watchdog never acts on a crash loop the job is about to roll back.
 //
 // Log: C:\ProgramData\HTPC\logs\watchdog.log (or %LOCALAPPDATA%\HTPC\logs when that one is not
 // ours to write), moved to watchdog.old.log and started afresh whenever it passes 512 KB (checked
@@ -81,6 +87,7 @@ namespace Htpc.Watchdog
         static readonly string Dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         static readonly string LauncherExe = Path.Combine(Dir, "HtpcLauncher.exe");
         static readonly string JobPauseFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"HTPC\state\watchdog-pause");
+        static readonly string JobWatchFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"HTPC\state\watchdog-watch");
         const string PauseKey = @"Software\HTPC", PauseValue = "WatchdogPauseUntil";
         static readonly string RestartMarker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"HTPC\watchdog-restart");
 
@@ -169,16 +176,18 @@ namespace Htpc.Watchdog
                     var lived = holder.Started.HasValue ? DateTime.Now - holder.Started.Value : (TimeSpan?)null;
                     Log.Info((holder.Pid == 0 ? "Setup (or another launcher) ended" : "Launcher ended (pid " + holder.Pid) + (lived.HasValue ? ", ran " + Seconds(lived.Value) : "")
                         + (code.HasValue ? ", exit code " + code.Value : "") + (holder.Pid == 0 ? "" : ")"));
-                    if (code == PlannedExit || Paused()) { }     // an update, a hand-over, a job ending it: not a crash
-                    else if (lived.HasValue && (lived.Value < FastExit || (endedHung && lived.Value < Settled))) fastExits++;
-                    else if (lived.HasValue) fastExits = 0;
+                    var watched = Watched();
+                    var verdict = Judge(code, lived, endedHung, watched || Paused());
+                    if (verdict == Exit.Fast) fastExits++;
+                    else if (verdict == Exit.Settled) fastExits = 0;
+                    if (watched && code != PlannedExit) Log.Info("Not counted: a launcher update is checking this launcher (it rolls it back itself)");
                     if (!ending.WaitOne(0)) Ui.ShowSplash();       // not a bare black screen meanwhile
                 }
                 if (ending.WaitOne(sawExit ? Grace : TimeSpan.Zero) || SessionEnding()) { Log.Info("Session ending: not restarting"); return; }
                 if (IsHeld()) continue; // another launcher took over (setup handing over, a dev build)
                 if (Paused()) { WaitWhilePaused(); continue; }
 
-                if (retries < 0 && fastExits >= FastExitsBeforeFallback)
+                if (FallBack(fastExits, retries, Watched()))
                 {
                     Log.Warn("The launcher ended " + fastExits + " times within " + Seconds(FastExit) + " of starting");
                     if (TryAutoRestart())
@@ -190,9 +199,10 @@ namespace Htpc.Watchdog
                     EnterFallback();
                     retries = 0;
                 }
-                if (retries >= 0)
+                // In the fallback, the next try waits (unless someone starts a launcher first: Back
+                // to TV); not while a launcher update checks the launcher: it needs it started now.
+                if (retries >= 0 && !Watched())
                 {
-                    // The next try, unless someone starts a launcher first (Back to TV).
                     var wait = retries < RetryAfter.Length ? RetryAfter[retries] : Timeout.InfiniteTimeSpan;
                     if (retries < RetryAfter.Length) retries++;
                     if (WaitForLauncher(wait)) continue;
@@ -280,7 +290,12 @@ namespace Htpc.Watchdog
             var reason = restartReason ?? "ended";
             if (child != null) child.Dispose();
             child = Native.Start(LauncherExe, restarted ? "--restarted --restart-reason=" + reason : "");
-            if (child == null) { sawExit = true; restartReason = "not-started"; fastExits++; return; }
+            if (child == null)
+            {
+                sawExit = true; restartReason = "not-started";
+                if (Judge(null, TimeSpan.Zero, false, Watched() || Paused()) == Exit.Fast) fastExits++;
+                return;
+            }
             Log.Info("Launcher started (pid " + child.Id + (restarted ? ", --restarted: " + reason : "") + ")");
             // Until it holds the mutex (a first start after an update unpacks for a while), or
             // exits before it does.
@@ -291,7 +306,7 @@ namespace Htpc.Watchdog
                 sawExit = true;
                 var code = ExitCode(child);
                 restartReason = code == PlannedExit ? "planned" : code.HasValue ? "exit:" + code.Value.ToString(CultureInfo.InvariantCulture) : "ended";
-                if (code != PlannedExit) fastExits++;
+                if (Judge(code, TimeSpan.Zero, false, Watched() || Paused()) == Exit.Fast) fastExits++;
                 Log.Warn("Launcher exited before starting up (exit code " + ExitCode(child) + ")");
             }
         }
@@ -319,18 +334,63 @@ namespace Htpc.Watchdog
         {
             var user = UserPause();
             if (Unexpired(user) && user != consumedPause) return true;
+            return JobFileHolds(JobPauseFile);
+        }
+
+        // A launcher update is checking the launcher it put in place (state\watchdog-watch).
+        static bool Watched() { return JobFileHolds(JobWatchFile); }
+
+        static bool JobFileHolds(string path)
+        {
             try
             {
-                // From before the box started: its job is long gone (and its pid may be reused).
-                if (!File.Exists(JobPauseFile) || File.GetLastWriteTimeUtc(JobPauseFile) < Native.BootTimeUtc()) return false;
-                var text = File.ReadAllText(JobPauseFile);
-                var expires = Regex.Match(text, "\"expiresUtc\"\\s*:\\s*\"([^\"]+)\"");
-                var job = Regex.Match(text, "\"jobPid\"\\s*:\\s*(\\d+)");
-                if (!expires.Success || !Unexpired(expires.Groups[1].Value)) return false;
-                if (!job.Success) return true;
-                using (Process.GetProcessById(int.Parse(job.Groups[1].Value, CultureInfo.InvariantCulture))) return true;
+                if (!File.Exists(path)) return false;
+                return JobFileHolds(File.ReadAllText(path), File.GetLastWriteTimeUtc(path), Native.BootTimeUtc(), DateTime.UtcNow, ProcessRuns);
             }
-            catch (Exception) { return false; } // unreadable, or the job is gone
+            catch (Exception) { return false; } // unreadable
+        }
+
+        static bool ProcessRuns(int pid)
+        {
+            try { using (Process.GetProcessById(pid)) return true; }
+            catch (Exception) { return false; }
+        }
+
+        // --- The rules, apart from Windows (setup\test\Test-Updates.ps1 compiles this file with checks) --
+
+        // A job's file (pause or watch), {"jobPid": N, "expiresUtc": "..."}: it holds while it was
+        // written since the box started (else its job is long gone, and its pid may be reused), has
+        // not expired, and names a process that still runs.
+        internal static bool JobFileHolds(string text, DateTime writtenUtc, DateTime bootUtc, DateTime nowUtc, Func<int, bool> running)
+        {
+            if (text == null || writtenUtc < bootUtc) return false;
+            var expires = Regex.Match(text, "\"expiresUtc\"\\s*:\\s*\"([^\"]+)\"");
+            var job = Regex.Match(text, "\"jobPid\"\\s*:\\s*(\\d+)");
+            DateTime until;
+            if (!expires.Success || !DateTime.TryParse(expires.Groups[1].Value.Trim(), CultureInfo.InvariantCulture,
+                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out until) || nowUtc >= until) return false;
+            if (!job.Success) return true;
+            int pid;
+            return int.TryParse(job.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out pid) && running(pid);
+        }
+
+        internal enum Exit { NotCounted, Fast, Settled }
+
+        // How a launcher's end counts: not at all when it was planned (exit code 75), when a job
+        // held it (a pause: the job ended it on purpose; a watch: the job judges it itself) or its
+        // start time is unknown; a fast exit when it ran less than 60 s, or was ended for not
+        // responding within 5 min; otherwise it had settled (the count starts again).
+        internal static Exit Judge(int? code, TimeSpan? lived, bool endedHung, bool jobHolds)
+        {
+            if (code == PlannedExit || jobHolds || !lived.HasValue) return Exit.NotCounted;
+            return lived.Value < FastExit || (endedHung && lived.Value < Settled) ? Exit.Fast : Exit.Settled;
+        }
+
+        // The fallback (restart the box, else the desktop) after 3 fast exits in a row, never while
+        // a launcher update watches the launcher it put in place.
+        internal static bool FallBack(int fastExits, int retries, bool watched)
+        {
+            return retries < 0 && fastExits >= FastExitsBeforeFallback && !watched;
         }
 
         static void WaitWhilePaused()
@@ -420,6 +480,7 @@ namespace Htpc.Watchdog
             {
                 if (ending.WaitOne(5000)) return true;
                 if (IsHeld()) { CloseMessage(); return true; } // Back to TV: the message has done its job
+                if (Watched()) { Log.Info("A launcher update is checking the launcher: trying now"); return false; }
             }
             return false;
         }

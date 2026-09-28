@@ -9,7 +9,9 @@
     Everything happens under %TEMP%\htpc-updtest: a fake Program Files\HTPC and ProgramData\HTPC,
     fake launchers and a fake watchdog (small C# programs built with the .NET Framework's csc),
     and a fake GitHub on http://127.0.0.1 (Serve-FakeRelease.ps1).
-      Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs)
+      Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs), the
+                real watchdog's rules (Watchdog.cs compiled with checks: a job's pause or watch
+                file, how an exit counts, never a fallback while an update watches)
       Download  pinned redirects: another host, another scheme, more than 5 hops, another
                 repository's path (a renamed one: "moved", also for releases/latest), no release
                 yet, a lying Content-Length, a longer stream, 429 short and long, 403 with and
@@ -17,7 +19,9 @@
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
                 first roll back; the next update that works removes the .bad copies), not
                 newer, no watchdog, not enough free space, a bad download, never back at Home
-                (an app in front: it gives up; nothing touched, nothing stopped)
+                (an app in front: it gives up; nothing touched, nothing stopped); in each, the
+                fake watchdog, judging exits as the real one does, counts none (the job's watch
+                covers the crash loop it rolls back, its pause the launcher it stops)
       Faults    the job ended hard after each journal step, then reconcile, started the way the
                 box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
                 the update, even with lib\ or jobs\ gone): the old launcher or the new one, never
@@ -108,25 +112,47 @@ class P { static int Main() {
 }
 
 # The watchdog: starts HtpcLauncher.exe from its folder whenever none runs from there, unless
-# the job's pause file names a live process. Stops when <root>\stop-watchdog exists.
+# the job's pause file names a live process. Each exit of a launcher it started is judged as the
+# real one judges it, into <root>\watchdog-exits.log: "planned" (exit code 75), "covered" (a
+# job's pause or watch file names a live process: not counted) or "counted" (a crash the real
+# watchdog would count towards restarting the box). Stops when <root>\stop-watchdog exists.
 function Get-FakeWatchdog {
     Build-Fake 'HtpcWatchdog.exe' @'
 using System; using System.IO; using System.Threading; using System.Diagnostics; using System.Text.RegularExpressions;
-class W { static void Main() {
+class W {
+  static bool Holds(string path) {
+    try { var m = Regex.Match(File.ReadAllText(path), "\"jobPid\":\\s*(\\d+)");
+          if (m.Success) { using (Process.GetProcessById(int.Parse(m.Groups[1].Value))) return true; } } catch (Exception) { }
+    return false;
+  }
+  static void Main() {
   var dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
   var exe = Path.Combine(dir, "HtpcLauncher.exe");
   var root = Path.GetFullPath(Path.Combine(dir, @"..\..\.."));
   var pause = Path.Combine(root, @"PD\HTPC\state\watchdog-pause");
+  var watch = Path.Combine(root, @"PD\HTPC\state\watchdog-watch");
+  var log = Path.Combine(root, "watchdog-exits.log");
+  Process child = null;
+  var nextStart = DateTime.MinValue;
   while (!File.Exists(Path.Combine(root, "stop-watchdog"))) {
-    var paused = false;
-    try { var m = Regex.Match(File.ReadAllText(pause), "\"jobPid\":\\s*(\\d+)");
-          if (m.Success) { try { Process.GetProcessById(int.Parse(m.Groups[1].Value)); paused = true; } catch (Exception) { } } } catch (Exception) { }
-    var running = false;
+    if (child != null && child.HasExited) {
+      var what = child.ExitCode == 75 ? "planned" : Holds(pause) || Holds(watch) ? "covered" : "counted";
+      try { File.AppendAllText(log, what + " " + child.ExitCode + Environment.NewLine); } catch (Exception) { }
+      child = null;
+      nextStart = DateTime.UtcNow.AddSeconds(1);
+    }
+    var running = child != null;
     foreach (var p in Process.GetProcessesByName("HtpcLauncher")) { try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) running = true; } catch (Exception) { } }
-    if (!paused && !running && File.Exists(exe)) { try { Process.Start(exe); } catch (Exception) { } Thread.Sleep(1500); }
-    Thread.Sleep(250);
+    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(exe); } catch (Exception) { } }
+    Thread.Sleep(100);
   } } }
 '@
+}
+
+# The exits of a fake box's launcher its watchdog would have counted as crashes (see above).
+function Get-CountedExits([string]$Root) {
+    $log = Join-Path $Root 'watchdog-exits.log'
+    @(if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log | Where-Object { $_ -like 'counted*' } })
 }
 
 # An admin-only folder (SYSTEM and Administrators full, Users read), as the box's are.
@@ -364,6 +390,46 @@ try {
         $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*') { throw 'failed' } }
         $ran.Clear(); Update-MachineSettings $mp $fake
         Check (($ran -join ',') -eq 'Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
+
+        # The real watchdog's rules (launcher\src\Watchdog\Watchdog.cs, compiled here with checks,
+        # as the build does: the Framework's csc, warnings as errors): a job's pause or watch file,
+        # how an exit counts, when it falls back to restarting the box or the desktop.
+        $wdChecks = Join-Path $bin 'watchdog-checks.cs'
+        [IO.File]::WriteAllText($wdChecks, @'
+using System;
+namespace Htpc.Watchdog {
+static class Checks {
+  static int failed;
+  static void Check(bool ok, string what) { Console.WriteLine((ok ? "PASS " : "FAIL ") + what); if (!ok) failed++; }
+  static int Main() {
+    var boot = new DateTime(2026, 9, 28, 8, 0, 0, DateTimeKind.Utc);
+    var now = boot.AddHours(2);
+    Func<int, bool> running = pid => pid == 4321;
+    var file = "{\"jobPid\":4321,\"expiresUtc\":\"" + now.AddMinutes(10).ToString("o") + "\"}";
+    Check(Program.JobFileHolds(file, now.AddMinutes(-1), boot, now, running), "a job's pause or watch holds: written since the box started, not expired, its job running");
+    Check(!Program.JobFileHolds(file.Replace("4321", "4322"), now.AddMinutes(-1), boot, now, running), "  not once its job is gone");
+    Check(!Program.JobFileHolds(file, boot.AddMinutes(-5), boot, now, running), "  not when written before the box started");
+    Check(!Program.JobFileHolds(file, now.AddMinutes(-1), boot, now.AddMinutes(11), running), "  not once expired");
+    Check(!Program.JobFileHolds("{\"jobPid\":4321}", now, boot, now, running) && !Program.JobFileHolds(null, now, boot, now, running), "  not without an expiry, nor without a file");
+    var early = TimeSpan.FromSeconds(5);
+    Check(Program.Judge(1, early, false, false) == Program.Exit.Fast, "a crash 5 s after its start: a fast exit");
+    Check(Program.Judge(1, early, false, true) == Program.Exit.NotCounted, "  not counted while a job watches or pauses (the update judges it)");
+    Check(Program.Judge(75, early, false, false) == Program.Exit.NotCounted, "exit code 75 (planned): not counted");
+    Check(Program.Judge(null, TimeSpan.FromSeconds(90), true, false) == Program.Exit.Fast, "ended as hung 90 s in: a fast exit");
+    Check(Program.Judge(1, TimeSpan.FromMinutes(2), false, false) == Program.Exit.Settled, "a crash 2 min in: it had settled");
+    Check(Program.Judge(null, TimeSpan.FromMinutes(6), true, false) == Program.Exit.Settled, "ended as hung 6 min in: it had settled");
+    Check(Program.FallBack(3, -1, false), "3 fast exits in a row: restart the box or the desktop");
+    Check(!Program.FallBack(3, -1, true), "  never while a launcher update watches the launcher it put in place");
+    Check(!Program.FallBack(2, -1, false) && !Program.FallBack(3, 0, false), "  not before 3, nor again while in the fallback");
+    return failed;
+  } } }
+'@)
+        $wdExe = Join-Path $bin 'watchdog-checks.exe'
+        $built = & { $ErrorActionPreference = 'Continue'; & $csc /nologo /target:exe /warnaserror+ /main:Htpc.Watchdog.Checks "/out:$wdExe" (Join-Path $repo 'launcher\src\Watchdog\Watchdog.cs') $wdChecks 2>&1 | Out-String }
+        Check ($LASTEXITCODE -eq 0) "the watchdog compiles with its checks $(if ($LASTEXITCODE) { $built.Trim() })"
+        if (Test-Path -LiteralPath $wdExe) {
+            foreach ($line in & $wdExe) { if ($line -match '^(PASS|FAIL) (.+)$') { Check ($Matches[1] -eq 'PASS') "watchdog: $($Matches[2])" } }
+        }
     }
 
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) { Start-FakeGitHub }
@@ -427,6 +493,8 @@ try {
         Check ((Get-FileHash $bootstrap).Hash -eq (Get-FileHash (Join-Path $root 'PF\HTPC\Launcher\lib\Start-Job.ps1')).Hash) "the task's bootstrap is lib\'s copy again"
         & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrap -Job reconcile -DryRun 2>&1 | Out-Null }
         Check ($LASTEXITCODE -eq 0) '  and a dry run through it reaches the runner'
+        $counted = Get-CountedExits $root
+        Check ($counted.Count -eq 0 -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-watch'))) "no exit counted by the watchdog, its watch gone ($($counted -join '; '))"
         Remove-FakeBox $root
 
         foreach ($case in @(@{ mode = 'crash' }, @{ mode = 'hang' }, @{ mode = 'healthy'; broken = $true })) {
@@ -437,6 +505,13 @@ try {
             $j = Get-Journal $root
             Check ($j.step -eq 'rolledback' -and (Get-ExeVersion $root) -eq '0.1.0') "$label rolls back ($($j.message))"
             Check (Wait-For { Get-Running $root '0.1.0' } 20) "  and 0.1.0 runs again"
+            # The crash loop the job rolled back was never the watchdog's to act on (no restart of
+            # the box, no desktop): the watch covered every exit from the swap on, the rollback's
+            # pause the one it stopped.
+            $counted = Get-CountedExits $root
+            $covered = @(Get-Content -LiteralPath (Join-Path $root 'watchdog-exits.log') -ErrorAction SilentlyContinue | Where-Object { $_ -like 'covered*' })
+            Check ($counted.Count -eq 0 -and ($case.mode -ne 'crash' -or $covered.Count -ge 2) -and
+                -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-watch')) -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause'))) "  no exit counted by the watchdog ($($covered.Count) covered by the job; counted: $($counted -join '; ')), watch and pause gone"
             Check ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left'
             if ($case.mode -eq 'crash') {
                 # Kept only until an update works.
