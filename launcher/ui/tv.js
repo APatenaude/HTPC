@@ -186,6 +186,13 @@ const TvUi = {
       case 'twins': return { ...base, status: 'unbound', profile: null, profiles: [],
         found: [{ ...roku, picked: false, detected: false }, { ...roku, id: 'roku:X00000000002', name: 'Bedroom TV', input: 3, picked: false, detected: false }] };
       case 'unbound': return { ...base, status: 'unbound', profile: null, profiles: [], found: [{ ...roku, picked: false }] };
+      // Two TVs and every brand: the method dialog's list is taller than the screen (it scrolls).
+      case 'crowd': return { ...base, status: 'unbound', profile: null, profiles: [],
+        methods: [methods[0], lg,
+          { id: 'bravia', label: 'Sony Bravia', brand: 'Sony', beta: true, how: 'Over your network. Type the PIN the TV shows, once.', checklist: [], detected: false },
+          { id: 'androidtv', label: 'Google TV / Android TV', brand: 'Google TV', beta: true, how: 'Over your network. Type the code the TV shows, once.', checklist: [], detected: false },
+          { id: 'samsung', label: 'Samsung (Tizen)', brand: 'Samsung', beta: true, how: 'Over your network. Say yes to the prompt on the TV once.', checklist: [], detected: false }],
+        found: [{ ...roku, picked: false, detected: false }, { ...roku, id: 'roku:X00000000002', name: 'Bedroom TV', input: 3, picked: false, detected: false }] };
       case 'lg': return { ...base, screen: 'LG TV SSCR2', status: 'unbound', profile: null, profiles: [], methods: [methods[0], lg].map((m) => ({ ...m, detected: m.id === 'webos' })),
         found: [{ id: 'webos:1a2b', method: 'webos', label: 'LG (webOS)', beta: true, name: 'LG OLED65C4', model: 'OLED65C4PUA', locked: false, on: true, power: 'on', input: 1, detected: true, picked: false }] };
       case 'paused': return { ...base, status: 'paused', caps: { ...caps, test: false }, profile: { ...profile, paused: 'Living room tv says it shows HDMI 3, not the box (HDMI 1)' } };
@@ -325,6 +332,9 @@ if (typeof settingsSection === 'function') (() => {
         `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Choose'], ['B', 'Cancel']])}</div></div>`);
     },
     focus: (list) => list.find((e) => e.classList.contains('picked')) || list[0],
+    // The list's ends fade where there is more (app.js scrolls it to the focus).
+    focused(node) { const l = node.closest('.tv-list'); if (l) { scrollIntoBox(node, l, 16); listEdges(l); } },
+    layout() { const l = $('tvmethod').querySelector('.tv-list'); if (l) listEdges(l); },
     demo() { state.tv = TvUi.demo(new URLSearchParams(location.hash.split('?')[1] || '').get('demo') || 'lg'); },
   });
 

@@ -90,11 +90,11 @@ function views() {
     };
   }
   if (s === 'wifi') return {
-    // HOOK for the Wi-Fi component (WifiUI, the alerts/network agent's): it draws its network
-    // list into #su-wifi (see mountWifi below). setup.html loads its script before this one.
+    // The Wi-Fi component (WifiUI, wifi.js, the same as Settings › Wi-Fi) draws its network list
+    // into #su-wifi (see wifiHtml below). setup.html loads its script before this one.
     main: '<div class="su-col"><div class="su-head"><h1>Connect to your network</h1>' +
       '<p>No network cable is plugged in. Pick your Wi-Fi network, or plug in a cable. The box finds the TV and installs apps over the network.</p></div>' +
-      '<div id="su-wifi"></div></div>',
+      `<div id="su-wifi">${wifiHtml()}</div></div>`,
     buttons: button('back', 'Back') + button('next', 'Next', true),
   };
   if (s === 'tv') return tvView();
@@ -150,10 +150,12 @@ function views() {
   if (restart) lines.push(['warn', r.restartNeeded.includes('shell')
     ? 'Restart the box once to finish: from then on it starts straight into this home screen'
     : 'Restart the box once to finish (the name change)']);
+  // Steps that did not work: the list can be taller than the screen, so its lines take the focus
+  // (up from the buttons) and it scrolls to them.
   return {
     main: `<div class="su-col"><h1 class="big">${failed.length ? 'Almost set' : 'All set'}</h1>` +
-      `<div class="su-summary">${lines.map(([k, text]) =>
-        `<span class="su-line"><span class="${k}">${icon(k === 'ok' ? 'check' : 'warn', 34, 2.5)}</span>${esc(text)}</span>`).join('')}</div>` +
+      `<div class="su-summary">${lines.map(([k, text], n) =>
+        `<span class="su-line"${failed.length ? ` data-nav data-id="line:${n}"` : ''}><span class="${k}">${icon(k === 'ok' ? 'check' : 'warn', 34, 2.5)}</span>${esc(text)}</span>`).join('')}</div>` +
       '<p>Press Home any time to get back to your apps.</p></div>',
     // "Restart now" is live once setup has finished (the host restarts Windows).
     buttons: button('restart', 'Restart now', !!restart, !state.result) + button('finish', 'Go to home screen', !restart),
@@ -186,11 +188,13 @@ function tvView() {
 function tvDialog() {
   const tv = state.tv;
   const found = TvUi.foundRows(tv, 'tv-mrow');
+  // The TVs and brands scroll inside the dialog (to the focus: setFocus), as in Settings.
   return '<div class="tv-dialog-wrap"><div class="tv-dialog">' +
     `<h2>How should the box control ${esc((tv.profile && tv.profile.name) || 'this TV')}?</h2>` +
     `<p>${found ? 'Pick your TV, its brand to see what to turn on, or skip TV control.' : 'Pick your TV’s brand to see what to turn on, or skip TV control.'}</p>` +
-    (found ? `<span class="tv-label">TVs on your network</span>${found}<span class="tv-label">Not listed?</span>` : '') +
-    TvUi.methodRows(tv, 'tv-mrow', state.tvHint) + '</div></div>';
+    '<div class="tv-list">' +
+      (found ? `<span class="tv-label">TVs on your network</span>${found}<span class="tv-label">Not listed?</span>` : '') +
+      TvUi.methodRows(tv, 'tv-mrow', state.tvHint) + '</div></div></div>';
 }
 
 function inputView() {
@@ -216,34 +220,96 @@ function render() {
   const v = views();
   const list = steps();
   const i = index();
-  $('su-dots').innerHTML = list.map((_, n) => `<span class="su-dot${n === i ? ' now' : n < i ? ' done' : ''}"></span>`).join('');
+  patchHtml($('su-dots'), list.map((_, n) => `<span class="su-dot${n === i ? ' now' : n < i ? ' done' : ''}"></span>`).join(''));
   $('su-step').textContent = `Step ${i + 1} of ${list.length}`;
   const main = $('su-main');
-  main.innerHTML = v.main;
-  if (shownStep !== state.step) { main.style.animation = 'none'; void main.offsetWidth; main.style.animation = ''; shownStep = state.step; }
-  $('su-buttons').innerHTML = v.buttons;
-  if (state.step === 'wifi') mountWifi($('su-wifi'));
+  // Where the focus was: if its row goes (a network or a TV no longer found), the row now
+  // nearest that place takes it, not the first button.
+  const was = shownStep === state.step && document.querySelector('[data-nav].focused');
+  const at = was && was.getBoundingClientRect();
+  // A new step is drawn afresh (it animates in); the same step again (the TV search, the Wi-Fi
+  // scans, the controller's buttons) is updated in place: the TV dialog does not pop in again,
+  // the lists keep their scroll, the focus its ring.
+  if (shownStep !== state.step) {
+    main.innerHTML = v.main;
+    main.style.animation = 'none'; void main.offsetWidth; main.style.animation = '';
+    shownStep = state.step;
+  } else patchHtml(main, v.main);
+  patchHtml($('su-buttons'), v.buttons);
+  if (state.step === 'wifi' && typeof WifiUI !== 'undefined') WifiUI.afterRender();
+  for (const box of main.querySelectorAll('.su-summary, .tv-list, .wifi-scroll')) listEdges(box);
   const nav = items();
-  const keep = nav.find((e) => e.dataset.id === state.focus);
+  const keep = nav.find((e) => e.dataset.id === state.focus) || (at && state.focus && was.dataset.id === state.focus && !was.isConnected ? nearestTo(at, nav) : null);
   // While pairing, its controls first (the first key, or its button).
   const pairFirst = nav.find((e) => e.closest('.tv-pair'));
   setFocus(keep || pairFirst || nav.find((e) => e.classList.contains('picked')) || nav.find((e) => e.classList.contains('primary')) || nav[0] || null);
 }
 
+// The element among list whose middle is closest to rect's (a row that went: its neighbour).
+function nearestTo(rect, list) {
+  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+  let best = null, bestD = Infinity;
+  for (const e of list) {
+    const q = e.getBoundingClientRect();
+    const d = Math.abs(q.left + q.width / 2 - cx) + 2 * Math.abs(q.top + q.height / 2 - cy);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  return best;
+}
+
 /**
  * The Wi-Fi step's list: the Wi-Fi component (wifi.js, WifiUI, the same as Settings › Wi-Fi)
- * draws its data-nav rows into `el` (the controller moves through them like any other) and sends
- * its "wifi.*" messages to the host's [UiMessages("wifi.")] handler. goStep starts and stops its
- * scanning with the step; press and onHost hand it its buttons and messages.
+ * draws its data-nav rows (the controller moves through them like any other) and sends its
+ * "wifi.*" messages to the host's [UiMessages("wifi.")] handler. goStep starts and stops its
+ * scanning with the step; press and onHost hand it its buttons and messages; render calls its
+ * afterRender.
  */
-function mountWifi(el) {
-  if (!el) return;
-  if (typeof WifiUI === 'undefined') {
-    el.innerHTML = '<div class="su-row">Plug in a network cable, then press Next.</div>';
-    return;
-  }
-  el.innerHTML = WifiUI.html();
-  WifiUI.afterRender();
+function wifiHtml() {
+  return typeof WifiUI === 'undefined' ? '<div class="su-row">Plug in a network cable, then press Next.</div>' : WifiUI.html();
+}
+
+// Puts html into el keeping the elements that stay (same tag and place, same data-id), as
+// app.js's patchHtml: what changed is updated in place, the rest is left alone. Text fields are
+// always new ones (wifi.js wires each field it draws).
+function patchHtml(el, html) {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  patchChildren(el, t.content);
+}
+function patchChildren(from, to) {
+  const want = [...to.childNodes];
+  want.forEach((w, i) => {
+    const have = from.childNodes[i];
+    if (!have) from.appendChild(w);
+    else if (have.nodeType === w.nodeType && (have.nodeType !== 1 ||
+        (have.tagName === w.tagName && have.tagName !== 'INPUT' && have.getAttribute('data-id') === w.getAttribute('data-id')))) patchNode(have, w);
+    else from.replaceChild(w, have);
+  });
+  while (from.childNodes.length > want.length) from.lastChild.remove();
+}
+function patchNode(a, b) {
+  if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  const cls = [b.getAttribute('class') || '', ...['focused', 'editing'].filter((c) => a.classList.contains(c))].join(' ').trim();
+  for (const at of [...a.attributes]) if (!b.hasAttribute(at.name) && at.name !== 'class') a.removeAttribute(at.name);
+  for (const at of [...b.attributes]) if (at.name !== 'class' && a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+  if ((a.getAttribute('class') || '') !== cls) { if (cls) a.setAttribute('class', cls); else a.removeAttribute('class'); }
+  patchChildren(a, b);
+}
+
+// Scrolls box (overflow hidden: only this scrolls it) so el shows whole with room for its ring;
+// the first element takes it back to the top. The stage is scaled: screen pixels are turned back
+// into the box's own. The box's ends fade where there is more (.more-up, .more-down).
+function scrollIntoBox(el, box, room) {
+  const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const scale = b.height / box.offsetHeight || 1;
+  if (box.querySelector('[data-nav]') === el) box.scrollTop = 0;
+  else if (r.bottom > b.bottom - room * scale) box.scrollTop += (r.bottom - b.bottom) / scale + room;
+  else if (r.top < b.top + room * scale) box.scrollTop -= (b.top - r.top) / scale + room;
+  listEdges(box);
+}
+function listEdges(box) {
+  box.classList.toggle('more-up', box.scrollTop > 2);
+  box.classList.toggle('more-down', box.scrollTop + box.clientHeight < box.scrollHeight - 2);
 }
 
 function wifiRedraw(focusId) {
@@ -264,8 +330,10 @@ function setFocus(el) {
   if (!el) { state.focus = null; return; }
   el.classList.add('focused');
   state.focus = el.dataset.id;
-  // The Wi-Fi step's list scrolls: a row the focus moves to comes into view.
-  if (el.closest('.wifi-scroll')) el.scrollIntoView({ block: 'nearest' });
+  // The lists that scroll (Wi-Fi networks, the TV dialog's TVs and brands, the Done page's
+  // lines): a row the focus moves to comes into view, ring and all.
+  const box = el.closest('.wifi-scroll, .tv-list, .su-summary');
+  if (box) scrollIntoBox(el, box, 16);
 }
 
 function move(dir) {
@@ -369,8 +437,21 @@ function press(button, fromController) {
     if (BUTTONS.some(([b]) => b === button)) { state.pressed.add(button); render(); }
     return;
   }
+  const el = document.querySelector('[data-nav].focused');
+  // A value row (data-edit: the hidden network's Security) changes only once A has picked it,
+  // as in Settings: then left/right change it, A or B put it down, up/down move on.
+  if (el && el.dataset.edit !== undefined) {
+    const on = el.classList.contains('editing');
+    if (!on && button === 'a') { el.classList.add('editing'); return; }
+    if (on) {
+      if (button === 'a' || button === 'b') { el.classList.remove('editing'); return; }
+      if (button === 'left' || button === 'right') { if (typeof WifiUI !== 'undefined') WifiUI.press(button, el); return; }
+      if (button !== 'up' && button !== 'down') return;
+      el.classList.remove('editing');
+    } else if (button === 'left' || button === 'right') { move(button); return; }
+  }
   // The Wi-Fi list and its password form take their own buttons first (A on a network, B in the form).
-  if (step === 'wifi' && typeof WifiUI !== 'undefined' && WifiUI.press(button, document.querySelector('[data-nav].focused'))) return;
+  if (step === 'wifi' && typeof WifiUI !== 'undefined' && WifiUI.press(button, el)) return;
   switch (button) {
     case 'up': case 'down': case 'left': case 'right': move(button); break;
     case 'a': activate(state.focus); break;
@@ -467,7 +548,9 @@ if (host) {
     const list = steps();
     const step = /^\d+$/.test(name) ? list[Math.min(list.length - 1, Number(name))] : name;
     state.starting = q.get('starting') === '1';
-    if (step === 'done') state.result = { ok: true, results: {}, restartNeeded: q.get('restart') === '1' ? ['ComputerName'] : [] };
+    // done?failed=12: that many steps that did not work (the list scrolls).
+    if (step === 'done') state.result = { ok: true, restartNeeded: q.get('restart') === '1' ? ['ComputerName'] : [],
+      results: Object.fromEntries(Object.keys(STEP_NAMES).slice(0, Number(q.get('failed') || 0)).map((k) => [k, 'FAILED: it stopped with an error (details in the setup log)'])) };
     goStep(step);
     // setup.html#wifi?wired=0&wifi=password: the Wi-Fi component's sample states (wifi.js demo).
     if (step === 'wifi' && typeof WifiUI !== 'undefined') { WifiUI.demo(q.get('wifi') || 'wifi'); render(); }

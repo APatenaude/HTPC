@@ -11,11 +11,13 @@
 .su-dot.now { width: 48px; background: var(--accent); }
 .su-dot.done { background: #7FD1AE; }
 
-.su-main { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; animation: view-in 0.22s ease-out; }
+/* min-height 0: a step taller than the screen (the Done page with many steps that failed) shrinks
+   to it, and its list scrolls, clear of the buttons. */
+.su-main { flex-grow: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; animation: view-in 0.22s ease-out; }
 .su-main h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 64px; letter-spacing: -0.02em; }
 .su-main h1.big { font-size: 80px; letter-spacing: -0.03em; line-height: 1.05; }
 .su-main p { margin: 0; font-size: 30px; line-height: 1.4; color: var(--text-2); }
-.su-col { display: flex; flex-direction: column; gap: 28px; }
+.su-col { display: flex; flex-direction: column; gap: 28px; min-height: 0; }
 .su-head { display: flex; flex-direction: column; gap: 14px; }
 
 .su-buttons { display: flex; justify-content: flex-end; gap: 20px; min-height: 88px; }
@@ -85,8 +87,13 @@
 .su-spin { width: 26px; height: 26px; border-radius: 50%; border: 4px solid #33373F; border-top-color: var(--accent); animation: su-spin 0.9s linear infinite; }
 @keyframes su-spin { to { transform: rotate(360deg); } }
 .su-pending { width: 14px; height: 14px; border-radius: 7px; background: #33373F; }
-.su-summary { display: flex; flex-direction: column; gap: 18px; }
-.su-line { display: flex; align-items: center; gap: 18px; font-size: 32px; }
+.su-summary { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
+.su-summary > * { flex-shrink: 0; }
+.su-summary.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); }
+.su-summary.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); }
+.su-summary.more-up.more-down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
+.su-line { display: flex; align-items: center; gap: 18px; padding: 4px 12px; margin: 0 -12px; border-radius: 16px; font-size: 32px; }
+.su-line.focused { background: #262A31; box-shadow: 0 0 0 4px var(--accent); }
 .su-line .ok { color: #7FD1AE; display: flex; } .su-line .warn { color: var(--warn); display: flex; }
 
 /* The Wi-Fi step: the network list (wifi.js's .wifi-scroll) scrolls inside the step, clear of Back / Next. */

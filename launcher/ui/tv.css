@@ -59,6 +59,10 @@
 /* Settings' dialog: its rows scroll (app.js setFocus) inside it, the hints stay; room for rings */
 .tv-list { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
 .tv-list > * { flex-shrink: 0; }
+/* Its ends fade where there is more (listEdges) */
+.tv-list.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); }
+.tv-list.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); }
+.tv-list.more-up.more-down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
 .tv-dialog .hints { flex-shrink: 0; }
 .tv-dialog p { margin: 0 0 14px; font-size: 23px; color: var(--text-2); }
 .tv-dialog .tv-label { margin-top: 8px; }
