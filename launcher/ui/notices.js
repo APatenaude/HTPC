@@ -171,7 +171,11 @@ function noticeDemo(route) {
 addEventListener('DOMContentLoaded', () => {
   onAction('alert', (el, arg) => noticeAct(arg));
   hostMessage('alerts.update', noticeUpdate);
-  hostMessage('text.', (msg) => { if (msg.type === 'text.insert') textInsert(msg.text); else if (msg.type === 'text.key') textKey(msg.key); });
+  hostMessage('text.', (msg) => {
+    if (msg.type === 'text.insert') textInsert(msg.text);
+    else if (msg.type === 'text.key') textKey(msg.key);
+    else if (msg.type === 'text.keyboardAt') textKeyboardAt(msg.top);
+  });
   if (host || !location.hash) return;
   const route = location.hash.slice(1);
   // #selftest: the self-test, the UI audit (audit.js) at its end; #audit, #audit?page=...: the

@@ -5,15 +5,23 @@ using Microsoft.Web.WebView2.WinForms;
 namespace Htpc.Launcher;
 
 /// <summary>
-/// The on-screen keyboard's window (SPEC N11): a band across the bottom of the screen (or the
-/// top, when the text field is low), over the app, that never takes the focus. The app keeps
-/// it, so the keys the launcher sends with SendInput land in the app's text field. The
-/// controller drives the keyboard through the launcher (Post), not through window focus.
+/// The on-screen keyboard's window (SPEC N11): a band across the bottom of the screen, always,
+/// over the app, that never takes the focus. The app keeps it, so the keys the launcher sends
+/// with SendInput land in the app's text field. The controller drives the keyboard through the
+/// launcher (Post), not through window focus. It used to go to the top when the field was low
+/// on the screen, which put it at the top at times for no reason the user could see; a field
+/// it covers is the page's to bring into view (the launcher's own pages lift it: textinput.js).
 /// </summary>
 sealed class KeyboardForm : Form
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     const int WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
+
+    /// <summary>Its height: 560 of the screen's 1080 (the page's stage), at any resolution.</summary>
+    const int HeightOf1080 = 560;
+
+    /// <summary>Where it starts, as a share of the screen's height from the top (textinput.js lifts fields above it).</summary>
+    public const double TopShare = 1 - HeightOf1080 / 1080.0;
 
     WebView2 web = new() { Dock = DockStyle.Fill };   // replaced by ReleaseWebView
     bool ready;
@@ -100,16 +108,20 @@ sealed class KeyboardForm : Form
         if (ready) web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, Json));
     }
 
-    /// <summary>Shows the keyboard for a field (name, password?), at the top when the field is low on the screen.</summary>
-    public void Open(string field, bool password, Rectangle fieldBounds)
+    /// <summary>Shows the keyboard for a field (name, password?), across the bottom of the screen.</summary>
+    public void Open(string field, bool password)
     {
-        var screen = Screen.PrimaryScreen!.Bounds;
-        var height = screen.Height * 560 / 1080;
-        var top = !fieldBounds.IsEmpty && fieldBounds.Top + fieldBounds.Height / 2 > screen.Bottom - height;
-        Bounds = new Rectangle(screen.X, top ? screen.Y : screen.Bottom - height, screen.Width, height);
+        Bounds = Band(Screen.PrimaryScreen!.Bounds);
         var open = new { type = "open", field, password };
         if (ready) Post(open); else pending = open;
         if (!Visible) Show();
+    }
+
+    /// <summary>Its place on a screen: the bottom band, the screen's whole width.</summary>
+    public static Rectangle Band(Rectangle screen)
+    {
+        var height = screen.Height * HeightOf1080 / 1080;
+        return new Rectangle(screen.X, screen.Bottom - height, screen.Width, height);
     }
 
     public void Dismiss(string reason)

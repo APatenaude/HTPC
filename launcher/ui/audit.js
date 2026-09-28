@@ -249,6 +249,12 @@ function auditProblems(el) {
     const box = { l: c.left + p.clientLeft * k, t: c.top + p.clientTop * k, r: c.left + (p.clientLeft + p.clientWidth) * k, b: c.top + (p.clientTop + p.clientHeight) * k };
     if (!inside(ring, box)) { out.push(`its ring is cut by ${auditDescribe(p)}`); break; }
   }
+  // A box the focus scrolled is overflow auto (without a scrollbar), not hidden: Chromium moves an
+  // auto one on the GPU and draws a hidden one afresh at each step (on the TV at 4K, Add tile with
+  // a direction held: 50-130 ms a press, 33 as auto).
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    if (p.scrollTop > 0 && getComputedStyle(p).overflowY === 'hidden') { out.push(`${auditDescribe(p)} scrolls but is overflow: hidden (auto, scrollbar-width: none)`); break; }
+  }
   for (const h of auditHintBars()) {
     const q = h.getBoundingClientRect();
     if (!h.contains(el) && ring.l < q.right && ring.r > q.left && ring.t < q.bottom && ring.b > q.top) out.push('it is under the hint bar');

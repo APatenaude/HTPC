@@ -409,6 +409,7 @@ function onHost(m) {
     // The on-screen keyboard's and the phone's typing, into the focused field (textinput.js).
     case 'text.insert': if (typeof textInsert === 'function') textInsert(m.text); break;
     case 'text.key': if (typeof textKey === 'function') textKey(m.key); break;
+    case 'text.keyboardAt': if (typeof textKeyboardAt === 'function') textKeyboardAt(m.top); break;
     case 'init':
       state.apps = m.apps || [];
       state.picked = new Set(state.apps.filter((a) => a.default).map((a) => a.id));

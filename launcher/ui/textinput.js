@@ -5,10 +5,12 @@
 //   (B: cancel), which still work the dialog;
 // - the on-screen keyboard and the phone: the host posts the text (text.insert, text.key)
 //   instead of typing it through Windows, so it can only land in this field;
-// - R3, or a field taking the focus with the controller, asks for the on-screen keyboard with
-//   the field's rectangle, so it opens clear of it.
+// - R3, or a field taking the focus with the controller, asks for the on-screen keyboard. It
+//   opens across the bottom of the screen, always; the host says where it starts, and a field
+//   it would cover is lifted above it with its screen until it closes (textKeyboardAt).
 //   From the host: {type:'text.insert', text} {type:'text.key', key: backspace|left|right|enter}
-//   To the host:   {type:'text.keyboard', field, password, rect:{x, y, w, h}} {type:'text.done'}
+//                  {type:'text.keyboardAt', top: share of the height from the top, null: closed}
+//   To the host:   {type:'text.keyboard', field, password} {type:'text.done'}
 // A field's Enter (from either keyboard) raises 'textsubmit' on it; its screen decides what that does.
 
 // The input types with a caret the page can move (email and number have none: not used here).
@@ -54,14 +56,30 @@ function textKey(key) {
 function openKeyboardFor(el) {
   if (!isTextField(el)) return;
   el.focus();
-  const r = el.getBoundingClientRect(), d = window.devicePixelRatio || 1;
   send({
     type: 'text.keyboard',
     field: el.getAttribute('aria-label') || el.placeholder || '',
     password: el.type === 'password',
-    rect: { x: r.left * d, y: r.top * d, w: r.width * d, h: r.height * d },
   });
 }
 
 // The field's screen closed: the keyboard goes too.
 function textDone() { send({ type: 'text.done' }); }
+
+// The on-screen keyboard is up from top (a share of the window's height) down, or closed
+// (null): the focused field, if it would be under it, goes up above it with its screen (the
+// stage's child it is in), and back down once it closes. The keyboard itself never moves.
+function textKeyboardAt(top) {
+  const lifted = document.querySelector('[data-kb-lift]');
+  if (lifted) { lifted.style.transform = ''; lifted.style.transition = ''; delete lifted.dataset.kbLift; }
+  const el = textField(), stage = document.getElementById('stage');
+  if (top == null || !el || !stage || !stage.contains(el)) return;
+  let box = el;
+  while (box.parentElement && box.parentElement !== stage) box = box.parentElement;
+  const scale = stage.getBoundingClientRect().height / 1080 || 1;
+  const over = el.getBoundingClientRect().bottom + 24 * scale - innerHeight * top;   // 24: room under the field
+  if (over <= 0) return;
+  box.dataset.kbLift = '';
+  box.style.transition = 'transform 0.15s ease-out';
+  box.style.transform = `translateY(${-Math.ceil(over / scale)}px)`;
+}

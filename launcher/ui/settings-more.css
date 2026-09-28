@@ -3,8 +3,9 @@
 
 :root { --ok: #7FD1AE; --chip: #22252B; --row-2: #16181C; }
 
-/* Section panes: kept inside the screen; long content is cut, not scrolled */
-.spane main { overflow: hidden; }
+/* Section panes: kept inside the screen; long content scrolls only to the focus (app.js
+   settingsFocused; auto, not hidden: moved on the GPU, see app.css .tiles-wrap) */
+.spane main { overflow: hidden auto; scrollbar-width: none; }
 .snote { margin: 10px 0 0; font-size: 22px; line-height: 1.4; color: var(--muted); }
 .srow .toggle, .srow .value, .srow .sbutton { flex-shrink: 0; }
 
@@ -71,7 +72,7 @@
 #maps { background: var(--bg); }
 #maps .sitem { color: var(--text-2); }
 .back { display: flex; align-items: center; gap: 8px; font-size: 22px; color: var(--muted); }
-.mlist { display: flex; flex-direction: column; gap: 12px; overflow: hidden; padding: 6px 6px 14px; margin: 0 -6px -6px; }
+.mlist { display: flex; flex-direction: column; gap: 12px; overflow: hidden auto; scrollbar-width: none; padding: 6px 6px 14px; margin: 0 -6px -6px; }
 .mrow {
   display: flex; align-items: center; gap: 22px; min-height: 84px; padding: 12px 28px; box-sizing: border-box; flex-shrink: 0;
   border-radius: 20px; background: var(--row-2);
@@ -119,7 +120,7 @@
 .bcat.on { background: var(--track); color: #FFFFFF; font-weight: 700; }
 /* Lists that scroll (the picker, the presets, Button maps): room inside for the focus ring, and
    their ends fade where there is more (buttons.js keepInView) */
-.blist { display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 8px; margin: 0 -8px -8px; min-height: 0; }
+.blist { display: flex; flex-direction: column; gap: 6px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: 0 -8px -8px; min-height: 0; }
 .blist.more-down, .mlist.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent); }
 .blist.more-up, .mlist.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 56px), transparent); }
 .blist.more-up.more-down, .mlist.more-up.more-down {
@@ -143,7 +144,7 @@
 .bmods { display: flex; gap: 8px; }
 .bmod { flex: 1; display: flex; align-items: center; justify-content: center; height: 52px; border-radius: 14px; background: var(--chip); font-size: 22px; font-weight: 700; color: var(--text-2); }
 .bmod.on { background: var(--accent); color: var(--bg); }
-.bkeys { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; overflow: hidden; padding: 4px; margin: -4px; }
+.bkeys { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; overflow: hidden auto; scrollbar-width: none; padding: 4px; margin: -4px; }
 .bk { display: flex; align-items: center; justify-content: center; height: 46px; border-radius: 12px; background: var(--chip); font-size: 18px; font-weight: 700; white-space: nowrap; }
 .bk.on { background: var(--accent); color: var(--bg); }
 .bk.focused, .bmod.focused, .buse.focused { box-shadow: 0 0 0 4px var(--accent) !important; }

@@ -15,6 +15,23 @@ sealed record InstalledProgram(string Name, string? Target, string? Args, string
 /// </summary>
 static class StartMenuScanner
 {
+    /// <summary>
+    /// Scan on a thread of its own, not the UI thread (it took 120-410 ms on the box). STA: the
+    /// shortcuts are read through WScript.Shell, which lives in one.
+    /// </summary>
+    public static Task<List<InstalledProgram>> ScanAsync()
+    {
+        var done = new TaskCompletionSource<List<InstalledProgram>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { done.SetResult(Scan()); }
+            catch (Exception e) { done.SetException(e); }
+        }) { IsBackground = true, Name = "Start menu" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return done.Task;
+    }
+
     public static List<InstalledProgram> Scan()
     {
         var roots = new[]
