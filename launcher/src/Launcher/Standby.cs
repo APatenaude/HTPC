@@ -206,13 +206,25 @@ sealed class Standby
     readonly ControllerService controller;
     readonly LauncherSettings settings;
     readonly MediaWatcher media;
-    DateTime since;
+    // Times as tick counts (Environment.TickCount64): the clock can jump (a daylight-saving
+    // change, the time set), the tick count does not. It runs on through a real sleep, though.
+    long standbySince;                              // entered standby
+    long countFrom = Environment.TickCount64;       // idle counts from here at the earliest: the start, a wake, a resume
+    long phoneActivityTick = long.MinValue;
+    DateTime phoneActivity;
 
     public bool Active { get; private set; }
     public event Action<bool>? Changed;
 
     /// <summary>The phone remote's last input (its heartbeat does not count): keeps the box awake like the controller.</summary>
-    public DateTime PhoneActivity { get; set; }
+    public DateTime PhoneActivity
+    {
+        get => phoneActivity;
+        set { phoneActivity = value; Interlocked.Exchange(ref phoneActivityTick, Environment.TickCount64); }
+    }
+
+    /// <summary>PhoneActivity as a tick count; long.MinValue: none yet.</summary>
+    public long PhoneActivityTick => Interlocked.Read(ref phoneActivityTick);
 
     /// <summary>Raised before a real sleep or hibernate, so the UI can reset to the home screen.</summary>
     public event Action? GoingDown;
@@ -270,7 +282,7 @@ sealed class Standby
 
         // No XInput power-off here: the 8BitDo ignores it (it switches itself off after 15 idle
         // minutes) and it was a suspect in missed wake presses.
-        since = DateTime.Now;
+        standbySince = Environment.TickCount64;
         await WifiOff();
     }
 
@@ -330,6 +342,7 @@ sealed class Standby
         if (!Active) return;
         Log.Info($"Wake ({reason})");
         var clock = System.Diagnostics.Stopwatch.StartNew();
+        countFrom = Environment.TickCount64; // woken by the TV's own remote, say: no input of ours to count from
         Active = false;
         controller.Slow = false;
         controller.WakeMode = false;
@@ -353,6 +366,13 @@ sealed class Standby
         Application.SetSuspendState(hibernate ? PowerState.Hibernate : PowerState.Suspend, false, false);
     }
 
+    /// <summary>
+    /// Back from a real sleep or hibernate (MainForm): someone woke the box (the keyboard, the
+    /// power button, the phone). Idle counts from now: the tick count ran on through the sleep,
+    /// so the last input before it looked hours old and the next Tick slept again at once.
+    /// </summary>
+    public void Resumed() => countFrom = Environment.TickCount64;
+
     /// <summary>Called every few seconds: sleeps when idle, and from standby after the set hours.</summary>
     public async Task Tick()
     {
@@ -360,19 +380,17 @@ sealed class Standby
         {
             WarnIdle(false);
             if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep && HoldOffRealSleep?.Invoke() != true &&
-                DateTime.Now - since >= TimeSpan.FromHours(settings.SleepAfterStandbyHours))
+                Environment.TickCount64 - standbySince >= (long)TimeSpan.FromHours(settings.SleepAfterStandbyHours).TotalMilliseconds)
             {
                 RealSleep(false, $"after {settings.SleepAfterStandbyHours} h in standby");
-                since = DateTime.Now; // back from it still in standby: count again
+                standbySince = Environment.TickCount64; // back from it still in standby: count again
             }
             return;
         }
         if (settings.IdleMinutes <= 0) { WarnIdle(false); return; }
-        var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - LastInputAgeTicks());
-        var controllerIdle = DateTime.Now - controller.LastActivity;
-        if (controllerIdle < idle) idle = controllerIdle;
-        var phoneIdle = DateTime.Now - PhoneActivity;
-        if (phoneIdle < idle) idle = phoneIdle;
+        // Real input only (LastUseTick: not the controller's analog noise, not the launcher's own
+        // key taps), or the start, a wake or a resume if later.
+        var idle = TimeSpan.FromMilliseconds(Environment.TickCount64 - Math.Max(LastUseTick(), countFrom));
         var left = TimeSpan.FromMinutes(settings.IdleMinutes) - idle;
         if (left > IdleWarningTime) { WarnIdle(false); return; }
         if (settings.StayAwakeWhilePlaying && (SomethingNeedsDisplay() || await media.IsPlayingAsync())) { WarnIdle(false); return; }
@@ -412,14 +430,16 @@ sealed class Standby
     /// </summary>
     public DateTime LastUserInput()
     {
-        var last = controller.LastInput;
-        if (PhoneActivity > last) last = PhoneActivity;
+        var last = LastUseTick();
+        return last == long.MinValue ? DateTime.MinValue : DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64 - last);
+    }
+
+    /// <summary>LastUserInput as a tick count (Environment.TickCount64); long.MinValue: none since the box started.</summary>
+    public long LastUseTick()
+    {
+        var last = Math.Max(controller.LastInputTick, PhoneActivityTick);
         var tick = LastInputAgeTicks();
-        if (Math.Abs(tick - Native.LastInjectedTick) > 500)
-        {
-            var keys = DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64 - tick);
-            if (keys > last) last = keys;
-        }
+        if (Math.Abs(tick - Native.LastInjectedTick) > 500) last = Math.Max(last, tick);
         return last;
     }
 

@@ -89,10 +89,9 @@ sealed partial class MainForm : Form
             if (!setupMode) await standby.Tick();
             await tv.Poll();
         };
-        // Back from a real sleep or hibernate: the TV comes on with the box.
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
-            if (e.Mode == Microsoft.Win32.PowerModes.Resume) BeginInvoke(() => { Log.Info("Resumed"); _ = tv.TurnOn(); });
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUi(OnResumed);
         };
         mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
         revealTimer.Tick += (_, _) => RevealPending("400 ms");
@@ -138,6 +137,15 @@ sealed partial class MainForm : Form
         // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
         await StartTv(handoff);
         ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
+    }
+
+    // Back from a real sleep or hibernate (the keyboard, the power button, the phone's
+    // Wake-on-LAN): the TV comes on with the box, and idle counts from now, not from before the sleep.
+    void OnResumed()
+    {
+        Log.Info("Resumed");
+        standby?.Resumed();
+        _ = tv.TurnOn();
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
@@ -469,8 +477,10 @@ sealed partial class MainForm : Form
         if (standby.Active || LauncherActive || !textFields.Enabled) return;
         // Someone typing on a real keyboard needs no keyboard on screen: it pops up by itself
         // only while the controller is in use. (R3 still opens it.)
-        if (DateTime.Now - controller.LastActivity > TimeSpan.FromMinutes(1)) return;
-        if (PhoneActivity > controller.LastActivity) return; // the phone is in use: it has its own keyboard
+        // A button, trigger or stick (not the controller's analog noise), as tick counts (the clock can jump).
+        var padUsed = controller.LastInputTick;
+        if (padUsed == long.MinValue || Environment.TickCount64 - padUsed > 60_000) return;
+        if (standby.PhoneActivityTick > padUsed) return; // the phone is in use: it has its own keyboard
         if (keyboard.Visible && SameField(keyboardField, field)) return; // still typing there
         OpenKeyboard(field, auto: true);
     }

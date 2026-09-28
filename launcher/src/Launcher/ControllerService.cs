@@ -133,12 +133,18 @@ sealed class ControllerService : IDisposable
 
     public bool Connected { get; private set; }
     public string? BatteryLevel { get; private set; }
-    public DateTime LastActivity { get; private set; } = DateTime.Now;
     /// <summary>
-    /// Someone at the controller: a button held, a trigger or a stick past its dead zone. Unlike
-    /// LastActivity (any new packet, analog noise included), what counts as the box being used.
+    /// Someone at the controller: a button held, a trigger or a stick past its dead zone. Not any
+    /// new packet (analog noise sends them too): what counts as the box being used.
     /// </summary>
     public DateTime LastInput { get; private set; } = DateTime.MinValue;
+
+    /// <summary>
+    /// LastInput as a tick count (Environment.TickCount64; long.MinValue: never), for idle times:
+    /// the clock can jump (a daylight-saving change, the time set), the tick count does not.
+    /// </summary>
+    public long LastInputTick => Interlocked.Read(ref lastInputTick);
+    long lastInputTick = long.MinValue;
     const int StickDeadzone = 8000; // PadMapper's (XInput suggests 7849)
 
     readonly Thread thread;
@@ -220,12 +226,15 @@ sealed class ControllerService : IDisposable
                 state = new State { Packet = lastPacket + 1, Pad = new Gamepad { Buttons = f.Buttons, LeftTrigger = f.LT, RightTrigger = f.RT, LX = f.LX, LY = f.LY, RX = f.RX, RY = f.RY } };
             }
             else if (!ReadController(now, out state)) continue;
-            if (state.Packet != lastPacket) { lastPacket = state.Packet; LastActivity = DateTime.Now; }
+            lastPacket = state.Packet;
 
             var pad = state.Pad;
             if (pad.Buttons != 0 || pad.LeftTrigger >= TriggerUp || pad.RightTrigger >= TriggerUp ||
                 Math.Max(Math.Abs((int)pad.LX), Math.Abs((int)pad.LY)) > StickDeadzone || Math.Max(Math.Abs((int)pad.RX), Math.Abs((int)pad.RY)) > StickDeadzone)
+            {
                 LastInput = DateTime.Now;
+                Interlocked.Exchange(ref lastInputTick, Environment.TickCount64);
+            }
             LastState = new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY);
             // Start + D-pad is the volume: the map and the launcher get the buttons without it.
             var (seen, command, repeat) = chord.Update(pad.Buttons, now);
