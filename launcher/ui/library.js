@@ -423,34 +423,62 @@
 
   addView('installing', {
     overlay: true,
-    demo() { demoData(); lib.install = lib.catalog.apps.find((c) => c.state === 'install'); lib.installing = false; },
+    // #installing: the choice; #installing/running, /waiting, /done, /failed: after A.
+    demo(arg) {
+      demoData();
+      lib.install = lib.catalog.apps.find((c) => c.state === (arg === 'running' || arg === 'waiting' ? 'installing' : arg === 'done' ? 'installed' : 'install'));
+      lib.installing = !!arg;
+      lib.installHome = true;
+      if (arg === 'waiting') lib.progress = { current: { id: 'vlc', action: 'install', phase: 'install' }, pending: [{ id: 'spotify', action: 'install' }] };
+      if (arg === 'failed') lib.failed.add(lib.install.id);
+    },
+    // Updated in place (patchHtml): the host sends the progress twice a second, and a dialog
+    // drawn afresh each time played its entrance again (a flicker) and lost its focus.
     render() {
-      const c = lib.install;
-      if (!c) { back(); return; }
-      const p = lib.progress.current && lib.progress.current.id === c.id ? lib.progress.current : null;
-      let action;
+      if (!lib.install) { back(); return; }
+      const c = findCard(lib.install.id) || lib.install;
+      let action, hintList = [['A', 'Select'], ['B', 'Cancel']];
       if (!lib.installing) {
         action = '<div class="il-buttons">' +
           '<button class="il-primary" data-nav data-id="il-home" data-act="installBtn" data-arg="home">Install and add to home</button>' +
           '<button class="il-secondary" data-nav data-id="il-only" data-act="installBtn" data-arg="only">Install only</button></div>';
       } else {
-        const pct = p && p.phase === 'download' ? p.percent : null;
-        const phase = p && p.phase === 'download' ? 'Downloading' : 'Installing';
+        const st = installState(c);
+        const bar = st.bar ? `<div class="il-bar"><div class="il-fill${st.pct === null ? ' going' : ''}" style="width:${st.pct !== null ? st.pct : 100}%"></div></div>` : '';
         action = '<div class="il-progress">' +
-          `<div class="il-prow"><span class="il-phase">${phase}</span>${pct !== null ? `<span class="il-pct">${pct}%</span>` : ''}</div>` +
-          `<div class="il-bar"><div class="il-fill" style="width:${pct !== null ? pct : 100}%${pct === null ? ';opacity:.5' : ''}"></div></div>` +
-          '<span class="il-note">Keep using the TV. The tile appears when it’s done.</span></div>';
+          `<div class="il-prow"><span class="il-phase${st.cls ? ' ' + st.cls : ''}">${esc(st.label)}</span>${st.pct !== null ? `<span class="il-pct">${st.pct}%</span>` : ''}</div>` +
+          bar + `<span class="il-note">${esc(st.note)}</span></div>` +
+          (st.failed ? '<div class="il-buttons"><button class="il-primary" data-nav data-id="il-retry" data-act="installBtn" data-arg="retry">Try again</button></div>' : '');
+        hintList = st.failed ? [['A', 'Try again'], ['B', 'Back to library']] : [['B', 'Back to library']];
       }
-      el('installing').innerHTML =
+      patchHtml(el('installing'),
         '<div class="il-dialog">' +
           '<div class="il-head">' +
             `<span class="il-icon">${appIcon({ ...c, color: '' }, 72, 1.5)}</span>` +
             `<div class="il-text"><span class="il-name">${esc(c.name)}</span><span class="il-desc">${esc(c.desc || '')}</span></div>` +
           '</div>' + action +
         '</div>' +
-        `<footer class="hints">${hints(lib.installing ? [['B', 'Back to library']] : [['A', 'Select'], ['B', 'Cancel']])}</footer>`;
+        `<footer class="hints">${hints(hintList)}</footer>`);
     },
   });
+
+  // What the dialog says once A has started the install: running (downloading, installing),
+  // waiting behind another app, just out of the queue (the catalog that follows says how it
+  // went: starting still), done, or not installed.
+  function installState(c) {
+    const p = lib.progress.current && lib.progress.current.id === c.id ? lib.progress.current : null;
+    const note = 'Keep using the TV. The tile appears when it’s done.';
+    if (p) {
+      const pct = p.phase === 'download' && p.percent != null ? p.percent : null;
+      return { label: p.phase === 'download' ? 'Downloading' : 'Installing', pct, bar: true, note };
+    }
+    if (lib.failed.has(c.id) && !lib.queued.has(c.id))
+      return { label: 'Didn’t install', cls: 'warn', pct: null, failed: true, note: 'Check the network, then try again.' };
+    if (lib.queued.has(c.id)) return { label: 'Waiting', pct: null, bar: true, note: 'Another app is installing first. Keep using the TV.' };
+    if (c.state === 'installed' || c.state === 'home')
+      return { label: 'Done', cls: 'ok', pct: null, note: lib.installHome ? 'Its tile is on the home screen.' : 'Add its tile from the library any time.' };
+    return { label: 'Installing', pct: null, bar: true, note };
+  }
 
   function openInstall(card) {
     if (!state.libraryAvailable) { toast('Installing from the TV isn’t set up yet. Run setup once more.', 'warn'); return; }
@@ -460,8 +488,9 @@
   }
   onAction('installBtn', (node, arg) => {
     if (!lib.install) return;
+    if (arg !== 'retry') lib.installHome = arg === 'home';   // Try again: as asked the first time
     lib.installing = true;
-    installApp(lib.install.id, arg === 'home');
+    installApp(lib.install.id, lib.installHome);
     render();
   });
 
