@@ -39,12 +39,63 @@ sealed class SetupRunner
     /// </summary>
     public static string? FindSetupDir()
     {
-        var dirs = new[]
+        var beside = Path.Combine(AppContext.BaseDirectory, "setup");
+        if (File.Exists(Path.Combine(beside, "setup.ps1"))) return beside;
+        // The kept copy, elevated only once ProgramData\HTPC and it are setup's (locked, owned by
+        // Administrators): before that, a standard process could have put it there.
+        var kept = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "setup");
+        if (!File.Exists(Path.Combine(kept, "setup.ps1"))) return null;
+        if (Environment.IsPrivilegedProcess && (SetupElevation.UntrustedReason(Path.GetDirectoryName(kept)!) ?? SetupElevation.UntrustedReason(kept)) is { } why)
         {
-            Path.Combine(AppContext.BaseDirectory, "setup"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "setup"),
+            Log.Warn($"Setup: the kept setup folder is not used elevated: {why}");
+            return null;
+        }
+        return kept;
+    }
+
+    /// <summary>
+    /// C:\ProgramData\HTPC locked and owned by Administrators before the elevated wizard writes
+    /// there (tv\, the TV step; TvFiles refuses an unlocked one): setup\lib\Register-AppInstaller.ps1
+    /// -LockOnly from this exe's own setup folder, as setup.ps1 does first too. Waits for it (a few
+    /// seconds, once per setup). False when it failed or there is no such folder (logged).
+    /// </summary>
+    public static bool LockData()
+    {
+        var script = Path.Combine(AppContext.BaseDirectory, "setup", "lib", "Register-AppInstaller.ps1");
+        if (!File.Exists(script)) { Log.Warn($"Setup: {script} missing; ProgramData\\HTPC not locked yet"); return false; }
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
+            $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{script}\" -LockOnly")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(script)!,
         };
-        return dirs.FirstOrDefault(d => File.Exists(Path.Combine(d, "setup.ps1")));
+        SetPowerShellEnvironment(psi);
+        try
+        {
+            using var p = Process.Start(psi)!;
+            var output = p.StandardOutput.ReadToEndAsync();
+            var errors = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(90_000)) { try { p.Kill(true); } catch (Exception) { } Log.Warn("Setup: locking ProgramData\\HTPC took over 90 s; stopped"); return false; }
+            var said = (output.Result + errors.Result).Trim();
+            Log.Info($"Setup: ProgramData\\HTPC locked (exit {p.ExitCode}){(said.Length > 0 ? ": " + said.Replace(Environment.NewLine, " | ") : "")}");
+            return p.ExitCode == 0;
+        }
+        catch (Exception e) { Log.Error("Setup: locking ProgramData\\HTPC", e); return false; }
+    }
+
+    /// <summary>
+    /// For the PowerShell the elevated wizard starts: modules from Windows' and Program Files'
+    /// folders only (SetupElevation.SystemModulePath: never the user's Documents folder), and
+    /// HTPC_SETUP_WIZARD=1 (setup.ps1: TV Box Setup started it, elevated and outside any package,
+    /// so no probe of the user's AppData).
+    /// </summary>
+    static void SetPowerShellEnvironment(ProcessStartInfo psi)
+    {
+        psi.Environment["PSModulePath"] = SetupElevation.SystemModulePath;
+        psi.Environment["HTPC_SETUP_WIZARD"] = "1";
     }
 
     /// <summary>
@@ -72,12 +123,14 @@ sealed class SetupRunner
         var args = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\" -NoPause";
         args += apps.Count > 0 ? $" -Apps {string.Join(',', apps)}" : " -Skip Apps";
         if (launcherExe is not null) args += $" -LauncherExe \"{launcherExe}\"";
-        return new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"), args)
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"), args)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(script)!,
         };
+        SetPowerShellEnvironment(psi);
+        return psi;
     }
 
     /// <summary>Starts setup.ps1. False when it could not start (logged; nothing ran).</summary>

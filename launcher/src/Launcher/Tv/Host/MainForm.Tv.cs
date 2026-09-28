@@ -10,6 +10,8 @@ sealed partial class MainForm
 {
     TvService CreateTv()
     {
+        // Elevated (TV Box Setup), the TV's files are written only into a locked ProgramData\HTPC.
+        TvFiles.ElevatedTrust = SetupElevation.UntrustedReason;
         var service = new TvService(new TvParts(
             settings.Tvs, settings.Save, TvDrivers.Create(TvNet.Instance), TvNet.Instance, SystemTvClock.Instance,
             new TvFiles(), Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, OnUi, () => setupMode)))

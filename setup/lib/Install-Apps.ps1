@@ -16,7 +16,8 @@
 
     Nothing may pop up on the TV:
       - an app its installer starts (Stremio does) is closed again;
-      - install.firstRun files are written before the app first starts, when missing (VLC);
+      - install.firstRun files are written before the app first starts, when missing (VLC); by
+        the launcher, as the user, at its start (elevated, setup never writes the user's profile);
       - programs listed in install.blockInbound get an inbound Block rule, so Windows does not ask
         to allow them on the network (Stremio's streaming service).
     Then nothing the catalog's apps set up starts by itself (lib\AppAutostart.ps1): every catalog
@@ -59,7 +60,9 @@ try {
             $before = @(Get-Process | Select-Object -ExpandProperty Id)
             Install-App $app $null $WorkDir
             Stop-StartedByInstaller $app $before
-            Write-FirstRunFiles $app
+            # Elevated, never in the user's profile (a link planted there could send the write
+            # anywhere): the launcher writes the missing first-run files as the user at its start.
+            if (-not (Test-Admin)) { Write-FirstRunFiles $app }
         } catch {
             Write-Attention "$($app.name): $($_.Exception.Message)"
             $failed += $app.name

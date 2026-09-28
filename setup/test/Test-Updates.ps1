@@ -645,9 +645,12 @@ static class Checks {
         # (Register-AppInstaller -LockOnly) gives the folders to Administrators and renames the
         # journal aside, and the jobs then trust them.
         $data = Join-Path $work 'owner\HTPC'
-        New-Item -ItemType Directory -Force (Join-Path $data 'state'), (Join-Path $data 'setup\lib') | Out-Null
+        New-Item -ItemType Directory -Force (Join-Path $data 'state'), (Join-Path $data 'setup\lib'), (Join-Path $data 'logs') | Out-Null
         [IO.File]::WriteAllText((Join-Path $data 'state\launcher-update.json'), '{}')
-        foreach ($p in $data, "$data\state", "$data\state\launcher-update.json", "$data\setup") { & icacls $p /setowner "*$me" | Out-Null }
+        # logs\ as an older setup left it: Users may change it, with the launcher's own log in it.
+        & icacls "$data\logs" /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+        [IO.File]::WriteAllText((Join-Path $data 'logs\launcher.log'), 'old')
+        foreach ($p in $data, "$data\state", "$data\state\launcher-update.json", "$data\setup", "$data\logs\launcher.log") { & icacls $p /setowner "*$me" | Out-Null }
         $ownerOf = { param($p) (Get-Acl -LiteralPath $p).GetOwner([Security.Principal.SecurityIdentifier]).Value }
         Check ((& $ownerOf $data) -eq $me) "  (the fake ProgramData\HTPC is $me's to start with)"
         $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
@@ -655,9 +658,12 @@ static class Checks {
         Check (@($owners | Where-Object { $_ -ne 'S-1-5-32-544' }).Count -eq 0) "ProgramData\HTPC, state\ and setup\ the user made: now Administrators' ($($owners -join ', '))"
         Check ($null -eq (Get-UntrustedReason $data) -and $null -eq (Get-UntrustedReason "$data\state") -and $null -eq (Get-UntrustedReason "$data\setup")) "  and the SYSTEM jobs trust them ($(Get-UntrustedReason $data)$(Get-UntrustedReason "$data\state"))"
         Check (-not (Test-Path -LiteralPath "$data\state\launcher-update.json") -and @(Get-ChildItem "$data\state" -Filter 'launcher-update.json.untrusted-*').Count -eq 1) '  the journal the user owned: renamed aside, never read'
-        Check ((Get-Acl -LiteralPath "$data\logs").Access | Where-Object { $_.IdentityReference -eq (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545').Translate([Security.Principal.NTAccount]) -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) -eq [Security.AccessControl.FileSystemRights]::Modify }) '  logs\ still user-writable'
+        $usersModify = { param($p) [bool]((Get-Acl -LiteralPath $p).Access | Where-Object { $_.IdentityReference -eq (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545').Translate([Security.Principal.NTAccount]) -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) -eq [Security.AccessControl.FileSystemRights]::Modify }) }
+        Check ($null -eq (Get-UntrustedReason "$data\logs") -and -not (& $usersModify "$data\logs")) "  logs\ setup's own now: Users' write gone, trusted ($(Get-UntrustedReason "$data\logs"))"
+        Check (-not (Test-Path -LiteralPath "$data\logs\launcher.log") -and @(Get-ChildItem "$data\logs" -Filter 'launcher.log.untrusted-*').Count -eq 1) '  the launcher log the user owned there: renamed aside'
+        Check ((& $usersModify "$data\user") -and (& $usersModify "$data\tv")) '  user\ and tv\ still user-writable'
         $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
-        Check ($out -notmatch 'now by Administrators|renamed aside|threw') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
+        Check ($out -notmatch 'now by Administrators|renamed aside|threw|setup''s own now') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
 
         # The app jobs' runner as SYSTEM (Job-Common.ps1, in its own PowerShell, SYSTEM faked):
         # state\ checked before anything is written there, the progress written atomically.

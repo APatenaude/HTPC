@@ -18,7 +18,9 @@ installed, started as the signed-in user, not elevated (launcher/README.md, Setu
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Only Edge,Power
 
 It elevates itself (UAC; started elevated, as TV Box Setup starts it, it just runs), is safe
-to re-run, keeps going when one step fails, and logs to
+to re-run, keeps going when one step fails, runs with Windows' own environment, never the user's
+(PSModulePath reset first of all; `lib\Common.ps1` resets Windows' folders, PATH and TEMP and
+drops the .NET switches for any elevated or SYSTEM script), and logs to
 `C:\ProgramData\HTPC\logs` (`setup-last.json` has the step results). After a USB install the
 answer file runs it with `-Unattended` at the first sign-in.
 
@@ -26,7 +28,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
 | Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store) |
-| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
+| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC; written by the launcher as the user at its start: nothing elevated writes the user's profile), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos; nothing of Edge running with no window open (`StartupBoostEnabled` and `BackgroundModeEnabled` 0, the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed) |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
@@ -35,7 +37,7 @@ answer file runs it with `-Unattended` at the first sign-in.
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network (and every network joined later, a SYSTEM task), automatic time zone, location for the launcher's Wi-Fi list, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
 | Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup` (`lib\`, `jobs\` and the kept folder mirrored, built anew and swapped in, never merged); the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell. A TV Box Setup older than what the box has (the installed launcher, or the kept `setup\VERSION`) is refused before anything changes, and the wizard says so |
-| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (owned by Administrators, SYSTEM/Administrators full, Users read; `logs\`, `user\` and `tv\` (the TV address cache) stay user-writable, `state\` is admin-write/user-read; the root, `state\` and `setup\` taken from whoever else owned them, since an owner can always undo the lock, and what a standard user owned inside `state\` or `setup\` renamed aside; setup.ps1 does this part first of all, `-LockOnly`) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
+| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (owned by Administrators, SYSTEM/Administrators full, Users read; `user\` and `tv\` (the TV address cache and keys) stay user-writable, `state\` and `logs\` (setup's own logs; the launcher and watchdog log in `%LOCALAPPDATA%\HTPC\logs`) are admin-write/user-read; the root, `state\`, `logs\` and `setup\` taken from whoever else owned them, since an owner can always undo the lock, and what a standard user owned inside them renamed aside; setup.ps1, and TV Box Setup as it opens, do this part first of all, `-LockOnly`) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
 | PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80, 8765 and 443) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
 | Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
@@ -210,7 +212,7 @@ While a launcher update checks the launcher it just put in place
 (`C:\ProgramData\HTPC\state\watchdog-watch`, set before its pause is lifted and kept until the
 new launcher is judged), the launcher is started as usual but none of its exits counts and there
 is no restart or desktop: a crash loop there is the update's to roll back.
-Log: `C:\ProgramData\HTPC\logs\watchdog.log`.
+Log: `%LOCALAPPDATA%\HTPC\logs\watchdog.log`.
 
 Desktop mode (Power menu, one confirmation) starts Explorer: desktop, taskbar, Start menu. The
 launcher stays behind it; Home still opens the menu over the desktop. Back to TV (Power menu,

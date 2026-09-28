@@ -29,9 +29,11 @@
 #                                 tasks, services; logs to ProgramData\HTPC\state\autostart.log.
 #                                 Not the user's Startup folder (theirs to change under SYSTEM's
 #                                 feet): the launcher clears that one (AutostartGuard.cs)
-#   an admin (setup)              HKLM, HKCU, both Startup folders, tasks, services, prefs
-#   the user (per-user jobs)      HKCU, the user's Startup folder, prefs
-#   (both: ProgramData\HTPC\logs\autostart.log)
+#   an admin (setup)              HKLM, HKCU, the all-users Startup folder, tasks, services; logs
+#                                 to ProgramData\HTPC\logs (setup's, admin-write). Nothing in the
+#                                 user's profile (their Startup folder, prefs): the launcher's
+#   the user (per-user jobs)      HKCU, the user's Startup folder, prefs; logs to
+#                                 %LOCALAPPDATA%\HTPC\logs\autostart.log
 # The registry, tasks, services and file removals go through $AutostartIO, which the tests replace
 # with fakes under %TEMP% (setup\test\Test-Autostart.ps1): nothing there touches the real ones.
 
@@ -250,9 +252,18 @@ function Get-AutostartPlaces {
         }
     } else {
         $run += New-AutostartRunPlaces 'HKCU' 'HKCU'
-        $startup += @{ Label = 'Startup (user)'; Dir = [Environment]::GetFolderPath('Startup'); Approved = "HKCU\$AutostartApproved\StartupFolder"; Root = $env:USERPROFILE }
+        # Elevated (setup), not the user's Startup folder nor their prefs files either: nothing
+        # elevated writes or deletes in the user's profile (a link they planted could send it
+        # anywhere). The launcher does both as the user at its start (AutostartGuard.cs).
+        if (-not $isAdmin) {
+            $startup += @{ Label = 'Startup (user)'; Dir = [Environment]::GetFolderPath('Startup'); Approved = "HKCU\$AutostartApproved\StartupFolder"; Root = $env:USERPROFILE }
+        }
     }
-    $logDir = Join-Path $env:ProgramData ("HTPC\" + $(if ($isSystem) { 'state' } else { 'logs' }))
+    # SYSTEM: state\ (admin-write); setup: logs\ (setup's own, admin-write); the user: their own
+    # %LOCALAPPDATA%\HTPC\logs. Never where a standard user could plant a link for an elevated write.
+    $logDir = if ($isSystem) { Join-Path $env:ProgramData 'HTPC\state' } elseif ($isAdmin) { Join-Path $env:ProgramData 'HTPC\logs' }
+              else { Join-Path $env:LOCALAPPDATA 'HTPC\logs' }
+    if (-not $isAdmin) { New-Item -ItemType Directory -Force $logDir -ErrorAction SilentlyContinue | Out-Null }
     $logDirItem = Get-Item -LiteralPath $logDir -Force -ErrorAction SilentlyContinue
     [pscustomobject]@{
         Who      = if ($isSystem) { 'SYSTEM' } elseif ($isAdmin) { 'admin' } else { 'user' }
@@ -261,9 +272,8 @@ function Get-AutostartPlaces {
         Startup  = $startup
         Tasks    = $isAdmin
         Services = $isAdmin
-        Prefs    = -not $isSystem
+        Prefs    = -not $isAdmin
         Note     = $note
-        # SYSTEM writes only in state\ (admin-write): never where a standard user could plant a link.
         Log      = if ($logDirItem -and -not ($logDirItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Join-Path $logDir 'autostart.log' } else { $null }
     }
 }

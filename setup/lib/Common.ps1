@@ -1,5 +1,68 @@
 # Shared helpers for the setup steps. Dot-source it: . "$PSScriptRoot\Common.ps1"
 
+# --- Windows' own environment, elevated or as SYSTEM ------------------------------------------------
+# Elevated, a process also gets the user's variables (HKCU\Environment is theirs to write): paths
+# like $env:ProgramFiles or $env:SystemRoot, PATH and PSModulePath could point wherever they
+# chose, and a step would install, register or run from there as administrator, or load a
+# PowerShell module from their Documents folder. So first of all (no command before this: a
+# command can load a module), elevated or as SYSTEM:
+#   PSModulePath        Windows' and Program Files' module folders only (never the user's
+#                       Documents\WindowsPowerShell\Modules)
+#   SystemRoot, windir, ProgramFiles, ProgramFiles(x86), ProgramW6432, CommonProgramFiles,
+#   CommonProgramFiles(x86), CommonProgramW6432, ProgramData, ALLUSERSPROFILE, USERPROFILE,
+#   APPDATA, LOCALAPPDATA   from Windows itself (the folders it knows), not the environment
+#   PATH                the machine's (HKLM), expanded with those and the machine's own variables
+#   TEMP, TMP           elevated (not SYSTEM, whose own is admin-only): Program Files\HTPC\Setup\temp
+#   COMPlus_*, DOTNET_*, CORECLR_*, COR_*, WEBVIEW2_*   removed (they load code into .NET programs
+#                       and WebView2, or make them write files)
+# TV Box Setup starts setup.ps1 with such an environment already (SetupElevation.CleanEnvironment,
+# which also drops every other variable of the user's); this covers any other elevated start.
+& {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $isSystem = $identity.User.Value -eq 'S-1-5-18'
+    if (-not $isSystem -and -not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { return }
+    $sys = [Environment]::SystemDirectory
+    $win = [Environment]::GetFolderPath('Windows')
+    $pf = [Environment]::GetFolderPath('ProgramFiles')
+    $cpf = [Environment]::GetFolderPath('CommonProgramFiles')
+    $pd = [Environment]::GetFolderPath('CommonApplicationData')
+    $known = [ordered]@{
+        PSModulePath = "$sys\WindowsPowerShell\v1.0\Modules;$pf\WindowsPowerShell\Modules"
+        SystemRoot = $win; windir = $win
+        ProgramFiles = $pf; ProgramW6432 = $pf; 'ProgramFiles(x86)' = [Environment]::GetFolderPath('ProgramFilesX86')
+        CommonProgramFiles = $cpf; CommonProgramW6432 = $cpf; 'CommonProgramFiles(x86)' = [Environment]::GetFolderPath('CommonProgramFilesX86')
+        ProgramData = $pd; ALLUSERSPROFILE = $pd
+        USERPROFILE = [Environment]::GetFolderPath('UserProfile')
+        APPDATA = [Environment]::GetFolderPath('ApplicationData')
+        LOCALAPPDATA = [Environment]::GetFolderPath('LocalApplicationData')
+    }
+    # %NAME% from those or the machine's own variables, never a user's.
+    $machine = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment')
+    $expand = {
+        param([string]$Text, [int]$Depth = 0)
+        if ($Depth -gt 4) { return $Text }
+        [regex]::Replace($Text, '%([^%]+)%', [Text.RegularExpressions.MatchEvaluator] {
+                param($m)
+                $name = $m.Groups[1].Value
+                if ($known.Contains($name)) { return $known[$name] }
+                $value = $machine.GetValue($name, $null, 'DoNotExpandEnvironmentNames')
+                if ($null -ne $value) { return (& $expand ([string]$value) ($Depth + 1)) }
+                $m.Value
+            })
+    }
+    foreach ($name in $known.Keys) { [Environment]::SetEnvironmentVariable($name, $known[$name]) }
+    [Environment]::SetEnvironmentVariable('PATH', (& $expand ([string]$machine.GetValue('Path', '', 'DoNotExpandEnvironmentNames'))))
+    if (-not $isSystem) {
+        $temp = [IO.Path]::Combine($pf, 'HTPC\Setup\temp')
+        [void][IO.Directory]::CreateDirectory($temp)
+        [Environment]::SetEnvironmentVariable('TEMP', $temp)
+        [Environment]::SetEnvironmentVariable('TMP', $temp)
+    }
+    foreach ($name in @([Environment]::GetEnvironmentVariables().Keys)) {
+        if ($name -match '^(COMPlus_|DOTNET_|CORECLR_|COR_|WEBVIEW2_)') { [Environment]::SetEnvironmentVariable($name, $null) }
+    }
+}
+
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12

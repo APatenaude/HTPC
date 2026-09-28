@@ -57,7 +57,11 @@ param(
     [switch]$NoPause
 )
 
-$lib = Join-Path $PSScriptRoot 'lib'
+# Before any command can load a module: Windows' and Program Files' module folders only, never
+# the user's Documents\WindowsPowerShell\Modules (elevated, a module put there would run as
+# administrator). Common.ps1 makes the rest of the environment Windows' own too.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' + [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
+$lib = [IO.Path]::Combine($PSScriptRoot, 'lib')
 . "$lib\Common.ps1"
 $BoundArgs = $PSBoundParameters
 $RelaunchTask = 'HTPC setup'
@@ -131,7 +135,9 @@ function Split-List([string[]]$Values) { @($Values | ForEach-Object { $_ -split 
 
 # --- Get to an elevated process outside any app container ---------------------------------
 
-if (Test-AppDataRedirected) {
+# Not under TV Box Setup (HTPC_SETUP_WIZARD, SetupRunner.cs): it is elevated and in no package,
+# and the probe would be an elevated write in the user's AppData.
+if ($env:HTPC_SETUP_WIZARD -ne '1' -and (Test-AppDataRedirected)) {
     Write-Host 'Relaunching setup outside this app (its AppData writes are redirected)...'
     # Already admin: the task runs elevated too, so no second UAC prompt.
     $runLevel = if (Test-Admin) { 'Highest' } else { 'Limited' }
@@ -170,9 +176,9 @@ if (-not (Test-Admin)) {
 # C:\ProgramData\HTPC locked and owned by Administrators first of all, before this log or any
 # step writes there: made by a standard process (the launcher, or TV Box Setup before it asked for
 # administrator rights) it is the user's, who could plant links where the steps write. The
-# Library step does it again, with the task.
+# Library step does it again, with the task. Not locked, nothing is written there: setup stops.
 try { & "$lib\Register-AppInstaller.ps1" -LockOnly }
-catch { Write-Attention "could not lock $HtpcData yet: $($_.Exception.Message)" }
+catch { Write-Attention "Setup stopped: could not lock $HtpcData ($($_.Exception.Message)), and its steps write there as administrator"; exit 1 }
 
 # --- Run the steps -------------------------------------------------------------------------
 

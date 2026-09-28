@@ -268,15 +268,14 @@ try {
         $did = @(Invoke-AppAutostartGuard -Apps $apps -Places (New-FakePlaces) -Context 'reconcile')
         Check (@($did | Where-Object Action -ne 'left').Count -eq 0) 'a second pass finds nothing to do'
 
-        # A junction in the user's profile, planted to make setup (the elevated pass over the
-        # user's places, Root = the profile) delete elsewhere: not followed.
+        # A junction in the user's profile (the user's pass, Root = the profile): not followed.
         $target = Join-Path $work 'elsewhere'
         New-Link (Join-Path $target 'Spotify.lnk') (Join-Path $spotifyDir 'Spotify.exe')
         $jProfile = Join-Path $work 'Users\planted'
         $jStartup = Join-Path $jProfile 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
         New-Item -ItemType Directory -Force (Split-Path $jStartup -Parent) | Out-Null
         cmd /c mklink /J "$jStartup" "$target" | Out-Null
-        $places = New-FakePlaces 'admin'
+        $places = New-FakePlaces 'user'
         $places.Startup = @(@{ Label = 'Startup (user)'; Dir = $jStartup; Approved = $null; Root = $jProfile })
         [void](Invoke-AppAutostartGuard -Apps $apps -Places $places -Kinds startup)
         Check (Test-Path (Join-Path $target 'Spotify.lnk')) 'a junction for the user''s Startup folder: not followed, nothing deleted through it'
@@ -290,10 +289,12 @@ try {
         [void](Invoke-AppAutostartGuard -Apps (App 'spotify') -Places $userPlaces -Context 'install:spotify')
         Check ($null -eq (Get-FakeValue "HKU\$sid\$run" 'Spotify') -and ($tasks | Where-Object Path -eq '\SpotifyTask').Enabled) 'as the user: the Run value removed, tasks left to SYSTEM'
         Check (-not (Test-Path (Join-Path $userStartup 'Spotify.lnk')) -and $null -eq (Get-FakeValue "HKU\$sid\$approved\StartupFolder" 'Spotify.lnk') -and (Test-Path (Join-Path $userStartup 'Other.lnk'))) '  its shortcut in the user''s Startup folder removed, with its record (Other.lnk kept)'
-        # Run as SYSTEM (in the VM): the real places have no user Startup folder.
-        if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18') {
-            Check (-not @((Get-AutostartPlaces).Startup | Where-Object { $_.Label -eq 'Startup (user)' }).Count) 'as SYSTEM, Get-AutostartPlaces: no user Startup folder'
-        }
+        # Run as SYSTEM or elevated (in the VM): the real places have no user Startup folder and no
+        # prefs (nothing elevated in the user's profile); as the user, both.
+        $real = Get-AutostartPlaces
+        $hasUserStartup = [bool]@($real.Startup | Where-Object { $_.Label -eq 'Startup (user)' }).Count
+        if ($real.Who -eq 'user') { Check ($hasUserStartup -and $real.Prefs) 'as the user, Get-AutostartPlaces: the user''s Startup folder and prefs' }
+        else { Check (-not $hasUserStartup -and -not $real.Prefs) "as $($real.Who), Get-AutostartPlaces: no user Startup folder, no prefs" }
         $prefs = if (Test-Path (Join-Path $spotifyDir 'prefs')) { [IO.File]::ReadAllText((Join-Path $spotifyDir 'prefs')) } else { '' }
         Check ($prefs -ceq "app.autostart-configured=true`napp.autostart-mode=`"off`"`n") "  and Spotify's prefs written before its first start ($($prefs -replace "`n", '\n'))"
     }

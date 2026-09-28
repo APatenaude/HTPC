@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $launcher = Get-Process HtpcLauncher -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $launcher) { Write-Warning 'The launcher is not running.'; exit 1 }
 $listen = @(Get-NetTCPConnection -State Listen -OwningProcess $launcher.Id -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 80, 8765 })
-if (-not $listen) { Write-Warning 'The launcher listens on neither 80 nor 8765: see "Phone remote" in C:\ProgramData\HTPC\logs\launcher.log'; exit 1 }
+if (-not $listen) { Write-Warning 'The launcher listens on neither 80 nor 8765: see "Phone remote" in %LOCALAPPDATA%\HTPC\logs\launcher.log'; exit 1 }
 $port = $listen[0].LocalPort
 $suffix = if ($port -eq 80) { '' } else { ":$port" }
 Write-Host "Listening on port $port ($((@($listen | ForEach-Object { $_.LocalAddress } | Sort-Object -Unique)) -join ', '))"

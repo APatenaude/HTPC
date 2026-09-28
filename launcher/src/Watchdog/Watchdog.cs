@@ -41,8 +41,8 @@
 //       job's to judge: none counts, and there is no restart of the box, no desktop and no wait
 //       between tries, so the watchdog never acts on a crash loop the job is about to roll back.
 //
-// Log: C:\ProgramData\HTPC\logs\watchdog.log (or %LOCALAPPDATA%\HTPC\logs when that one is not
-// ours to write), moved to watchdog.old.log and started afresh whenever it passes 512 KB (checked
+// Log: %LOCALAPPDATA%\HTPC\logs\watchdog.log (the user's own; ProgramData\HTPC\logs is setup's,
+// admin-write; none for an elevated start), moved to watchdog.old.log and started afresh whenever it passes 512 KB (checked
 // at every line: the watchdog runs for weeks).
 
 using System;
@@ -116,8 +116,7 @@ namespace Htpc.Watchdog
             // Elevated (started from an admin window) or inside an app package (started from the
             // Claude desktop app): the launcher would inherit that. Start again as the signed-in
             // user through a one-shot scheduled task. Once only: with UAC off every admin token
-            // counts as elevated. (An elevated process logs to Temp: a log file it created in
-            // ProgramData would not be writable for the watchdog running as the user.)
+            // counts as elevated. (An elevated start writes no log: its folders are the user's.)
             var elevated = Native.IsElevated();
             if (!relaunched && (elevated || Native.IsPackaged()))
             {
@@ -522,29 +521,29 @@ namespace Htpc.Watchdog
         static readonly object Gate = new object();
         static string path;
 
-        /// <summary>Log to %TEMP% instead (an elevated start).</summary>
+        /// <summary>
+        /// An elevated start (it only starts itself again as the user): no log file at all, since
+        /// its folders (%LOCALAPPDATA%, %TEMP%) are the user's, where an elevated write could be
+        /// sent anywhere by a link they planted.
+        /// </summary>
         public static bool ToTemp;
 
         static string PathFor()
         {
             if (path != null) return path;
-            if (ToTemp) return path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "htpc-watchdog.log");
-            // ProgramData\HTPC only once setup made it: made here, at standard rights, it would be
-            // the user's, and its owner could undo setup's lock (the launcher's Log.cs does the same).
-            var data = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
-            var local = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC");
-            foreach (var root in Directory.Exists(data) ? new[] { data, local } : new[] { local })
+            if (ToTemp) return null;
+            // The user's own %LOCALAPPDATA%\HTPC\logs, never ProgramData\HTPC: its logs\ is setup's
+            // (admin-write), and the folder made here, at standard rights, would be the user's,
+            // whose owner could undo setup's lock (the launcher's Log.cs does the same).
+            try
             {
-                try
-                {
-                    var dir = System.IO.Path.Combine(root, "logs");
-                    Directory.CreateDirectory(dir);
-                    var file = System.IO.Path.Combine(dir, "watchdog.log");
-                    File.AppendAllText(file, "");
-                    return path = file;
-                }
-                catch (Exception) { }
+                var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"HTPC\logs");
+                Directory.CreateDirectory(dir);
+                var file = System.IO.Path.Combine(dir, "watchdog.log");
+                File.AppendAllText(file, "");
+                return path = file;
             }
+            catch (Exception) { }
             return path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "htpc-watchdog.log");
         }
 
@@ -571,6 +570,7 @@ namespace Htpc.Watchdog
             {
                 try
                 {
+                    if (PathFor() == null) return;
                     Roll(PathFor());
                     File.AppendAllText(PathFor(), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)
                         + " " + level.PadRight(5) + " " + message + Environment.NewLine);

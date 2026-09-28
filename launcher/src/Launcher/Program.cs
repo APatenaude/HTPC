@@ -150,7 +150,13 @@ static class Program
         var trusted = SetupElevation.RunsFromTrustedPlace(Environment.ProcessPath, AppContext.BaseDirectory, SetupElevation.TrustedDir);
         var step = SetupElevation.Decide(options.Setup, elevated, trusted, args);
         if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
-        if (options.Setup && elevated) SetupElevation.TidyTrustedDir();
+        if (options.Setup && elevated)
+        {
+            // Windows' own environment for the elevated setup and all it starts, not the user's
+            // (SetupElevation.CleanEnvironment lists it).
+            SetupElevation.ApplyCleanEnvironment();
+            SetupElevation.TidyTrustedDir();
+        }
         // Setup replaces a launcher that is already running (setup run again on a finished box).
         // The watchdog must not start it again meanwhile. Only this session's: setup is elevated.
         if (options.Setup)
@@ -171,6 +177,10 @@ static class Program
         }
 
         Log.Info($"Launcher {typeof(Program).Assembly.GetName().Version} starting ({string.Join(' ', args)})");
+        // The elevated wizard writes in C:\ProgramData\HTPC (the TV step's tv\) only once that is
+        // locked and Administrators' (TvFiles refuses otherwise); everything else it keeps in
+        // Program Files\HTPC\Setup, never in the user's profile.
+        if (options.Setup && elevated) SetupRunner.LockData();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);
         Application.ThreadException += (_, e) => Log.Error("UI thread", e.Exception);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);

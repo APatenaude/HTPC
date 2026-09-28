@@ -13,17 +13,18 @@
 
     Two changes make that safe:
       1. C:\ProgramData\HTPC is locked: owned by Administrators, inheritance off, SYSTEM and
-         Administrators full control, Users read only. Three sub-folders stay user-writable - logs\
-         (the launcher's log), tv\ (the TV code's address cache) and user\
-         (progress for per-user installs the launcher runs itself). state\ is admin-write, user-read
-         (SYSTEM writes machine-job progress and staging there; the launcher only reads it).
+         Administrators full control, Users read only. Two sub-folders stay user-writable - tv\
+         (the TV code's address cache and keys) and user\ (progress for per-user installs the
+         launcher runs itself). state\ is admin-write, user-read (SYSTEM writes machine-job
+         progress and staging there; the launcher only reads it), and so is logs\ (setup's own
+         logs; the launcher and the watchdog log in the user's %LOCALAPPDATA%\HTPC\logs).
          Without this, any standard process could plant files where SYSTEM or an elevated setup
          later reads or runs them (ProgramData is world-writable by default). The owner matters
          as much as the permissions: whoever owns a folder may always change them again, and the
          SYSTEM update jobs refuse a folder anyone else owns (UpdateCore.ps1). A folder made at
          standard rights (the launcher, TV Box Setup before it asks for administrator rights) is
-         the user's, so the root, state\ and setup\ are given to Administrators (takeown), and what
-         a standard user owns in state\ or setup\ is renamed aside, never opened through.
+         the user's, so the root, state\, logs\ and setup\ are given to Administrators (takeown),
+         and what a standard user owns in them is renamed aside, never opened through.
          setup.ps1 runs this part first of all (-LockOnly), before any step writes there.
       2. The \HTPC\Jobs task runs as SYSTEM, one instance at a time, with a 4-hour limit (Windows
          updates install one at a time from the TV and a cumulative update alone can take close to
@@ -110,11 +111,11 @@ function Assert-RealFolder([string]$Path, [switch]$AdminOwned, [switch]$AdminOnl
 }
 
 Assert-RealFolder $HtpcData -AdminOwned
-foreach ($sub in @('logs', 'user', 'tv')) { Assert-RealFolder (Join-Path $HtpcData $sub) }
-Assert-RealFolder (Join-Path $HtpcData 'state') -AdminOnly
+foreach ($sub in @('user', 'tv')) { Assert-RealFolder (Join-Path $HtpcData $sub) }
+foreach ($sub in @('state', 'logs')) { Assert-RealFolder (Join-Path $HtpcData $sub) -AdminOnly }
 Assert-RealFolder (Join-Path $HtpcData 'setup') -AdminOnly -IfThere
 
-# Root and state\: Users read only. logs\, user\ and tv\: Users may write.
+# Root, state\ and logs\: Users read only. user\ and tv\: Users may write.
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)   # inheritance off, drop inherited rules
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($SidSystem, 'FullControl', $Inherit, 'None', 'Allow')))
@@ -130,16 +131,32 @@ if (-not $current.AreAccessRulesProtected) {
     Set-Acl -LiteralPath $HtpcData -AclObject $acl
     Write-Same "$HtpcData already locked"
 }
-# Checked again now that the root is locked (Users can no longer create anything in it): state\ or
-# setup\ swapped for a link meanwhile (by the root's old owner, before it was ours) is caught here.
+# Checked again now that the root is locked (Users can no longer create anything in it): state\,
+# logs\ or setup\ swapped for a link meanwhile (by the root's old owner, before it was ours) is
+# caught here.
 Assert-RealFolder (Join-Path $HtpcData 'state') -AdminOnly
+Assert-RealFolder (Join-Path $HtpcData 'logs') -AdminOnly
 Assert-RealFolder (Join-Path $HtpcData 'setup') -AdminOnly -IfThere
 
-# Anything in state\ or setup\ a standard user owns was planted there before the lock (setup and
-# the SYSTEM jobs make all of it as Administrators or SYSTEM), and its owner could still change it:
-# renamed aside, never opened or deleted through (it may be a link or hold one), so nothing reads
-# it by its name again. Now that both folders are locked, nothing new can appear in them.
-foreach ($sub in @('state', 'setup')) {
+# logs\ is setup's own (its transcript, progress and results, written elevated): admin-write,
+# user-read, as the root. The Users Modify an older setup gave it goes (the launcher and the
+# watchdog now log in the user's own %LOCALAPPDATA%\HTPC\logs).
+$logs = Join-Path $HtpcData 'logs'
+$logsAcl = Get-Acl -LiteralPath $logs
+if ($logsAcl.AreAccessRulesProtected -or @($logsAcl.Access | Where-Object { -not $_.IsInherited }).Count) {
+    & (Join-Path $env:SystemRoot 'System32\icacls.exe') $logs /reset /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "could not reset the permissions of $logs (icacls exit code $LASTEXITCODE)" }
+    Write-Change "$logs is setup's own now (Users read)"
+} else {
+    Write-Same "$logs already setup's own"
+}
+
+# Anything in state\, logs\ or setup\ a standard user owns was planted there before the lock, or
+# is an older launcher's log (setup and the SYSTEM jobs make all the rest as Administrators or
+# SYSTEM), and its owner could still change it: renamed aside, never opened or deleted through (it
+# may be a link or hold one), so nothing elevated writes to it by its name again. Now that these
+# folders are locked, nothing new can appear in them.
+foreach ($sub in @('state', 'logs', 'setup')) {
     $dir = Join-Path $HtpcData $sub
     if (-not (Test-Path -LiteralPath $dir)) { continue }
     foreach ($item in @(Get-ChildItem -LiteralPath $dir -Force)) {
@@ -153,9 +170,10 @@ foreach ($sub in @('state', 'setup')) {
     }
 }
 
-# logs\, user\ and tv\ get Users Modify back (the launcher writes there at standard rights; tv\ is
-# the TV code's address cache and its own files, which nothing elevated reads).
-foreach ($sub in @('logs', 'user', 'tv')) {
+# user\ and tv\ get Users Modify back (the launcher writes there at standard rights: per-user
+# install progress, and the TV code's address cache and pairing keys; the elevated wizard writes
+# tv\ only once this is done, never through a file already there: TvFiles.WriteAtomic).
+foreach ($sub in @('user', 'tv')) {
     $path = Join-Path $HtpcData $sub
     # Checked again now that the root is locked (Users can no longer create anything in it): a
     # link planted in a writable sub-folder's place before this run is replaced here.

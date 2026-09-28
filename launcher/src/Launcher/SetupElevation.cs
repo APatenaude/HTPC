@@ -44,6 +44,105 @@ static class SetupElevation
     public static string TrustedDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup");
 
     /// <summary>
+    /// PowerShell's module path for anything elevated: Windows' and Program Files' module folders,
+    /// from Windows itself (not the environment). Never the user's Documents\WindowsPowerShell\
+    /// Modules, which Windows PowerShell adds by default and loads a command's module from before
+    /// Windows' own: elevated, a module the user put there would run as administrator. Not the
+    /// machine value as written (PowerShell adds the user's folder back to that one).
+    /// </summary>
+    public static string SystemModulePath =>
+        Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\Modules") + ";" +
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"WindowsPowerShell\Modules");
+
+    /// <summary>Program Files\HTPC\Setup\temp: the elevated setup's TEMP and TMP (admin-only), never the user's %TEMP%.</summary>
+    public static string TrustedTemp => Path.Combine(TrustedDir, "temp");
+
+    /// <summary>Variables that load code or write files into a program (.NET, WebView2): never kept, from anywhere.</summary>
+    static readonly string[] DroppedPrefixes = ["COMPlus_", "DOTNET_", "CORECLR_", "COR_", "WEBVIEW2_"];
+
+    /// <summary>
+    /// The elevated setup's environment, for itself and all it starts (setup.ps1, the installers,
+    /// WebView2), made from Windows' own values instead of the one it was started with: elevated,
+    /// a process gets the user's variables too (HKCU\Environment is theirs to write), so
+    /// $env:ProgramFiles, SystemRoot, PATH or a .NET switch could point it wherever they chose.
+    /// What it holds, in this order (a later one wins):
+    ///   - the machine's variables (HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\
+    ///     Environment: Path, PATHEXT, ComSpec, OS, PROCESSOR_*...), expanded with Windows' folders
+    ///     and each other, never with a user's variable;
+    ///   - Windows' folders from Windows itself: SystemRoot, windir, SystemDrive, ProgramFiles,
+    ///     ProgramFiles(x86), ProgramW6432, CommonProgramFiles, CommonProgramFiles(x86),
+    ///     CommonProgramW6432, ProgramData, ALLUSERSPROFILE, PUBLIC, COMPUTERNAME;
+    ///   - the user's basics, from their account and known folders: USERNAME, USERDOMAIN,
+    ///     USERPROFILE, HOMEDRIVE, HOMEPATH, APPDATA, LOCALAPPDATA (read by setup's steps; nothing
+    ///     elevated writes there);
+    ///   - TEMP and TMP = TrustedTemp; PSModulePath = SystemModulePath; HTPC_SETUP_WIZARD = 1.
+    /// Everything else goes: the user's own variables and PATH additions, and any COMPlus_*,
+    /// DOTNET_*, CORECLR_*, COR_* or WEBVIEW2_* variable, the machine's included.
+    /// </summary>
+    public static Dictionary<string, string> CleanEnvironment(IReadOnlyDictionary<string, string> machine)
+    {
+        static string Folder(Environment.SpecialFolder f) => Environment.GetFolderPath(f);
+        var win = Folder(Environment.SpecialFolder.Windows);
+        var profile = Folder(Environment.SpecialFolder.UserProfile);
+        var windows = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SystemRoot"] = win, ["windir"] = win, ["SystemDrive"] = Path.GetPathRoot(win)!.TrimEnd('\\'),
+            ["ProgramFiles"] = Folder(Environment.SpecialFolder.ProgramFiles), ["ProgramW6432"] = Folder(Environment.SpecialFolder.ProgramFiles),
+            ["ProgramFiles(x86)"] = Folder(Environment.SpecialFolder.ProgramFilesX86),
+            ["CommonProgramFiles"] = Folder(Environment.SpecialFolder.CommonProgramFiles), ["CommonProgramW6432"] = Folder(Environment.SpecialFolder.CommonProgramFiles),
+            ["CommonProgramFiles(x86)"] = Folder(Environment.SpecialFolder.CommonProgramFilesX86),
+            ["ProgramData"] = Folder(Environment.SpecialFolder.CommonApplicationData), ["ALLUSERSPROFILE"] = Folder(Environment.SpecialFolder.CommonApplicationData),
+            ["PUBLIC"] = Path.GetDirectoryName(Folder(Environment.SpecialFolder.CommonDocuments)) ?? "",
+            ["COMPUTERNAME"] = Environment.MachineName,
+        };
+        var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // %NAME% from Windows' folders or the machine's own variables, never the user's.
+        string Expand(string value, int depth = 0) => depth > 4 ? value : System.Text.RegularExpressions.Regex.Replace(value, "%([^%]+)%", m =>
+            windows.TryGetValue(m.Groups[1].Value, out var w) ? w
+            : machine.TryGetValue(m.Groups[1].Value, out var v) ? Expand(v, depth + 1) : m.Value);
+        foreach (var (name, value) in machine)
+            if (!DroppedPrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase))) env[name] = Expand(value);
+        foreach (var (name, value) in windows) env[name] = value;
+        env["USERNAME"] = Environment.UserName;
+        env["USERDOMAIN"] = Environment.UserDomainName;
+        env["USERPROFILE"] = profile;
+        env["HOMEDRIVE"] = Path.GetPathRoot(profile)!.TrimEnd('\\');
+        env["HOMEPATH"] = profile[env["HOMEDRIVE"].Length..];
+        env["APPDATA"] = Folder(Environment.SpecialFolder.ApplicationData);
+        env["LOCALAPPDATA"] = Folder(Environment.SpecialFolder.LocalApplicationData);
+        env["TEMP"] = env["TMP"] = TrustedTemp;
+        env["PSModulePath"] = SystemModulePath;
+        env["HTPC_SETUP_WIZARD"] = "1";
+        return env;
+    }
+
+    /// <summary>The machine's variables as stored (not expanded): HKLM's Session Manager\Environment.</summary>
+    static Dictionary<string, string> MachineEnvironment()
+    {
+        var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+        foreach (var name in key?.GetValueNames() ?? Array.Empty<string>())
+            if (name.Length > 0 && key!.GetValue(name, null, Microsoft.Win32.RegistryValueOptions.DoNotExpandEnvironmentNames) is string value) vars[name] = value;
+        return vars;
+    }
+
+    /// <summary>
+    /// Main, the elevated setup: this process's environment becomes CleanEnvironment's, for
+    /// everything it starts from now on (its own .NET switches were cleared by the trampoline
+    /// before it started). TrustedTemp is made.
+    /// </summary>
+    public static void ApplyCleanEnvironment()
+    {
+        var clean = CleanEnvironment(MachineEnvironment());
+        Directory.CreateDirectory(TrustedTemp);
+        var dropped = 0;
+        foreach (var name in Environment.GetEnvironmentVariables().Keys.Cast<string>().ToList())
+            if (!clean.ContainsKey(name)) { Environment.SetEnvironmentVariable(name, null); dropped++; }
+        foreach (var (name, value) in clean) Environment.SetEnvironmentVariable(name, value);
+        Log.Info($"Setup: environment made Windows' own ({clean.Count} variables, {dropped} of the user's dropped; TEMP {TrustedTemp})");
+    }
+
+    /// <summary>
     /// Run: the launcher, or setup elevated in a trusted place. Elevate: setup without the rights.
     /// NeedsAdmin: the copy from asking, still without them. Relocate: elevated, but unpacked where
     /// the user can write. Unsafe: the copy started to fix that, still there.
@@ -93,20 +192,51 @@ static class SetupElevation
     /// no AutoRun commands, /e:on and /v:off whatever the user's registry says (HKCU is theirs to
     /// write, and so is HKCU\Environment: this line holds no %variable%, which cmd would fill in
     /// from it, and the .NET switches that load code from elsewhere are cleared: a profiler, a
-    /// startup hook, extra dependencies, the diagnostics ports). Null when the exe's path has a %
-    /// in it (it cannot be written here safely).
+    /// startup hook, extra dependencies, the diagnostics ports, host traces, crash dumps). Windows'
+    /// folders (SystemRoot, windir, ProgramFiles...), PATH (Windows' own), PSModulePath and TEMP
+    /// (TrustedTemp) are set from Windows itself, until the copy remakes its whole environment
+    /// (ApplyCleanEnvironment). Null when the exe's path has a % in it (it cannot be written
+    /// here safely).
     /// </summary>
     public static string? Trampoline(string exe, IEnumerable<string> args, string trustedDir, string suffix)
     {
         if (exe.Contains('%') || trustedDir.Contains('%') || suffix.Any(c => !char.IsAsciiLetterOrDigit(c))) return null;
         var target = Path.Combine(trustedDir, TrustedExeName);
         var bundle = Path.Combine(trustedDir, "bundle");
+        var temp = Path.Combine(trustedDir, "temp");
+        var sys = Environment.SystemDirectory;
         var steps = new List<string>
         {
             $"set \"DOTNET_BUNDLE_EXTRACT_BASE_DIR={bundle}\"",
             "set \"DOTNET_EnableDiagnostics=0\"", "set \"DOTNET_STARTUP_HOOKS=\"", "set \"DOTNET_ADDITIONAL_DEPS=\"",
             "set \"CORECLR_ENABLE_PROFILING=\"", "set \"COR_ENABLE_PROFILING=\"",
+            // Nor anything .NET's host or runtime writes as it starts: traces, crash dumps, an ICU of its own.
+            "set \"COREHOST_TRACE=\"", "set \"COREHOST_TRACEFILE=\"", "set \"DOTNET_HOST_TRACE=\"", "set \"DOTNET_HOST_TRACEFILE=\"",
+            "set \"DOTNET_DbgEnableMiniDump=\"", "set \"COMPlus_DbgEnableMiniDump=\"", "set \"DOTNET_EnableCrashReport=\"",
+            "set \"COMPlus_EnableCrashReport=\"", "set \"DOTNET_SYSTEM_GLOBALIZATION_APPLOCALICU=\"",
+            // PowerShell's modules from Windows' and Program Files' folders only, never the user's
+            // Documents\WindowsPowerShell\Modules (setup.ps1 and every script it starts).
+            $"set \"PSModulePath={SystemModulePath}\"",
         };
+        // Windows' folders from Windows itself, PATH Windows' own and TEMP admin-only until the
+        // copy remakes its whole environment (CleanEnvironment): what it loads as it starts
+        // (a COM server's %SystemRoot%\... path, a DLL by name) must not come from the user's.
+        foreach (var (name, value) in new[]
+        {
+            ("SystemRoot", Environment.GetFolderPath(Environment.SpecialFolder.Windows)), ("windir", Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
+            ("ProgramFiles", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)), ("ProgramW6432", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)),
+            ("ProgramFiles(x86)", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)),
+            ("CommonProgramFiles", Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles)), ("CommonProgramW6432", Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles)),
+            ("CommonProgramFiles(x86)", Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86)),
+            ("ProgramData", Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)), ("ALLUSERSPROFILE", Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)),
+            ("PATH", $@"{sys};{Environment.GetFolderPath(Environment.SpecialFolder.Windows)};{sys}\Wbem;{sys}\WindowsPowerShell\v1.0\"),
+            ("TEMP", temp), ("TMP", temp),
+        })
+        {
+            if (value.Contains('%') || value.Contains('"')) return null;
+            steps.Add($"set \"{name}={value}\"");
+        }
+        steps.Add($"mkdir \"{temp}\" 2>nul");
         var start = $"start \"\" /d \"{trustedDir}\" \"{target}\" {CommandLine(args)}".TrimEnd();
         if (string.Equals(Path.GetFullPath(exe), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
             steps.Add(start);
@@ -175,11 +305,41 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// The WebView2 profile: setup's own, so nothing an elevated WebView2 writes ever lands in the
-    /// launcher's, which runs at standard rights every day.
+    /// The WebView2 profile. The elevated setup's: Program Files\HTPC\Setup\webview, admin-only
+    /// (the elevated wizard is its only user), so nothing an elevated WebView2 writes lands in the
+    /// user's profile, where a link they planted could send it anywhere. The launcher's, and a
+    /// setup at standard rights (a dev run): its own in %LOCALAPPDATA%\HTPC, as always.
     /// </summary>
-    public static string WebViewFolder(bool setupMode) =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+    public static string WebViewFolder(bool setupMode, bool elevated) =>
+        setupMode && elevated ? Path.Combine(TrustedDir, "webview")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+
+    /// <summary>
+    /// Why a folder is not safe for an elevated process to rely on, or null when it is: a junction
+    /// or link, an owner other than SYSTEM, Administrators or TrustedInstaller, or write rights
+    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#).
+    /// </summary>
+    public static string? UntrustedReason(string dir)
+    {
+        string[] trusted = ["S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
+        const FileSystemRights write = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes |
+            FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles |
+            FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+        var info = new DirectoryInfo(dir);
+        if (!info.Exists) return $"{dir} is not there";
+        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) return $"{dir} is a junction or link";
+        var acl = info.GetAccessControl();
+        var owner = acl.GetOwner(typeof(SecurityIdentifier))?.Value;
+        if (owner is null || !trusted.Contains(owner)) return $"{dir} is owned by {owner}";
+        foreach (FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            var sid = rule.IdentityReference.Value;
+            if (rule.AccessControlType != AccessControlType.Allow || trusted.Contains(sid) || sid == "S-1-3-0") continue; // CREATOR OWNER: only what someone creates
+            // 0x40000000 GENERIC_WRITE, 0x10000000 GENERIC_ALL (seen on inherit-only entries)
+            if ((rule.FileSystemRights & write) != 0 || ((int)rule.FileSystemRights & 0x50000000) != 0) return $"{dir} lets {sid} change it";
+        }
+        return null;
+    }
 
     /// <summary>
     /// Who takes over when the wizard is done: the installed launcher, through its watchdog when
