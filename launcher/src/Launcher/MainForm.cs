@@ -127,36 +127,52 @@ sealed partial class MainForm : Form
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        // A launcher update or a restart for Windows updates left word (MainForm.Updates.cs).
-        var handoff = TakeHandoffAtStart();
-        var screen = Screen.PrimaryScreen!.Bounds;
-        Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
-        fittedTo = screen; // and again at each display change (MainForm.Screen.cs)
-        RestoreBrightness(); // MainForm.Settings.cs: the level set last, before the first frame
-        apps.Adopt(); // apps left open by a previous launcher
-        standby = new Standby(controller, settings, media);
-        standby.Changed += OnStandbyChanged;
-        InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
-        standby.GoingDown += () =>
+        // Up to the controller and the page, a failure is a black window without a controller
+        // that still answers the watchdog: it exits for the watchdog instead (async void: an
+        // exception would only reach the log).
+        LauncherHandoff? handoff;
+        try
         {
-            Post(new { type = "show", view = "home" });
-            // Before Windows sleeps, or the key never goes out. On the thread pool: waiting on the
-            // UI thread would deadlock the awaits inside.
-            Task.Run(() => tv.TurnOff()).Wait(3000);
-        };
-        AlertsLoaded(); // MainForm.Alerts.cs
-        var (hasS3, hasS4) = Standby.Capabilities();
-        Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}, Modern Standby {Standby.ModernStandby()}");
-        controller.Start();
-        clock.Start();
-        mouseWatch.Start();
+            // A launcher update or a restart for Windows updates left word (MainForm.Updates.cs).
+            handoff = TakeHandoffAtStart();
+            var screen = Screen.PrimaryScreen!.Bounds;
+            Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+            fittedTo = screen; // and again at each display change (MainForm.Screen.cs)
+            RestoreBrightness(); // MainForm.Settings.cs: the level set last, before the first frame
+            apps.Adopt(); // apps left open by a previous launcher
+            standby = new Standby(controller, settings, media);
+            standby.Changed += OnStandbyChanged;
+            InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
+            standby.GoingDown += () =>
+            {
+                Post(new { type = "show", view = "home" });
+                // Before Windows sleeps, or the key never goes out. On the thread pool: waiting on the
+                // UI thread would deadlock the awaits inside.
+                Task.Run(() => tv.TurnOff()).Wait(3000);
+            };
+            AlertsLoaded(); // MainForm.Alerts.cs
+            var (hasS3, hasS4) = Standby.Capabilities();
+            Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}, Modern Standby {Standby.ModernStandby()}");
+            controller.Start();
+            clock.Start();
+            mouseWatch.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Starting the launcher", ex);
+            ExitForRestart("the launcher did not start");
+            return;
+        }
         await StartWebView(); // MainForm.Shell.cs: tries again, else exits for the watchdog
-        StartPhone(); // the phone remote (MainForm.Phone.cs), in the background
+        // From here the launcher works: a part that fails is logged and the rest goes on.
+        StartPhone(); // the phone remote (MainForm.Phone.cs), in the background; logs its own failures
         _ = Task.Run(() => ScreenCapture.Prepare(captureDir)); // a first capture, so the first Home is quick too
         // On (and to the box's input) if the box has just booted: MainForm.Tv.cs. Not after a
         // launcher update or a restart for Windows updates (a handoff): nobody asked for the TV.
-        await StartTv(handoff);
-        ResumeAfterHandoff(); // back to standby if the launcher before this one was in it
+        try { await StartTv(handoff); }
+        catch (Exception ex) { Log.Error("The TV at start", ex); }
+        try { ResumeAfterHandoff(); } // back to standby if the launcher before this one was in it
+        catch (Exception ex) { Log.Error("Back to standby after a handoff", ex); }
     }
 
     // Back from a real sleep or hibernate (the keyboard, the power button, the phone's

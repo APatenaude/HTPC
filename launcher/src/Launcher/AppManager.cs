@@ -242,8 +242,15 @@ sealed class AppManager
                 if (match is not null) break;
             }
             if (match is null) { p.Dispose(); continue; }
+            try { Track(match.Id, p, adopted: true); }
+            catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                // Ended meanwhile, or not ours to watch (elevated): left alone; the tile opens its own copy.
+                Log.Warn($"{match.Id} (pid {p.Id}) was running but could not be taken over: {e.Message}");
+                p.Dispose();
+                continue;
+            }
             wanted.Remove(match);
-            Track(match.Id, p, adopted: true);
             Log.Info($"{match.Id} was already running (pid {p.Id}): taken over");
             RunningChanged?.Invoke(match.Id, true);
             if (wanted.Count == 0) break;
