@@ -113,7 +113,7 @@ function testCard() {
 
 function batteryLine() {
   if (!state.controller) return ['Not connected. Press Home on the controller to wake it.', null];
-  if (state.battery === 'wired') return ['Connected. Its dongle does not report the battery.', null];
+  if (state.battery === 'wired') return ['Connected. It doesn’t report its battery.', null];
   const level = { full: 100, medium: 60, low: 25, empty: 5 }[state.battery];
   return level === undefined ? ['Connected', null] : [`Connected · battery ${state.battery}`, level];
 }

@@ -268,9 +268,9 @@ const CHOICES = {
 
 // What each sleep mode means, shown under the choice and on the Power screen.
 const SLEEP_MODES = {
-  standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Hold Home on the controller to wake it.',
+  standby: { caption: 'The video output and the TV go off; the box stays on, using little power. Hold Home on the controller to wake it.',
              wake: 'Hold Home on the controller to wake' },
-  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller and the phone can’t wake it: use the power button or the keyboard.',
+  sleep: { caption: 'Windows sleep: less power still. The controller and the phone may not wake it: use the power button or the keyboard.',
            wake: 'Wake with the power button or the keyboard' },
   hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. The controller and the phone can’t wake it: use the power button.',
                wake: 'Wake with the power button' }
@@ -304,7 +304,7 @@ function renderSleepSection() {
           '<div class="seg">' + availableModes().map(([v, l]) => `<span${v === p.sleepMode ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>')
       : '') +
     (p.sleepMode === 'standby' && state.power.sleep
-      ? settingRow('sleepAfterStandbyHours', 'Then Windows sleep', 'After this long with the screen off, the box goes into Windows sleep (about 1 W; the controller can’t wake it from there)',
+      ? settingRow('sleepAfterStandbyHours', 'Then Windows sleep', 'After this long with the screen off, the box goes into Windows sleep (the controller may not wake it from there)',
           stepper('sleepAfterStandbyHours'))
       : '') +
     settingRow('idleMinutes', 'Sleep after', 'When nothing plays and nobody touches the controller', stepper('idleMinutes')) +

@@ -16,7 +16,7 @@ function btRow(id, glyph, label, caption, right, extra) {
 }
 
 function btHtml() {
-  let h = '<header><h1>Bluetooth</h1><p>For headphones and controllers. The 8BitDo uses its own dongle, not Bluetooth.</p></header>';
+  let h = '<header><h1>Bluetooth</h1><p>For headphones, speakers, controllers and keyboards. A controller with its own USB receiver doesn’t need it.</p></header>';
   const s = bt.st;
   if (!s) return h + '<p class="wifi-note">Looking for Bluetooth…</p>';
   if (!s.adapter) return h + '<p class="wifi-note">This box has no Bluetooth.</p>';
