@@ -5,7 +5,7 @@
 // How the box controls a TV).
 //   From the host: {type:'tv.state', tv} {type:'tv.read', power, input} {type:'tv.open'}
 //   To the host:   tv.refresh, tv.choose {id}, tv.none, tv.input {input}, tv.option {key, value},
-//                  tv.forget {key}, tv.showing {on}, tv.read, tv.test
+//                  tv.forget {key}, tv.showing {on}, tv.read, tv.test, tv.resume
 // Loaded before setup.js in setup.html, after app.js in index.html (where it registers the
 // Settings section and the dialog). Uses esc(), icon() and send() from those, when called.
 
@@ -156,7 +156,7 @@ const TvUi = {
     if (s === 'ok') return { kind: 'ok', text: 'Connected. Found by name, so a move or a new network address is fine.' };
     if (s === 'locked') return { kind: 'warn', text: 'This TV blocks control: on the TV, Settings › System › Advanced system settings › Control by mobile apps, set Network access to Enabled.' };
     if (s === 'missing') return { kind: 'warn', text: `${p.name} is not answering on the network. Is it plugged in and connected? Find it again below.` };
-    if (s === 'paused') return { kind: 'warn', text: `Paused: ${p.paused}. Pick your TV again to go on.` };
+    if (s === 'paused') return { kind: 'warn', text: `Paused: ${p.paused}. The box sends it nothing until you press Resume or pick your TV again.` };
     if (s === 'none') return { kind: 'info', text: 'The box leaves this TV to its own remote.' };
     if (s === 'unavailable') return { kind: 'warn', text: 'This control method is turned off on this box.' };
     if (s === 'unpaired') return { kind: 'warn', text: `${p.name} is not paired yet: the box cannot control it until it is.` };
@@ -251,6 +251,12 @@ if (typeof settingsSection === 'function') (() => {
     // While pairing runs, only its panel (the rest waits; the keypad needs the room).
     const pairing = tv.pairing && ['code', 'prompt', 'working'].includes(tv.pairing.stage);
     if (pairing) right = TvUi.pairHtml(tv);
+    // Paused (the box doubts this is the TV it is on): first, and one press to go on with it.
+    if (!pairing && tv.status === 'paused' && p && !tv.handsOff) {
+      right = `<div class="srow tv-resume" data-nav data-id="tv-resume" data-act="tv-resume">${icon('warn', 34, 2)}` +
+        `<div class="text"><span class="label">TV control is paused</span><span class="caption">The box does not turn ${esc(p.name || 'this TV')} on or off. Is it your TV?</span></div>` +
+        '<div class="value">Resume</div></div>' + right;
+    }
     if (!pairing && p && p.method !== 'none') {
       if (tv.caps.input) right += `<div class="srow" data-nav data-id="tv-input" data-tv-input="1" data-edit><div class="text"><span class="label">Input this box is on</span>` +
         `<span class="caption">${esc(TvUi.portNote(tv))}</span></div>` +
@@ -343,6 +349,7 @@ if (typeof settingsSection === 'function') (() => {
   // Pairing controls (the panel above): the same ids as in setup.
   for (const act of ['tv-pair', 'tv-key', 'tv-code', 'tv-cancel-pair']) onAction(act, (el) => { TvUi.pairAction(el.dataset.id); window.render(); });
   onAction('tv-test', () => { toast('Turning the TV off and back on…'); send({ type: 'tv.test' }); });
+  onAction('tv-resume', () => { toast('TV control resumed'); send({ type: 'tv.resume' }); });
   onAction('tv-refresh', () => { toast('Searching for TVs…'); send({ type: 'tv.refresh' }); });
 
   hostMessage('tv.', (msg) => {

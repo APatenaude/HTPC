@@ -29,6 +29,11 @@
 .tv-status { display: flex; align-items: flex-start; gap: 12px; margin-top: 6px; font-size: 21px; line-height: 1.4; color: #7FD1AE; }
 .tv-status span { width: 10px; height: 10px; flex-shrink: 0; margin-top: 9px; border-radius: 5px; background: currentColor; }
 .tv-status.warn { color: var(--warn); }
+/* Paused (Settings › TV): the Resume row, first on the right */
+.srow.tv-resume { color: var(--warn); }
+.srow.tv-resume:not(.focused) { background: var(--warn-bg); }
+.srow.tv-resume .icon { flex-shrink: 0; }
+.srow.tv-resume .caption { color: var(--text-2); }
 .tv-status.info { color: var(--text-2); }
 
 /* A brand's checklist (setup's side panel, or inline in Settings) */

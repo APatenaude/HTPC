@@ -29,6 +29,16 @@ sealed partial class MainForm
         }
     }
 
+    /// <summary>
+    /// OnLoad, once standby exists: its Wi-Fi switch (the radio off in standby on the cable,
+    /// Standby.cs), and the radio back on if the launcher before this one ended in standby.
+    /// </summary>
+    void InitStandbyWifi()
+    {
+        standby.Wifi = new StandbyRadio(WifiService.GetRadioState, WifiService.SetRadio, WifiService.CableOnly);
+        _ = standby.WifiBack("the launcher started");
+    }
+
     [UiMessages("wifi.")]
     void OnWifiMessage(string type, JsonElement m)
     {

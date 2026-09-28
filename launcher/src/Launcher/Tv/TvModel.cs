@@ -25,9 +25,20 @@ sealed class TvProfile
     List<string> macs = new();
     /// <summary>
     /// Why the box stopped controlling this TV (it doubts this is the TV it is plugged into), or
-    /// null. Nothing is sent until the user picks the TV again.
+    /// null. Nothing is sent until the user picks the TV again or presses Resume, or (a pause for
+    /// the input) the TV shows the box's input again while someone uses the box.
     /// </summary>
     public string? Paused { get; set; }
+    /// <summary>
+    /// What the pause is about: "input" (the TV showed another input: it ends by itself) or
+    /// "twins" (an identical TV showed the box's input too: only the user ends it). Null in files
+    /// from before it was kept: <see cref="PausedForInput"/> reads the reason then.
+    /// </summary>
+    public string? PauseKind { get; set; }
+
+    /// <summary>A pause for the TV showing another input (not for twins): the one that may end by itself.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool PausedForInput => Paused is not null && (PauseKind == "input" || (PauseKind is null && Paused.Contains(" says it shows ")));
 }
 
 enum TvPower { Unknown, On, Off }

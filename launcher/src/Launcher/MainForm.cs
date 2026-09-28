@@ -43,7 +43,7 @@ sealed partial class MainForm : Form
     SetupRunner? setup;
 
     bool uiReady;
-    int brightness = 100;
+    int brightness = 100;      // as the UI and phones show it; kept in settings (MainForm.Settings.cs)
 
     public MainForm(Options options)
     {
@@ -113,9 +113,11 @@ sealed partial class MainForm : Form
         var handoff = TakeHandoffAtStart();
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+        RestoreBrightness(); // MainForm.Settings.cs: the level set last, before the first frame
         apps.Adopt(); // apps left open by a previous launcher
         standby = new Standby(controller, settings, media);
         standby.Changed += OnStandbyChanged;
+        InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
         standby.GoingDown += () =>
         {
             Post(new { type = "show", view = "home" });
@@ -261,7 +263,7 @@ sealed partial class MainForm : Form
             case "close": apps.Close(Str("id")!); break;
             case "power": Power(Str("action")!); break;
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
-            case "brightness": brightness = m.GetProperty("value").GetInt32(); dimmer.SetBrightness(brightness); break;
+            case "brightness": SetBrightness(m.GetProperty("value").GetInt32()); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
             default:
                 if (!DispatchUiMessage(Str("type"), m)) Log.Warn($"UI message {Str("type")} not handled");

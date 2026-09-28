@@ -24,6 +24,12 @@ static class Native
     const byte VK_MENU = 0x12;
     const uint KEYEVENTF_KEYUP = 2;
 
+    /// <summary>
+    /// When the launcher last made up input of its own (the Alt tap below, the mouse nudge on
+    /// wake), tick count: Windows' "last input" then is not someone at the box (Standby.LastUserInput).
+    /// </summary>
+    public static long LastInjectedTick;
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
@@ -96,6 +102,7 @@ static class Native
         if (GetForegroundWindow() == hWnd) return attached ? "attached" : "direct";
 
         BringWindowToTop(hWnd);
+        LastInjectedTick = Environment.TickCount64;
         keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
         SetForegroundWindow(hWnd);
         keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);

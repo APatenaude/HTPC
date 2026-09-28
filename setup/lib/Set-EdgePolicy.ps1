@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Edge policies for the box: Google search, the extensions, no first-run or promotions.
+    Edge policies for the box: Google search, the extensions, no first-run, promotions or
+    password saving.
 
 .DESCRIPTION
     Machine policies under HKLM\SOFTWARE\Policies\Microsoft\Edge (check edge://policy).
@@ -84,8 +85,25 @@ Set-RegValue $edge 'PersonalizationReportingEnabled' 0
 Set-RegValue $edge 'DiagnosticData' 0
 Set-RegValue $edge 'UserFeedbackAllowed' 0
 
-Write-Host '  Open box: saved passwords fill without asking for the (blank) Windows password'
+# Sign-ins are kept by the sites' own cookies in each profile. Edge never offers to save a
+# password (the user, 27 Sept 2026); it still fills one saved before, and then without asking
+# for the (blank) Windows password first.
+Write-Host '  Passwords: never offered to be saved; ones saved before fill without asking for the Windows password'
+Set-RegValue $edge 'PasswordManagerEnabled' 0
 Set-RegValue $edge 'PrimaryPasswordSetting' 0
+
+# Google shows Edge users its own "Switch to Chrome" prompt on google.com (the Browser tile's
+# home and search). uBlock Origin Lite hides it with its "annoyances-others" list (EasyList's
+# Other Annoyances has the rule), off by default: turned on through uBOL's managed settings
+# (its managed_storage.json schema: "rulesets", "+id" adds a list), which Edge hands to the
+# extension from this policy key. A list, one numbered value per entry. uBOL applies cosmetic
+# rules in its default Optimal mode: force-installed, it holds access to every site. Its
+# first-run page (a tab in each new website tile's profile) is skipped too.
+Write-Host '  uBlock Origin Lite: the annoyances list too (hides Google''s "Switch to Chrome"), no first-run page'
+$ubolId = ($extensions['uBlock Origin Lite (ad blocking)'] -split ';')[0]
+$ubol = "$edge\3rdparty\extensions\$ubolId\policy"
+Set-RegValue "$ubol\rulesets" '1' '+annoyances-others' 'String'
+Set-RegValue $ubol 'disableFirstRunPage' 1
 
 Write-Host '  TV playback: autoplay and hardware acceleration on'
 Set-RegValue $edge 'AutoplayAllowed' 1

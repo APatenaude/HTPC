@@ -180,8 +180,7 @@ partial class MainForm
             case DragCommand d: PhoneDrag(d.Down); break;
             case VolumeCommand v: PhoneVolume(v); break;
             case BrightnessCommand b:
-                brightness = b.Value;
-                dimmer.SetBrightness(brightness);
+                SetBrightness(b.Value);
                 StateChanged();
                 break;
             case MediaCommand m:

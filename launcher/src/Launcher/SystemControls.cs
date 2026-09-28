@@ -107,10 +107,22 @@ sealed class Dimmer : Form
 
     protected override bool ShowWithoutActivation => true;
 
+    /// <summary>The darkest the layer goes (never fully black).</summary>
+    public const int Darkest = 10;
+
+    /// <summary>
+    /// A start never comes up darker than this, whatever was set last: a picture too dark to read
+    /// looks like a broken box, and the controller's way back is in the Home menu on that picture.
+    /// </summary>
+    public const int FloorAtStart = 30;
+
+    /// <summary>The brightness a start applies: the one set last (kept in settings), clamped as SetBrightness does, at least FloorAtStart.</summary>
+    public static int StartLevel(int saved) => Math.Max(Math.Clamp(saved, Darkest, 100), FloorAtStart);
+
     /// <summary>100 = no dimming; 10 = darkest allowed (never fully black).</summary>
     public void SetBrightness(int percent)
     {
-        percent = Math.Clamp(percent, 10, 100);
+        percent = Math.Clamp(percent, Darkest, 100);
         Bounds = Screen.PrimaryScreen!.Bounds;
         Opacity = (100 - percent) / 100.0;
         var front = Native.GetForegroundWindow();

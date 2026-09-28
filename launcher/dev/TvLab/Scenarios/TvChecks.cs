@@ -259,6 +259,103 @@ static class TvChecks
             h.Dispose(); w.Dispose();
         }
 
+        // Seen on the box (27 Sept 2026): the launcher idle on screen, the TV switched to HDMI 2 by
+        // its remote or CEC, paused. The launcher being up (even on the TV settings) is no one using it.
+        foreach (var settingsOpen in new[] { false, true })
+        {
+            var (w, h) = await Start();
+            var tv = w.AddRoku("roku", "X00000000001");
+            tv.On = true; tv.Input = 1;
+            h.Bind(tv, 1, RokuWorld.EdidKey);
+            await h.Boot(TimeSpan.FromMinutes(30));
+            if (settingsOpen) h.Tv.UiShowing(true);
+            tv.RemoteInput(2);
+            await w.RunFor(180);
+            Check.That(h.Profiles[RokuWorld.EdidKey].Paused is null,
+                $"doubt: the launcher idle on {(settingsOpen ? "the TV settings" : "its home screen")}, TV on HDMI 2 for 3 min: never paused");
+            h.Dispose(); w.Dispose();
+        }
+
+        // A pause for the input ends by itself: the TV back on the box's input for 30 s while the box is used.
+        {
+            var (w, h) = await Start();
+            var tv = w.AddRoku("roku", "X00000000001");
+            tv.On = true; tv.Input = 1;
+            h.Bind(tv, 1, RokuWorld.EdidKey);
+            await h.Boot(TimeSpan.FromMinutes(30));
+            h.LastUserInput = w.Clock.Now.AddHours(10);
+            tv.RemoteInput(2);
+            await w.RunFor(40);
+            var p = h.Profiles[RokuWorld.EdidKey];
+            Check.That(p.Paused is not null && p.PauseKind == "input", "self-healing: paused for the input first");
+            Check.That(h.Notices.Raised.Any(n => n.Id == TvNoticeRules.Paused && n.Body.Contains("Resume")), "self-healing: the alert says it resumes (or Resume)");
+            tv.RemoteInput(1);
+            await w.RunFor(20);
+            Check.That(p.Paused is not null, "self-healing: not before 30 s on the box's input");
+            var saves = h.ProfileSaves;
+            await w.RunFor(20);
+            Check.That(p.Paused is null && p.PauseKind is null, "self-healing: resumed after 30 s of the TV on HDMI 1 while the box is used");
+            Check.That(w.Trace.Lines.Any(l => l.Contains("notice cleared tv-paused")) && h.ProfileSaves > saves, "self-healing: alert cleared, profile saved");
+            var posts = Count(w, "keypress/PowerOff");
+            await h.Sleep();
+            Check.Equal(posts + 1, Count(w, "keypress/PowerOff"), "self-healing: the next sleep turns the TV off again");
+            h.Dispose(); w.Dispose();
+        }
+
+        // ... but not while nobody uses the box; and a settings.json from before (no kind: the reason tells).
+        foreach (var legacy in new[] { false, true })
+        {
+            var (w, h) = await Start();
+            var tv = w.AddRoku("roku", "X00000000001");
+            tv.On = true; tv.Input = 1;
+            h.Bind(tv, 1, RokuWorld.EdidKey);
+            var p = h.Profiles[RokuWorld.EdidKey];
+            p.Paused = "Living room tv says it shows HDMI 2, not the box (HDMI 1)";
+            p.PauseKind = legacy ? null : "input";
+            await h.Boot(TimeSpan.FromMinutes(30));
+            await w.RunFor(120);
+            Check.That(p.Paused is not null, $"self-healing{(legacy ? " (old file)" : "")}: on HDMI 1 but nobody at the box: still paused");
+            h.LastUserInput = w.Clock.Now.AddHours(10);
+            await w.RunFor(40);
+            Check.That(p.Paused is null, $"self-healing{(legacy ? " (old file, no kind)" : "")}: resumed once the box is used");
+            h.Dispose(); w.Dispose();
+        }
+
+        // The TV off, or on another input, never resumes; nor does a pause for twins.
+        foreach (var how in new[] { "off", "other input", "twins" })
+        {
+            var (w, h) = await Start();
+            var tv = w.AddRoku("roku", "X00000000001");
+            tv.On = true; tv.Input = 1;
+            FakeRoku? twin = null;
+            if (how == "twins") { twin = w.AddRoku("twin", "X00000000002"); twin.Name = "Bedroom TV"; twin.On = true; twin.Input = 1; }
+            h.Bind(tv, 1, RokuWorld.EdidKey);
+            var p = h.Profiles[RokuWorld.EdidKey];
+            h.LastUserInput = w.Clock.Now.AddHours(10);
+            if (how == "twins")
+            {
+                await h.Boot(TimeSpan.FromMinutes(30));
+                await w.RunFor(40);
+                Check.That(p.Paused is not null && p.PauseKind == "twins", "twins: paused for twins");
+                twin!.RemotePower(false);      // only the bound TV shows HDMI 1 now
+                await h.Tv.Discover();
+            }
+            else
+            {
+                p.Paused = "Living room tv says it shows HDMI 2, not the box (HDMI 1)";
+                p.PauseKind = "input";
+                await h.Boot(TimeSpan.FromMinutes(30));
+                if (how == "off") tv.RemotePower(false); else tv.RemoteInput(3);
+            }
+            await w.RunFor(180);
+            Check.That(p.Paused is not null, how == "twins" ? "twins: stays paused (only the user's pick or Resume ends it)"
+                : $"self-healing: the TV {how} for 3 min while the box is used: still paused");
+            Check.Equal(0, Count(w, "POST "), $"paused ({how}): nothing sent");
+            h.Tv.Resume();
+            Check.That(p.Paused is null && w.Trace.Lines.Any(l => l.Contains("notice cleared tv-paused")), $"Resume ({how}): ends the pause, alert cleared");
+            h.Dispose(); w.Dispose();
+        }
+
         // The quiet time ends when the TV gets there: its remote right after counts.
         {
             var (w, h) = await Start();
