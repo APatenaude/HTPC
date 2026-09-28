@@ -4,7 +4,7 @@
 //   msedge --headless=new --dump-dom file:///.../launcher/ui/index.html#selftest
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
 // X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
-// moving around Settings and changing a value there only once A has picked its row, the
+// Power's Restart and Shut down asking first, moving around Settings and changing a value there only once A has picked its row, the
 // interface sounds (rendered offline; which sound a press picks; none while hidden).
 
 (async function () {
@@ -276,6 +276,27 @@
   setFocus($('ask').querySelector('[data-id="ask-yes"]'));
   press('a');
   check('Phone remote: ... Forget forgets it', lastSent('phone.forget') && lastSent('phone.forget').id === 'c3');
+  reset('home');
+  await tick();
+
+  // ---- Power: Restart and Shut down ask first, Cancel focused ------------------------------------
+  const powerCard = (id) => $('power-cards').querySelector(`[data-id="${id}"]`);
+  for (const [id, title, yes] of [['restart', 'Restart the box?', 'Restart'], ['shutdown', 'Shut down the box?', 'Shut down']]) {
+    reset('home');
+    go('power');
+    sent.length = 0;
+    setFocus(powerCard(id));
+    press('a');
+    const asked = state.view === 'ask' && focusedEl() && focusedEl().dataset.id === 'ask-no';
+    check(`Power: ${id} asks first, Cancel focused`, asked && $('ask').textContent.includes(title) && !lastSent('power'), state.view);
+    press('a');
+    check(`Power: ... Cancel on ${id} sends nothing`, state.view === 'power' && !lastSent('power'), state.view);
+    setFocus(powerCard(id));
+    press('a');
+    setFocus($('ask').querySelector('[data-id="ask-yes"]'));
+    press('a');
+    check(`Power: ... ${yes} sends it`, lastSent('power') && lastSent('power').action === id, JSON.stringify(sent));
+  }
   reset('home');
   await tick();
   // ---- Settings: opening, moving, changing a value ----------------------------------------------

@@ -118,7 +118,7 @@ Decisions of 27 September 2026 (after the night's merges):
 | Topic | Decision |
 |---|---|
 | TVs | LG webOS and Google/Android TV built first (Sony and Samsung later) and offered in setup and Settings › TV marked beta, tested only against simulated TVs so far. A TV is never bound automatically: the user picks it by name. An LG that was factory-reset may show its "allow this device?" prompt once; the user pairs again from Settings › TV |
-| Power menu | Shut down asks first ("Shut down the box?", the focus on Cancel): the controller cannot turn the box back on |
+| Power menu | Shut down asks first ("Shut down the box?", the focus on Cancel): the controller cannot turn the box back on. Restart asks too ("Restart the box?"): it closes every app |
 | Bluetooth | The box keeps Windows' generic Bluetooth driver when Windows Update has none for its chip (this box's Realtek 0BDA:C821); a keyboard pairs only with a PIN. The launcher follows one controller (the 8BitDo); others work in games |
 | Stremio | Its update notice is off (`--autoupdater-endpoint` pointed nowhere; checked in the VM) |
 | Next | The box gets the new build in a session with the user at the TV (one Windows permission prompt); the shell switch stays for the end of development |
