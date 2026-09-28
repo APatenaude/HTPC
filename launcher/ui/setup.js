@@ -155,7 +155,7 @@ function views() {
   const restart = r.restartNeeded && r.restartNeeded.length;
   if (restart) lines.push(['warn', r.restartNeeded.includes('shell')
     ? 'Restart the box once to finish: from then on it starts straight into this home screen'
-    : 'Restart the box once to finish (the name change)']);
+    : 'Restart the box once to finish setting it up']); // a new name, drivers, Windows servicing...
   return {
     main: `<div class="su-col"><h1 class="big">${failed.length ? 'Almost set' : 'All set'}</h1>` +
       `<div class="su-summary">${lines.map(([k, text]) =>

@@ -167,6 +167,16 @@ $Apps = Split-List $Apps
 $unknown = @($Only + $Skip) | Where-Object { $Steps.Keys -notcontains $_ }
 if ($unknown) { throw "Unknown step(s): $($unknown -join ', '). Steps: $($Steps.Keys -join ', ')" }
 
+# One setup at a time (TV Box Setup closed while it installed, then opened again, would start a
+# second one over the first): a second run says so and ends with exit code 3 (TV Box Setup's
+# result then), touching none of the first one's files. A run that died leaves the mutex free.
+$setupMutex = New-Object Threading.Mutex($false, 'Global\HTPC-setup')
+try { $owned = $setupMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) {
+    Write-Host 'Setup is already running (another window, or TV Box Setup): this one stops.'
+    exit 3
+}
+
 # -Uninstall removes ProgramData\HTPC: its log goes to the user's Documents instead.
 $logDir = if ($Uninstall) { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HTPC logs' } else { Join-Path $HtpcData 'logs' }
 New-Item -ItemType Directory -Force $logDir | Out-Null
@@ -189,6 +199,7 @@ function Save-Progress([string]$Running, [bool]$Done = $false) {
 }
 
 $results = [ordered]@{}
+$global:HtpcRestartReasons = @()   # added by the steps (Add-RestartReason, Common.ps1)
 foreach ($name in $planned) {
     Write-Host "`n== $name"
     Save-Progress $name
@@ -206,11 +217,15 @@ foreach ($name in $planned) {
 # launcher is in; from then on the home screen starts instead.
 if (-not $Uninstall -and $results['Launcher'] -eq 'OK') { Unregister-ScheduledTask -TaskName 'HTPC setup wizard' -Confirm:$false -ErrorAction SilentlyContinue }
 
-$restart = @()
+# Why a restart is needed: the steps' own reasons (a driver, the desktop back), a new computer
+# name, Windows' servicing or anything Windows Update installed waiting for one.
+$restart = @($global:HtpcRestartReasons | Where-Object { $_ })
 $activeName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName').ComputerName
 $pendingName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
 if ($activeName -ne $pendingName) { $restart += "computer name $pendingName" }
-if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $restart += 'Windows servicing' }
+$servicing = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+try { if ((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired) { $servicing = $true } } catch { }
+if ($servicing) { $restart += 'Windows servicing' }
 if (-not $Uninstall -and $results['Shell'] -eq 'OK' -and (& "$lib\Set-Shell.ps1" -Pending)) { $restart += 'shell' }
 
 Write-Host "`n== Summary"
@@ -222,6 +237,7 @@ Write-Host "Log: $log"
     ConvertTo-Json | Out-File (Join-Path $logDir 'setup-last.json') -Encoding ascii
 Save-Progress '' $true
 Stop-Transcript | Out-Null
+$setupMutex.ReleaseMutex()
 
 if (-not $Unattended -and -not $NoPause) { Read-Host 'Press Enter to close' | Out-Null }
 if (@($results.Values | Where-Object { $_ -ne 'OK' -and $_ -notlike 'skipped*' }).Count) { exit 1 }

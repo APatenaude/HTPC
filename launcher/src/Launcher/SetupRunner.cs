@@ -13,6 +13,8 @@ sealed class SetupRunner
 {
     static readonly string LogDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "logs");
     static readonly string ProgressFile = Path.Combine(LogDir, "setup-progress.json");
+    /// <summary>setup.ps1's exit code when another setup is running (its Global\HTPC-setup mutex).</summary>
+    const int AlreadyRunning = 3;
 
     readonly string script;
     readonly System.Windows.Forms.Timer poll = new() { Interval = 700 };
@@ -122,13 +124,24 @@ sealed class SetupRunner
         {
             poll.Stop();
             JsonElement? summary = null;
-            try
+            if (p.ExitCode == AlreadyRunning)
+                // Another setup.ps1 holds its mutex (this wizard was closed while it installed, then
+                // opened again): its files are not this run's, so the result says that instead.
+                summary = JsonSerializer.SerializeToElement(new
+                {
+                    steps = new { Setup = "FAILED: still running from before (TV Box Setup was closed while it installed). Wait a few minutes for it to finish, then open TV Box Setup again." },
+                    restartNeeded = Array.Empty<string>(),
+                });
+            else
             {
-                if (File.GetLastWriteTime(Path.Combine(LogDir, "setup-last.json")) < startedAt) throw new IOException("not written by this run");
-                using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(LogDir, "setup-last.json")));
-                summary = doc.RootElement.Clone();
+                try
+                {
+                    if (File.GetLastWriteTime(Path.Combine(LogDir, "setup-last.json")) < startedAt) throw new IOException("not written by this run");
+                    using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(LogDir, "setup-last.json")));
+                    summary = doc.RootElement.Clone();
+                }
+                catch (Exception e) { Log.Warn($"Setup summary unreadable: {e.Message}"); }
             }
-            catch (Exception e) { Log.Warn($"Setup summary unreadable: {e.Message}"); }
             Log.Info($"Setup ended (exit code {p.ExitCode})");
             Finished?.Invoke(p.ExitCode, summary);
             process = null;
