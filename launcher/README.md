@@ -243,7 +243,9 @@ on the machine changes. Run it as SYSTEM too (a one-off scheduled task, in the t
 `New-Release.ps1` sets the one version (`Directory.Build.props`), builds it once as a check
 (`Build-Release.ps1`: `TV-Box-Setup.exe`, `setup.zip`, `update.json`, `.sha256` files in
 `launcher\dist\release`), commits and tags. The pushed tag runs `.github/workflows/release.yml`:
-build (read-only token, SDK from `global.json`, NuGet in locked mode), publish the release (the
+the tests (every `launcher\tests\*` project and TvLab with `dotnet run -c Release`, and
+`setup\test\Test-Updates.ps1`; any failure publishes nothing), build (read-only token, SDK from
+`global.json`, NuGet in locked mode), publish the release (the
 only step that can write), then `Test-ReleaseAssets.ps1` downloads it again the way a box does
 and checks every file; a mismatch turns the release back into a draft. Boxes see it at their
 next daily check. `Build-Release.ps1` alone is the dry run (nothing is published).
