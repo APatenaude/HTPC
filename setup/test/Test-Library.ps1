@@ -89,6 +89,9 @@ if (Section 'Spike') {
     # resolver the job uses picks a signed winget.exe.
     . (Join-Path $launcherDir 'lib\Common.ps1'); . (Join-Path $launcherDir 'lib\AppCore.ps1')
     try { $w = Get-WingetForContext; Ok "winget resolved: $w" } catch { Bad "winget resolve: $($_.Exception.Message)" }
+    # This console is elevated, like setup: never the alias in the user's writable WindowsApps folder.
+    Want ($w -and $w.StartsWith((Join-Path $env:ProgramFiles 'WindowsApps\'), [StringComparison]::OrdinalIgnoreCase)) "elevated: winget from Program Files\WindowsApps, not %LOCALAPPDATA% ($w)"
+    try { $v = & $w --version; Want ($LASTEXITCODE -eq 0 -and $v -match '^v\d') "elevated: that winget runs ($v)" } catch { Bad "elevated: winget --version: $($_.Exception.Message)" }
     Want (Invoke-Job 'install:vlc') "install VLC as SYSTEM"
     Want (App-Installed (Get-CatalogApp 'vlc')) "VLC present after install"
 }
