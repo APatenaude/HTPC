@@ -130,6 +130,11 @@
   sent.length = 0;
   press('a');
   check('menu: A on the alert row runs its action', lastSent('alerts.act') && lastSent('alerts.act').id === 'app:stremio', JSON.stringify(sent));
+  // Reopen shows "Opening Stremio", which takes every press but Home and B until the host says
+  // the window is up: here, no host.
+  check('menu: while "Opening" shows, X does nothing under it', (press('x'), state.view === 'menu' && !lastSent('alerts.dismiss')));
+  press('b');
+  check('menu: B takes "Opening" away and tells the host', !$('opening').classList.contains('on') && lastSent('launchDismissed') && lastSent('launchDismissed').id === 'stremio' && state.view === 'menu');
 
   setFocus($('menu').querySelector('[data-close="youtube"]'));
   press('x');
