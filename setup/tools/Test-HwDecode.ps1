@@ -4,16 +4,20 @@
     Checks hardware video decoding: what the GPU driver offers, and whether a real player uses it.
 
 .DESCRIPTION
-    docs/SPEC.md N5. setup.ps1 runs it at the end of the install; the launcher runs it from
-    Settings with -Json.
+    docs/SPEC.md N5. setup.ps1 runs it at the end of the install and the launcher from Settings,
+    both with -Json -NoPlayback (what the driver says; no clip is played).
 
     Codecs: H.264 (8-bit), HEVC Main, HEVC Main10, VP9 Profile 0, VP9 Profile 2 (10-bit),
     AV1 Main 8-bit and 10-bit (both are AV1 Profile 0).
 
-    1. Driver capability (always, no extra software). Creates a D3D11 device on the default
-       hardware adapter, lists the decoder profiles of its ID3D11VideoDevice, and for each codec
-       checks the output format (NV12 for 8-bit, P010 for 10-bit) and whether a 3840x2160
-       decoder can be configured.
+    1. Driver capability (always, no extra software). Checks the GPU that drives the TV: the
+       adapter of the primary display (the home screen's), whatever its maker, integrated or
+       discrete; with two GPUs the other is named, not checked (the default adapter when the
+       primary display's cannot be told). Creates a D3D11 device on it, lists the decoder
+       profiles of its ID3D11VideoDevice, and for each codec checks the output format (NV12 for
+       8-bit, P010 for 10-bit) and whether a 3840x2160 decoder can be configured. A graphics
+       chip on Windows' Microsoft Basic Display Adapter (no driver of its own, so no decoding)
+       is named as the cause.
 
     2. Real playback (when mpv or ffmpeg is found). Decodes a 2 s 3840x2160 clip per codec
        (hwdecode-clips\, made by New-HwDecodeClips.ps1) with D3D11VA forced and reports whether
@@ -174,6 +178,149 @@ namespace HtpcHwDecode
         [PreserveSig] int CheckInterfaceSupport(ref Guid InterfaceName, out long pUMDVersion);
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct AdapterDesc1
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Description;
+        public uint VendorId;
+        public uint DeviceId;
+        public uint SubSysId;
+        public uint Revision;
+        public UIntPtr DedicatedVideoMemory;
+        public UIntPtr DedicatedSystemMemory;
+        public UIntPtr SharedSystemMemory;
+        public uint AdapterLuidLow;
+        public int AdapterLuidHigh;
+        public uint Flags;
+    }
+
+    // dxgi.h: IDXGIObject methods, IDXGIFactory's, then IDXGIFactory1's.
+    [ComImport, Guid("770AAE78-F26F-4DBA-A829-253C83D1B387"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IDXGIFactory1
+    {
+        [PreserveSig] int SetPrivateData(ref Guid Name, uint DataSize, IntPtr pData);
+        [PreserveSig] int SetPrivateDataInterface(ref Guid Name, IntPtr pUnknown);
+        [PreserveSig] int GetPrivateData(ref Guid Name, ref uint pDataSize, IntPtr pData);
+        [PreserveSig] int GetParent(ref Guid riid, out IntPtr ppParent);
+        [PreserveSig] int EnumAdapters(uint Adapter, out IntPtr ppAdapter);
+        [PreserveSig] int MakeWindowAssociation(IntPtr WindowHandle, uint Flags);
+        [PreserveSig] int GetWindowAssociation(out IntPtr pWindowHandle);
+        [PreserveSig] int CreateSwapChain(IntPtr pDevice, IntPtr pDesc, out IntPtr ppSwapChain);
+        [PreserveSig] int CreateSoftwareAdapter(IntPtr Module, out IntPtr ppAdapter);
+        [PreserveSig] int EnumAdapters1(uint Adapter, out IntPtr ppAdapter);
+        [PreserveSig] int IsCurrent();
+    }
+
+    // dxgi.h: IDXGIObject methods, IDXGIAdapter's, then IDXGIAdapter1's.
+    [ComImport, Guid("29038F61-3839-4626-91FD-086879011A05"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IDXGIAdapter1
+    {
+        [PreserveSig] int SetPrivateData(ref Guid Name, uint DataSize, IntPtr pData);
+        [PreserveSig] int SetPrivateDataInterface(ref Guid Name, IntPtr pUnknown);
+        [PreserveSig] int GetPrivateData(ref Guid Name, ref uint pDataSize, IntPtr pData);
+        [PreserveSig] int GetParent(ref Guid riid, out IntPtr ppParent);
+        [PreserveSig] int EnumOutputs(uint Output, out IntPtr ppOutput);
+        [PreserveSig] int GetDesc(out AdapterDesc pDesc);
+        [PreserveSig] int CheckInterfaceSupport(ref Guid InterfaceName, out long pUMDVersion);
+        [PreserveSig] int GetDesc1(out AdapterDesc1 pDesc);
+    }
+
+    public sealed class AdapterInfo
+    {
+        public int Index;
+        public string Name;
+        public uint VendorId;
+        public uint DeviceId;
+        public bool Software;
+    }
+
+    // The GPUs as Direct3D sees them (a box can have two: integrated and discrete).
+    public static class Dxgi
+    {
+        [DllImport("dxgi.dll")]
+        static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr ppFactory);
+
+        const uint DXGI_ADAPTER_FLAG_SOFTWARE = 2;
+
+        // Adapter number Index (a reference the caller releases), or IntPtr.Zero past the last one.
+        public static IntPtr Adapter(int index)
+        {
+            Guid iid = typeof(IDXGIFactory1).GUID;
+            IntPtr factoryPtr;
+            int hr = CreateDXGIFactory1(ref iid, out factoryPtr);
+            if (hr < 0) throw new InvalidOperationException(String.Format("CreateDXGIFactory1 failed (0x{0:X8})", hr));
+            object factoryObject = Marshal.GetObjectForIUnknown(factoryPtr);
+            Marshal.Release(factoryPtr);
+            try
+            {
+                IntPtr adapter;
+                return ((IDXGIFactory1)factoryObject).EnumAdapters1((uint)index, out adapter) >= 0 ? adapter : IntPtr.Zero;
+            }
+            finally { Marshal.FinalReleaseComObject(factoryObject); }
+        }
+
+        public static AdapterInfo[] List()
+        {
+            List<AdapterInfo> list = new List<AdapterInfo>();
+            for (int i = 0; i < 16; i++)
+            {
+                IntPtr ptr = Adapter(i);
+                if (ptr == IntPtr.Zero) break;
+                object adapterObject = Marshal.GetObjectForIUnknown(ptr);
+                Marshal.Release(ptr);
+                try
+                {
+                    AdapterDesc1 desc;
+                    if (((IDXGIAdapter1)adapterObject).GetDesc1(out desc) >= 0)
+                    {
+                        AdapterInfo info = new AdapterInfo();
+                        info.Index = i;
+                        info.Name = desc.Description;
+                        info.VendorId = desc.VendorId;
+                        info.DeviceId = desc.DeviceId;
+                        info.Software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+                        list.Add(info);
+                    }
+                }
+                finally { Marshal.FinalReleaseComObject(adapterObject); }
+            }
+            return list.ToArray();
+        }
+    }
+
+    // Windows' display list: which adapter shows the primary display, where the home screen is.
+    public static class Displays
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct DisplayDevice
+        {
+            public int cb;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+            public int StateFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern bool EnumDisplayDevices(string device, uint index, ref DisplayDevice info, uint flags);
+
+        const int DISPLAY_DEVICE_PRIMARY_DEVICE = 4;
+
+        // Its adapter's first hardware ID (PCI\VEN_xxxx&DEV_xxxx&...), or null when Windows names none.
+        public static string PrimaryAdapterId()
+        {
+            for (uint i = 0; i < 32; i++)
+            {
+                DisplayDevice d = new DisplayDevice();
+                d.cb = Marshal.SizeOf(typeof(DisplayDevice));
+                if (!EnumDisplayDevices(null, i, ref d, 0)) break;
+                if ((d.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0) return d.DeviceID;
+            }
+            return null;
+        }
+    }
+
     public sealed class D3D11Probe : IDisposable
     {
         [DllImport("d3d11.dll")]
@@ -181,6 +328,7 @@ namespace HtpcHwDecode
             IntPtr pFeatureLevels, uint FeatureLevels, uint SDKVersion,
             out IntPtr ppDevice, out int pFeatureLevel, out IntPtr ppImmediateContext);
 
+        const int D3D_DRIVER_TYPE_UNKNOWN = 0;
         const int D3D_DRIVER_TYPE_HARDWARE = 1;
         const uint D3D11_CREATE_DEVICE_VIDEO_SUPPORT = 0x800;
         const uint D3D11_SDK_VERSION = 7;
@@ -194,11 +342,20 @@ namespace HtpcHwDecode
         public uint VendorId;
         public uint DeviceId;
 
-        public D3D11Probe()
+        // On DXGI adapter number adapterIndex (Dxgi.List), or the default hardware adapter for -1.
+        public D3D11Probe(int adapterIndex)
         {
+            IntPtr chosen = adapterIndex >= 0 ? Dxgi.Adapter(adapterIndex) : IntPtr.Zero;
+            if (adapterIndex >= 0 && chosen == IntPtr.Zero) throw new InvalidOperationException("DXGI adapter " + adapterIndex + " not found");
             int featureLevel;
-            int hr = D3D11CreateDevice(IntPtr.Zero, D3D_DRIVER_TYPE_HARDWARE, IntPtr.Zero, D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-                IntPtr.Zero, 0, D3D11_SDK_VERSION, out device, out featureLevel, out context);
+            int hr;
+            try
+            {
+                // With an adapter given, the driver type must be UNKNOWN.
+                hr = D3D11CreateDevice(chosen, chosen != IntPtr.Zero ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, IntPtr.Zero,
+                    D3D11_CREATE_DEVICE_VIDEO_SUPPORT, IntPtr.Zero, 0, D3D11_SDK_VERSION, out device, out featureLevel, out context);
+            }
+            finally { if (chosen != IntPtr.Zero) Marshal.Release(chosen); }
             if (hr < 0) throw new InvalidOperationException(String.Format("D3D11CreateDevice failed (0x{0:X8})", hr));
 
             deviceObject = Marshal.GetObjectForIUnknown(device);
@@ -267,12 +424,51 @@ function Get-InnerMessage([Exception]$Exception) {
     $Exception.Message
 }
 
+# The graphics chips as Windows lists them: hardware IDs, and whether Windows runs one with its
+# Microsoft Basic Display Adapter driver (display.inf: no driver of its own, no video decoding).
+function Get-DisplayChips {
+    foreach ($chip in @(Get-PnpDevice -Class Display -PresentOnly -ErrorAction SilentlyContinue)) {
+        $ids = @((Get-PnpDeviceProperty -InstanceId $chip.InstanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data |
+            Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+        $inf = (Get-PnpDeviceProperty -InstanceId $chip.InstanceId -KeyName 'DEVPKEY_Device_DriverInfPath' -ErrorAction SilentlyContinue).Data
+        [pscustomobject]@{ Name = $chip.FriendlyName; Ids = $ids; Basic = ("$inf" -eq 'display.inf') }
+    }
+}
+
+# The maker of a PCI graphics chip, for messages; nothing when not one of these.
+function Get-GpuMaker([string]$Id) {
+    if ($Id -match 'VEN_8086') { 'Intel' } elseif ($Id -match 'VEN_(1002|1022)') { 'AMD' } elseif ($Id -match 'VEN_10DE') { 'NVIDIA' }
+}
+
 function Get-DriverCapability {
-    $result = [ordered]@{ Error = $null; Name = $null; VendorId = $null; DeviceId = $null; DriverVersion = $null; Profiles = @(); Codecs = @{} }
+    $result = [ordered]@{ Error = $null; Name = $null; VendorId = $null; DeviceId = $null; DriverVersion = $null; Profiles = @(); Codecs = @{}
+        DrivesTv = $false; Others = @(); BasicDisplay = @(); Cause = $null }
     $probe = $null
+    $basic = @()
     try {
         if (-not ('HtpcHwDecode.D3D11Probe' -as [type])) { Add-Type -TypeDefinition $probeSource }
-        $probe = New-Object HtpcHwDecode.D3D11Probe
+        # The GPU that drives the TV: the primary display's, where the home screen is. With two
+        # GPUs (integrated and discrete) the other one is named, not checked.
+        $tvId = [HtpcHwDecode.Displays]::PrimaryAdapterId()
+        $chips = @(try { Get-DisplayChips } catch { })
+        $basic = @($chips | Where-Object { $_.Basic })
+        $result.BasicDisplay = @($basic | ForEach-Object { @($_.Ids)[0] })
+        $tvChip = if ($tvId) { $chips | Where-Object { $_.Ids -contains $tvId.ToUpperInvariant() } | Select-Object -First 1 }
+        if ($tvChip -and $tvChip.Basic) {
+            $maker = Get-GpuMaker $tvId
+            $result.Cause = "Microsoft Basic Display Adapter: the $(if ($maker) { "$maker " })graphics chip that drives the TV has no driver, so no video is hardware decoded"
+            throw $result.Cause
+        }
+        # Direct3D's adapters, without Microsoft's own (Basic Render, VendorId 1414, a software one).
+        $adapters = @([HtpcHwDecode.Dxgi]::List() | Where-Object { -not $_.Software -and $_.VendorId -ne 0x1414 })
+        $index = -1
+        if ($tvId -match 'VEN_([0-9A-F]{4})&DEV_([0-9A-F]{4})') {
+            $ven = $Matches[1]; $dev = $Matches[2]
+            $tv = $adapters | Where-Object { ('{0:X4}' -f $_.VendorId) -eq $ven -and ('{0:X4}' -f $_.DeviceId) -eq $dev } | Select-Object -First 1
+            if ($tv) { $index = $tv.Index; $result.DrivesTv = $true }
+        }
+        $probe = New-Object HtpcHwDecode.D3D11Probe -ArgumentList $index
+        $result.Others = @($adapters | Where-Object { $_.VendorId -ne $probe.VendorId -or $_.DeviceId -ne $probe.DeviceId } | ForEach-Object { $_.Name })
         $result.Name = $probe.AdapterName
         $result.VendorId = '{0:X4}' -f $probe.VendorId
         $result.DeviceId = '{0:X4}' -f $probe.DeviceId
@@ -291,6 +487,12 @@ function Get-DriverCapability {
         $result.Error = Get-InnerMessage $_.Exception
     } finally {
         if ($probe) { $probe.Dispose() }
+    }
+    # The TV's chip not found, no decoder at all, and a chip on the Basic Display Adapter: that is
+    # the likely reason.
+    if (-not $result.Cause -and $basic.Count -and ($result.Error -or -not $result.Profiles.Count)) {
+        $maker = Get-GpuMaker @($basic[0].Ids)[0]
+        $result.Cause = "Microsoft Basic Display Adapter: the $(if ($maker) { "$maker " })graphics chip has no driver, so no video is hardware decoded"
     }
 
     if ($result.VendorId) {
@@ -423,8 +625,11 @@ if (-not $Json) {
     if ($driver.Error) {
         Write-Host "GPU     driver check failed: $($driver.Error)"
     } else {
-        Write-Host "GPU     $($driver.Name) ($($driver.VendorId):$($driver.DeviceId)), driver $($driver.DriverVersion)"
+        $which = if ($driver.DrivesTv) { ', drives the TV (primary display)' } else { ' (the default one)' }
+        Write-Host "GPU     $($driver.Name) ($($driver.VendorId):$($driver.DeviceId)), driver $($driver.DriverVersion)$which"
     }
+    if ($driver.Others.Count) { Write-Host "Also    $($driver.Others -join ', ') (not checked)" }
+    if ($driver.BasicDisplay.Count -and -not $driver.Cause) { Write-Host "Note    no driver, on the Microsoft Basic Display Adapter: $($driver.BasicDisplay -join ', ')" }
     if ($playerInfo) {
         Write-Host "Player  $($playerInfo.version) ($($playerInfo.path))"
         Write-Host 'Playing the test clips with hardware decoding forced...'
@@ -478,7 +683,11 @@ if ($Json) {
             driverVersion   = $driver.DriverVersion
             decoderProfiles = @($driver.Profiles)
             error           = $driver.Error
+            drivesTv        = $driver.DrivesTv
+            otherAdapters   = @($driver.Others)
         }
+        basicDisplay = @($driver.BasicDisplay)
+        cause        = $driver.Cause
         player       = $playerInfo
         playbackNote = $playbackNote
         codecs       = @($rows)
@@ -505,6 +714,7 @@ if ($Json) {
     } else {
         $failed = ($rows | Where-Object { -not $_.pass } | ForEach-Object name) -join ', '
         Write-Host "Result  FAIL: $failed"
+        if ($driver.Cause) { Write-Host "Cause   $($driver.Cause)" }
     }
 }
 

@@ -242,6 +242,7 @@ hostMessage('sound.outputs', (m) => { more.audio = m; if (state.view === 'settin
 function decodeSummary(r) {
   if (!r) return 'Not checked yet';
   if (r.error) return r.error;
+  if (r.cause) return r.cause; // no graphics driver (Microsoft Basic Display Adapter)
   const codecs = r.codecs || [];
   const ok = codecs.filter((c) => c.pass).length;
   return (ok === codecs.length ? `The driver decodes all ${ok} formats in 4K` : `The driver decodes ${ok} of ${codecs.length} formats in 4K`) +
@@ -261,7 +262,9 @@ settingsSection('display', {
   render() {
     const d = more.decode || {};
     const r = d.result;
-    const adapter = r && r.adapter && r.adapter.name ? `${r.adapter.name} · driver ${r.adapter.driverVersion}` : '';
+    // With two GPUs (integrated and discrete) the check is the TV's; the other is named.
+    const others = r && r.adapter && r.adapter.otherAdapters && r.adapter.otherAdapters.length ? ` · the TV’s GPU (also: ${r.adapter.otherAdapters.join(', ')})` : '';
+    const adapter = r && r.adapter && r.adapter.name ? `${r.adapter.name} · driver ${r.adapter.driverVersion}${others}` : '';
     return '<header><h1>Display</h1><p>Brightness for every app, and which video formats the graphics chip decodes.</p></header>' +
       sliderRow('brightness', 'Brightness', 'Dims everything on screen, in every app. Can only go darker than the TV’s own setting.', true) +
       '<div class="srow decode">' +

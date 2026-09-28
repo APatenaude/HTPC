@@ -28,15 +28,16 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos; nothing of Edge running with no window open (`StartupBoostEnabled` and `BackgroundModeEnabled` 0, the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed) |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
+| Drivers | `lib/Install-Drivers.ps1` | before Updates keeps drivers out of Windows Update: the makers' drivers from Windows Update for the devices a clean install leaves on Windows' stand-ins or without a driver, whatever the hardware (`lib/DriverUpdate.ps1`): found by state, never by maker (a problem code; the Microsoft Basic Display Adapter, `display.inf`; the generic HD Audio driver, `hdaudio.inf`), every GPU alike (integrated, discrete or both), and only a driver whose hardware ID is the device's own; a second pass for devices that appear with those (a GPU's HDMI audio). Nothing to do when the makers' drivers are in. Fails when the GPU showing the desktop stays on the Basic Display Adapter (no video decoding). `-Check` only searches |
 | Updates | `lib/Set-UpdatePolicy.ps1` | Windows updates manual (from the TV: now or tonight), no driver swaps, no Windows update notifications or restart warnings over the TV, Store apps on demand; Edge and WebView2 update themselves |
-| Bluetooth | `lib/Install-BluetoothDriver.ps1` | the Bluetooth adapter's own driver from Windows Update, matched by its exact hardware ID and class, whatever the chipset; nothing if there is none (this box's Realtek 8821CE has none there) or its maker's driver is in already. `-Check` only searches |
+| Bluetooth | `lib/Install-BluetoothDriver.ps1` | the Bluetooth adapter's own driver from Windows Update instead of Windows' generic `bth.inf`, matched by its exact hardware ID and class, whatever the chipset; nothing if there is no adapter, no such driver (the first N97 box's Realtek 8821CE has none there) or its maker's driver is in already. `-Check` only searches |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network (and every network joined later, a SYSTEM task), automatic time zone, location for the launcher's Wi-Fi list, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
 | Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell |
 | Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\`, `user\` and `tv\` (the TV address cache) stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
 | PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80, 8765 and 443) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
 | Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
-| DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
+| DecodeCheck | `lib/Invoke-DecodeCheck.ps1` | `tools/Test-HwDecode.ps1 -NoPlayback`: does the GPU that drives the TV (the primary display's, whatever its maker; with two GPUs the other is named) decode H.264, HEVC, VP9 and AV1 in 4K, as its driver says (no clip played); says "Microsoft Basic Display Adapter" when a graphics chip has no driver. Skipped in a VM |
 
 `catalog.json` is the one app list for setup and the launcher's library.
 
@@ -193,8 +194,9 @@ Undo (back to Explorer, the watchdog started from Run as before; next sign-in):
     powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\lib\Set-Shell.ps1 -Undo
 
 `tools/Test-HwDecode.ps1` also runs on its own (`-Json` for the launcher): it lists the
-driver's decoders and, when mpv or ffmpeg is present, plays the 4K clips in
-`tools/hwdecode-clips` with hardware decoding forced.
+decoders of the TV's GPU and, from the repo when mpv or ffmpeg is present, plays the 4K clips in
+`tools/hwdecode-clips` with hardware decoding forced (the clips stay in the repo: not in the
+setup exe, the release's setup.zip or the USB media).
 
 ## Clean install and test VM
 

@@ -25,7 +25,7 @@ addEventListener('resize', fit);
 const BUTTONS = [['a', 'A'], ['b', 'B'], ['x', 'X'], ['y', 'Y'], ['lb', 'LB'], ['rb', 'RB'], ['lt', 'LT'], ['rt', 'RT'],
   ['select', 'Select'], ['start', 'Start'], ['home', 'Home']];
 const STEP_NAMES = { RestorePoint: 'Restore point', Winget: 'App installer', Apps: 'Apps', Codecs: 'Video codecs',
-  Edge: 'Edge settings', Power: 'Power and sleep', Updates: 'Windows updates', Bluetooth: 'Bluetooth driver', System: 'No pop-ups, network, time',
+  Edge: 'Edge settings', Power: 'Power and sleep', Drivers: 'Drivers', Updates: 'Windows updates', Bluetooth: 'Bluetooth driver', System: 'No pop-ups, network, time',
   AutoLogon: 'Sign-in without a password', Launcher: 'Home screen', Library: 'Installing from the TV', PhoneRemote: 'Phone remote',
   Shell: 'Start straight into the home screen', DecodeCheck: 'Video decoding check' };
 

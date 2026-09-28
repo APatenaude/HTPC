@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Talks to the Windows Update agent (its COM API) for WindowsUpdate.ps1, in a process of its
-    own that the job can end at any time.
+    Talks to the Windows Update agent (its COM API) for WindowsUpdate.ps1 (and setup's driver
+    steps, DriverUpdate.ps1), in a process of its own that the caller can end at any time.
 
 .DESCRIPTION
     Windows Update calls can hang for a long time (on this box a search once hung and left the
@@ -13,18 +13,24 @@
     Scan     searches for software updates not installed, not hidden, not optional (no drivers:
              Type='Software'; no previews: BrowseOnly=0; no feature updates)
     Install  searches again, then downloads and installs them one at a time ("2 of 5")
+    Drivers  searches for drivers instead (setup's Drivers and Bluetooth steps,
+             lib\DriverUpdate.ps1), each with the hardware ID and class it is for
+    InstallDrivers  searches for drivers again, then installs those named by -Ids, one at a time
 
     Each step writes one JSON line to -Out (admin-only state folder): {event, ...}. The last
     line is {event: "result", ...}.
 
 .PARAMETER Mode
-    Scan or Install.
+    Scan, Install, Drivers or InstallDrivers.
 .PARAMETER Out
     The file this script appends its report lines to.
+.PARAMETER Ids
+    InstallDrivers: the update ids to install (comma-separated), from a Drivers search.
 #>
 param(
-    [Parameter(Mandatory)][ValidateSet('Scan', 'Install')][string]$Mode,
-    [Parameter(Mandatory)][string]$Out
+    [Parameter(Mandatory)][ValidateSet('Scan', 'Install', 'Drivers', 'InstallDrivers')][string]$Mode,
+    [Parameter(Mandatory)][string]$Out,
+    [string[]]$Ids
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,7 +47,7 @@ $Uncounted = @('2267602', '890830')
 function Describe($Update) {
     $kbs = @($Update.KBArticleIDs | ForEach-Object { [string]$_ })
     $categories = @($Update.Categories | ForEach-Object { $_.Name })
-    @{
+    $d = @{
         id       = $Update.Identity.UpdateID
         title    = $Update.Title
         kb       = ($kbs -join ',')
@@ -50,6 +56,13 @@ function Describe($Update) {
         counted  = -not ($kbs | Where-Object { $Uncounted -contains $_ }) -and ($categories -notcontains 'Definition Updates')
         category = ($categories -join ', ')
     }
+    if ($Update.Type -eq 2) {   # a driver: what it is for
+        $d.hardwareId = $Update.DriverHardwareID
+        $d.driverClass = $Update.DriverClass
+        $d.provider = $Update.DriverProvider
+        $d.driverDate = $Update.DriverVerDate.ToString('yyyy-MM-dd')
+    }
+    $d
 }
 
 function Find-Updates($Session) {
@@ -59,6 +72,18 @@ function Find-Updates($Session) {
     if ($result.ResultCode -notin 2, 3) { throw "Windows Update search ended with code $($result.ResultCode)" }
     # Feature updates ("Upgrades") never come to LTSC; left out anyway.
     @($result.Updates | Where-Object { @($_.Categories | ForEach-Object { $_.Name }) -notcontains 'Upgrades' })
+}
+
+# Drivers. With drivers held back by policy (Set-UpdatePolicy.ps1) the plain search offers none;
+# asking the Windows Update service by its id still lists them (checked on the box, 27 Sept 2026).
+function Find-Drivers($Session) {
+    $searcher = $Session.CreateUpdateSearcher()
+    $searcher.ServerSelection = 3   # ssOthers: the service below
+    $searcher.ServiceID = '9482f4b4-e343-43b6-b170-9a65bc822c77'   # Windows Update
+    $searcher.Online = $true
+    $result = $searcher.Search("IsInstalled=0 and Type='Driver'")
+    if ($result.ResultCode -notin 2, 3) { throw "Windows Update driver search ended with code $($result.ResultCode)" }
+    @($result.Updates)
 }
 
 # Newest successful install in Windows Update's history ("Last installed" on the TV).
@@ -76,11 +101,16 @@ try {
     $session = New-Object -ComObject Microsoft.Update.Session
     $session.ClientApplicationID = 'HTPC TV box'
     Send @{ event = 'searching' }
-    $updates = Find-Updates $session
+    $updates = if ($Mode -in 'Drivers', 'InstallDrivers') { Find-Drivers $session } else { Find-Updates $session }
+    if ($Mode -eq 'InstallDrivers') {
+        # -File hands "a,b" over as one string.
+        $wanted = @($Ids | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+        $updates = @($updates | Where-Object { $wanted -contains $_.Identity.UpdateID })
+    }
     $described = @($updates | ForEach-Object { Describe $_ })
     Send @{ event = 'found'; updates = $described }
 
-    if ($Mode -eq 'Scan') {
+    if ($Mode -in 'Scan', 'Drivers') {
         $pending = $false
         try { $pending = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired } catch { }
         Send @{ event = 'result'; ok = $true; updates = $described; rebootRequired = $pending; lastInstalled = (Get-LastInstalled $session) }

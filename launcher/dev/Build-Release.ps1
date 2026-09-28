@@ -76,7 +76,7 @@ try {
     $setup = Join-Path $repoRoot 'setup'
     # Every script it ships must parse: a box runs its jobs (and its own rollback) with them.
     foreach ($f in Get-ChildItem -LiteralPath $setup -Recurse -File -Filter '*.ps1') {
-        if ($f.FullName.Substring($setup.Length + 1) -match '^(dev|test|autounattend)\\') { continue }
+        if ($f.FullName.Substring($setup.Length + 1) -match '^(dev|test|autounattend|tools\\hwdecode-clips)\\') { continue }
         $tokens = $null; $errors = $null
         [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
         if ($errors) { throw "$($f.FullName): $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))" }
@@ -84,10 +84,10 @@ try {
     $zip = Join-Path $Out 'setup.zip'
     $archive = [IO.Compression.ZipFile]::Open($zip, 'Create')
     try {
-        # The same parts the exe carries (Launcher.csproj): not dev\, test\ or autounattend\.
+        # The same parts the exe carries (Launcher.csproj): not dev\, test\, autounattend\ or the decoding test's clips.
         foreach ($f in Get-ChildItem -LiteralPath $setup -Recurse -File) {
             $relative = $f.FullName.Substring($setup.Length + 1)
-            if ($relative -match '^(dev|test|autounattend)\\') { continue }
+            if ($relative -match '^(dev|test|autounattend|tools\\hwdecode-clips)\\') { continue }
             [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $relative.Replace('\', '/'))
         }
         $entry = $archive.CreateEntry('VERSION')

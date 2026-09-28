@@ -35,8 +35,8 @@
     <!-- The web UI and the app catalog ship next to the exe. -->
     <None Include="..\..\ui\**\*" LinkBase="ui" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\setup\catalog.json" Link="catalog.json" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Setup mode ("TV Box Setup") runs these: the setup folder without the dev, test and USB-media parts. -->
-    <None Include="..\..\..\setup\**\*" Exclude="..\..\..\setup\dev\**;..\..\..\setup\test\**;..\..\..\setup\autounattend\**"
+    <!-- Setup mode ("TV Box Setup") runs these: the setup folder without the dev, test and USB-media parts, nor the decoding test's clips (the box checks the driver only). -->
+    <None Include="..\..\..\setup\**\*" Exclude="..\..\..\setup\dev\**;..\..\..\setup\test\**;..\..\..\setup\autounattend\**;..\..\..\setup\tools\hwdecode-clips\**"
           LinkBase="setup" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

@@ -11,14 +11,18 @@
       Codecs        HEVC Video Extensions (for Edge)
       Edge          Google search, uBlock Origin Lite, no first-run or promotions
       Power         never sleeps on its own (the launcher's standby), wake sources
+      Drivers       the makers' drivers from Windows Update for devices without one (graphics
+                    still on the Microsoft Basic Display Adapter, HDMI audio, chipset...)
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
+      Bluetooth     the Bluetooth adapter's own driver instead of Windows' generic one, if any
       System        no popups over the TV, Private network, time zone, computer name TV
       AutoLogon     open box: no Windows password, automatic sign-in
       Launcher      the launcher (-LauncherExe) and its watchdog into Program Files, started at sign-in
       Library       lock ProgramData\HTPC and register the \HTPC\Jobs task (install from the TV)
       PhoneRemote   firewall: phones on the home network reach the remote and YouTube casting
       Shell         the launcher replaces the Windows desktop for this account (-Skip Shell keeps Explorer)
-      DecodeCheck   hardware video decoding report (tools\Test-HwDecode.ps1; skipped in a VM)
+      DecodeCheck   does the GPU driving the TV decode the video formats in 4K (the driver's
+                    word: tools\Test-HwDecode.ps1 -NoPlayback; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
     and the others still run.
 
@@ -74,6 +78,7 @@ $Steps = [ordered]@{
     Codecs       = { & "$lib\Install-Codecs.ps1" }
     Edge         = { & "$lib\Set-EdgePolicy.ps1" }
     Power        = { & "$lib\Set-Power.ps1" }
+    Drivers      = { & "$lib\Install-Drivers.ps1" }   # before Updates, which keeps drivers out of Windows Update
     Updates      = { & "$lib\Set-UpdatePolicy.ps1" }
     Bluetooth    = { & "$lib\Install-BluetoothDriver.ps1" }
     System       = { & "$lib\Set-SystemPolicy.ps1" }
@@ -85,14 +90,7 @@ $Steps = [ordered]@{
     Library      = { & "$lib\Register-AppInstaller.ps1" }
     PhoneRemote  = { & "$lib\Set-PhoneRemote.ps1" }
     Shell        = { & "$lib\Set-Shell.ps1" }
-    DecodeCheck  = {
-        $tool = Join-Path $PSScriptRoot 'tools\Test-HwDecode.ps1'
-        if (-not (Test-Path $tool)) { Write-Attention 'tools\Test-HwDecode.ps1 not found; skipped'; return }
-        # A virtual machine (the clean-install test) has no video decoder to check.
-        if ((Get-CimInstance Win32_ComputerSystem).Model -eq 'Virtual Machine') { Write-Attention 'virtual machine: no hardware video decoder to check; skipped'; return }
-        & $tool
-        if ($LASTEXITCODE -ne 0) { throw 'Some codecs are not hardware decoded (table above)' }
-    }
+    DecodeCheck  = { & "$lib\Invoke-DecodeCheck.ps1" }
 }
 
 # One command-line argument, quoted when needed: unquoted, "TV Box Setup.exe" became three

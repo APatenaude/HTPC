@@ -20,6 +20,43 @@ function Write-Change([string]$Message) { Write-Host "  + $Message" }
 function Write-Same([string]$Message) { Write-Host "  = $Message" }
 function Write-Attention([string]$Message) { Write-Host "  ! $Message" -ForegroundColor Yellow }
 
+# A step that could not apply here (no launcher given, a virtual machine): setup.ps1 reports it as
+# "skipped: <why>", not OK (setup-last.json, the wizard).
+function Write-Skipped([string]$Reason) {
+    $global:HtpcStepSkipped = $Reason
+    Write-Host "  - skipped: $Reason"
+}
+
+# A step whose change needs a restart says so; setup.ps1 lists the reasons at the end
+# (restartNeeded in setup-last.json; the wizard offers Restart now).
+function Add-RestartReason([string]$Reason) {
+    if (@($global:HtpcRestartReasons) -notcontains $Reason) { $global:HtpcRestartReasons = @($global:HtpcRestartReasons | Where-Object { $_ }) + $Reason }
+    Write-Attention "needs a restart: $Reason"
+}
+
+# Whether the box reaches the internet: Windows' own check (NCSI) first, else one small request
+# to Microsoft's test page (NCSI can lag behind a network that just came up).
+function Test-Internet {
+    try {
+        if (Get-NetConnectionProfile -ErrorAction Stop | Where-Object { "$($_.IPv4Connectivity)" -eq 'Internet' -or "$($_.IPv6Connectivity)" -eq 'Internet' }) { return $true }
+    } catch { }
+    try { (Invoke-WebRequest 'http://www.msftconnecttest.com/connecttest.txt' -UseBasicParsing -TimeoutSec 10).Content -eq 'Microsoft Connect Test' }
+    catch { $false }
+}
+
+# Stops a step that has something to download, with a message a person can act on.
+function Assert-Internet([string]$What) {
+    if (-not (Test-Internet)) {
+        throw "No internet connection: $What needs it. Connect the box (network cable or Wi-Fi), then run setup again."
+    }
+}
+
+# A virtual machine (the clean-install test): Hyper-V, VMware, VirtualBox, QEMU/KVM, Xen, Parallels.
+function Test-VirtualMachine {
+    $cs = Get-CimInstance Win32_ComputerSystem
+    "$($cs.Manufacturer) $($cs.Model)" -match 'Virtual Machine|VMware|VirtualBox|innotek|KVM|QEMU|Xen|Parallels|Bochs'
+}
+
 # Sets a registry value only when it differs from what is there.
 function Set-RegValue {
     param(
