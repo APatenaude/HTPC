@@ -276,11 +276,11 @@ sealed class LibraryService
         // One run at a time (IgnoreNew): a Run while it is busy (the reconcile it does when Windows
         // starts, a firewall job not waited for) would be dropped silently. Wait for it instead.
         dynamic t = task;
-        var waitSince = DateTime.Now;
+        var waiting = Stopwatch.StartNew(); // not the clock: a daylight-saving change is an hour
         while (TaskRunning(t))
         {
             lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
-            if (DateTime.Now - waitSince > app.Stall) return (false, $"{app.Name}: the job runner stayed busy; try again");
+            if (waiting.Elapsed > app.Stall) return (false, $"{app.Name}: the job runner stayed busy; try again");
             Thread.Sleep(1000);
         }
         lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
@@ -354,7 +354,7 @@ sealed class LibraryService
 
     (bool, string) Follow(JobName app, string token, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false)
     {
-        var lastChange = DateTime.Now;
+        var sinceChange = Stopwatch.StartNew(); // not the clock: a daylight-saving change is an hour
         string lastSeen = "";
         while (true)
         {
@@ -374,7 +374,7 @@ sealed class LibraryService
                 var p = ParseProgress(text, app, token);
                 if (p is not null)
                 {
-                    lastChange = DateTime.Now;
+                    sinceChange.Restart();
                     Report(p);
                     if (p.Phase == "done") return (true, app.Box ? p.Message ?? "" : $"{app.Name} is ready");
                     if (p.Phase == "failed") return (false, p.Message ?? $"{app.Name} could not be installed");
@@ -388,7 +388,7 @@ sealed class LibraryService
                 if (p?.Phase == "done") { Report(p); return (true, app.Box ? p.Message ?? "" : $"{app.Name} is ready"); }
                 return (false, p?.Message ?? $"{app.Name} did not finish installing");
             }
-            if (DateTime.Now - lastChange > app.Stall)
+            if (sinceChange.Elapsed > app.Stall)
             {
                 Log.Warn($"Library: {app.Id} made no progress for {app.Stall.TotalMinutes} min; giving up");
                 // A task job would otherwise hold the runner until the task's own limit (4 hours).

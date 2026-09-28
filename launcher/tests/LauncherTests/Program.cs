@@ -414,16 +414,19 @@ Console.WriteLine("== Media calls: a player that never answers");
 // ---------------------------------------------------------------- SleepTimer
 Console.WriteLine("== SleepTimer");
 {
+    // The wall clock and the tick count (ms since boot) move together, until the clock is moved.
     var now = new DateTime(2026, 9, 26, 22, 0, 0);
+    long ms = 3_600_000;
     IReadOnlyList<MediaInfo> sessions = Array.Empty<MediaInfo>();
     var watching = false;
-    var timer = new SleepTimer(() => sessions, on => watching = on, () => now);
+    var timer = new SleepTimer(() => sessions, on => watching = on, () => now, () => ms);
     int warnings = 0, expired = 0, changed = 0;
     string? lastReason = null;
     timer.Warning += _ => warnings++;
     timer.Expired += why => { expired++; lastReason = why; };
     timer.Changed += () => changed++;
-    void Advance(int seconds) { for (var i = 0; i < seconds; i++) { now = now.AddSeconds(1); timer.Tick(); } }
+    void Second() { now = now.AddSeconds(1); ms += 1000; }
+    void Advance(int seconds) { for (var i = 0; i < seconds; i++) { Second(); timer.Tick(); } }
 
     timer.Set(30);
     Check(timer.Active && !timer.Warned, "30 min set");
@@ -457,7 +460,7 @@ Console.WriteLine("== SleepTimer");
     Check(((dynamic)timer.Describe()!).waiting == false, "follows the playing video");
     for (var i = 0; i < 120; i++)
     {
-        now = now.AddSeconds(1);
+        Second();
         sessions = new[] { new MediaInfo("MSEdge", "twitch", "Video", null, (now - t).TotalSeconds >= 100 ? MediaStatus.Paused : MediaStatus.Playing, Math.Min(600, 500 + (now - t).TotalSeconds), 600, 1, now, true) };
         timer.Tick();
     }
@@ -486,6 +489,39 @@ Console.WriteLine("== SleepTimer");
     Check(((dynamic)timer.Describe()!).minutesLeft == 16, "+15 after a video: on top of its last minute");
     timer.Cancel();
     Check(changed > 10, $"Changed raised ({changed})");
+
+    // The clock moved (daylight saving ends, the time set): the timer counts on regardless, and
+    // the end shown to the screen and the phone follows the clock.
+    long ShownEnd() => (long)((dynamic)timer.Describe()!).endsAt;
+    timer.Set(30);
+    Advance(10 * 60);
+    var endBefore = ShownEnd();
+    now = now.AddHours(-1);
+    Advance(1);
+    Check(((dynamic)timer.Describe()!).minutesLeft == 20 && Math.Abs(endBefore - 3_600_000 - ShownEnd()) <= 1000,
+        "clock back an hour: still 20 min left, the end shown an hour earlier on the clock");
+    Advance(20 * 60 - 62);
+    Check(expired == 3 && warnings == 5, $"... 61 s left: no warning yet ({warnings})");
+    now = now.AddHours(1);
+    Advance(1);
+    Check(expired == 3 && warnings == 6, $"clock forward an hour: the warning at 60 s left, no sleep yet ({warnings}, {expired})");
+    Advance(60);
+    Check(expired == 4 && lastReason == "sleep timer", "... sleeps at the 30 minutes, not an hour early or late");
+
+    // "When this video ends" with the clock moved while it plays: not 3 hours, nor paused for 5 minutes.
+    sessions = new[] { new MediaInfo("MSEdge", "twitch", "Long video", null, MediaStatus.Playing, 0, 7200, 1, now, true) };
+    timer.SetVideo();
+    Advance(5);
+    now = now.AddHours(3);
+    for (var i = 0; i < 10; i++)
+    {
+        Second();
+        sessions = new[] { new MediaInfo("MSEdge", "twitch", "Long video", null, MediaStatus.Playing, 15 + i, 7200, 1, now, true) };
+        timer.Tick();
+    }
+    Check(timer.Active && object.Equals(((dynamic)timer.Describe()!).endsAt, "video") && ((dynamic)timer.Describe()!).minutesLeft == 120,
+        "video mode, clock 3 hours on: still following it, 2 hours left");
+    timer.Cancel();
 }
 
 // ---------------------------------------------------------------- DecodeCheck.Parse
@@ -572,6 +608,33 @@ Console.WriteLine("== Brightness at start");
     Check(new LauncherSettings().Brightness == 100 && new LauncherSettings().Volume is null, "defaults: full brightness, no volume kept yet");
 }
 
+// ---------------------------------------------------------------- settings.json and its backup
+// In a folder of its own (never the box's settings.json).
+Console.WriteLine("== Settings: an unreadable settings.json");
+{
+    var dir = Path.Combine(Path.GetTempPath(), "htpc-settings-test");
+    if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+    var file = Path.Combine(dir, "settings.json");
+    var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    int Idle(string path) => JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), web)!.IdleMinutes;
+    new LauncherSettings { IdleMinutes = 45 }.Save(file);
+    new LauncherSettings { IdleMinutes = 50 }.Save(file);
+    Check(Idle(file) == 50 && Idle(file + ".bak") == 45 && !File.Exists(file + ".tmp"), "saved twice: the file, the one before as the backup, no temp file left");
+    File.WriteAllText(file, "{ \"idleMinutes\": 5");   // cut short
+    var loaded = LauncherSettings.Load(file);
+    Check(loaded.IdleMinutes == 45, "unreadable: the backup's settings");
+    Check(Idle(file) == 45 && File.ReadAllText(file + ".unreadable").StartsWith("{ \"idleMinutes\": 5"), "settings.json written again from the backup at once, the unreadable one kept aside");
+    loaded.IdleMinutes = 60;
+    loaded.Save(file);
+    Check(Idle(file) == 60 && Idle(file + ".bak") == 45, "the next save: the backup is a good copy, not the unreadable file");
+    File.WriteAllText(file, "");
+    Check(LauncherSettings.Load(file).IdleMinutes == 45, "unreadable again: the backup still has the settings");
+    File.Delete(file);
+    File.Delete(file + ".bak");
+    Check(LauncherSettings.Load(file).IdleMinutes == new LauncherSettings().IdleMinutes, "neither file: the defaults");
+    Directory.Delete(dir, recursive: true);
+}
+
 // ---------------------------------------------------------------- Core Audio (reads only)
 Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
 {
@@ -590,23 +653,43 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     On(ApartmentState.STA, () => held = new OtherEnumeratorClass());
     int before;
     lock (Log.Lines) before = Log.Lines.Count;
-    var audio = new AudioVolume();
+    var audio = new AudioVolume();   // reads on a thread of its own, from the start
     int? volume = null, again = null;
     SoundLevel? level = null;
     List<AudioOutputs.Output> outputs = new();
     List<AudioEndpoint> endpoints = new();
-    On(ApartmentState.STA, () => volume = audio.Get());
     On(ApartmentState.MTA, () => outputs = AudioOutputs.List());
+    SpinWait.SpinUntil(() => audio.Level is not null, outputs.Count > 0 ? 5000 : 500);
+    On(ApartmentState.STA, () => volume = audio.Get());
     On(ApartmentState.MTA, () => endpoints = AudioEndpoints.List());
     On(ApartmentState.STA, () => level = CoreAudio.TryLevel(null));
-    On(ApartmentState.MTA, () => again = audio.Get());
+    On(ApartmentState.MTA, () => again = CoreAudio.TryLevel(null)?.Volume);
     GC.KeepAlive(held);
     List<string> casts;
     lock (Log.Lines) casts = Log.Lines.Skip(before).Where(l => l.Contains("cast", StringComparison.OrdinalIgnoreCase)).ToList();
     Console.WriteLine($"  {outputs.Count} outputs, volume {volume?.ToString() ?? "none"}, level {level?.ToString() ?? "none"}");
     Check(casts.Count == 0, "no cast failures with another wrapper of the enumerator alive: " + string.Join(" | ", casts));
     var hasAudio = outputs.Count > 0;
-    Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread");
+    Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread, and on the audio thread");
+
+    // The audio thread held up (Core Audio hanging while an output comes or goes): nothing waits
+    // for it, the level stays as last read, and the work queued meanwhile runs once it answers.
+    using (var hold = new ManualResetEventSlim())
+    {
+        var ran = 0;
+        audio.Background("test-hold", () => hold.Wait(10_000), "Test");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        audio.Refresh();
+        audio.Refresh();
+        audio.Background("test-after", () => Interlocked.Increment(ref ran), "Test");
+        audio.Background("test-after", () => Interlocked.Increment(ref ran), "Test");
+        var shown = audio.Get();
+        Check(clock.ElapsedMilliseconds < 200 && shown == volume, $"audio thread held: reads and queuing return at once ({clock.ElapsedMilliseconds} ms), the level as last read");
+        hold.Set();
+        SpinWait.SpinUntil(() => Volatile.Read(ref ran) > 0, 3000);
+        Thread.Sleep(100);
+        Check(ran == 1, $"... then the work queued runs, the newest of a kind once ({ran})");
+    }
     Check(!hasAudio || outputs.Count(o => o.IsDefault) == 1, "one default output");
     Check(!hasAudio || endpoints.Where(e => e.IsDefault).All(e => e.Level == level), "the listed default output's level is the default's level");
 
@@ -618,12 +701,16 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     {
         watch.Changed += (_, _) => Interlocked.Increment(ref changes);
         watch.Arrived = id => arrived.Add(id); // the launcher's KeepVolume sets the level here; this only counts
-        On(ApartmentState.STA, () => { watch.Poll(); watch.Poll(); });
+        On(ApartmentState.MTA, () => { watch.Poll(); watch.Poll(); });
+        Check(!hasAudio || (arrived.Count == 1 && arrived[0] == CoreAudio.DefaultId()), $"volume watch: the default output 'arrives' once, at the first look ({arrived.Count})");
+        // After standby, or an output coming or going: the same output watched afresh, no indicator.
+        watch.Renew();
+        On(ApartmentState.MTA, () => { watch.Poll(); watch.Poll(); });
+        Check(!hasAudio || arrived.Count == 2, $"volume watch: renewed on the same output, once ({arrived.Count})");
     }
     int watchBefore;
-    lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume"));
-    Check(changes == 0 && watchBefore == 0, $"volume watch: starts and stops quietly ({changes} changes)");
-    Check(!hasAudio || (arrived.Count == 1 && arrived[0] == CoreAudio.DefaultId()), $"volume watch: the default output 'arrives' once, at the first look ({arrived.Count})");
+    lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume") || l.Contains("Watching the sound outputs"));
+    Check(changes == 0 && watchBefore == 0, $"volume watch: starts, renews and stops quietly ({changes} changes)");
     Check(!hasAudio || CoreAudio.DefaultId() == outputs.First(o => o.IsDefault).Id, "the default output's id");
 }
 
@@ -678,6 +765,8 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     var browser = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "edge").GetProperty("launch");
     Check(site.Contains(EdgeSiteApp.DarkPages) && AppManagerArgs(browser).Contains(EdgeSiteApp.DarkPages),
         "website tiles and the Browser: light pages drawn dark by Edge itself (no Dark Reader)");
+    Check(site.Contains(EdgeSiteApp.DiskCache) && AppManagerArgs(browser).Contains(EdgeSiteApp.DiskCache),
+        "website tiles and the Browser: each profile's cache capped (small disks)");
     // The Browser (the user, 27 Sept 2026: "Edge still says press Esc to exit full screen"): a
     // plain maximized window, its tabs and address bar showing, no full-screen bubble.
     var browserArgs = AppManagerArgs(browser);

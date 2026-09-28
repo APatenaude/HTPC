@@ -25,6 +25,27 @@ static class LogoTests
         await Cache();
         Console.WriteLine("== Logos: a program's own icon (the Shell, 256 px)");
         ProgramIcon();
+        Console.WriteLine("== Logos: only addresses on the internet are fetched from");
+        await Addresses();
+    }
+
+    // The box's own network and itself are never reached (a site's icon address or a redirect
+    // pointing there): checked without the network, the connection refused before it is made.
+    static async Task Addresses()
+    {
+        foreach (var a in new[] { "8.8.8.8", "1.1.1.1", "172.32.0.1", "100.128.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808" })
+            Check(AppLogos.IsOnInternet(IPAddress.Parse(a)), $"{a}: on the internet");
+        foreach (var a in new[] { "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.95", "169.254.1.1", "100.64.0.1", "0.0.0.0",
+            "192.0.0.8", "198.18.0.1", "224.0.0.251", "255.255.255.255", "::1", "::", "fe80::1", "fec0::1", "fd00::1", "ff02::1",
+            "::ffff:192.168.0.1", "::ffff:127.0.0.1", "64:ff9b::a00:1", "2002:c0a8:1::1" })
+            Check(!AppLogos.IsOnInternet(IPAddress.Parse(a)), $"{a}: not on the internet");
+        foreach (var url in new[] { "https://localhost/favicon.ico", "https://127.0.0.1:9/", "https://[::1]/", "https://192.168.0.1/manifest.json" })
+        {
+            Exception? refused = null;
+            try { await AppLogos.Fetch(new Uri(url), 1000); }
+            catch (Exception e) { refused = e; }
+            Check(refused is not null && AppLogos.NotOnInternet(refused), $"{url}: refused before connecting ({refused?.GetType().Name}: {refused?.Message})");
+        }
     }
 
     static void ParsePage()

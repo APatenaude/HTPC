@@ -6,10 +6,13 @@ namespace Htpc.Launcher;
 /// Plain text log in C:\ProgramData\HTPC\logs\launcher.log (SPEC: the launcher writes logs), or
 /// %LOCALAPPDATA%\HTPC\logs before setup made that folder (PickPath).
 /// Lines are queued and written by a background thread, so logging never blocks the caller
-/// (the controller thread logs every Home press).
+/// (the controller thread logs every Home press). The box runs for weeks: past 5 MB the file
+/// becomes launcher.old.log (the one before goes) and starts afresh, as the watchdog's does, so
+/// the logs never take more than about 10 MB of a small disk.
 /// </summary>
 static class Log
 {
+    const long MaxSize = 5 * 1024 * 1024;
     static readonly string FilePath = PickPath();
     static readonly BlockingCollection<string> Queue = new();
 
@@ -17,11 +20,36 @@ static class Log
     {
         new Thread(() =>
         {
+            long size = -1; // bytes in the file as this thread knows it; -1: read it again
             foreach (var line in Queue.GetConsumingEnumerable())
             {
-                try { File.AppendAllText(FilePath, line); } catch (Exception) { } // IO, or access while setup re-locks the folder
+                try
+                {
+                    if (size < 0) size = File.Exists(FilePath) ? new FileInfo(FilePath).Length : 0;
+                    if (size > MaxSize) size = Roll();
+                    File.AppendAllText(FilePath, line);
+                    size += System.Text.Encoding.UTF8.GetByteCount(line);
+                }
+                catch (Exception) { size = -1; } // IO, or access while setup re-locks the folder
             }
         }) { IsBackground = true, Name = "Log", Priority = ThreadPriority.BelowNormal }.Start();
+    }
+
+    // The size counted is checked against the file first (another launcher may have written to it
+    // meanwhile). A file that cannot be moved (open elsewhere) is copied and emptied instead; if
+    // even that fails, the next try is 5 MB later rather than at every line.
+    static long Roll()
+    {
+        var length = new FileInfo(FilePath).Length;
+        if (length <= MaxSize) return length;
+        var old = Path.ChangeExtension(FilePath, ".old.log");
+        try { File.Move(FilePath, old, overwrite: true); }
+        catch (Exception)
+        {
+            try { File.Copy(FilePath, old, overwrite: true); File.WriteAllText(FilePath, ""); }
+            catch (Exception) { }
+        }
+        return 0;
     }
 
     /// <summary>

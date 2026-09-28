@@ -19,6 +19,7 @@ sealed partial class MainForm
             // Standby is made in OnLoad; until then the screen is on.
             ScreenOn = () => standby is null || !standby.Active,
             // Real input only (a button, a key, the phone): the launcher up on screen is no one.
+            // Both in UTC, as the TV clock is.
             LastUserInput = () => standby is null ? controller.LastInput : standby.LastUserInput(),
         };
         service.Changed += () => OnUi(PostTv);

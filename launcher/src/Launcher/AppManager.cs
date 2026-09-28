@@ -259,8 +259,9 @@ sealed class AppManager
 
     void Track(string id, Process process, bool adopted = false)
     {
+        // In UTC: how long it ran must not gain or lose the hour of a daylight-saving change.
         DateTime since;
-        try { since = adopted ? process.StartTime : DateTime.Now; } catch (Exception) { since = DateTime.Now; }
+        try { since = adopted ? process.StartTime.ToUniversalTime() : DateTime.UtcNow; } catch (Exception) { since = DateTime.UtcNow; }
         process.EnableRaisingEvents = true;
         process.Exited += (_, _) =>
         {
@@ -276,7 +277,7 @@ sealed class AppManager
                 started.Remove(process);
             }
             RunningChanged?.Invoke(id, false);
-            Exited?.Invoke(new AppExit(id, ExitCodeOf(process), closedBy, DateTime.Now - info.Started, info.Adopted));
+            Exited?.Invoke(new AppExit(id, ExitCodeOf(process), closedBy, DateTime.UtcNow - info.Started, info.Adopted));
         };
         lock (running)
         {
@@ -480,6 +481,53 @@ sealed class AppManager
                 }
             }
             catch (Exception e) { Log.Error($"Closing {id}", e); }
+        });
+    }
+
+    /// <summary>
+    /// A website the user added is being removed: its Edge profile folder goes with it (the site's
+    /// sign-in, cookies and cache, hundreds of MB once used), or folders of removed sites would
+    /// pile up on a small disk. Closed first if it runs (Edge holds the folder), then deleted on a
+    /// pool thread, tried again for a few seconds while Edge lets go of its files. A catalog
+    /// site keeps its folder: added back from the library, it is still signed in. Call it before
+    /// the tile leaves the app list.
+    /// </summary>
+    public void DeleteProfile(string id)
+    {
+        if (Get(id) is not { Custom: true, IsWebsite: true } || !TileStore.IsWebsiteId(id)) return;
+        Process? p;
+        lock (running)
+        {
+            if (running.TryGetValue(id, out p)) closing.TryAdd(id, "its tile was removed");
+        }
+        var folder = Path.Combine(EdgeProfiles, id);
+        Task.Run(async () =>
+        {
+            try
+            {
+                if (p is { HasExited: false })
+                {
+                    p.CloseMainWindow();
+                    if (!p.WaitForExit(4000)) p.Kill(entireProcessTree: true);
+                    p.WaitForExit(4000);
+                }
+            }
+            catch (Exception e) { Log.Warn($"Closing {id} before removing its profile: {e.Message}"); }
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    if (!Directory.Exists(folder)) return;
+                    Directory.Delete(folder, recursive: true);
+                    Log.Info($"Removed the Edge profile of {id} (its sign-in)");
+                    return;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    if (attempt == 5) { Log.Warn($"The Edge profile of {id} was not removed ({folder}): {e.Message}"); return; }
+                    await Task.Delay(2000);
+                }
+            }
         });
     }
 

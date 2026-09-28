@@ -14,7 +14,8 @@ sealed record LogoSource(string Id, string? Url, Func<string?>? Exe);
 /// Everything happens in the background, one app at a time, and Changed says when a logo
 /// arrived. A program's logo is taken again when its program changed (an update); a site that
 /// could not be reached is tried again after 10 minutes, one without a usable icon after a day
-/// (and at each launcher start). Without a logo the tile keeps its glyph.
+/// (and at each launcher start). Without a logo the tile keeps its glyph. Only addresses on the
+/// internet are fetched from, redirects included (ConnectToInternet).
 /// </summary>
 sealed class AppLogos
 {
@@ -152,6 +153,13 @@ sealed class AppLogos
             Log.Info($"Logo {s.Id}: {found.From.Source} {found.From.Url.Host}{found.From.Url.AbsolutePath}");
             return true;
         }
+        catch (Exception e) when (NotOnInternet(e))
+        {
+            // A website tile for something on the home network (a NAS's page): no logo from there.
+            Log.Info($"Logo {s.Id}: {page.Host} or its icon is not on the internet: not fetched; again in a day");
+            RetryIn(s.Id, RetryNoIcon);
+            return false;
+        }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or OperationCanceledException)
         {
             Log.Info($"Logo {s.Id}: {page.Host} not reached ({e.GetType().Name}); again in 10 minutes");
@@ -188,6 +196,9 @@ sealed class AppLogos
             AutomaticDecompression = DecompressionMethods.All,
             UseCookies = false,
             ConnectTimeout = TimeSpan.FromSeconds(10),
+            // Straight to the site: through a proxy, where the name leads could not be checked.
+            UseProxy = false,
+            ConnectCallback = ConnectToInternet,
         };
         var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         // Some sites answer a plain client with a challenge page: ask as the box's Edge would.
@@ -196,6 +207,63 @@ sealed class AppLogos
         client.DefaultRequestHeaders.AcceptLanguage.Add(new StringWithQualityHeaderValue("en"));
         return client;
     }
+
+    /// <summary>
+    /// Every connection the fetcher makes (the page, its manifest, the icons, each redirect):
+    /// the name is looked up here and only an address on the internet is connected to. A site,
+    /// a page's icon address or a redirect cannot make the box reach into itself or its own
+    /// network (the router's page, a NAS, a service on localhost). A literal address is judged
+    /// the same way; a name with only local addresses fails as NotOnInternetException.
+    /// </summary>
+    static async ValueTask<Stream> ConnectToInternet(SocketsHttpConnectionContext context, CancellationToken cancel)
+    {
+        var host = context.DnsEndPoint.Host;
+        var addresses = IPAddress.TryParse(host, out var literal) ? new[] { literal } : await Dns.GetHostAddressesAsync(host, cancel);
+        var allowed = addresses.Where(IsOnInternet).ToArray();
+        if (allowed.Length == 0) throw new NotOnInternetException(host);
+        var socket = new System.Net.Sockets.Socket(System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(allowed, context.DnsEndPoint.Port, cancel);
+            return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// An address on the internet: not this host, loopback, private, link-local, shared (carrier
+    /// NAT), multicast or reserved. An IPv4 address carried in IPv6 (mapped, NAT64, 6to4) is
+    /// judged as that IPv4 address.
+    /// </summary>
+    internal static bool IsOnInternet(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        var b = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return !(b[0] is 0 or 10 or 127 or >= 224                // this network, private, loopback, multicast and reserved
+                || b[0] == 100 && (b[1] & 0xC0) == 64                // 100.64.0.0/10, shared (carrier NAT)
+                || b[0] == 169 && b[1] == 254                        // link-local
+                || b[0] == 172 && (b[1] & 0xF0) == 16                // 172.16.0.0/12
+                || b[0] == 192 && b[1] == 168                        // 192.168.0.0/16
+                || b[0] == 192 && b[1] == 0 && b[2] == 0             // 192.0.0.0/24, protocol assignments
+                || b[0] == 198 && (b[1] & 0xFE) == 18);              // 198.18.0.0/15, benchmarking
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6) return false;
+        if (address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || address.IsIPv6UniqueLocal || address.IsIPv6Multicast) return false;
+        if (b.Take(12).All(x => x == 0)) return false;                                        // ::, ::1, IPv4-compatible
+        if (b[0] == 0 && b[1] == 0x64 && b[2] == 0xFF && b[3] == 0x9B && b.Skip(4).Take(8).All(x => x == 0))
+            return IsOnInternet(new IPAddress(b[12..]));                                        // NAT64 64:ff9b::/96
+        if (b[0] == 0x20 && b[1] == 0x02) return IsOnInternet(new IPAddress(b[2..6]));         // 6to4 2002::/16
+        return true;
+    }
+
+    /// <summary>A name that leads only to this box or its own network: nothing is fetched from it.</summary>
+    internal sealed class NotOnInternetException(string host) : IOException($"{host} is not on the internet (a local or private address)");
+
+    internal static bool NotOnInternet(Exception e) => e is NotOnInternetException || e.InnerException is NotOnInternetException;
 
     /// <summary>
     /// GET over https only, at most maxBytes: a web page is read that far (its head, where the

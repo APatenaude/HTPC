@@ -87,13 +87,13 @@ sealed class InternetWatch
         return level is NetworkConnectivityLevel.LocalAccess or NetworkConnectivityLevel.ConstrainedInternetAccess && Reachable();
     }
 
-    static DateTime lastReach;
+    static long lastReach = long.MinValue;   // tick count: the clock can jump an hour
     static bool lastReachable;
 
     static bool Reachable()
     {
-        if (DateTime.Now - lastReach < TimeSpan.FromSeconds(30)) return lastReachable;
-        lastReach = DateTime.Now;
+        if (lastReach != long.MinValue && Environment.TickCount64 - lastReach < 30_000) return lastReachable;
+        lastReach = Environment.TickCount64;
         try
         {
             using var tcp = new System.Net.Sockets.TcpClient();

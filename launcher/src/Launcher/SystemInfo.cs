@@ -66,7 +66,7 @@ static class SystemInfo
         var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
         var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC");
         var files = new[] { Path.Combine(data, "logs"), Path.Combine(local, "logs") }
-            .Where(Directory.Exists).SelectMany(d => Directory.GetFiles(d)); // logs\ has the decode report too
+            .Where(Directory.Exists).SelectMany(d => Recent(Directory.GetFiles(d))); // logs\ has the decode report too
         var count = 0;
         foreach (var file in files)
         {
@@ -78,5 +78,18 @@ static class SystemInfo
         }
         Log.Info($"Logs saved to {target} ({count} files)");
         return target;
+    }
+
+    /// <summary>
+    /// A logs folder's files without the older setup logs: the 10 newest setup-&lt;time&gt;.log
+    /// (setup.ps1 keeps no more than that; a box set up before it did may have many), every
+    /// other file.
+    /// </summary>
+    internal static IEnumerable<string> Recent(IEnumerable<string> files)
+    {
+        static bool IsSetupLog(string f) => System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(f), @"^setup-\d{8}-\d{6}\.log$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var all = files.ToList();
+        var setupLogs = all.Where(IsSetupLog).OrderByDescending(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase).Take(10).ToHashSet();
+        return all.Where(f => !IsSetupLog(f) || setupLogs.Contains(f));
     }
 }

@@ -59,5 +59,12 @@ Check("website id shape", System.Text.RegularExpressions.Regex.IsMatch(id1, "^we
 Check("program id shape", System.Text.RegularExpressions.Regex.IsMatch(id2, "^app-[0-9a-f]{8}$"));
 Check("ids unique", TileStore.NewId("website") != TileStore.NewId("website"));
 
+// --- Which ids name a profile folder that removing the tile deletes ---
+Check("website id: its folder may go", TileStore.IsWebsiteId(id1));
+Check("program id: no folder", !TileStore.IsWebsiteId(id2));
+Check("catalog site: its folder stays", !TileStore.IsWebsiteId("twitch"));
+foreach (var bad in new[] { "web-..\\..\\x", "..", "web-3F9A2C00", "web-3f9a2c0", "web-3f9a2c001", "web-3f9a2c00\\..", "web-3f9a2c00\n", "", null })
+    Check($"not a website id: '{bad}'", !TileStore.IsWebsiteId(bad));
+
 Console.WriteLine($"\n{pass} passed, {fail} failed");
 Environment.Exit(fail == 0 ? 0 : 1);

@@ -81,7 +81,7 @@
       "icon": { "glyph": "globe", "color": "#3CCB9A" },
       "launch": {
         "exe": "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe",
-        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-maximized --no-first-run --no-default-browser-check --enable-features=WebContentsForceDark https://www.google.com"
+        "args": "--user-data-dir=\"%LOCALAPPDATA%\\HTPC\\edge\\browser\" --start-maximized --no-first-run --no-default-browser-check --enable-features=WebContentsForceDark --disk-cache-size=104857600 https://www.google.com"
       },
       "install": { "source": "builtin" },
       "autostart": { "run": [ "MicrosoftEdgeAutoLaunch_*" ] }

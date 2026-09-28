@@ -150,7 +150,9 @@
     if (t.custom) {
       ask({
         title: `Remove ${t.name}?`,
-        text: 'Its address and settings are only here, so they will be lost.',
+        // A website's own Edge profile goes too (MainForm.Library.cs RemoveTile): signed out.
+        text: t.website ? 'Its address and settings are only here, so they will be lost, and its sign-in on this box goes too.'
+          : 'Its address and settings are only here, so they will be lost.',
         yes: 'Remove',
         onYes: () => { send({ type: 'tile.remove', id: t.id }); toast(`${t.name} removed`); reset('home'); },
       });
