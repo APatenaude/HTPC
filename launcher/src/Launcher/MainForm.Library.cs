@@ -222,6 +222,12 @@ sealed partial class MainForm
     void OnJobFinished(LibraryJob job, bool ok, string text)
     {
         AppManager.ForgetShortcuts(); // what is installed changed: the Start menu is read again
+        // The home row, here on the UI thread that edits it too (LibraryService.UpdateTiles).
+        if (ok)
+        {
+            try { library.UpdateTiles(job); }
+            catch (Exception e) { Log.Error($"Library: the home row after {job.Action} {job.Id}", e); }
+        }
         toast(text, ok ? null : "warn");
         PushLibraryProgress();
         PushLibraryCatalog();
