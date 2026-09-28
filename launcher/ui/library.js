@@ -112,14 +112,15 @@
       const t = targetTile();
       if (!t) { back(); return; }
       const rows = [['opt-move', 'move', 'Move'], ['opt-rename', 'pencil', 'Rename'], ['opt-icon', 'image', 'Change icon']];
-      el('tileopts').innerHTML =
+      // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time.
+      patchHtml(el('tileopts'),
         '<aside class="to-panel">' +
           `<div class="to-head">${appIcon(t, 40)}<span class="to-name">${esc(t.name)}</span></div>` +
           rows.map(([act, glyph, label]) => `<button class="to-item" data-nav data-id="${act}" data-act="${act}">${icon(glyph, 32, 2)}${label}</button>`).join('') +
           '<div class="to-sep"></div>' +
           `<button class="to-item danger" data-nav data-id="opt-remove" data-act="opt-remove">${icon('trash', 32, 2)}Remove from home</button>` +
         '</aside>' +
-        `<footer class="hints">${hints([['A', 'Select'], ['B', 'Close']])}</footer>`;
+        `<footer class="hints">${hints([['A', 'Select'], ['B', 'Close']])}</footer>`);
     },
     layout() { placeByTile(el('tileopts').querySelector('.to-panel'), lib.target); },
   });
@@ -167,7 +168,8 @@
     render() {
       const t = targetTile();
       if (!t) { back(); return; }
-      el('rename').innerHTML =
+      // In place: a key typed changes the name and its count, not the 41 keys under it.
+      patchHtml(el('rename'),
         '<main class="lib-center"><div class="rn-wrap">' +
           '<div class="rn-field">' +
             '<span class="rn-label">Name</span>' +
@@ -176,7 +178,7 @@
           '</div>' +
           `<div class="kbi">${keyboardHtml('rename')}</div>` +
         '</div></main>' +
-        `<footer class="hints">${hints([['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Save'], ['B', 'Cancel']])}</footer>`;
+        `<footer class="hints">${hints([['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Save'], ['B', 'Cancel']])}</footer>`);
     },
     press(button) {
       if (button === 'x') { lib.draft = lib.draft.slice(0, -1); render(); return true; }
@@ -203,7 +205,7 @@
       const logoChoice = t.logoUrl
         ? `<div class="ci-logo"><button class="ci-glyph wide${onLogo ? ' on' : ''}" data-nav data-id="g-logo" data-act="glyph" data-arg="logo">` +
             `${appIcon({ ...t, logo: t.logoUrl }, 40)}Logo</button></div>` : '';
-      el('changeicon').innerHTML =
+      patchHtml(el('changeicon'),
         '<main class="lib-center"><div class="ci-wrap">' +
           `<div class="ci-preview">${appIcon(t, 80)}<span class="ci-name">${esc(t.name)}</span></div>` + logoChoice +
           '<div class="ci-glyphs">' + ICONS.map((g) =>
@@ -211,12 +213,23 @@
           '<div class="ci-colors">' + COLORS.map((c) =>
             `<button class="ci-color${!onLogo && c.toUpperCase() === String(t.color).toUpperCase() ? ' on' : ''}" data-nav data-id="c-${c}" data-act="color" data-arg="${c}"><span style="background:${c}"></span></button>`).join('') + '</div>' +
         '</div></main>' +
-        `<footer class="hints">${hints([['A', 'Choose'], ['B', 'Done']])}</footer>`;
+        `<footer class="hints">${hints([['A', 'Choose'], ['B', 'Done']])}</footer>`);
     },
   });
 
-  onAction('glyph', (node, glyph) => { send({ type: 'tile.icon', id: lib.target, glyph }); render(); });
-  onAction('color', (node, color) => { send({ type: 'tile.icon', id: lib.target, color }); render(); });
+  // The choice shows as picked at once (the host's tiles confirm it a moment later).
+  onAction('glyph', (node, glyph) => {
+    const t = targetTile();
+    if (t) { if (glyph === 'logo') t.logo = t.logoUrl; else { t.glyph = glyph; t.logo = null; } }
+    send({ type: 'tile.icon', id: lib.target, glyph });
+    render();
+  });
+  onAction('color', (node, color) => {
+    const t = targetTile();
+    if (t) { t.color = color; t.logo = null; }
+    send({ type: 'tile.icon', id: lib.target, color });
+    render();
+  });
 
   // ---- Add tile: Library / On this box / Website -------------------------------------------
 

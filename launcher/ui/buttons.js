@@ -113,7 +113,7 @@ addView('maps', {
       '<div class="spane"><main>' +
         `<header><span class="back">${icon('chevleft', 22, 2)}Controller</span><h1>Button maps</h1>` +
         '<p>Each app gets its own buttons. Home always opens the menu.</p></header>' +
-        `<div class="mlist">${rows || '<p class="snote">Loading…</p>'}</div>` +
+        `<div class="mlist">${rows || `<p class="snote">${maps.data ? 'No apps on the home screen yet.' : waitText()}</p>`}</div>` +
       `</main><footer class="hints">${hints([['A', 'Edit'], ['B', 'Back']])}</footer></div>`, '.mlist', 'maps');
   },
   focused() { keepInView('maps', '.mlist'); },   // the list scrolls to the focus
@@ -125,12 +125,26 @@ addView('maps', {
   demo() { mapsDemo(); },
 });
 
-onAction('maps', () => { send({ type: 'maps.get' }); go('maps'); });
+// Asks the host for the maps. Waiting shows "Loading…", and after 10 s that they did not come
+// (never an endless wait): B, then open them again.
+function askMaps() {
+  maps.askedAt = Date.now();
+  send({ type: 'maps.get' });
+  setTimeout(() => { if (!maps.data && (state.view === 'maps' || state.view === 'buttons')) render(); }, 10500);
+}
+function waitText() {
+  return Date.now() - (maps.askedAt || 0) > 10000 ? 'The button maps didn’t load. Press B, then open them again.' : 'Loading…';
+}
+function loadingHtml(cls) {
+  return `<div class="${cls}"><p class="snote">${waitText()}</p></div><footer class="hints">${hints([['B', 'Back']])}</footer>`;
+}
+
+onAction('maps', () => { askMaps(); go('maps'); });
 onAction('map-edit', (el, id) => openEditor(id));
 
 // Home menu › Buttons: the editor for the app the menu was opened over, else the list.
 onAction('buttons', () => {
-  send({ type: 'maps.get' });
+  askMaps();
   if (state.current && mapApp(state.current)) openEditor(state.current); else go('maps');
 });
 
@@ -192,15 +206,15 @@ function keepInView(view, listSelector) {
   for (const l of document.querySelectorAll(`#${view} :is(${listSelector})`)) listEdges(l);
 }
 
-// Re-renders a view with its scrolling list left where it was (the clock and the host redraw
-// every so often), unless the list now shows something else (another key).
+// Re-renders a view in place (patchHtml: the clock, the host and each move redraw it; what did
+// not change stays, the focus keeps its ring) with its scrolling list left where it was, unless
+// the list now shows something else (another key): then from its top.
 function renderKeepingScroll(el, html, listSelector, key) {
-  const old = el.querySelector(listSelector);
-  const top = old && el.dataset.listKey === key ? old.scrollTop : 0;
-  el.innerHTML = html;
+  const same = el.dataset.listKey === key;
+  patchHtml(el, html);
   el.dataset.listKey = key;
   const list = el.querySelector(listSelector);
-  if (list) { list.scrollTop = top; listEdges(list); }
+  if (list && !same) list.scrollTop = 0;
 }
 
 // Moves the focus in a direction, no wrapping round (the lists and the grid stop at their ends);
@@ -318,7 +332,7 @@ function presetRow(app) {
 addView('buttons', {
   render() {
     const app = mapApp(maps.id);
-    if (!app) { $('buttons').innerHTML = '<div class="bedit"><p class="snote">Loading…</p></div>'; return; }
+    if (!app) { patchHtml($('buttons'), loadingHtml('bedit')); return; }
     const row = focusedRow(app);
     const control = row === 'b-preset' ? null : row.slice(2);
     const badge = control && (MAP_CONTROLS.find(([c]) => c === control) || [null, 'Home'])[1];
@@ -370,12 +384,14 @@ addView('buttons', {
       case 'lb':
         if (state.current === app.id) send({ type: 'resume', id: app.id });
         return true;
-      case 'up': case 'down': case 'left': case 'right':
-        // Around the preset row and the grid, stopping at their edges; the side panel follows.
+      case 'up': case 'down': case 'left': case 'right': {
+        // Around the preset row and the grid, stopping at their edges; the side panel and the
+        // hints follow: this view only, in place (not the whole page for each move).
         stepFocus(el, button);
-        if (focusedEl()) maps.row = focusedEl().dataset.id;
-        render();
+        const now = focusedEl();
+        if (now && now !== el) { maps.row = now.dataset.id; EXT.views.buttons.render(); }
         return true;
+      }
     }
     return false;
   },

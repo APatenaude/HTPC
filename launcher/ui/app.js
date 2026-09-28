@@ -84,7 +84,9 @@ function batteryText() {
 function renderStatus() {
   const now = new Date();
   const low = state.battery === 'low' || state.battery === 'empty';
-  $('status').innerHTML =
+  // In place (patchHtml): each minute and each host push redraw it, and the Settings and Power
+  // buttons drawn afresh lost their ring and drew it in again.
+  patchHtml($('status'),
     `<div class="clock"><span class="time">${timeText(now)}</span><span class="date">${esc(dateText(now))}</span></div>` +
     '<div class="pills">' +
       (state.timer ? `<div class="pill timer">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
@@ -92,7 +94,7 @@ function renderStatus() {
       `<div class="pill"${low ? ' style="color: var(--warn)"' : ''}>${icon('controller', 32)}<b>${esc(batteryText())}</b></div>` +
       `<div class="round" data-nav data-id="settings" data-act="settings" aria-label="Settings">${icon('sliders', 28, 2)}</div>` +
       `<div class="round" data-nav data-id="power" data-act="power" aria-label="Power">${icon('power', 28, 2)}</div>` +
-    '</div>';
+    '</div>');
 }
 
 // Tiles are updated in place, by id: a change on one tile (an app closing, a rename) redraws
@@ -225,11 +227,12 @@ const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close
 
 function renderPower() {
   POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
-  $('power-cards').innerHTML = POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
+  // In place, as the other screens a host push or the clock redraws (patchHtml).
+  patchHtml($('power-cards'), POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
-      `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join('');
-  $('power-note').innerHTML = '';
-  $('power-hints').innerHTML = hints([['A', 'Select'], ['B', 'Cancel']]);
+      `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join(''));
+  patchHtml($('power-note'), '');
+  patchHtml($('power-hints'), hints([['A', 'Select'], ['B', 'Cancel']]));
 }
 
 const TIMER = [
@@ -239,15 +242,15 @@ const TIMER = [
 ];
 
 function renderTimer() {
-  $('timer-icon').innerHTML = icon('timer', 56);
+  patchHtml($('timer-icon'), icon('timer', 56));
   const picked = state.timer ? state.timer.label : null;
-  $('timer-grid').innerHTML = TIMER.map((o, i) =>
+  patchHtml($('timer-grid'), TIMER.map((o, i) =>
     `<div class="opt${o.label === picked ? ' picked' : ''}" data-nav data-id="t${i}" data-act="timer" data-arg="${i}">` +
-      `<span class="label${o.small ? ' small' : ''}">${o.label}</span><span class="sub">${o.sub || ''}</span></div>`).join('');
+      `<span class="label${o.small ? ' small' : ''}">${o.label}</span><span class="sub">${o.sub || ''}</span></div>`).join(''));
   const status = $('timer-status');
-  status.innerHTML = icon('moon', 28) + esc(state.timer ? `${timerText()}. It shows in the top bar.` : 'No timer set');
+  patchHtml(status, icon('moon', 28) + esc(state.timer ? `${timerText()}. It shows in the top bar.` : 'No timer set'));
   status.classList.toggle('on', !!state.timer);
-  $('timer-hints').innerHTML = hints([['A', 'Set'], ['B', 'Back']]);
+  patchHtml($('timer-hints'), hints([['A', 'Set'], ['B', 'Back']]));
 }
 
 const SECTIONS = [
@@ -407,13 +410,13 @@ function changeSetting(key, step) {
 
 function renderConfirm() {
   const c = state.confirm;
-  $('confirm-box').innerHTML =
+  patchHtml($('confirm-box'),
     `<h2>Close ${esc(c.name)}?</h2><p>It stops, and anything playing in it ends.</p>` +
     '<div class="buttons">' +
       `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">Close</div>` +
       '<div class="button" data-nav data-id="confirm-cancel" data-act="cancel">Cancel</div>' +
     '</div>' +
-    `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`;
+    `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`);
 }
 
 // The views under the one shown, nearest first: an overlay (a confirmation, a dialog) sits over
@@ -746,13 +749,14 @@ addView('ask', {
   overlay: true,
   render() {
     const q = asking || {};
-    $('ask').innerHTML = '<div class="dialog">' +
+    // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time.
+    patchHtml($('ask'), '<div class="dialog">' +
       `<h2>${esc(q.title || '')}</h2>${q.text ? `<p>${esc(q.text)}</p>` : ''}` +
       '<div class="buttons">' +
         `<div class="button" data-nav data-id="ask-yes" data-act="ask-yes">${esc(q.yes || 'OK')}</div>` +
         '<div class="button" data-nav data-id="ask-no" data-act="cancel">Cancel</div>' +
       '</div>' +
-      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`;
+      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`);
   },
   focus: (list) => list.find((e) => e.dataset.id === 'ask-no'),
 });
