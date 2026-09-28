@@ -699,6 +699,9 @@ AutostartTests.Run((ok, what) => Check(ok, what));
 // ---------------------------------------------------------------- Setup asks for administrator rights as it opens (ElevationTests.cs)
 ElevationTests.Run((ok, what) => Check(ok, what));
 
+// ---------------------------------------------------------------- The update checks' rules (UpdateRulesTests.cs)
+UpdateRulesTests.Run((ok, what) => Check(ok, what));
+
 // ---------------------------------------------------------------- The Home menu's backdrop
 // ScreenCapture's own part: sizes, scaling (the GPU halves a 4K screen; this is what 2560 wide
 // and the GDI fallback get) and the JPEG. The screen itself is not captured here.

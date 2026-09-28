@@ -11,8 +11,8 @@ Assert-ScopeContext $app
 # A GitHub zip (VacuumTube): the latest release, checked, unpacked, its own updater turned off,
 # then swapped in (lib\AppUpdaters.ps1).
 if ($app.install.source -eq 'github' -and $app.install.installDir) {
-    . "$PSScriptRoot\..\lib\UpdateCore.ps1"
-    . "$PSScriptRoot\..\lib\AppUpdaters.ps1"
+    . "$JobLib\UpdateCore.ps1"
+    . "$JobLib\AppUpdaters.ps1"
     Enter-UpdateJob
     Update-GithubApp -App $app
     [void](Invoke-AppAutostartGuard -Apps $app -Context "upgrade:$($app.id)")

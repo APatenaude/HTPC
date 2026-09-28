@@ -6,9 +6,9 @@ param([string]$Arg)
 
 if (-not $script:IsSystem) { throw 'windows-scan runs only through the elevated task' }
 if ($Arg) { throw 'Refused: windows-scan takes no argument' }
-. "$PSScriptRoot\..\lib\UpdateCore.ps1"
-. "$PSScriptRoot\..\lib\LauncherUpdate.ps1"
-. "$PSScriptRoot\..\lib\WindowsUpdate.ps1"
+. "$JobLib\UpdateCore.ps1"
+. "$JobLib\LauncherUpdate.ps1"
+. "$JobLib\WindowsUpdate.ps1"
 Enter-UpdateJob
 
 Invoke-LauncherReconcile -Quick

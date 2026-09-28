@@ -7,8 +7,8 @@ param([string]$Arg)
 
 if (-not $script:IsSystem) { throw 'launcher-update runs only through the elevated task' }
 if ($Arg -cnotmatch '^\d{1,6}\.\d{1,6}\.\d{1,6}$') { throw "Refused: '$Arg' is not a version (major.minor.patch)" }
-. "$PSScriptRoot\..\lib\UpdateCore.ps1"
-. "$PSScriptRoot\..\lib\LauncherUpdate.ps1"
+. "$JobLib\UpdateCore.ps1"
+. "$JobLib\LauncherUpdate.ps1"
 Enter-UpdateJob
 
 Invoke-LauncherUpdate -Version $Arg

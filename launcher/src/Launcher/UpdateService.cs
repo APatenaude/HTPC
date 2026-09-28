@@ -31,13 +31,22 @@ sealed class TonightPlan
 /// <summary>What the update checks found, kept across launcher restarts (%LOCALAPPDATA%\HTPC\updates.json).</summary>
 sealed class UpdatesSaved
 {
+    /// <summary>The last check that worked (what "Checked 2 h ago" says).</summary>
     public DateTime? LastCheckUtc { get; set; }
     public string? LastCheckError { get; set; }
+    /// <summary>The last try, and how many in a row failed (then tried again after an hour, a few times).</summary>
+    public DateTime? LastTryUtc { get; set; }
+    public int FailedChecks { get; set; }
     public LauncherRelease? Launcher { get; set; }
     public List<AppUpdateInfo> Apps { get; set; } = new();
     public TonightPlan? Tonight { get; set; }
     /// <summary>The launcher update journal entry already told to the user (its updatedUtc).</summary>
     public string? JournalShown { get; set; }
+    /// <summary>
+    /// A launcher version rolled back on this box (the journal said "rolledback"): left out of the
+    /// count and of Update all while it is the newest; its row still offers it.
+    /// </summary>
+    public string? LauncherSkipped { get; set; }
 }
 
 /// <summary>
@@ -46,8 +55,10 @@ sealed class UpdatesSaved
 ///     only when asked). What it finds shows as a pill on the home screen, never over a video.
 ///   - Installing only when asked: an app's Update, Update all (a restore point first, then the
 ///     apps, then the launcher last), Windows updates now or tonight.
-///   - The launcher's own update is swapped in only at Home or in standby, never with an app in
-///     front, and needs the watchdog (which starts the new launcher).
+///   - The launcher's own update downloads at once (low priority) and is swapped in only at Home
+///     or in standby, never with an app in front: at "ready" the job waits until this launcher
+///     says it is (TryLeave), and only then pauses the watchdog and says "leave". It needs the
+///     watchdog (which starts the new launcher).
 ///   - Everything that installs runs in the one job lane, at low priority, so a video can keep
 ///     playing (LibraryService, the box's one job lane: library installs and updates alike).
 /// Trust: the launcher only reads here; the SYSTEM job (setup\lib\LauncherUpdate.ps1) downloads
@@ -55,15 +66,14 @@ sealed class UpdatesSaved
 /// </summary>
 sealed class UpdateService
 {
-    const string Repo = "APatenaude/HTPC";
-    static readonly string[] AllowedHosts = { "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com" };
+    const string Repo = UpdateRules.Repo;
     static readonly string HtpcData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
     static readonly string WindowsFile = Path.Combine(HtpcData, "state", "windows-updates.json");
     static readonly string JournalFile = Path.Combine(HtpcData, "state", "launcher-update.json");
     static readonly string SavedFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "updates.json");
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
-    static readonly TimeSpan CheckEvery = TimeSpan.FromHours(20);
+    static readonly TimeSpan StandbySettles = TimeSpan.FromMinutes(2);
 
     readonly LibraryService lane;
     readonly IAlerts alerts;
@@ -73,17 +83,25 @@ sealed class UpdateService
     readonly object gate = new();
     readonly Dictionary<string, (string Status, string Message)> results = new();   // token -> last result
     readonly HashSet<string> batch = new();       // tokens of the running "Update all"
-    System.Threading.Timer? standbyCheck;
+    DateTime? standbySinceUtc;
+    System.Threading.Timer? homeWatch;   // the launcher update is at "ready": looking for Home or standby
+    bool leaveSaid;                      // TryLeave said yes: "Restarting..." shows, the job was told
     bool checking;
     bool tonightRunning;
 
-    /// <summary>True at Home (the launcher in front, no app) or in standby: when the launcher may be swapped.</summary>
-    public Func<bool> AtHomeOrStandby { get; set; } = () => false;
+    /// <summary>
+    /// The launcher update has its files ready: when at Home (the launcher in front, no app) or in
+    /// standby, show "Restarting..." and tell the job (Local\HtpcLeaving_&lt;version&gt;_&lt;pid&gt;); true
+    /// then. False, and nothing shown, anywhere else. Called about once a second, any thread.
+    /// </summary>
+    public Func<string, bool> TryLeave { get; set; } = _ => false;
     public Func<bool> InStandby { get; set; } = () => false;
     /// <summary>Something changed that Settings › Updates shows. Any thread.</summary>
     public event Action? Changed;
-    /// <summary>The launcher update is ready to swap: show "Restarting..." and exit with code 75. Any thread.</summary>
-    public event Action<string>? LauncherReady;
+    /// <summary>The job paused the watchdog ("leave"): exit with code 75 now. Any thread.</summary>
+    public event Action? LauncherLeave;
+    /// <summary>The update ended after TryLeave said yes, without "leave": back to Home. Any thread.</summary>
+    public event Action? LauncherStay;
     /// <summary>Restart the box for Windows updates; true = quietly (at night, TV stays off). Any thread.</summary>
     public event Action<bool>? RestartBox;
     /// <summary>Open Settings › Updates (the pill's action).</summary>
@@ -136,7 +154,7 @@ sealed class UpdateService
             var appsTask = CheckAppsAsync();
             try { var l = await launcherTask; lock (gate) saved.Launcher = l; }
             catch (Exception e) { error = e.Message; Log.Warn($"Updates: launcher check: {e.Message}"); }
-            try { var a = await appsTask; lock (gate) { saved.Apps = a; ForgetDoneResults(); } }
+            try { var a = await appsTask; lock (gate) { saved.Apps = a; ForgetResults(failedToo: !quiet); } }
             catch (Exception e) { error ??= e.Message; Log.Warn($"Updates: app check: {e.Message}"); }
         }
         finally
@@ -144,7 +162,10 @@ sealed class UpdateService
             lock (gate)
             {
                 checking = false;
-                saved.LastCheckUtc = DateTime.UtcNow;
+                // Only a check that worked counts as one: a failed one is tried again (CheckDue).
+                saved.LastTryUtc = DateTime.UtcNow;
+                if (error is null) { saved.LastCheckUtc = saved.LastTryUtc; saved.FailedChecks = 0; }
+                else saved.FailedChecks++;
                 saved.LastCheckError = error;
             }
             Save();
@@ -171,13 +192,12 @@ sealed class UpdateService
         { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"htpc-launcher/{Program.Version}");
         using var latest = await http.GetAsync($"https://github.com/{Repo}/releases/latest");
+        if ((int)latest.StatusCode is 403 or 429) throw new InvalidOperationException(RateLimited(latest) ?? $"releases/latest answered {(int)latest.StatusCode}");
         if ((int)latest.StatusCode is not (301 or 302 or 303 or 307 or 308) || latest.Headers.Location is null)
             throw new InvalidOperationException($"releases/latest answered {(int)latest.StatusCode}");
-        var to = new Uri(new Uri($"https://github.com/{Repo}/releases/latest"), latest.Headers.Location);
-        var prefix = $"/{Repo}/releases/tag/";
-        if (to.Host != "github.com" || !to.AbsolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null; // no release yet
-        var tag = Uri.UnescapeDataString(to.AbsolutePath[prefix.Length..]);
-        if (ParseSemVer(tag) is null) return null;   // not a v<major.minor.patch> release
+        // No release yet: null. A renamed or moved repository: an error, not "no release".
+        var tag = UpdateRules.LatestTag(new Uri(new Uri($"https://github.com/{Repo}/releases/latest"), latest.Headers.Location));
+        if (tag is null || ParseSemVer(tag) is null) return null;   // none, or not a v<major.minor.patch> release
 
         var text = await GetPinnedText(http, new Uri($"https://github.com/{Repo}/releases/download/{Uri.EscapeDataString(tag)}/update.json"));
         using var doc = JsonDocument.Parse(text);
@@ -189,13 +209,13 @@ sealed class UpdateService
         return new LauncherRelease(version, S("notes") ?? "", S("minimumFrom"));
     }
 
-    // A small file, following redirects only over HTTPS to GitHub's own hosts (at most 5).
+    // A small file, following redirects (UpdateRules.RefusedHop: github.com under the repository,
+    // then *.githubusercontent.com) at most 5 times.
     static async Task<string> GetPinnedText(HttpClient http, Uri uri)
     {
         for (var hop = 0; hop <= 5; hop++)
         {
-            if (uri.Scheme != "https" || !AllowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Refused to read from {uri.Host}");
+            if (UpdateRules.RefusedHop(uri) is { } refused) throw new InvalidOperationException(refused);
             using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
             var code = (int)response.StatusCode;
             if (code is 301 or 302 or 303 or 307 or 308 && response.Headers.Location is { } location)
@@ -203,7 +223,7 @@ sealed class UpdateService
                 uri = new Uri(uri, location);
                 continue;
             }
-            if (code is 403 or 429) throw new InvalidOperationException("GitHub is limiting requests from this box; try again later");
+            if (code is 403 or 429 && RateLimited(response) is { } limited) throw new InvalidOperationException(limited);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength > 262144) throw new InvalidOperationException("update.json is too large");
             return await response.Content.ReadAsStringAsync();
@@ -211,13 +231,15 @@ sealed class UpdateService
         throw new InvalidOperationException("Too many redirects");
     }
 
-    /// <summary>"0.10.2" or "v0.10.2" as a number triple; null otherwise (no pre-releases: stable channel only).</summary>
-    public static Version? ParseSemVer(string? text)
+    // GitHub's rate limit (UpdateRules.IsRateLimit): the message to show, or null when it is not one.
+    static string? RateLimited(HttpResponseMessage r)
     {
-        if (text is null) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(text, @"^v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})$");
-        return m.Success ? new Version(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value)) : null;
+        var remaining = r.Headers.TryGetValues("X-RateLimit-Remaining", out var left) ? left.FirstOrDefault() : null;
+        return UpdateRules.IsRateLimit((int)r.StatusCode, r.Headers.RetryAfter is not null, remaining)
+            ? "GitHub is limiting requests from this box; try again later" : null;
     }
+
+    static Version? ParseSemVer(string? text) => UpdateRules.ParseSemVer(text);
 
     // setup\tools\Get-AppUpdates.ps1, as the user, at low priority, 5 minutes at most.
     async Task<List<AppUpdateInfo>> CheckAppsAsync()
@@ -257,7 +279,7 @@ sealed class UpdateService
         lock (gate)
         {
             var n = saved.Apps.Count(a => a.Update && !Done(Token(a)));
-            if (LauncherNewer() && !Done(LauncherToken())) n++;
+            if (LauncherOffered() && !Done(LauncherToken())) n++;
             var w = ReadWindows();
             if (w is { Result: "ok" }) n += w.Counted;
             return n;
@@ -286,6 +308,12 @@ sealed class UpdateService
         return mine is not null && latest is not null && latest > mine;
     }
 
+    // The newest release is the one rolled back here: its row offers it, nothing else does.
+    bool LauncherSkipped() => ParseSemVer(saved.LauncherSkipped) is { } s && ParseSemVer(saved.Launcher?.Version) == s;
+
+    /// <summary>A newer launcher that counts and goes with Update all (not one rolled back here).</summary>
+    bool LauncherOffered() => LauncherNewer() && !LauncherSkipped();
+
     /// <summary>Updates one app (no restore point: that is for Update all and Windows). Null, or why not.</summary>
     public string? UpdateApp(string id)
     {
@@ -312,7 +340,10 @@ sealed class UpdateService
         return lane.EnqueueBoxJob(job, out var error) ? null : error;
     }
 
-    /// <summary>The launcher itself: needs the watchdog, swaps only at Home or in standby.</summary>
+    /// <summary>
+    /// The launcher itself: needs the watchdog. It downloads at once; the swap waits for Home or
+    /// standby inside the job ("ready", TryLeave).
+    /// </summary>
     public string? UpdateLauncher()
     {
         LauncherRelease? r;
@@ -322,7 +353,7 @@ sealed class UpdateService
             return $"Version {r.Version} needs setup to run again";
         if (Process.GetProcessesByName("HtpcWatchdog").Length == 0)
             return "Updating the launcher needs the watchdog. Run setup again.";
-        return QueueBox("launcher-update", r.Version, $"Updating the TV launcher to {r.Version}", waitUntil: AtHomeOrStandby);
+        return QueueBox("launcher-update", r.Version, $"Updating the TV launcher to {r.Version}");
     }
 
     /// <summary>Update all: a restore point (checked) first, then every app, then the launcher, last.</summary>
@@ -330,7 +361,7 @@ sealed class UpdateService
     {
         List<AppUpdateInfo> apps;
         lock (gate) apps = saved.Apps.Where(a => a.Update && !Done(Token(a))).ToList();
-        var launcher = LauncherNewer() && !Done(LauncherToken());
+        var launcher = LauncherOffered() && !Done(LauncherToken());
         if (apps.Count == 0 && !launcher) return "Everything is up to date";
         lock (gate)
         {
@@ -393,15 +424,60 @@ sealed class UpdateService
 
     void OnProgress(LibraryJob job, JobProgress p)
     {
-        // The SYSTEM job has the new launcher ready: this launcher leaves now (exit code 75).
-        if (job.BoxJob && job.Action == "launcher-update" && p.Phase == "ready")
-            LauncherReady?.Invoke(job.Id);
+        if (!job.BoxJob || job.Action != "launcher-update") return;
+        // The SYSTEM job has the new launcher ready: at Home or in standby, this launcher says so.
+        if (p.Phase == "ready") WatchForHome(job.Id);
+        // It paused the watchdog: this launcher leaves now (exit code 75).
+        else if (p.Phase == "leave") LauncherLeave?.Invoke();
+    }
+
+    // Once a second until TryLeave says yes (the job waits for that, 3 hours at most). A launcher
+    // started again meanwhile does not follow that job: it gives up after its wait, nothing moved.
+    void WatchForHome(string version)
+    {
+        lock (gate)
+        {
+            if (homeWatch is not null || leaveSaid) return;
+            Log.Info($"Updates: launcher {version} is ready; waiting for Home or standby");
+            // Made under the lock: its first tick waits for the field to be set.
+            homeWatch = new System.Threading.Timer(_ =>
+            {
+                lock (gate) if (homeWatch is null || leaveSaid) return;
+                bool yes;
+                try { yes = TryLeave(version); }
+                catch (Exception e) { Log.Warn($"Updates: TryLeave: {e.Message}"); yes = false; }
+                if (!yes) return;
+                var ended = false;
+                lock (gate)
+                {
+                    if (homeWatch is { } watch) { leaveSaid = true; watch.Dispose(); homeWatch = null; }
+                    else ended = true;   // the job ended while TryLeave ran
+                }
+                if (ended) LauncherStay?.Invoke();
+            }, null, TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(1));
+        }
+    }
+
+    // The launcher update ended (a stop, a timeout) while this launcher is still here: no more
+    // watching, and "Restarting..." goes if it showed.
+    void StopWatchingForHome()
+    {
+        bool said;
+        lock (gate)
+        {
+            homeWatch?.Dispose();
+            homeWatch = null;
+            said = leaveSaid;
+            leaveSaid = false;
+        }
+        if (said) LauncherStay?.Invoke();
     }
 
     void OnFinished(LibraryJob job, bool ok, string message)
     {
         var p = new { Message = message };
         lock (gate) results[job.Token] = (ok ? "done" : "failed", message);
+        if (job.BoxJob && job.Action == "launcher-update") StopWatchingForHome();
         if (job.Token == "restorepoint" && !ok)
         {
             // No restore point, no "Update all": the rest of it is dropped.
@@ -423,6 +499,14 @@ sealed class UpdateService
                 CleanUserLeftovers();
             }
             else alerts.Raise(new AlertSpec { Id = "updates-result", Title = $"{(job.Label ?? job.Id).Replace("Updating ", "")} was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
+        }
+        else if (job.Token.StartsWith("launcher-update:"))
+        {
+            // Stopped before the restart (a download, a check, never back at Home): this launcher
+            // is still here to say so. A rollback after the restart is told by the launcher it
+            // put back (TellLauncherResult).
+            if (!ok && p.Message != "Cancelled")
+                alerts.Raise(new AlertSpec { Id = "updates-result", Title = "The TV launcher was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
         }
         else if (job.Token.StartsWith("windows-"))
         {
@@ -448,24 +532,27 @@ sealed class UpdateService
 
     // --- Standby, the clock, the start -------------------------------------------------------------------
 
-    /// <summary>In standby: the daily check, two minutes in (the box has settled, nobody is watching).</summary>
-    public void OnStandbyChanged(bool active)
+    /// <summary>In standby: the daily check, two minutes in (the box has settled, nobody is watching); see OnMinute.</summary>
+    public void OnStandbyChanged(bool active) => standbySinceUtc = active ? DateTime.UtcNow : null;
+
+    // 20 hours after the last check that worked; an hour after one that failed, a few times (UpdateRules.CheckDue).
+    bool CheckDue()
     {
-        standbyCheck?.Dispose();
-        standbyCheck = null;
-        if (!active) return;
-        DateTime? last;
-        lock (gate) last = saved.LastCheckUtc;
-        if (last is not null && DateTime.UtcNow - last < CheckEvery) return;
-        standbyCheck = new System.Threading.Timer(_ =>
-        {
-            if (InStandby() && !lane.Busy) _ = CheckAsync(quiet: true);
-        }, null, TimeSpan.FromMinutes(2), Timeout.InfiniteTimeSpan);
+        lock (gate) return UpdateRules.CheckDue(DateTime.UtcNow, saved.LastCheckUtc, saved.LastTryUtc, saved.FailedChecks);
     }
 
-    /// <summary>Once a minute: "tonight" happens between 02:00 and 05:00, in standby, with the lane free.</summary>
+    /// <summary>
+    /// Once a minute: the quiet check when due and the box has been in standby for two minutes
+    /// with the lane free (so a failed one is tried again an hour on, even through the night);
+    /// "tonight" happens between 02:00 and 05:00, in standby, with the lane free.
+    /// </summary>
     public void OnMinute()
     {
+        bool busyChecking;
+        lock (gate) busyChecking = checking;
+        if (standbySinceUtc is { } since && DateTime.UtcNow - since >= StandbySettles && !busyChecking && !lane.Busy && CheckDue() && InStandby())
+            _ = CheckAsync(quiet: true);
+
         TonightPlan? plan;
         lock (gate) plan = saved.Tonight;
         if (plan is null || tonightRunning) return;
@@ -490,8 +577,62 @@ sealed class UpdateService
     public void OnStart()
     {
         CleanUserLeftovers();
+        NoteRolledBack();
         TellLauncherResult();
         UpdatePill();
+    }
+
+    // A launcher update rolled back (the SYSTEM job's journal, state\, readable by everyone): that
+    // version is not counted or put in Update all again, until a newer one comes.
+    void NoteRolledBack()
+    {
+        try
+        {
+            if (!File.Exists(JournalFile)) return;
+            using var doc = JsonDocument.Parse(File.ReadAllText(JournalFile));
+            var r = doc.RootElement;
+            string S(string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+            if (S("step") != "rolledback" || ParseSemVer(S("to")) is null) return;
+            lock (gate)
+            {
+                if (saved.LauncherSkipped == S("to")) return;
+                saved.LauncherSkipped = S("to");
+            }
+            Log.Info($"Updates: launcher {S("to")} was rolled back here; not offered again until a newer one");
+            Save();
+        }
+        catch (Exception e) { Log.Warn($"Updates: reading the launcher journal: {e.Message}"); }
+    }
+
+    /// <summary>
+    /// After a healthy start: what other launcher versions unpacked in
+    /// %LOCALAPPDATA%\HTPC\bundle\&lt;exe name&gt;\ (DOTNET_BUNDLE_EXTRACT_BASE_DIR, about 200 MB each:
+    /// the one before an update, or the one a rollback left), all but this one's. Each folder is
+    /// renamed first: that fails while a program still runs from it, which then keeps it whole.
+    /// </summary>
+    public static void RemoveOtherBundles()
+    {
+        try
+        {
+            var mine = Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory));
+            var app = Path.GetDirectoryName(mine);
+            var bundles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "bundle");
+            // A dev build (not unpacked), or unpacked somewhere else: nothing of ours to tidy.
+            if (app is null || !app.StartsWith(bundles + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return;
+            foreach (var dir in Directory.EnumerateDirectories(app))
+            {
+                if (string.Equals(Path.TrimEndingDirectorySeparator(dir), mine, StringComparison.OrdinalIgnoreCase)) continue;
+                var aside = dir.EndsWith(".old", StringComparison.OrdinalIgnoreCase) ? dir : dir + ".old";
+                try
+                {
+                    if (aside != dir) Directory.Move(dir, aside);
+                    Directory.Delete(aside, recursive: true);
+                    Log.Info($"Updates: removed {dir} (another version's unpacked files)");
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Info($"Updates: {dir} is in use or locked; left ({e.Message})"); }
+            }
+        }
+        catch (Exception e) { Log.Warn($"Updates: tidying other versions' unpacked files: {e.Message}"); }
     }
 
     // install.selfUpdate.userDirs (VacuumTube's %LOCALAPPDATA%\vacuumtube-updater): deleted as the
@@ -581,7 +722,9 @@ sealed class UpdateService
         {
             if (current?.Token == token)
             {
-                var waitingForHome = current.WaitUntil is not null && progress?.Phase is null or "start";
+                // The launcher's update at "ready": downloaded, waiting for Home or standby.
+                var waitingForHome = (current.WaitUntil is not null && progress?.Phase is null or "start")
+                    || (current.Action == "launcher-update" && progress?.Phase == "ready");
                 return new
                 {
                     status = waitingForHome ? "waiting" : "running",
@@ -610,6 +753,8 @@ sealed class UpdateService
                     installed = Program.Version,
                     latest = saved.Launcher?.Version,
                     update = LauncherNewer() && !Done(LauncherToken()),
+                    // Rolled back here: not counted, not in Update all; its row still offers it.
+                    skipped = LauncherNewer() && LauncherSkipped(),
                     notes = saved.Launcher?.Notes,
                     job = LauncherNewer() ? Row(LauncherToken()) : null,
                 },
@@ -650,7 +795,7 @@ sealed class UpdateService
     int PendingCountUnlocked(WindowsState? w)
     {
         var n = saved.Apps.Count(a => a.Update && !Done(Token(a)));
-        if (LauncherNewer() && !Done(LauncherToken())) n++;
+        if (LauncherOffered() && !Done(LauncherToken())) n++;
         if (w is { Result: "ok" }) n += w.Counted;
         return n;
     }
@@ -663,10 +808,11 @@ sealed class UpdateService
         catch (Exception) { return null; }
     }
 
-    // After a new check, a "done" from before no longer says anything.
-    void ForgetDoneResults()
+    // After a new check, a "done" from before no longer says anything; after Check now, neither
+    // does a "failed" (the rows show what the check found, ready to be tried again).
+    void ForgetResults(bool failedToo)
     {
-        foreach (var t in results.Where(r => r.Value.Status == "done").Select(r => r.Key).ToList()) results.Remove(t);
+        foreach (var t in results.Where(r => r.Value.Status == "done" || failedToo && r.Value.Status == "failed").Select(r => r.Key).ToList()) results.Remove(t);
     }
 
     /// <summary>Below-normal priority and EcoQoS: a check can run while a video plays.</summary>

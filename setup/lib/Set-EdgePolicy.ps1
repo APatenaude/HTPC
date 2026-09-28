@@ -20,8 +20,12 @@
     apps kept running after the last window closes). The startup boost's own start at sign-in,
     HKCU Run MicrosoftEdgeAutoLaunch_<hash>, is removed (the catalog's "autostart" for the Browser:
     the launcher and the jobs keep it away if it comes back).
+
+.PARAMETER MachineOnly
+    Only the machine's policies (everything but the HKCU Run value): what a launcher update
+    applies again, as SYSTEM, when this script changed (lib\LauncherUpdate.ps1).
 #>
-param()
+param([switch]$MachineOnly)
 
 . "$PSScriptRoot\Common.ps1"
 . "$PSScriptRoot\AppCore.ps1"
@@ -112,8 +116,10 @@ Set-RegValue $edge 'HardwareAccelerationModeEnabled' 1
 Write-Host '  Nothing of Edge running with no window open: no startup boost, no background mode'
 Set-RegValue $edge 'StartupBoostEnabled' 0
 Set-RegValue $edge 'BackgroundModeEnabled' 0
-$browser = @(Get-AutostartCatalog (Join-Path $PSScriptRoot '..\catalog.json') | Where-Object { $_.id -eq 'edge' })
-[void](Invoke-AppAutostartGuard -Apps $browser -Kinds run -Context 'Edge')
+if (-not $MachineOnly) {
+    $browser = @(Get-AutostartCatalog (Join-Path $PSScriptRoot '..\catalog.json') | Where-Object { $_.id -eq 'edge' })
+    [void](Invoke-AppAutostartGuard -Apps $browser -Kinds run -Context 'Edge')
+}
 
 Write-Host '  Fake MDM enrollment (so Edge honours the search policies)'
 $fake = 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF'

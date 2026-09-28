@@ -6,8 +6,8 @@ param([string]$Arg)
 
 if (-not $script:IsSystem) { throw 'reconcile runs only through the elevated task' }
 if ($Arg) { throw 'Refused: reconcile takes no argument' }
-. "$PSScriptRoot\..\lib\UpdateCore.ps1"
-. "$PSScriptRoot\..\lib\LauncherUpdate.ps1"
+. "$JobLib\UpdateCore.ps1"
+. "$JobLib\LauncherUpdate.ps1"
 Enter-UpdateJob
 
 Invoke-LauncherReconcile

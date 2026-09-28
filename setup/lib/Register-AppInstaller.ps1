@@ -32,7 +32,8 @@
 . "$PSScriptRoot\Common.ps1"
 Assert-Admin
 
-$installerScript = Join-Path $env:ProgramFiles 'HTPC\Launcher\lib\Invoke-AppJob.ps1'
+# The runner's bootstrap, outside the lib\ and jobs\ a launcher update swaps (lib\Start-Job.ps1).
+$installerScript = Join-Path $env:ProgramFiles 'HTPC\Launcher\Start-Job.ps1'
 if (-not (Test-Path $installerScript)) {
     Write-Attention "job runner not found at $installerScript (run the Launcher step first); the task will still be registered"
 }

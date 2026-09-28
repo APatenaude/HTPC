@@ -198,15 +198,20 @@ Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm
   restore point first, then the apps, the launcher last); Windows updates now or "Tonight"
   (02:00 to 05:00 while in standby, then a quiet restart: the TV stays off and the box comes
   back in standby). Defender's definitions come with the Windows updates and are not counted.
-- **The launcher's own update** (`setup/lib/LauncherUpdate.ps1`, run as SYSTEM): only at Home or
-  in standby, never with an app in front, and only with the watchdog running (it starts the new
-  launcher). The job downloads release v<x.y.z> itself, checks it, pauses the watchdog, and says
-  "ready"; the launcher shows "Restarting…", leaves a handoff (`%LOCALAPPDATA%\HTPC\handoff.json`:
+- **The launcher's own update** (`setup/lib/LauncherUpdate.ps1`, run as SYSTEM): swapped only at
+  Home or in standby, never with an app in front, and only with the watchdog running (it starts
+  the new launcher). The job downloads release v<x.y.z> itself at once (low priority, a video can
+  keep playing), checks it, and says "ready"; the launcher waits until it is at Home or in
+  standby, shows "Restarting…" and says so (the event `Local\HtpcLeaving_<version>_<pid>`); only
+  then does the job pause the watchdog and say "leave" (not at Home within 3 hours: it gives up,
+  nothing moved or stopped). The launcher leaves a handoff (`%LOCALAPPDATA%\HTPC\handoff.json`:
   back to standby, no TV on) and exits with code 75; the job swaps the files (journaled, with
   write-through renames) and waits up to 3 minutes for the new launcher to say it is healthy
   (the event `Local\HtpcHealthy_<version>_<pid>`, once its UI is ready and the controller thread
   runs), otherwise it puts the old one back. A power cut at any step is put right when Windows
-  starts (`reconcile`).
+  starts (`reconcile`). Once the new launcher is healthy, the machine part of setup's Edge and
+  System steps runs again when their scripts changed (setup/README.md, "What an update applies");
+  whatever needs the signed-in user (HKCU, the phone remote's certificate) waits for TV Box Setup.
 - **A newer WebView2 runtime** (Edge's updater installs it) is taken at the next standby: the
   launcher's WebViews close and open again, no restart.
 - **The apps' own updaters** are off where they can be: VacuumTube's (catalog
@@ -238,10 +243,12 @@ on the machine changes. Run it as SYSTEM too (a one-off scheduled task, in the t
 `New-Release.ps1` sets the one version (`Directory.Build.props`), builds it once as a check
 (`Build-Release.ps1`: `TV-Box-Setup.exe`, `setup.zip`, `update.json`, `.sha256` files in
 `launcher\dist\release`), commits and tags. The pushed tag runs `.github/workflows/release.yml`:
-build (read-only token, SDK from `global.json`, NuGet in locked mode), publish the release (the
-only step that can write), then `Test-ReleaseAssets.ps1` downloads it again the way a box does
-and checks every file; a mismatch turns the release back into a draft. Boxes see it at their
-next daily check. `Build-Release.ps1` alone is the dry run (nothing is published).
+the tests (every `launcher\tests\*` project and TvLab with `dotnet run -c Release`, and
+`setup\test\Test-Updates.ps1`; any failure publishes nothing), build (read-only token, SDK from
+`global.json`, NuGet in locked mode), publish the release, not as "latest" yet (the only step
+that can write), then `Test-ReleaseAssets.ps1` downloads it again the way a box does and checks
+every file; only then is it made "latest", what boxes look at (a mismatch deletes the release,
+the tag stays: no box ever saw it). Boxes see it at their next daily check. `Build-Release.ps1` alone is the dry run (nothing is published).
 
 **What the box trusts, and what that leaves open.** There is no signing key (the user's choice:
 "just get the updates only from my repo"). A box installs a launcher only from

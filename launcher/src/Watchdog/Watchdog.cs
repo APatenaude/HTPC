@@ -14,10 +14,13 @@
 //   wait until it is released or abandoned -> let go at once -> grace (2 s) -> still free, the
 //   session not ending and no pause -> start the launcher -> wait until it holds the mutex (or
 //   exits before it does) -> wait again.
-// A launcher that ends within 60 s of starting is a fast exit. After 3 in a row: restart the
-// box once (as the shell, at most once per 6 hours), else the Windows desktop with a message,
-// and more tries after 30 s, 2 min and 10 min. Exit code 75 is a planned exit (an update, setup
-// handing over): not counted.
+// A launcher that ends within 60 s of starting is a fast exit, and so is one ended for not
+// responding within 5 min of starting (the hang check itself takes 60 to 75 s). After 3 in a row:
+// restart the box once (as the shell, at most once per 6 hours), else the Windows desktop with a
+// message, and more tries after 30 s, 2 min and 10 min; out of that once a launcher has run for
+// 5 min. Exit code 75 is a planned exit (an update, setup handing over): not counted, and neither
+// is an exit during a pause (a job or setup ending it on purpose). When a pause ends the count
+// starts again: a launcher update that rolled back a crashing launcher leaves no count behind.
 // A launcher started again gets --restarted (it leaves the TV as it is) and
 // --restart-reason=<why> for its log: planned, hung, exit:<code>, ended (exit code unknown),
 // setup-ended (setup or another launcher held the mutex), not-started, watchdog-restarted
@@ -33,7 +36,8 @@
 //       process is gone; ignored when written before the box started.
 //
 // Log: C:\ProgramData\HTPC\logs\watchdog.log (or %LOCALAPPDATA%\HTPC\logs when that one is not
-// ours to write), started afresh when over 512 KB.
+// ours to write), moved to watchdog.old.log and started afresh whenever it passes 512 KB (checked
+// at every line: the watchdog runs for weeks).
 
 using System;
 using System.Collections.Generic;
@@ -64,6 +68,9 @@ namespace Htpc.Watchdog
 
         static readonly TimeSpan Grace = TimeSpan.FromSeconds(2);
         static readonly TimeSpan FastExit = TimeSpan.FromSeconds(60);
+        // A launcher ended for not responding this soon after its start has not settled either,
+        // and one that has run this long has (out of the fallback).
+        static readonly TimeSpan Settled = TimeSpan.FromMinutes(5);
         const int FastExitsBeforeFallback = 3;
         static readonly TimeSpan HangCheckEvery = TimeSpan.FromSeconds(10);
         static readonly TimeSpan HangLimit = TimeSpan.FromSeconds(60);
@@ -162,8 +169,8 @@ namespace Htpc.Watchdog
                     var lived = holder.Started.HasValue ? DateTime.Now - holder.Started.Value : (TimeSpan?)null;
                     Log.Info((holder.Pid == 0 ? "Setup (or another launcher) ended" : "Launcher ended (pid " + holder.Pid) + (lived.HasValue ? ", ran " + Seconds(lived.Value) : "")
                         + (code.HasValue ? ", exit code " + code.Value : "") + (holder.Pid == 0 ? "" : ")"));
-                    if (code == PlannedExit) { }                  // an update or a hand-over: not a crash
-                    else if (lived.HasValue && lived.Value < FastExit) fastExits++;
+                    if (code == PlannedExit || Paused()) { }     // an update, a hand-over, a job ending it: not a crash
+                    else if (lived.HasValue && (lived.Value < FastExit || (endedHung && lived.Value < Settled))) fastExits++;
                     else if (lived.HasValue) fastExits = 0;
                     if (!ending.WaitOne(0)) Ui.ShowSplash();       // not a bare black screen meanwhile
                 }
@@ -233,8 +240,9 @@ namespace Htpc.Watchdog
                 }
                 catch (AbandonedMutexException) { launcherMutex.ReleaseMutex(); return endedHung; } // ended without letting go
 
-                // Out of the fallback once a launcher has been up for a while.
-                if (retries >= 0 && holder.Started.HasValue && DateTime.Now - holder.Started.Value >= FastExit)
+                // Out of the fallback once a launcher has been up for a while (long enough that a
+                // hang would no longer count as a fast exit).
+                if (retries >= 0 && holder.Started.HasValue && DateTime.Now - holder.Started.Value >= Settled)
                 {
                     Log.Info("The launcher is up again: back to normal");
                     retries = -1;
@@ -330,7 +338,11 @@ namespace Htpc.Watchdog
             Log.Info("Paused (" + (Unexpired(UserPause()) ? "HKCU\\" + PauseKey + "\\" + PauseValue : JobPauseFile) + ")");
             while (Paused() && !IsHeld())
                 if (ending.WaitOne(2000)) return;
-            Log.Info("Pause over");
+            // Whoever paused it changed the launcher on purpose (an update, its rollback, setup):
+            // the exits before that say nothing about the one that starts now.
+            if (fastExits > 0) Log.Info("Pause over: " + fastExits + " fast exit(s) before it no longer count");
+            else Log.Info("Pause over");
+            fastExits = 0;
         }
 
         // --- Fallback ---------------------------------------------------------------------------
@@ -445,6 +457,7 @@ namespace Htpc.Watchdog
 
     static class Log
     {
+        const long MaxSize = 512 * 1024;
         static readonly object Gate = new object();
         static string path;
 
@@ -462,17 +475,25 @@ namespace Htpc.Watchdog
                     var dir = System.IO.Path.Combine(Environment.GetFolderPath(root), @"HTPC\logs");
                     Directory.CreateDirectory(dir);
                     var file = System.IO.Path.Combine(dir, "watchdog.log");
-                    if (File.Exists(file) && new FileInfo(file).Length > 512 * 1024)
-                    {
-                        File.Copy(file, System.IO.Path.Combine(dir, "watchdog.old.log"), true);
-                        File.WriteAllText(file, "");
-                    }
                     File.AppendAllText(file, "");
                     return path = file;
                 }
                 catch (Exception) { }
             }
             return path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "htpc-watchdog.log");
+        }
+
+        // Past 512 KB: the file becomes <name>.old.log (the one before goes) and starts afresh.
+        static void Roll(string file)
+        {
+            try
+            {
+                var info = new FileInfo(file);
+                if (!info.Exists || info.Length <= MaxSize) return;
+                File.Copy(file, System.IO.Path.ChangeExtension(file, ".old.log"), true);
+                File.WriteAllText(file, "");
+            }
+            catch (Exception) { }
         }
 
         public static void Info(string message) { Write("INFO", message); }
@@ -485,6 +506,7 @@ namespace Htpc.Watchdog
             {
                 try
                 {
+                    Roll(PathFor());
                     File.AppendAllText(PathFor(), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)
                         + " " + level.PadRight(5) + " " + message + Environment.NewLine);
                 }
