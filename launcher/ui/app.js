@@ -520,6 +520,8 @@ function restoreFocus(id, gone) {
     (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
     // Settings opens on the section list, on the section last shown (A or right goes into it).
     (state.view === 'settings' ? list.find((e) => e.dataset.section === state.section) : null) ||
+    // A confirmation opens on Cancel: one press of A never closes an app by mistake.
+    (state.view === 'confirm' ? list.find((e) => e.dataset.id === 'confirm-cancel') : null) ||
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
@@ -918,7 +920,7 @@ function press(button) {
       else if (state.view === 'menu') id = (el && el.dataset.close) || state.current;
       else break;
       const t = id && state.tiles.find((x) => x.id === id && x.running);
-      if (t) { state.confirm = { id: t.id, name: t.name }; go('confirm'); }
+      if (t) { state.confirm = { id: t.id, name: t.name }; state.memory.confirm = null; go('confirm'); }
       break;
     }
     case 'home':

@@ -473,7 +473,8 @@
   const jf = tileEl('jellyfin'), yt = tileEl('youtube');
   setFocus(jf);
   press('x');
-  check('Home: X on a running tile asks to close it', state.view === 'confirm');
+  check('Home: X on a running tile asks to close it, on Cancel', state.view === 'confirm' && focusedEl() && focusedEl().dataset.id === 'confirm-cancel');
+  press('left');
   press('a');
   check('Home: closed, back on home without its entrance again', state.view === 'home' && $('home').classList.contains('stay') && lastSent('close').id === 'jellyfin');
   onHost({ type: 'state', running: [] });
@@ -614,6 +615,7 @@
   check('Logos: A on it asks for the logo back', lastSent('tile.icon').glyph === 'logo' && lastSent('tile.icon').id === 'netflix');
   reset('home');
   EXT.actions['tile-options'](tileEl('chosen'), 'chosen');
+  check('Tile options: open on their first item, not where the last ones were left', focusedEl() && focusedEl().dataset.id === 'opt-move', focusedEl() && focusedEl().dataset.id);
   setFocus($('tileopts').querySelector('[data-id="opt-icon"]'));
   press('a');
   check('Logos: a chosen glyph is the one picked, the logo still offered', ciNode('g-logo') && !ciNode('g-logo').classList.contains('on') && ciNode('g-moon').classList.contains('on'));

@@ -48,7 +48,8 @@
   // ---- Home hooks (app.js calls these) -----------------------------------------------------
 
   onAction('addtile', openAddTile);
-  onAction('tile-options', (node, id) => { lib.target = id; go('tileopts'); });
+  // Always on its first item, never where the last one's focus was left (Remove, after one).
+  onAction('tile-options', (node, id) => { lib.target = id; state.memory.tileopts = null; go('tileopts'); });
   onAction('tile-move', (node, button) => moveButton(button));
 
   function moveButton(button) {
