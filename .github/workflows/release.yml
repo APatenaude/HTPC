@@ -1,5 +1,6 @@
 # A release of the TV box (launcher\dev\New-Release.ps1 makes the tag):
-#   push of a tag v<major.minor.patch>  test, build, publish a GitHub release, then download it
+#   push of a tag v<major.minor.patch>  check the Tests workflow passed on that commit, build,
+#                                       publish a GitHub release, then download it
 #                                       again the way a box does and check every file
 #   run by hand (workflow_dispatch)     a dry run: the files are kept as a workflow artifact only
 #
@@ -24,6 +25,7 @@ jobs:
     runs-on: windows-2025
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,29 +45,23 @@ jobs:
         with:
           global-json-file: global.json
 
-      # Nothing is published unless every check passes: the launcher's console tests, the TV
-      # bench and setup's tests against fakes (the update jobs, the autostart guard, the driver
-      # picks, the privilege checks; Test-Updates and Test-Rights need an administrator: the
-      # runner is one). Test-Library installs real apps: test VM only. Each exits 0 only when
-      # all its checks passed.
-      - name: Tests
+      # The checks run in the Tests workflow, on every push. A tag is only made on a commit where
+      # they passed (launcher\dev\New-Release.ps1 waits for them), and this checks it again before
+      # anything is built: a tag on a commit without a passed run publishes nothing.
+      - name: Tests passed on this commit
         shell: powershell
         env:
-          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAGGED: ${{ github.event_name == 'push' && github.ref_type == 'tag' && '1' || '' }}
         run: |
-          $failed = @()
-          $projects = @(Get-ChildItem launcher\tests -Directory | ForEach-Object { $_.FullName }) + @((Resolve-Path launcher\dev\TvLab).Path)
-          foreach ($project in $projects) {
-            Write-Host "== $project"
-            dotnet run -c Release --project $project
-            if ($LASTEXITCODE -ne 0) { $failed += (Split-Path $project -Leaf) }
-          }
-          foreach ($test in 'Test-Updates', 'Test-Autostart', 'Test-Drivers', 'Test-Rights') {
-            Write-Host "== setup\test\$test.ps1"
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "setup\test\$test.ps1"
-            if ($LASTEXITCODE -ne 0) { $failed += $test }
-          }
-          if ($failed) { throw "Failed: $($failed -join ', ')" }
+          $sha = git rev-parse HEAD
+          $json = gh api "repos/$env:GH_REPO/actions/runs?head_sha=$sha&status=success&per_page=100"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $passed = @(($json | ConvertFrom-Json).workflow_runs | Where-Object { $_.path -like '.github/workflows/tests.yml*' })
+          if ($passed.Count) { Write-Host "Tests passed on $($sha): $($passed[0].html_url)"; exit 0 }
+          if ($env:TAGGED) { throw "The Tests workflow has not passed on $($sha): nothing is published. Tag a commit where it passed (New-Release.ps1 does)." }
+          Write-Host "::warning::The Tests workflow has not passed on $($sha) (yet): a dry run builds anyway"
 
       - name: Build
         shell: powershell
@@ -85,7 +81,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    # The build job runs the tests first: a failed check publishes nothing.
+    # The build job checks first that the Tests workflow passed on this commit.
     needs: build
     # Only a pushed tag publishes; a run by hand is a dry run, even on a tag.
     if: github.event_name == 'push' && github.ref_type == 'tag'

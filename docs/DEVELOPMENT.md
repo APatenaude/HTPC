@@ -43,7 +43,8 @@ releases and repo settings, and Hyper-V (Windows Pro/Enterprise) for the test VM
 | `launcher/tests/*`, `launcher/dev/TvLab` | Console test projects: `dotnet run -c Release`, exit 0 = pass |
 | `launcher/dev` | Dev and release scripts (below) |
 | `setup` | `setup.ps1` and its steps in `lib/`, the SYSTEM job verbs in `jobs/`, `catalog.json` (the apps), `autounattend/` (USB install), `test/` (setup tests, the VM tools) |
-| `.github/workflows/release.yml` | Builds, tests and publishes a release from a `v*` tag |
+| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator) |
+| `.github/workflows/release.yml` | Builds and publishes a release from a `v*` tag whose commit passed Tests |
 
 ## 3. The everyday loop
 
@@ -92,8 +93,11 @@ routine, scripted in `launcher\dev\Merge-Branch.ps1`:
 
 - One version number for everything: `Directory.Build.props` `<Version>`.
 - `launcher\dev\New-Release.ps1 -Version 1.0.0 -Notes "..."` checks the tree is clean and the
-  version higher, sets it, builds once as a check, commits "Release x.y.z" and tags `vx.y.z`.
-- `git push origin HEAD vx.y.z` publishes: `release.yml` runs the tests, builds TV-Box-Setup.exe,
+  version higher, sets it, builds once as a check, commits "Release x.y.z" and pushes, waits for
+  the Tests workflow on that commit, and only if it passed tags `vx.y.z` and pushes the tag. If
+  the tests fail nothing is tagged: fix, commit, run it again with the same version. Never push a
+  `v*` tag by hand: a pushed tag can't be moved or deleted, so a failed release uses up the number.
+- The tag publishes: `release.yml` checks Tests passed on the commit, builds TV-Box-Setup.exe,
   setup.zip, HtpcWatchdog.exe, update.json and their .sha256 files, creates the release as not
   "latest", downloads and checks it, then marks it latest (a failed check deletes it).
 - Boxes check GitHub daily (Settings › Updates shows it); the launcher update is a journaled swap
@@ -164,7 +168,9 @@ Done:
 
 Left, in order:
 
-1. `New-Release.ps1 -Version 1.0.0`, push the tag, watch the workflow (it runs the tests too).
+1. `New-Release.ps1 -Version 1.0.2` (it pushes, waits for Tests, then tags), watch the release
+   workflow. v1.0.0 and v1.0.1 were tagged but their runs failed in the tests (then part of the
+   release workflow), so nothing was published under those numbers.
 2. Then turn on immutable releases (Settings › General › Releases, or
    `gh api -X PUT repos/APatenaude/HTPC/immutable-releases`), and check the next release's
    workflow still creates, checks and marks it latest. It was left until after 1.0 so the first

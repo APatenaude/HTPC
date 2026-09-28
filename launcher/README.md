@@ -304,14 +304,16 @@ on the machine changes. Run it as SYSTEM too (a one-off scheduled task, in the t
 ### Releases
 
     powershell -ExecutionPolicy Bypass -File launcher\dev\New-Release.ps1 -Version 0.2.0 -Notes "What changed, in a sentence"
-    git push origin HEAD v0.2.0
 
 `New-Release.ps1` sets the one version (`Directory.Build.props`), builds it once as a check
 (`Build-Release.ps1`: `TV-Box-Setup.exe`, `setup.zip`, `update.json`, `.sha256` files in
-`launcher\dist\release`), commits and tags. The pushed tag runs `.github/workflows/release.yml`:
-the tests (every `launcher\tests\*` project and TvLab with `dotnet run -c Release`, and
-`setup\test\Test-Updates.ps1`; any failure publishes nothing), build (read-only token, SDK from
-`global.json`, NuGet in locked mode), publish the release, not as "latest" yet (the only step
+`launcher\dist\release`), commits and pushes, then waits for `.github/workflows/tests.yml` on that
+very commit (it runs on every push: every `launcher\tests\*` project and TvLab with
+`dotnet run -c Release`, and setup's `Test-Updates`, `Test-Autostart`, `Test-Drivers` and
+`Test-Rights`, as an administrator). Only when that passed does it tag and push the tag: a
+failing check never uses up a version number (pushed `v*` tags can't be moved or deleted). The
+tag runs `.github/workflows/release.yml`: it checks the Tests run passed on the commit, then
+builds (read-only token, SDK from `global.json`, NuGet in locked mode), publishes the release, not as "latest" yet (the only step
 that can write), then `Test-ReleaseAssets.ps1` downloads it again the way a box does and checks
 every file; only then is it made "latest", what boxes look at (a mismatch deletes the release,
 the tag stays: no box ever saw it). Boxes see it at their next daily check. `Build-Release.ps1` alone is the dry run (nothing is published).

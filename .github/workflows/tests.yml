@@ -1,0 +1,68 @@
+# The checks, on every push:
+#   - the launcher's console tests;
+#   - the TV bench;
+#   - setup's tests against fakes: the update jobs, the autostart guard, the driver picks and the
+#     privilege checks. Test-Updates and Test-Rights need an administrator: the runner is one.
+# Test-Library installs real apps: test VM only. Each exits 0 only when all its checks passed.
+# Two jobs run side by side, since Test-Updates alone takes about 7 minutes.
+#
+# A release is only tagged on a commit whose run here passed (launcher\dev\New-Release.ps1 waits
+# for it), and the release workflow checks that again before it builds: a flaky check can never
+# burn a version number.
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.part }}
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [launcher, updates]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Tests
+        shell: powershell
+        env:
+          PART: ${{ matrix.part }}
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: |
+          $failed = @()
+          if ($env:PART -eq 'launcher') {
+            $projects = @(Get-ChildItem launcher\tests -Directory | ForEach-Object { $_.FullName }) + @((Resolve-Path launcher\dev\TvLab).Path)
+            $scripts = 'Test-Autostart', 'Test-Drivers', 'Test-Rights'
+          } else {
+            $projects = @()
+            $scripts = 'Test-Updates'
+          }
+          foreach ($project in $projects) {
+            Write-Host "== $project"
+            dotnet run -c Release --project $project
+            if ($LASTEXITCODE -ne 0) { $failed += (Split-Path $project -Leaf) }
+          }
+          foreach ($test in $scripts) {
+            Write-Host "== setup\test\$test.ps1"
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "setup\test\$test.ps1"
+            if ($LASTEXITCODE -ne 0) { $failed += $test }
+          }
+          if ($failed) { throw "Failed: $($failed -join ', ')" }
