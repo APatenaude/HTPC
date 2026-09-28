@@ -251,6 +251,15 @@ static partial class Program
                 Check(!exported, "intermediate key: exporting it fails");
             }
 
+            // Windows sends the intermediate from the machine's CA store only (Schannel, in LSA). With
+            // administrator rights (TV Box Setup's step) it goes there; without them the machine store
+            // is left alone and the launcher says setup must do it.
+            var elevated = Environment.IsPrivilegedProcess;
+            if (elevated)
+                Check(certs.PlaceIntermediateInMachineStore() && certs.IntermediateInMachineStore, "with administrator rights (setup's step): the intermediate in the machine's CA store");
+            else
+                Check(!certs.PlaceIntermediateInMachineStore() && !certs.IntermediateInMachineStore && Log.Warnings.Any(w => w.Contains("not in Windows' machine store")),
+                    "without administrator rights: the machine store left alone, and the launcher says setup must put the intermediate there");
             var ca = certs.Authority!;
             var inter = certs.Intermediate!;
             SslPolicyErrors seen = SslPolicyErrors.None;
@@ -283,7 +292,10 @@ static partial class Program
             using var https = new HttpClient(handler) { BaseAddress = new Uri("https://tv.local") };
             var page = await https.GetAsync("/");
             Check(page.StatusCode == HttpStatusCode.OK && (seen & SslPolicyErrors.RemoteCertificateNameMismatch) == 0, "HTTPS at tv.local: the page, the certificate names tv.local");
-            Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, "the handshake sends the intermediate; the chain ends at the root");
+            if (elevated)
+                Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, $"the handshake sends the intermediate; the chain ends at the root (sent: {intermediateSent}; chain: {chainStatus})");
+            else
+                Console.WriteLine($"    info: not administrator: the intermediate {(intermediateSent ? "was" : "was not")} sent (setup's step puts it where Windows sends it from)");
             var shareOverHttps = new HttpRequestMessage(HttpMethod.Post, "/share")
             {
                 Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["url"] = "https://vimeo.com/1" }), Headers = { { "Sec-Fetch-Site", "none" } },

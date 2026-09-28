@@ -218,7 +218,14 @@ sealed class PhoneCertificates
     {
         server = cert;
         context = SslStreamCertificateContext.Create(cert, new X509Certificate2Collection(intermediate!), offline: true);
+        if (machineStoreChecked) return;
+        machineStoreChecked = true;
+        if (!IntermediateInMachineStore)
+            Log.Warn("Phone remote: this box's intermediate certificate is not in Windows' machine store, so HTTPS can go out without it " +
+                "(Android then cannot check the certificate): run TV Box Setup again, its Phone remote step puts it there");
     }
+
+    bool machineStoreChecked;   // once a start: IntermediateInMachineStore, logged when not
 
     void LoadOrCreateAuthorities(List<string> dns)
     {
@@ -272,6 +279,55 @@ sealed class PhoneCertificates
         File.Delete(Path.Combine(folder, "server.cer"));
         server = null;
         (root, intermediate) = (newRoot, X509CertificateLoader.LoadCertificate(newIntermediate.RawData));
+    }
+
+    /// <summary>
+    /// Whether the handshake can send the intermediate. Schannel builds the chain it sends in LSA,
+    /// which finds intermediates in the machine's CA store; one only in the user's store (all a
+    /// launcher without administrator rights can write) is not seen before the user signs in
+    /// again, so a new pair went out without it. The launcher runs without those rights: TV Box
+    /// Setup's Phone remote step puts it there (HtpcLauncher --phone-certificates, elevated).
+    /// </summary>
+    public bool IntermediateInMachineStore => intermediate is { } i && InStore(StoreLocation.LocalMachine, i.Thumbprint);
+
+    static bool InStore(StoreLocation location, string thumbprint)
+    {
+        try
+        {
+            using var store = new X509Store(StoreName.CertificateAuthority, location);
+            store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+            return store.Certificates.Find(X509FindType.FindByThumbprint, thumbprint, false).Count > 0;
+        }
+        catch (CryptographicException) { return false; }
+    }
+
+    /// <summary>
+    /// With administrator rights (setup): the intermediate (its public certificate only; the key
+    /// stays where it is) in the machine's CA store, this box's older ones out. True when it is there.
+    /// </summary>
+    public bool PlaceIntermediateInMachineStore()
+    {
+        lock (gate)
+        {
+            if (intermediate is null) return false;
+            try
+            {
+                using var store = new X509Store(StoreName.CertificateAuthority, StoreLocation.LocalMachine);
+                store.Open(OpenFlags.ReadWrite);
+                if (store.Certificates.Find(X509FindType.FindByThumbprint, intermediate.Thumbprint, false).Count == 0)
+                {
+                    store.Add(X509CertificateLoader.LoadCertificate(intermediate.RawData));
+                    Log.Info("Phone remote: the intermediate certificate put in the machine's CA store (HTTPS sends it)");
+                }
+            }
+            catch (CryptographicException e)
+            {
+                Log.Warn($"Phone remote: the intermediate certificate could not go in the machine's CA store: {e.Message}");
+                return false;
+            }
+            RemoveIntermediates(name, intermediate.Thumbprint);
+            return IntermediateInMachineStore;
+        }
     }
 
     /// <summary>

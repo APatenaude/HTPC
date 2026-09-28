@@ -110,9 +110,12 @@ second QR code in Settings › Phone remote, which opens /send and pairs):
   non-exportable, in the TPM when the box has one that does ECDSA P-256 (else the software key
   store; this box: the TPM). It signs the server certificate (1 year) for tv.local and the box's private
   addresses, made again at once when the address changes (no DHCP reservation) and a month before
-  it ends; the handshake sends it with the intermediate (for that, Windows adds the intermediate
-  to the "Intermediate Certification Authorities" store: the user's, or the machine's when the
-  launcher runs as administrator). Root and intermediate end together after 10 years: then the box
+  it ends; the handshake sends it with the intermediate. Windows (Schannel, in LSA) sends an
+  intermediate only from the machine's "Intermediate Certification Authorities" store; one only in
+  the user's store is not seen before the user signs in again. The launcher runs without
+  administrator rights, so setup's Phone remote step runs `HtpcLauncher --phone-certificates`
+  (elevated): the CA made or loaded in the user's key store, the intermediate's public certificate
+  put in the machine's store. Without it the launcher logs a warning (run TV Box Setup again). Root and intermediate end together after 10 years: then the box
   makes a new pair and each phone installs the new root once more. At every start the launcher
   removes this box's older intermediates from those stores (matched by the subject's CN and O,
   in either order; the current one kept; logged). The user's store also lists the machine's entries;

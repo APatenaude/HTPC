@@ -6,7 +6,8 @@ namespace Htpc.Launcher;
 /// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"; it
 /// runs elevated, see SetupElevation.cs), --elevated (the copy setup started with administrator
 /// rights), --home (not setup even so: the home screen after setup when no launcher was installed),
-/// --version (prints the version and ends; see Program.Main),
+/// --version (prints the version and ends; see Program.Main), --phone-certificates (setup: the phone
+/// remote's intermediate certificate in the machine's store; ends),
 /// --restarted (started again by the watchdog: the TV is left as it is) with
 /// --restart-reason=WHY (why the watchdog started it again, for the log: Watchdog.cs lists them),
 /// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one).
@@ -103,7 +104,17 @@ static class Program
             Console.Out.Flush();
             return;
         }
-        var options = Options.Parse(args);
+        // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
+        // phone remote's CA made (or loaded) in this user's key store, and its intermediate put in the
+        // machine's CA store, where Windows finds it to send with the HTTPS certificate. Ends; exit
+        // code 0 when it is there.
+        if (args.Contains("--phone-certificates"))
+        {
+            var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
+            certs.Ensure(PhoneCertificates.LocalNames(), PhoneNetwork.LocalAddresses());
+            Environment.ExitCode = certs.PlaceIntermediateInMachineStore() ? 0 : 1;
+            return;
+        }        var options = Options.Parse(args);
         // Back to TV with a launcher running: it is told, this copy is not needed. Without one,
         // this becomes the launcher (and closes the desktop once its UI is up).
         if (options.BackToTv && !options.Setup && DesktopMode.SignalRunningLauncher()) return;
