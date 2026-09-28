@@ -314,7 +314,11 @@ function Test-Token([string]$Token, [string[]]$More) {
 # the release each came from (test-version.txt), and whether both are there whole.
 function Resolve-FakeRunner([string]$Root) {
     $ErrorActionPreference = 'Continue'
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\PF\HTPC\Launcher\Start-Job.ps1" -Resolve -DataRoot "$Root\PD\HTPC" 2>&1 | Out-String
+    # As the bootstrap does it (Sync-JobBootstrap): a legitimate SYSTEM -Resolve, marked so Start-Job
+    # allows it (run as SYSTEM in the VM the task's -Job "$(Arg0)" injection guard would refuse it).
+    $env:HTPC_JOB_RESOLVE = '1'
+    try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\PF\HTPC\Launcher\Start-Job.ps1" -Resolve -DataRoot "$Root\PD\HTPC" 2>&1 | Out-String }
+    finally { Remove-Item Env:\HTPC_JOB_RESOLVE -ErrorAction SilentlyContinue }
     $found = @{}
     foreach ($line in $out -split "`r?`n") { if ($line -match '^(lib|jobs)=(.+)$') { $found[$Matches[1]] = $Matches[2].Trim() } }
     $from = { param($dir) $f = if ($dir) { Join-Path $dir 'test-version.txt' }; if ($f -and (Test-Path -LiteralPath $f)) { ([IO.File]::ReadAllText($f)).Trim() } else { '?' } }

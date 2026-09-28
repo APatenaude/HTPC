@@ -48,6 +48,16 @@ param(
 # Common.ps1 resets it again.
 $env:PSModulePath = [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' + [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
 $ErrorActionPreference = 'Stop'
+# The \HTPC\Jobs task passes only the launcher's token, as -Job "$(Arg0)" (Register-AppInstaller.ps1):
+# a token with a quote in it could otherwise smuggle -DryRun, -Catalog, -Resolve or -DataRoot onto
+# this command line. As SYSTEM none of those is accepted; they are test hooks, run by hand as an
+# administrator. The update bootstrap's own -Resolve call (lib\LauncherUpdate.ps1, Sync-JobBootstrap)
+# runs as SYSTEM too and marks itself with HTPC_JOB_RESOLVE, which the task's clean environment never
+# has and an $(Arg0) attacker cannot set.
+if (([Security.Principal.WindowsIdentity]::GetCurrent()).User.Value -eq 'S-1-5-18' -and $env:HTPC_JOB_RESOLVE -ne '1' -and
+    ($DryRun -or $Catalog -or $Resolve -or $DataRoot)) {
+    throw 'Refused: the \HTPC\Jobs task passes only -Job; no other parameter is accepted as SYSTEM'
+}
 # The task passes only the token; anything else here reads a folder of the caller's choosing.
 if ($DataRoot -and -not $Resolve) { throw 'Refused: -DataRoot is only for -Resolve' }
 if (-not $DataRoot) { $DataRoot = Join-Path $env:ProgramData 'HTPC' }
