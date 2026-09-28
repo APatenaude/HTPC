@@ -57,7 +57,11 @@ param(
     [switch]$NoPause
 )
 
-$lib = Join-Path $PSScriptRoot 'lib'
+# Before any command can load a module: Windows' and Program Files' module folders only, never
+# the user's Documents\WindowsPowerShell\Modules (elevated, a module put there would run as
+# administrator). Common.ps1 makes the rest of the environment Windows' own too.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' + [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
+$lib = [IO.Path]::Combine($PSScriptRoot, 'lib')
 . "$lib\Common.ps1"
 $BoundArgs = $PSBoundParameters
 $RelaunchTask = 'HTPC setup'

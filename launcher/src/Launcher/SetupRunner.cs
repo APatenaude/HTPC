@@ -87,11 +87,14 @@ sealed class SetupRunner
     }
 
     /// <summary>
-    /// For the PowerShell the elevated wizard starts: HTPC_SETUP_WIZARD=1 (setup.ps1: TV Box Setup
-    /// started it, elevated and outside any package, so no probe of the user's AppData).
+    /// For the PowerShell the elevated wizard starts: modules from Windows' and Program Files'
+    /// folders only (SetupElevation.SystemModulePath: never the user's Documents folder), and
+    /// HTPC_SETUP_WIZARD=1 (setup.ps1: TV Box Setup started it, elevated and outside any package,
+    /// so no probe of the user's AppData).
     /// </summary>
     static void SetPowerShellEnvironment(ProcessStartInfo psi)
     {
+        psi.Environment["PSModulePath"] = SetupElevation.SystemModulePath;
         psi.Environment["HTPC_SETUP_WIZARD"] = "1";
     }
 

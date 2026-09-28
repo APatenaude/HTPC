@@ -88,6 +88,7 @@ static class ElevationTests
         Check(line is not null && line.Contains($"set \"DOTNET_BUNDLE_EXTRACT_BASE_DIR={pf}\\bundle\""), "... .NET unpacks into Program Files\\HTPC\\Setup\\bundle");
         Check(line is not null && line.Contains("set \"DOTNET_EnableDiagnostics=0\"") && line.Contains("set \"DOTNET_STARTUP_HOOKS=\"") && line.Contains("set \"CORECLR_ENABLE_PROFILING=\"") && line.Contains("set \"COR_ENABLE_PROFILING=\""),
             "... no profiler, startup hook or diagnostics port from the user's environment");
+        Check(line is not null && line.Contains($"set \"PSModulePath={SetupElevation.SystemModulePath}\""), "... PowerShell's modules from Windows' and Program Files' folders only");
         Check(line is not null && line.Contains($"move /y \"{pf}\\TV Box Setup.exe\" \"{pf}\\TV Box Setup.exe.a1b2c3.old\"") && line.Contains($"copy /b /y \"{odd}\" \"{pf}\\TV Box Setup.exe\" >nul && start \"\" /d \"{pf}\" \"{pf}\\TV Box Setup.exe\" --setup --elevated\""),
             "... the one in use renamed aside, this exe copied, the copy started only if the copy went");
         Check(line is not null && line.IndexOf("copy /b", StringComparison.Ordinal) > line.IndexOf("DOTNET_BUNDLE_EXTRACT_BASE_DIR", StringComparison.Ordinal), "... the variables set before anything starts");
@@ -168,6 +169,10 @@ static class ElevationTests
         Check(psi.Arguments.Contains("-File \"C:\\x y\\setup\\setup.ps1\" -NoPause -Apps youtube,kodi -LauncherExe \"D:\\TV Box Setup.exe\""), "its arguments: " + psi.Arguments);
         Check(psi.WorkingDirectory == @"C:\x y\setup", "in the setup folder");
         Check(SetupRunner.StartInfo(@"C:\s\setup.ps1", [], null).Arguments.EndsWith("-NoPause -Skip Apps"), "no apps picked: -Skip Apps, and no -LauncherExe for a dev build");
+        var modules = psi.Environment["PSModulePath"] ?? "";
+        Check(modules == SetupElevation.SystemModulePath && !modules.Contains("Documents", StringComparison.OrdinalIgnoreCase)
+            && modules.StartsWith(Environment.SystemDirectory, StringComparison.OrdinalIgnoreCase), $"setup.ps1's modules: Windows' and Program Files' folders only ({modules})");
+        Check(psi.Environment["HTPC_SETUP_WIZARD"] == "1", "setup.ps1 is told TV Box Setup started it (no probe of the user's AppData)");
         var odd = SetupRunner.StartInfo(@"C:\s\setup.ps1", ["vlc", "x -LauncherExe C:\\evil.exe", "VLC", "kodi\n", "plex"], null).Arguments;
         Check(odd.EndsWith("-NoPause -Apps vlc,plex"), $"only catalog-like ids reach setup.ps1's command line ({odd})");
 

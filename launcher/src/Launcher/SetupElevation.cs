@@ -44,6 +44,17 @@ static class SetupElevation
     public static string TrustedDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup");
 
     /// <summary>
+    /// PowerShell's module path for anything elevated: Windows' and Program Files' module folders,
+    /// from Windows itself (not the environment). Never the user's Documents\WindowsPowerShell\
+    /// Modules, which Windows PowerShell adds by default and loads a command's module from before
+    /// Windows' own: elevated, a module the user put there would run as administrator. Not the
+    /// machine value as written (PowerShell adds the user's folder back to that one).
+    /// </summary>
+    public static string SystemModulePath =>
+        Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\Modules") + ";" +
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"WindowsPowerShell\Modules");
+
+    /// <summary>
     /// Run: the launcher, or setup elevated in a trusted place. Elevate: setup without the rights.
     /// NeedsAdmin: the copy from asking, still without them. Relocate: elevated, but unpacked where
     /// the user can write. Unsafe: the copy started to fix that, still there.
@@ -106,6 +117,9 @@ static class SetupElevation
             $"set \"DOTNET_BUNDLE_EXTRACT_BASE_DIR={bundle}\"",
             "set \"DOTNET_EnableDiagnostics=0\"", "set \"DOTNET_STARTUP_HOOKS=\"", "set \"DOTNET_ADDITIONAL_DEPS=\"",
             "set \"CORECLR_ENABLE_PROFILING=\"", "set \"COR_ENABLE_PROFILING=\"",
+            // PowerShell's modules from Windows' and Program Files' folders only, never the user's
+            // Documents\WindowsPowerShell\Modules (setup.ps1 and every script it starts).
+            $"set \"PSModulePath={SystemModulePath}\"",
         };
         var start = $"start \"\" /d \"{trustedDir}\" \"{target}\" {CommandLine(args)}".TrimEnd();
         if (string.Equals(Path.GetFullPath(exe), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))

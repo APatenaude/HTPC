@@ -43,6 +43,10 @@ param(
     [string]$DataRoot
 )
 
+# Before any command can load a module: Windows' and Program Files' module folders only (SYSTEM's
+# own Documents folder is admin-only, but a job must never load one from a user's). The runner's
+# Common.ps1 resets it again.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' + [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
 $ErrorActionPreference = 'Stop'
 # The task passes only the token; anything else here reads a folder of the caller's choosing.
 if ($DataRoot -and -not $Resolve) { throw 'Refused: -DataRoot is only for -Resolve' }
