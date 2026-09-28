@@ -35,7 +35,9 @@ sealed partial class MainForm : Form
     TextField? lastField;        // the latest text field that had the focus
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
-    readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
+    // Elevated (TV Box Setup): admin-only, never the user's %TEMP%.
+    readonly string captureDir = Environment.IsPrivilegedProcess ? Path.Combine(SetupElevation.TrustedDir, "temp", "htpc-launcher")
+        : Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
     int ticks;
@@ -234,7 +236,7 @@ sealed partial class MainForm : Form
     async Task InitWebView()
     {
         // Setup (elevated) has a profile of its own: SetupElevation.cs.
-        var dataDir = SetupElevation.WebViewFolder(options.Setup);
+        var dataDir = SetupElevation.WebViewFolder(options.Setup, Environment.IsPrivilegedProcess);
         // The controller's presses reach the page as web messages, not user gestures: without
         // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
         var env = await CoreWebView2Environment.CreateAsync(null, dataDir,
@@ -312,6 +314,12 @@ sealed partial class MainForm : Form
         using var doc = JsonDocument.Parse(e.WebMessageAsJson);
         var m = doc.RootElement;
         string? Str(string name) => m.TryGetProperty(name, out var v) ? v.ToString() : null;
+        // Setup mode is elevated: only setup's own messages, never "launch", power, settings...
+        if (setupMode && !SetupElevation.IsSetupMessage(Str("type")))
+        {
+            Log.Warn($"Setup: UI message {Str("type")} refused (not one of setup's)");
+            return;
+        }
         switch (Str("type"))
         {
             case "ready" when setupMode:
@@ -336,6 +344,7 @@ sealed partial class MainForm : Form
                 ApplySettings();
                 break;
             case "launch": Open(Str("id")!); break;
+            case "launchDismissed": launchDismissed.Add(Str("id")!); break; // Home or B on "Opening X"
             case "switchTo": case "resume": SwitchTo(Str("id")!); break;
             case "close": apps.Close(Str("id")!); break;
             case "power": Power(Str("action")!); break;
@@ -381,7 +390,7 @@ sealed partial class MainForm : Form
     object TileList() => apps.Tiles.Select(t => new
     {
         id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, logo = LogoFor(t), logoUrl = logos.Url(t.Id),
-        running = apps.IsRunning(t.Id), custom = t.Custom
+        running = apps.IsRunning(t.Id), custom = t.Custom, website = t.IsWebsite
     }).ToList();
 
     object StateObject() => new
@@ -690,8 +699,13 @@ sealed partial class MainForm : Form
 
     // --- Apps and the Home menu ----------------------------------------------------------------
 
+    // Apps whose "Opening X" the user took away (Home or B) before their window came: it opens
+    // behind the launcher instead of over the menu or home screen now in front.
+    readonly HashSet<string> launchDismissed = new();
+
     void Open(string id)
     {
+        launchDismissed.Remove(id);
         apps.Adopt(id); // already open without our knowing: switch to it, no second copy
         if (apps.IsRunning(id)) { SwitchTo(id); return; }
         var name = apps.Get(id)?.Name ?? id;
@@ -717,6 +731,12 @@ sealed partial class MainForm : Form
             if (!apps.IsRunning(id)) { AppDidntOpen(id, $"{name} didn’t open", "It closed while starting.", retry: true); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
+            if (launchDismissed.Remove(id))
+            {
+                Post(new { type = "opened", id, ok = true });
+                Log.Info($"{id} window up after {waited + 250} ms: left behind the launcher (Home or B while it opened)");
+                return;
+            }
             var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
             var how = Native.ForceForeground(window);
             StepAside(id);
@@ -731,7 +751,12 @@ sealed partial class MainForm : Form
     {
         if (id == DesktopMode.Id) { ShowDesktop(); return; } // B in the menu opened over the desktop
         var window = apps.MainWindow(id);
-        if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
+        if (window == IntPtr.Zero)
+        {
+            Post(new { type = "toast", text = "That app is no longer open", kind = "warn" });
+            Post(new { type = "opened", id, ok = false }); // a tile's "Opening X" (Open: running) goes
+            return;
+        }
         // Back to the app (B or its row in the Home menu): one change on screen, the app raised
         // and activated over the launcher. Its window is not otherwise touched (FillScreen only
         // when it does not fill the screen already), and the launcher hides behind it later.
@@ -1020,7 +1045,8 @@ sealed partial class MainForm : Form
         }
     }
 
-    // Dev and test hooks:
+    // Dev and test hooks, answered only with --dev (Start-Launcher.ps1 -Dev): in a release any
+    // program the user runs could otherwise press the controller's buttons or put the box in standby.
     //   PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Standby"), 1 = enter standby /
     //     0 = wake / 2 = enter standby leaving the TV as it is, 0)
     //   PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Pad"), buttons | LT << 16 | RT << 24,
@@ -1035,13 +1061,13 @@ sealed partial class MainForm : Form
     {
         if (m.Msg == DesktopMode.BackToTvMessage) { BackToTv(); return; } // HtpcLauncher.exe --tv
         if (m.Msg == WM_DISPLAYCHANGE) ScreenChanged("display change"); // MainForm.Screen.cs; on to WinForms too
-        if (m.Msg == StandbyMessage && standby is not null)
+        if (options.Dev && m.Msg == StandbyMessage && standby is not null)
         {
             if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone
             if (m.WParam != IntPtr.Zero) standby.Enter("message"); else standby.Wake("message");
             return;
         }
-        if (m.Msg == PadMessage)
+        if (options.Dev && m.Msg == PadMessage)
         {
             long w = m.WParam, l = m.LParam;
             controller.Inject(w == -1 ? null : new PadState((ushort)w, (byte)(w >> 16), (byte)(w >> 24),

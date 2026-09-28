@@ -130,6 +130,11 @@
   sent.length = 0;
   press('a');
   check('menu: A on the alert row runs its action', lastSent('alerts.act') && lastSent('alerts.act').id === 'app:stremio', JSON.stringify(sent));
+  // Reopen shows "Opening Stremio", which takes every press but Home and B until the host says
+  // the window is up: here, no host.
+  check('menu: while "Opening" shows, X does nothing under it', (press('x'), state.view === 'menu' && !lastSent('alerts.dismiss')));
+  press('b');
+  check('menu: B takes "Opening" away and tells the host', !$('opening').classList.contains('on') && lastSent('launchDismissed') && lastSent('launchDismissed').id === 'stremio' && state.view === 'menu');
 
   setFocus($('menu').querySelector('[data-close="youtube"]'));
   press('x');
@@ -187,9 +192,9 @@
   check('Wi-Fi: switch off while online only through it asks first', asked.length === 1 && /Turn Wi-Fi off/.test(asked[0].title) && !lastSent('wifi.radio'));
   WifiUI.press('x', node('wifi-current'));
   check('Wi-Fi: X on the network in use asks before forgetting it', asked.length === 2 && /Forget/.test(asked[1].title) && /offline/.test(asked[1].text));
-  WifiUI.press('a', node('wifi-net:3'));
+  WifiUI.press('a', node('wifi-net:[Old router]'));
   check('Wi-Fi: a WEP network is refused with the reason, no form', !WifiUI.joining && toasts.some((t) => /WEP/.test(t)));
-  WifiUI.press('a', node('wifi-net:0'));
+  WifiUI.press('a', node('wifi-net:[Network name 2]'));
   draw();
   const pw = document.getElementById('wifi-password-input');
   check('Wi-Fi: a locked network opens the password form', WifiUI.joining && pw && pw.type === 'password' && pw.autocomplete === 'off');
@@ -225,7 +230,19 @@
   WifiUI.demo('ethernet');
   state.section = 'wifi';
   reset('settings');
-  setFocus($('settings').querySelector('[data-id="wifi-net:0"]'));
+  // The host sorts the networks again with each scan: the focus stays on its network, and when
+  // that one goes, on the row nearest its place, not back on the section list.
+  const wnet = (ssid) => ({ ssid, signal: 50, words: 'good signal', security: 'wpa2psk', password: true, saved: false, connected: false });
+  const wstate = (names) => ({ type: 'wifi.state', adapter: true, radio: 'on', location: 'ok', wired: null, current: null, networks: names.map(wnet), wifiInternet: false, askRadioOff: false });
+  onHost(wstate(['[Net A]', '[Net B]', '[Net C]']));
+  setFocus($('settings').querySelector('[data-id="wifi-net:[Net B]"]'));
+  onHost(wstate(['[Net B]', '[Net C]', '[Net A]']));
+  check('Settings › Wi-Fi: the list sorted again: the focus stays on its network', focusedEl() && focusedEl().dataset.id === 'wifi-net:[Net B]', focusedEl() && focusedEl().dataset.id);
+  onHost(wstate(['[Net C]', '[Net A]']));
+  check('Settings › Wi-Fi: its network gone: the nearest row takes the focus, not the section list', focusedEl() && /^wifi-net:/.test(focusedEl().dataset.id), focusedEl() && focusedEl().dataset.id);
+  WifiUI.demo('ethernet');
+  render();
+  setFocus($('settings').querySelector('[data-id="wifi-net:[Network name 2]"]'));
   press('a');
   await tick();
   const typed = () => document.getElementById('wifi-password-input');
@@ -259,18 +276,18 @@
   reset('settings');
   const btNode = (id) => $('settings').querySelector(`[data-id="${id}"]`);
   check('Bluetooth: shown, the host lists devices', lastSent('bt.watch') && lastSent('bt.watch').on === true);
-  check('Bluetooth: paired headphones say sound plays there', btNode('bt-paired:0') && btNode('bt-paired:0').textContent.includes('sound plays here'));
+  check('Bluetooth: paired headphones say sound plays there', btNode('bt-paired:p1') && btNode('bt-paired:p1').textContent.includes('sound plays here'));
   setFocus(btNode('bt-new'));
   press('a');
-  check('Bluetooth: Pair a new device looks for devices', lastSent('bt.scan') && lastSent('bt.scan').on === true && !!btNode('bt-near:0'));
-  setFocus(btNode('bt-near:0'));
+  check('Bluetooth: Pair a new device looks for devices', lastSent('bt.scan') && lastSent('bt.scan').on === true && !!btNode('bt-near:n1'));
+  setFocus(btNode('bt-near:n1'));
   press('a');
   check('Bluetooth: A on a nearby device pairs it', lastSent('bt.pair') && lastSent('bt.pair').id === 'n1' && !!btNode('bt-pairing'));
   onHost({ type: 'bt.pin', id: 'n1', name: '[Keyboard]', pin: '482915' });
   check('Bluetooth: a keyboard\'s PIN is shown to type', btNode('bt-pin') && btNode('bt-pin').textContent.includes('482915'));
   onHost({ type: 'bt.result', id: 'n1', ok: true, text: '[Keyboard] paired' });
   check('Bluetooth: paired: back to the list, looking stops', !btNode('bt-pin') && !btNode('bt-pairing') && lastSent('bt.scan').on === false);
-  setFocus(btNode('bt-paired:1'));
+  setFocus(btNode('bt-paired:p2'));
   press('x');
   check('Bluetooth: X on a paired device asks before removing it', state.view === 'ask' && !lastSent('bt.forget'));
   press('b');
@@ -461,7 +478,8 @@
   const jf = tileEl('jellyfin'), yt = tileEl('youtube');
   setFocus(jf);
   press('x');
-  check('Home: X on a running tile asks to close it', state.view === 'confirm');
+  check('Home: X on a running tile asks to close it, on Cancel', state.view === 'confirm' && focusedEl() && focusedEl().dataset.id === 'confirm-cancel');
+  press('left');
   press('a');
   check('Home: closed, back on home without its entrance again', state.view === 'home' && $('home').classList.contains('stay') && lastSent('close').id === 'jellyfin');
   onHost({ type: 'state', running: [] });
@@ -614,6 +632,7 @@
   check('Logos: A on it asks for the logo back', lastSent('tile.icon').glyph === 'logo' && lastSent('tile.icon').id === 'netflix');
   reset('home');
   EXT.actions['tile-options'](tileEl('chosen'), 'chosen');
+  check('Tile options: open on their first item, not where the last ones were left', focusedEl() && focusedEl().dataset.id === 'opt-move', focusedEl() && focusedEl().dataset.id);
   setFocus($('tileopts').querySelector('[data-id="opt-icon"]'));
   press('a');
   check('Logos: a chosen glyph is the one picked, the logo still offered', ciNode('g-logo') && !ciNode('g-logo').classList.contains('on') && ciNode('g-moon').classList.contains('on'));

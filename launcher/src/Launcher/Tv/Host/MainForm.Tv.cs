@@ -10,6 +10,8 @@ sealed partial class MainForm
 {
     TvService CreateTv()
     {
+        // Elevated (TV Box Setup), the TV's files are written only into a locked ProgramData\HTPC.
+        TvFiles.ElevatedTrust = SetupElevation.UntrustedReason;
         var service = new TvService(new TvParts(
             settings.Tvs, settings.Save, TvDrivers.Create(TvNet.Instance), TvNet.Instance, SystemTvClock.Instance,
             new TvFiles(), Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, OnUi, () => setupMode)))
@@ -19,6 +21,7 @@ sealed partial class MainForm
             // Standby is made in OnLoad; until then the screen is on.
             ScreenOn = () => standby is null || !standby.Active,
             // Real input only (a button, a key, the phone): the launcher up on screen is no one.
+            // Both in UTC, as the TV clock is.
             LastUserInput = () => standby is null ? controller.LastInput : standby.LastUserInput(),
         };
         service.Changed += () => OnUi(PostTv);

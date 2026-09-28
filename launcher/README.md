@@ -7,15 +7,15 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 |---|---|
 | `ui/` | The web UI: Home, Home menu, Power, Sleep timer, Settings, Button maps. Laid out at 1920x1080 and scaled to the screen. Opened in a normal browser it runs on demo data with the keyboard as the controller (arrows, Enter = A, Esc = B, X, H = Home, P = hold Home). |
 | `src/Launcher/MainForm.cs` | Full-screen window hosting the UI; routes the controller, apps, power, volume, brightness and the sleep timer. |
-| `src/Launcher/ControllerService.cs` | XInput polling, Home button included (XInputGetStateEx); Home tap and 1 s hold (Power; in Moonlight, our menu). Start + D-pad is the volume in every app (`StartChord`): Start + Up / Down up or down by 2, repeating while held; Start + Left mute. Start's own action then comes as it is let go, and only without a direction; the D-pad alone is unchanged. Not in Moonlight (the game PC's buttons). Controller-preset apps read the pad themselves and see Start and the D-pad too. |
+| `src/Launcher/ControllerService.cs` | XInput polling, Home button included (XInputGetStateEx); Home tap and 0.5 s hold (Power; in Moonlight, our menu; in standby, wake with a buzz). Start + D-pad is the volume in every app (`StartChord`): Start + Up / Down up or down by 2, repeating while held; Start + Left mute. Start's own action then comes as it is let go, and only without a direction; the D-pad alone is unchanged. Not in Moonlight (the game PC's buttons). Controller-preset apps read the pad themselves and see Start and the D-pad too. |
 | `src/Launcher/AppManager.cs` | Starts the catalog's apps (`setup/catalog.json`), tracks them, finds their windows, closes them. Websites get their own Edge app window and profile (`EdgeSiteApp.cs`): full screen in Chromium's app mode (`--force-app-mode`, not Edge's InPrivate kiosk), so no "press and hold Esc to exit full screen" when they open, and Esc or F11 cannot take them out of it; a page's own full screen (a video player's) still says "Press Esc" for a moment. Every app opens filling the screen: its own switch where it has one (VacuumTube, Jellyfin `--tv --fullscreen`, Kodi `-fs`, Edge), else `fill` (Stremio, VLC, Moonlight, Plex HTPC, Spotify, Feishin): the launcher makes its main window cover the screen without a frame (`Native.FillScreen`), and again when it stops doing so for 2 s while in front (`KeepFilled`: VLC after a video leaves its own full screen). VLC also gets `--fullscreen --no-video-title-show --no-qt-video-autoresize` (videos full screen, no title over them, its window never shrunk to the video). `launch.env` variables go to the app's process (Feishin: `DISABLE_AUTO_UPDATES=1`). |
 | `src/Launcher/AppLogos.cs`, `LogoSources.cs`, `MainForm.Logos.cs` | The apps' real logos, taken from the apps themselves (none ship): a program's own icon at 256 px (the Shell's image factory, not the 32 px one), a website's own icon (its manifest's largest, then apple-touch-icon, then the largest favicon; https only, 512 KB at most, only real images of 64 px or more, drawn again as PNG; dark ones on a light plate). Cached in `%LOCALAPPDATA%\HTPC\logos\<id>.png` (the UI reads `https://logos.htpc/`), found in the background: when the UI is up, a tile is added, an app installed, and every 10 minutes for the missing ones (a site out of reach: 10 minutes; one with no usable icon: a day). Tiles, library cards, the Home menu's rows and Button maps show them; the glyph stays without one, or when the user chose one (Change icon › Logo brings it back). Demo: `index.html#home?logos=1` reads `ui\logos\<id>.png` (not in the repo). |
 | `src/Launcher/SystemControls.cs` | Master volume (Core Audio), brightness dimmer layer. |
 | `src/Launcher/ScreenCapture.cs` | The Home menu's backdrop over an app: the screen through Desktop Duplication, halved on the GPU to 1920 wide, a JPEG, off the UI thread (GDI as the fallback); started at Home's press, one thrown away at start (the first is slow). The launcher's layers over apps (brightness, alerts, volume) are left out of it (WDA_EXCLUDEFROMCAPTURE). |
 | `src/Launcher/Standby.cs` | Sleep modes (Settings): screen off (standby: pause playback, video output off, apps in Efficiency mode; hold Home 0.5 s to wake, with a buzz), Windows sleep, hibernate. Idle timer counts the controller. Settings in `%LOCALAPPDATA%\HTPC\settings.json`. |
-| `src/Launcher/Tv.cs` | TV control (Roku ECP): found by SSDP, matched by EDID, one profile per TV; off/on with the box, follows the TV's own remote. |
+| `src/Launcher/Tv/` | TV control (SPEC N7), below: `TvService`, five drivers, pairing, `TvStore`; the launcher's side in `Tv/Host/MainForm.Tv.cs`; the screens (setup's TV steps, Settings › TV) in `ui/tv.*`. Checked against simulated TVs by `dev/TvLab`. |
 | `src/Launcher/KeyboardForm.cs`, `TextFieldWatcher.cs`, `ui/keyboard.*` | On-screen keyboard (SPEC N11): a band across the bottom of the screen, always, over the app, that never takes the focus, so its keys (SendInput) land in the app's text field. Pops up when a text field gets the focus in an app on the Mouse or Keyboard preset (UI Automation focus events, only listened to while such an app is in front), R3 opens it anywhere but Moonlight. A type, X delete, Y space, LT shift, LB/RB move the cursor, Start Enter, Select shows a password, B closes (and it stays closed for that field). A last row has what a controller lacks: Tab, refresh, zoom, full screen, volume, mute. |
-| `src/Launcher/SetupRunner.cs`, `SetupElevation.cs`, `ui/setup.*` | Setup mode, "TV Box Setup" (`--setup`, or "setup" in the exe's name, unless `--home`; design: First-run setup): welcome, controller check (each button once; Hold Home skips), find the TV, pick apps (they become the home tiles), install (setup\setup.ps1, started directly with no prompt; live progress from `setup-progress.json`), done; then the installed launcher takes over. The one Windows permission prompt (UAC) comes as setup opens and names it: without administrator rights it starts itself again elevated (runas, same arguments plus `--elevated`) and ends; declined, a screen says setup needs them (A try again, B quit). No requireAdministrator manifest: the same exe is the launcher, which never runs elevated. Everything the elevated wizard starts for the user runs as the signed-in user, not elevated: the installed watchdog (or launcher) at the end through a one-shot scheduled task (`AsUser`, as Install-Launcher and the watchdog do), or, with no launcher installed, a copy of itself as the home screen (`--home`). It has its own WebView2 profile (`%LOCALAPPDATA%\HTPC\setup-webview`; the launcher's stays `launcher-webview`), and its single-instance mutex lets the user in (an elevated one's default would lock out the watchdog and the launcher). Files it writes in `C:\ProgramData\HTPC\tv` on a new box become user-writable with the Library step (setup.ps1). |
+| `src/Launcher/SetupRunner.cs`, `SetupElevation.cs`, `ui/setup.*` | Setup mode, "TV Box Setup" (`--setup`, or "setup" in the exe's name, unless `--home`; design: First-run setup): welcome, controller check (each button once; Hold Home skips), find the TV, pick apps (they become the home tiles), install (setup\setup.ps1, started directly with no prompt; live progress from `setup-progress.json`), done; then the installed launcher takes over. The one Windows permission prompt (UAC) comes as setup opens. It is for Windows' command processor (`System32\cmd.exe /d`), never for this exe where it lies: the exe unpacks itself (code, `ui\`, `setup\`, the watchdog) where .NET says, by default a folder the user can write, and setup would run and install those files as administrator. So cmd copies the exe to `Program Files\HTPC\Setup\TV Box Setup.exe` (admin-only), clears the .NET profiler, startup-hook and diagnostics variables, and starts that copy (`--setup --elevated`, plus `--no-tv`/`--windowed`; never `--ui`, `--catalog` or `--dev`) with `DOTNET_BUNDLE_EXTRACT_BASE_DIR` = `Program Files\HTPC\Setup\bundle`. An elevated setup started anywhere else (Run as administrator) moves there the same way, with no prompt; one that still isn't there stops. Declined, a screen says setup needs the rights (A try again, B quit). In setup mode the page may only send setup's own messages (ready, install, finish, restart, `tv.*`, `wifi.*`, `text.*`). No requireAdministrator manifest: the same exe is the launcher, which never runs elevated. Everything the elevated wizard starts for the user runs as the signed-in user, not elevated: the installed watchdog (or launcher) at the end through a one-shot scheduled task (`AsUser`, as Install-Launcher and the watchdog do), or, with no launcher installed, a copy of itself as the home screen (`--home`). Nothing elevated writes in the user's profile (a link they planted could send the write anywhere): the wizard keeps its WebView2 profile (`webview`), log (`logs\launcher.log`), temp files and logos in `Program Files\HTPC\Setup` (admin-only); its settings (tiles, TV) go to `Program Files\HTPC\Setup\settings.json`, which the launcher takes in as the user at its next start (`LauncherSettings.Load`); the apps' first-run files, Startup shortcuts and prefs are the launcher's to do at its start. The wizard locks `C:\ProgramData\HTPC` first (`Register-AppInstaller.ps1 -LockOnly`, `SetupRunner.LockData`) and writes the TV's files in `tv\` only then, each as a new file moved over the old one (`TvFiles.WriteAtomic`). Its environment is Windows' own, not the one it was started with (elevated, a process gets the user's HKCU\Environment too): cmd sets Windows' folders, PATH, PSModulePath and TEMP and clears the .NET switches before the copy starts, and the copy then remakes its whole environment for itself and all it starts (`SetupElevation.CleanEnvironment`): the machine's variables (HKLM), expanded with Windows' folders and each other only; SystemRoot, windir, SystemDrive, ProgramFiles, ProgramFiles(x86), ProgramW6432, CommonProgramFiles(,x86, W6432), ProgramData, ALLUSERSPROFILE, PUBLIC and COMPUTERNAME from Windows; USERNAME, USERDOMAIN, USERPROFILE, HOMEDRIVE, HOMEPATH, APPDATA and LOCALAPPDATA from the account; TEMP/TMP `Program Files\HTPC\Setup\temp`; PSModulePath Windows' and Program Files' module folders only (never the user's Documents one); HTPC_SETUP_WIZARD=1. Everything else is dropped: the user's own variables and PATH additions, and every COMPlus_*, DOTNET_*, CORECLR_*, COR_* and WEBVIEW2_* variable. (setup\lib\Common.ps1 does the same for any elevated or SYSTEM script, and setup.ps1 and Start-Job.ps1 reset PSModulePath first of all.) Its single-instance mutex lets the user in (an elevated one's default would lock out the watchdog and the launcher). |
 | `src/Launcher/SleepTimer.cs`, `MediaWatcher.cs`, `MainForm.Timer.cs` | Sleep timer (SPEC N14): a countdown or "when this video ends", warning 1 minute before (Home = +15 min). MediaWatcher reads Windows' media sessions only while needed (the timer, standby, the phone): what plays, its app, title, timeline; play/pause/next/seek; pauses anything that starts playing in standby. VideoEndDetector decides when "this video" has ended (autoplay moving on counts; a pause after 5 min; an ad does not; 3 h cap). `dev/Show-MediaSessions.ps1` lists what apps report (read-only). |
 | `src/Launcher/VolumeOsd.cs`, `VolumeWatch` (AudioOutputs.cs) | The volume indicator: a small card at the top left over everything for 2 s after any change of the volume or mute, whoever made it (Windows' IAudioEndpointVolumeCallback: the controller, the phone, a keyboard's volume keys, Settings), with the output's name for 3 s when the sound moves to another output (checked each second, at once after a switch from the launcher). Same look and kind of window as the alerts; hidden in standby. It replaces the "Volume 45" alert card. |
 | `src/Launcher/AlertsForm.cs` | The overlay over apps (design: Alerts): alert cards at the top right, painted with GDI+ into a layered window (per-pixel alpha, click-through, never takes the focus, left out of the Home menu's screen capture), above the brightness layer, clear of the on-screen keyboard, hidden in standby. `Show(OverlayView)`, `Hide()`, `Hidden`. Icons come from `ui/icons.js`. |
@@ -26,12 +26,19 @@ host with a WebView2 web UI. Design: the "TV Box Launcher" canvas.
 | `src/Launcher/ForeignWindowWatch.cs` | `--dev`: logs any new window that is neither the launcher's nor its apps' (a prompt nobody can answer with the controller). |
 | `src/Launcher/ButtonMap.cs`, `PadMapper.cs`, `Input.cs` | Button presets (SPEC N13): Mouse (Edge, Twitch, Stremio, websites) and Keyboard. Applied to the app in front on the controller thread, sent with SendInput; pointer and scroll speed from Settings › Controller. Controller preset = the app reads the pad itself. |
 | `src/Launcher/ButtonMapStore.cs`, `MainForm.Maps.cs`, `ui/buttons.js` | Button maps per tile (SPEC N13; design: Button maps, Button map editor): a preset and the buttons changed on top of it, kept in settings.json (`buttonMaps`, plain strings such as `"start": "key:F"`, read leniently). Keys and combinations (Ctrl, Alt, Shift), clicks, media keys, volume, launcher actions (Home menu, keyboard, Power, sleep timer), nothing; sticks as pointer, scroll, arrows. R3 is the keyboard unless changed; Home is fixed; Controller-preset apps take no changes (the app reads the pad itself). "Other windows" is the map for windows that are not catalog apps. The editor: Settings › Controller › Button maps, or Buttons in the Home menu (the app it was opened over). |
-| `ui/settings-more.*`, `src/Launcher/MainForm.Settings.cs`, `DecodeCheck.cs`, `AudioOutputs.cs`, `SystemInfo.cs` | Settings › Controller (battery, button test, rumble, pointer / slow pointer / scroll speed, show the keyboard automatically, Button maps), Sound (output: TV, soundbar, Bluetooth, switched for every role through IPolicyConfig, listed only if Windows refuses; volume; test sound). The volume is one level for the box whatever the output: Windows keeps one per output (HDMI often at 100), so a switch first gives the new output the level and mute the box is at, then makes it the default, and the slider reads the new output; `CoreAudio` (AudioOutputs.cs) is the one place the Core Audio enumerator is made, Display (brightness; the hardware decoding check: `setup\tools\Test-HwDecode.ps1 -Json -NoPlayback` in the background, report kept in `C:\ProgramData\HTPC\logs\hwdecode-last.json`), About (Desktop mode, box, versions, hardware; restart the launcher, save the logs to a USB stick, run setup again). Demo routes: `index.html#settings/controller` and so on. |
+| `ui/settings-more.*`, `src/Launcher/MainForm.Settings.cs`, `DecodeCheck.cs`, `AudioOutputs.cs`, `SystemInfo.cs` | Settings › Controller (battery, button test, rumble, pointer / slow pointer / scroll speed, show the keyboard automatically, Button maps), Sound (output: TV, soundbar, Bluetooth, switched for every role through IPolicyConfig, listed only if Windows refuses; volume; test sound). The volume is one level for the box whatever the output: Windows keeps one per output (HDMI often at 100), so a switch first gives the new output the level and mute the box is at, then makes it the default, and the slider reads the new output; `CoreAudio` (AudioOutputs.cs) is the one place the Core Audio enumerator is made, Display (brightness; the hardware decoding check: `setup\tools\Test-HwDecode.ps1 -Json -NoPlayback` in the background, report kept in `%LOCALAPPDATA%\HTPC\logs\hwdecode-last.json`), About (Desktop mode, box, versions, hardware; restart the launcher, save the logs to a USB stick, run setup again). Demo routes: `index.html#settings/controller` and so on. |
 | `ui/app.js` (added screens), `src/Launcher/MainForm.Messages.cs` | How features plug in: `settingsSection`, `addView`, `onAction`, `hostMessage`, `ask` in app.js; `[UiMessages("prefix.")]` and `[UiReady]` methods in any MainForm part. |
 | `src/Launcher/MainForm.Library.cs`, `LibraryService.cs`, `TileStore.cs`, `StartMenuScanner.cs`, `ui/library.*` | App library and tile editing (SPEC W1, W5). The Add tile screen (Library / On this box / Website), Tile options (Start on a home tile: move, rename, change icon, remove), and installing/uninstalling from the TV. `LibraryService` owns the install queue and starts the `\HTPC\Jobs` scheduled task (machine-scope apps, elevated as SYSTEM, no prompt on the TV) or runs winget itself for per-user apps; it never lets a standard process run anything but an install/uninstall of a catalog id. Custom tiles (added websites, programs) and per-tile edits live in `settings.json` (`CustomTiles`, `TileEdits`); AppManager merges them so they launch like catalog apps. `library.js` registers its screens through app.js's addView / onAction / hostMessage registry; `MainForm.Library.cs` handles the `library.*` / `tile.*` messages through the UiMessages registry. |
 | `phone/`, `src/Launcher/Phone*.cs`, `MainForm.Phone.cs`, `ui/phone-settings.*`, `ui/qr.js` | The phone remote (SPEC N8), below. |
-| `src/Watchdog/Watchdog.cs` | HtpcWatchdog.exe, the Windows shell of the TV account (setup's Shell step): starts the launcher, starts it again after a crash, a kill or a 60 s hang; box restart once, then the Windows desktop, after repeated fast exits; pauses; a "One moment…" screen while it restarts. .NET Framework (Windows' own csc.exe, C# 5, built by Launcher.csproj), a few MB. Log: `C:\ProgramData\HTPC\logs\watchdog.log`. |
+| `src/Watchdog/Watchdog.cs` | HtpcWatchdog.exe, the Windows shell of the TV account (setup's Shell step): starts the launcher, starts it again after a crash, a kill or a 60 s hang; box restart once, then the Windows desktop, after repeated fast exits; pauses; a "One moment…" screen while it restarts. .NET Framework (Windows' own csc.exe, C# 5, built by Launcher.csproj), a few MB. Log: `%LOCALAPPDATA%\HTPC\logs\watchdog.log`. |
 | `src/Launcher/Shell.cs`, `MainForm.Shell.cs` | Desktop mode (Power menu, confirmed): Explorer for maintenance, Home still works over it; Back to TV (Power menu, or `HtpcLauncher.exe --tv`, the desktop shortcut) closes it. `--restarted` (from the watchdog) leaves the TV as it is. Apps start with the user's environment built afresh (PATH after installs). WebView2 that cannot start: the launcher exits for the watchdog to start it again. |
+| `ui/sounds.js` | Interface sounds (SPEC N2; Settings › Sound: Off, Low, Medium; Low by default): short, soft sounds made with the Web Audio API from oscillators and noise, no audio files. What a press did picks its sound (a move, a list's end, a toggle, a view opening), plus the Home menu coming up over an app and an alert's card. None while the launcher is hidden or blank, while a text field has the focus, or in setup. The WebView starts with `--autoplay-policy=no-user-gesture-required`: the controller's presses reach the page as host messages, not gestures. |
+| `ui/selftest.js`, `ui/audit.js` | The page's own checks (`dev/Test-Ui.ps1 -SelfTest`) and the UI audit, a focus walker over every view in a stress state (below, "Build and run on the box"). **Every new view must be in the audit walker.** |
+| `src/Launcher/WebViewGuard.cs`, `LauncherOrigin.cs`, `WebViewRecovery.cs` | The launcher's WebViews (its page, the keyboard's) show only its own pages (`https://launcher.htpc/`, `ui\` mapped in), and only those may send it messages: a navigation elsewhere, in the page or a frame, is cancelled, a new window never opens, each refusal is logged. A WebView process that fails: an ended renderer reloads at once, then after 2, 10, 30 and 60 s, and a sixth time within 10 minutes restarts the launcher; a hung one reloads, and again within 5 minutes restarts; a second GPU-process loss within an hour renews the browser process (Chromium would otherwise composite in software, sluggish at 4K on any GPU); an ended browser process restarts. Restart = the launcher exits and the watchdog starts it afresh. |
+| `src/Launcher/MainForm.Screen.cs` | The screen the launcher fills, followed through display changes: a box restarted at night with the TV off comes up on Windows' placeholder monitor; when the TV comes on (1080p, 1440p, 4K, any scaling) or another screen becomes the primary one, the window and its layers over apps (brightness, alerts, volume, the keyboard's band) are fitted to it again, half a second after Windows settles. Per-monitor DPI aware; the pages follow the scaling themselves. |
+| `src/Launcher/LauncherHandoff.cs` | What a launcher about to go away tells the next one (`%LOCALAPPDATA%\HTPC\handoff.json`, read once, ignored when old): after a launcher update or a night's restart for Windows updates the new one goes straight back to standby and sends the TV nothing, as if nothing happened. |
+| `src/Launcher/MainForm.SetupGuard.cs` | Setup mode while setup.ps1 installs: installers' own windows do not stay over the wizard (it stays on top and comes forward again, never over Windows' permission prompt); after any mouse or keyboard input it stands back for a minute, and a window that comes back in front three times is left there. |
+| `src/Launcher/SoakLog.cs`, `MainForm.Soak.cs` | Soak telemetry, the box running for weeks as the shell: once an hour (the first 10 minutes after the start) one log line with the launcher's and its WebView2 processes' private bytes, handles, GDI and USER objects, so a leak shows as a slope. |
 
 Home over an app: the launcher captures the screen, shows the Home menu with the capture
 dimmed behind it, and the app keeps running underneath. B or the app's row returns to it.
@@ -51,6 +58,38 @@ second at most). The log has each step: `Home over <app>: backdrop ready`, `Home
 ready` (decoded, drawn), `Launcher up in … (shown, foreground, pointer, focus); menu on screen …
 after Home`; a slow capture says where its time went. A first capture at start (`Screen capture
 ready`) makes the first Home as quick as the next ones.
+
+## TV control
+
+`src/Launcher/Tv/` (SPEC N7). `TvService.cs` finds, binds and drives the TV of the screen the box
+is on: on with its input at start and wake, off at standby and shut down (not restart), standby
+when the TV is turned off (polled every 5 s). A TV is bound only by the user's pick or on positive
+evidence (on, showing the input the EDID names, while the TV settings are on screen, with no
+identical TV around); nothing goes to a TV the box doubts (a paused profile) or under `--no-tv`,
+not even Wake-on-LAN. Every driver talks only to the bound TV: its identity is checked at that
+address right before a key (and Google TV's TLS key is pinned when it pairs).
+
+| File | What |
+|---|---|
+| `RokuDriver.cs` | Roku: ECP, HTTP on port 8060, found by SSDP; a key only after that address answered with the TV's serial seconds before (the network has another Roku). The first version's requests are the golden traces in `dev/TvLab/golden/roku`. |
+| `WebOsDriver.cs` (beta) | LG webOS: SSAP over wss on 3001, "Allow" once on the TV, on by Wake-on-LAN. |
+| `AndroidTvDriver.cs`, `Protobuf.cs` (beta) | Google TV / Android TV Remote protocol v2: paired once over TLS on 6467 with the code the TV shows, keys on 6466; Chromecasts and Nest devices left out. |
+| `BraviaDriver.cs` (beta) | Sony Bravia REST API (plain HTTP, as the TV requires), a 4-digit PIN once, on by Wake-on-LAN. |
+| `TizenDriver.cs` (beta) | Samsung Tizen, on and off only: power read on 8001, keys over wss on 8002 with the token "Allow" gives. |
+| `TvPairing.cs` | The methods whose TV accepts the box once; pairing starts only from the user's pick of a TV, never under `--no-tv`. |
+| `Edid.cs` | The screen's HDMI identity and the TV input it is plugged into (the CEC physical address the TV writes into the EDID), for every brand, without the network. |
+| `TvModel.cs` | A profile per TV keyed by EDID, kept in settings.json (the first, Roku-only version's names still load), and `ITvDriver`. |
+| `TvStore.cs` | `TvFiles`: `%ProgramData%\HTPC\tv`, one set per box: the address cache (so settings.json is written only when a setting changes) and `TvCredentials` (DPAPI in machine scope with entropy of our own, the file readable by this user, SYSTEM and Administrators only; never logged). |
+| `TvNet.cs` | SSDP and mDNS on the LAN adapters only (not virtual ones), Wake-on-LAN, `TvHttp` (no proxy, never a redirect, TVs' own certificates accepted). |
+| `TvClock.cs`, `TvNotices.cs`, `TvUiState.cs` | The clock (TvLab's is virtual), alerts about the TV, and what the screens show (the driver list: every brand, the beta ones marked). |
+| `Host/MainForm.Tv.cs` | The launcher's side: the service built from its parts, the `tv.*` messages of setup's TV steps and Settings › TV (`ui/tv.*`). |
+
+`dev/TvLab` (not shipped) compiles those sources, without `Host\`, against simulated TVs on
+127.0.0.1 with a virtual clock, where minutes of TV behaviour replay in a moment:
+`dotnet run --project launcher\dev\TvLab` runs every check that needs no network (the golden
+Roku traces, binding, doubts, `--no-tv`, notices, EDID fixtures, Wake-on-LAN packets, the
+credentials file, the LG, Google, Sony and Samsung fakes); `-- discover` searches the real
+network with every method, read-only. The release workflow runs it before publishing.
 
 ## Phone remote
 
@@ -165,8 +204,13 @@ and a page of another version reloads). Volume/mute, the sleep timer and what pl
 small interfaces (`PhoneAdapters.cs`) over AudioVolume, SleepTimer and MediaWatcher
 (`MainForm.Phone.cs`); the pairing code and "Phone remote connected" are alerts (IAlerts). The
 state message carries `phone: { url, paired, pairingOpen }` (the address to scan, a phone has
-paired, new phones need no code) for the home screen's "Add the remote to your phone" card (not
-drawn yet: first-run and TV work), and `ui/qr.js` has `qrSvg(text, px)`.
+paired, new phones need no code) for the home screen's "Add the remote to your phone" card
+(`ui/phone-card.*`, dismissible), and `ui/qr.js` has `qrSvg(text, px)` (after Project Nayuki's
+library, MIT: THIRD-PARTY-NOTICES.txt). Also: `PhonePairing.cs` (phones and Shortcut keys, kept
+as hashes; the code and its locks), `PhoneNetwork.cs` (the Host and Origin names a request may
+use: tv.local, the computer's names, its addresses; nothing else, against DNS rebinding),
+`PhoneLinks.cs` (which tile a link opens in; only a YouTube video's checked id reaches
+VacuumTube), `PhonePointer.cs` (the touchpad's speed curve).
 
 VacuumTube and links: it has no single-instance lock (a second start opens a second window), so
 a YouTube link restarts it: `VacuumTube.exe --fullscreen -- https://www.youtube.com/watch?v=ID`.
@@ -187,7 +231,9 @@ field; its own requests never cross the inbound rule, so the real test is a phon
 
 ## Updates (SPEC N10: nothing updates unless asked)
 
-Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm.Updates.cs`):
+Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm.Updates.cs`;
+`UpdateRules.cs` holds the rules that need no network, tested in LauncherTests: versions, where
+GitHub's redirects may go, when the quiet check is due, an hour's wait after a failed one):
 
 - **Checks:** once a day, two minutes into standby, the launcher (its newest release's
   `update.json`) and the apps (`setup/tools/Get-AppUpdates.ps1`, read-only, as the user: winget,
@@ -198,15 +244,20 @@ Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm
   restore point first, then the apps, the launcher last); Windows updates now or "Tonight"
   (02:00 to 05:00 while in standby, then a quiet restart: the TV stays off and the box comes
   back in standby). Defender's definitions come with the Windows updates and are not counted.
-- **The launcher's own update** (`setup/lib/LauncherUpdate.ps1`, run as SYSTEM): only at Home or
-  in standby, never with an app in front, and only with the watchdog running (it starts the new
-  launcher). The job downloads release v<x.y.z> itself, checks it, pauses the watchdog, and says
-  "ready"; the launcher shows "Restarting…", leaves a handoff (`%LOCALAPPDATA%\HTPC\handoff.json`:
+- **The launcher's own update** (`setup/lib/LauncherUpdate.ps1`, run as SYSTEM): swapped only at
+  Home or in standby, never with an app in front, and only with the watchdog running (it starts
+  the new launcher). The job downloads release v<x.y.z> itself at once (low priority, a video can
+  keep playing), checks it, and says "ready"; the launcher waits until it is at Home or in
+  standby, shows "Restarting…" and says so (the event `Local\HtpcLeaving_<version>_<pid>`); only
+  then does the job pause the watchdog and say "leave" (not at Home within 3 hours: it gives up,
+  nothing moved or stopped). The launcher leaves a handoff (`%LOCALAPPDATA%\HTPC\handoff.json`:
   back to standby, no TV on) and exits with code 75; the job swaps the files (journaled, with
   write-through renames) and waits up to 3 minutes for the new launcher to say it is healthy
   (the event `Local\HtpcHealthy_<version>_<pid>`, once its UI is ready and the controller thread
   runs), otherwise it puts the old one back. A power cut at any step is put right when Windows
-  starts (`reconcile`).
+  starts (`reconcile`). Once the new launcher is healthy, the machine part of setup's Edge and
+  System steps runs again when their scripts changed (setup/README.md, "What an update applies");
+  whatever needs the signed-in user (HKCU, the phone remote's certificate) waits for TV Box Setup.
 - **A newer WebView2 runtime** (Edge's updater installs it) is taken at the next standby: the
   launcher's WebViews close and open again, no restart.
 - **The apps' own updaters** are off where they can be: VacuumTube's (catalog
@@ -238,10 +289,12 @@ on the machine changes. Run it as SYSTEM too (a one-off scheduled task, in the t
 `New-Release.ps1` sets the one version (`Directory.Build.props`), builds it once as a check
 (`Build-Release.ps1`: `TV-Box-Setup.exe`, `setup.zip`, `update.json`, `.sha256` files in
 `launcher\dist\release`), commits and tags. The pushed tag runs `.github/workflows/release.yml`:
-build (read-only token, SDK from `global.json`, NuGet in locked mode), publish the release (the
-only step that can write), then `Test-ReleaseAssets.ps1` downloads it again the way a box does
-and checks every file; a mismatch turns the release back into a draft. Boxes see it at their
-next daily check. `Build-Release.ps1` alone is the dry run (nothing is published).
+the tests (every `launcher\tests\*` project and TvLab with `dotnet run -c Release`, and
+`setup\test\Test-Updates.ps1`; any failure publishes nothing), build (read-only token, SDK from
+`global.json`, NuGet in locked mode), publish the release, not as "latest" yet (the only step
+that can write), then `Test-ReleaseAssets.ps1` downloads it again the way a box does and checks
+every file; only then is it made "latest", what boxes look at (a mismatch deletes the release,
+the tag stays: no box ever saw it). Boxes see it at their next daily check. `Build-Release.ps1` alone is the dry run (nothing is published).
 
 **What the box trusts, and what that leaves open.** There is no signing key (the user's choice:
 "just get the updates only from my repo"). A box installs a launcher only from
@@ -275,6 +328,14 @@ redirect chain and every file with the box's own code.
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1 -Keyboard # on-screen keyboard: click a field, type
     powershell -ExecutionPolicy Bypass -File launcher\dev\Publish-Setup.ps1          # launcher\dist\TV Box Setup.exe (68 MB, self-contained; 12 MB of it Kestrel)
 
+Send-Pad, Test-Presets and `Measure-StandbyPower.ps1` (the processor's power awake and in
+standby) drive the launcher through window messages (`HtpcLauncher.Pad`, `HtpcLauncher.Standby`)
+that only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`, with `-NoTv` while
+nobody watches the TV); a release, and the setup exe, ignore them. Also in `dev/`:
+`Build-Icon.ps1` (the launcher's icon from `art/`), `input-test.html` (a page showing the keys and
+clicks it gets, for Test-Presets), `library-uitest.html` (the library screens' checks),
+`New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`, `Run-NetProbe.ps1`, `TvLab` (above).
+
 Checks that need no box, controller or TV (`dotnet run` in each folder; exit code 0 = all passed):
 `launcher\tests\LauncherTests` (button maps, PadMapper, video end, sleep timer, decode-check
 parser, alerts overlay, the autostart guard on a fake registry, setup's elevation: its decisions,
@@ -289,9 +350,15 @@ and walked with the D-pad through `press()`, the controller's path. At each focu
 its ring and its zoom are whole inside every box that clips them, on screen, above the hints and
 not covered; and for the page: everything focusable is reached, nothing wraps round, B leaves,
 one hint bar shows, every press takes at most 50 ms (timed in a second, real-time run,
-`index.html#audit`). **Every new view must be in the walker**: an `auditPage()` in audit.js for
-each view (`addView`) and each Settings section (what to set up, how to open it); a view without
-one fails the audit. `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element.
+`index.html#audit`). As it walks it replays the host's periodic messages for the page (the clock,
+state pushes, the TV search, Wi-Fi scans in another order, install progress): the focus must stay
+put and nothing on screen may be drawn afresh (an entrance playing again). First-run setup
+(`setup.html#audit`: every step, the TV dialog, the Wi-Fi forms) and the on-screen keyboard
+(`keyboard.html#audit`) are walked too, and the launcher again at 1280x720, 2560x1080 and 1920x1200
+(the TV or monitor may be any size and shape: the stage scales and letterboxes). **Every new view
+must be in the walker**: an `auditPage()` in audit.js for each view (`addView`), each Settings
+section and each setup step (what to set up, how to open it); one without fails the audit.
+`-Shots "audit?page=home"` shows a page in its stress state, focus on its last element.
 
 A PC's headless Edge is not the TV: on the box the launcher draws 3840x2160 on the N97's GPU.
 The page times every press there too, from the press to the frame that shows it, and one over
@@ -312,4 +379,5 @@ written through WMI: HKCU written from inside the Claude app stays in its packag
 watchdog never sees it (if WMI fails, the watchdog is stopped instead). `-Restore` goes back:
 it lifts the pause, ends the dev build and starts the installed watchdog again (as the
 signed-in user, not elevated) if it is not running, which starts the installed launcher.
-Log: `C:\ProgramData\HTPC\logs\launcher.log`.
+Log: `%LOCALAPPDATA%\HTPC\logs\launcher.log` (the elevated setup's: `Program Files\HTPC\Setup\logs\launcher.log`;
+setup's own logs stay in `C:\ProgramData\HTPC\logs`, now admin-write).

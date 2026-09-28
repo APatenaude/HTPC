@@ -23,18 +23,34 @@ sealed class TvFiles
 
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    /// <summary>Written in full to a temporary file, then moved over the old one: never half a file.</summary>
+    /// <summary>
+    /// Why a folder is not safe for an elevated write, or null (the launcher's
+    /// SetupElevation.UntrustedReason, set by the host; TvLab never runs elevated). Elevated
+    /// without one, nothing is written.
+    /// </summary>
+    internal static Func<string, string?>? ElevatedTrust;
+
+    /// <summary>
+    /// Written in full to a new file of an unguessable name, then moved over the old one: never
+    /// half a file, and never through a file already there (tv\ is the user's to write: a link or
+    /// hard link planted in the old one's or a temp name's place is replaced, not written through).
+    /// Elevated (TV Box Setup), only once C:\ProgramData\HTPC is setup's (owned by Administrators,
+    /// locked: SetupRunner.LockData), so tv\ cannot be a link or be swapped for one.
+    /// </summary>
     internal static void WriteAtomic(string path, byte[] data, FileSecurity? security = null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temp = path + ".tmp";
-        if (security is null) File.WriteAllBytes(temp, data);
-        else
+        var dir = Path.GetDirectoryName(path)!;
+        if (Environment.IsPrivilegedProcess)
         {
-            File.Delete(temp);
-            using var stream = new FileInfo(temp).Create(FileMode.CreateNew, FileSystemRights.FullControl, FileShare.None, 4096, FileOptions.None, security);
-            stream.Write(data);
+            var why = ElevatedTrust is null ? "no trust check" : ElevatedTrust(Path.GetDirectoryName(dir)!);
+            if (why is not null) throw new IOException($"not written elevated: {why}");
+            if (Directory.Exists(dir) && File.GetAttributes(dir).HasFlag(FileAttributes.ReparsePoint)) throw new IOException($"not written elevated: {dir} is a link");
         }
+        Directory.CreateDirectory(dir);
+        var temp = Path.Combine(dir, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        using (var stream = security is null ? new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)
+                   : new FileInfo(temp).Create(FileMode.CreateNew, FileSystemRights.FullControl, FileShare.None, 4096, FileOptions.None, security))
+            stream.Write(data);
         File.Move(temp, path, overwrite: true);
     }
 
@@ -146,7 +162,7 @@ sealed class TvCredentials
         public byte[]? Pfx { get; set; }
         /// <summary>LG: "wss" or "ws", the scheme the key was paired over (the key never goes over another).</summary>
         public string? Scheme { get; set; }
-        /// <summary>The TV's TLS key hash (SHA-256 of its public key), for connections that must reach that TV only (Samsung).</summary>
+        /// <summary>The TV's TLS key hash (SHA-256 of its public key), for connections that must reach that TV only (Samsung, LG over wss).</summary>
         public string? Pin { get; set; }
     }
 

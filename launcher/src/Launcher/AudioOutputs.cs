@@ -205,6 +205,20 @@ static class CoreAudio
         [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
         [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
         [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
+        [PreserveSig] int RegisterEndpointNotificationCallback(IMMNotificationClient client);
+        [PreserveSig] int UnregisterEndpointNotificationCallback(IMMNotificationClient client);
+    }
+
+    [StructLayout(LayoutKind.Sequential)] public struct PropKey { public Guid Format; public int Id; }
+
+    [ComImport, Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMMNotificationClient
+    {
+        [PreserveSig] int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string id, int state);
+        [PreserveSig] int OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string id);
+        [PreserveSig] int OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string id);
+        [PreserveSig] int OnDefaultDeviceChanged(int flow, int role, [MarshalAs(UnmanagedType.LPWStr)] string? id);
+        [PreserveSig] int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string id, PropKey key);
     }
 
     [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -356,6 +370,52 @@ static class CoreAudio
         }
     }
 
+    /// <summary>
+    /// Calls back when any output or input comes, goes, or changes state (plugged, unplugged,
+    /// disabled), or the default changes: on a thread of Windows' own, where Core Audio must not
+    /// be called (the callback only takes note). Dispose to stop.
+    /// </summary>
+    public static IDisposable WatchDevices(Action changed)
+    {
+        var enumerator = NewEnumerator();
+        try { return new DeviceWatcher((IMMDeviceEnumerator)enumerator, enumerator, changed); }
+        catch (Exception) { Release(enumerator); throw; }
+    }
+
+    [ComVisible(true)]
+    sealed class DeviceWatcher : IMMNotificationClient, IDisposable
+    {
+        readonly IMMDeviceEnumerator devices;
+        readonly object enumerator;   // kept while registered
+        readonly Action changed;
+        bool registered;
+
+        public DeviceWatcher(IMMDeviceEnumerator devices, object enumerator, Action changed)
+        {
+            this.devices = devices;
+            this.enumerator = enumerator;
+            this.changed = changed;
+            Marshal.ThrowExceptionForHR(devices.RegisterEndpointNotificationCallback(this));
+            registered = true;
+        }
+
+        int Changed() { try { changed(); } catch (Exception) { } return 0; }
+        public int OnDeviceStateChanged(string id, int state) => Changed();
+        public int OnDeviceAdded(string id) => Changed();
+        public int OnDeviceRemoved(string id) => Changed();
+        public int OnDefaultDeviceChanged(int flow, int role, string? id) => Changed();
+        public int OnPropertyValueChanged(string id, PropKey key) => 0; // names, formats: not the volume's concern
+
+        public void Dispose()
+        {
+            if (!registered) return;
+            registered = false;
+            try { devices.UnregisterEndpointNotificationCallback(this); }
+            catch (Exception) { }
+            Release(enumerator);
+        }
+    }
+
     // AUDIO_VOLUME_NOTIFICATION_DATA: the event's GUID, then bMuted and fMasterVolume.
     [ComVisible(true)]
     sealed class Watcher : IAudioEndpointVolumeCallback, IDisposable
@@ -422,6 +482,11 @@ static class CoreAudio
 /// keyboard's volume keys, Settings, another app): Windows calls back on a thread of its own.
 /// And the default output itself changing: Poll, each second and right after the launcher
 /// switched it, moves the watch to the new one. For the volume indicator (VolumeOsd).
+///
+/// A watch lives as long as the output does: an output unplugged and back (an HDMI output as the
+/// TV goes off and on, a USB one, whatever the hardware) can come back under the same id with the
+/// old watch dead. Any output coming, going or changing state (Windows says so,
+/// CoreAudio.WatchDevices), and a wake from standby (Renew), make the next Poll watch it afresh.
 /// </summary>
 sealed class VolumeWatch : IDisposable
 {
@@ -429,31 +494,64 @@ sealed class VolumeWatch : IDisposable
     public event Action<SoundLevel, string?>? Changed;
 
     /// <summary>
-    /// An output has become the default (the first look included), before it is watched: the
-    /// box's level goes onto it here (MainForm.Timer.cs KeepVolume). UI thread.
+    /// An output has become the default (the first look included) or is watched afresh, before it
+    /// is watched: the box's level goes onto it here (MainForm.Timer.cs KeepVolume). Poll's thread.
     /// </summary>
     public Action<string>? Arrived { get; set; }
 
+    readonly object gate = new();
     string? watching;
-    IDisposable? watch;
-    bool started;
+    IDisposable? watch, devices;
+    bool started, devicesFailed;
+    volatile bool renew;
 
-    /// <summary>UI thread. The first look only starts watching: nothing changed yet.</summary>
+    /// <summary>The next Poll watches the default output afresh, even if it is the same one.</summary>
+    public void Renew() => renew = true;
+
+    /// <summary>
+    /// Off the UI thread (Core Audio can hang: AudioVolume.Background), one at a time. The first
+    /// look only starts watching: nothing changed yet.
+    /// </summary>
     public void Poll()
     {
-        var id = CoreAudio.DefaultId();
-        if (started && id == watching) return;
-        var first = !started;
-        started = true;
-        watch?.Dispose();
-        watch = null;
-        watching = id;
-        if (id is null) return;
-        Arrived?.Invoke(id);
-        try { watch = CoreAudio.Watch(id, level => Changed?.Invoke(level, null)); }
-        catch (Exception e) { Log.Warn($"Watching the volume: {e.Message}"); }
-        if (!first && CoreAudio.TryLevel(id) is { } now) Changed?.Invoke(now, AudioOutputs.NameOf(id));
+        lock (gate)
+        {
+            if (devices is null && !devicesFailed)
+            {
+                try { devices = CoreAudio.WatchDevices(Renew); }
+                catch (Exception e) { devicesFailed = true; Log.Warn($"Watching the sound outputs: {e.Message}"); }
+            }
+            var id = CoreAudio.DefaultId();
+            var afresh = renew;
+            renew = false;
+            if (started && id == watching && !afresh) return;
+            var first = !started;
+            var moved = id != watching;
+            started = true;
+            watch?.Dispose();
+            watch = null;
+            watching = id;
+            if (id is null) return;
+            Arrived?.Invoke(id);
+            try { watch = CoreAudio.Watch(id, level => Changed?.Invoke(level, null)); }
+            catch (Exception e) { Log.Warn($"Watching the volume: {e.Message}"); }
+            // The indicator with the output's name when sound moved to another output; the same one
+            // watched afresh says nothing.
+            if (!first && moved && CoreAudio.TryLevel(id) is { } now) Changed?.Invoke(now, AudioOutputs.NameOf(id));
+        }
     }
 
-    public void Dispose() => watch?.Dispose();
+    // At the launcher's end, on the UI thread: a Poll stuck in Core Audio holds the gate, and the
+    // launcher does not wait for it.
+    public void Dispose()
+    {
+        if (!Monitor.TryEnter(gate, 1000)) return;
+        try
+        {
+            watch?.Dispose();
+            devices?.Dispose();
+            watch = devices = null;
+        }
+        finally { Monitor.Exit(gate); }
+    }
 }

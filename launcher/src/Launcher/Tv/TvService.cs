@@ -90,7 +90,8 @@ sealed class TvService
 
     /// <summary>
     /// Last real input on the box: a controller button or stick, a key, the phone remote (someone
-    /// is looking at the box's picture). Not the launcher merely being on screen.
+    /// is looking at the box's picture). Not the launcher merely being on screen. On the clock's
+    /// time (UTC in the launcher: SystemTvClock).
     /// </summary>
     public Func<DateTime> LastUserInput { get; set; } = () => DateTime.MinValue;
 

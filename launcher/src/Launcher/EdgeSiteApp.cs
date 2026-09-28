@@ -24,8 +24,15 @@ static class EdgeSiteApp
     public static IReadOnlyList<string> Arguments(string profile, string url) => new[]
     {
         $"--user-data-dir={profile}", $"--app={url}",
-        "--start-fullscreen", "--force-app-mode", "--no-first-run", "--no-default-browser-check", DarkPages,
+        "--start-fullscreen", "--force-app-mode", "--no-first-run", "--no-default-browser-check", DarkPages, DiskCache,
     };
+
+    /// <summary>
+    /// Each profile's HTTP cache capped at 100 MB, for the website tiles and the Browser tile
+    /// (catalog.json). Edge sizes it from the free space otherwise: on the box a day of Twitch
+    /// left a 415 MB cache (27 Sept 2026), a profile per site, on disks that may be 64 GB.
+    /// </summary>
+    public const string DiskCache = "--disk-cache-size=104857600";
 
     /// <summary>
     /// Light pages drawn dark by Chromium itself ("Auto Dark Mode for Web Contents"), for the

@@ -34,8 +34,8 @@
     it opens, and starts this script already elevated and outside any package: it runs the
     steps straight away (no prompt, no relaunch task).
 
-    Log: C:\ProgramData\HTPC\logs\setup-<time>.log; step results: setup-last.json; while it
-    runs, setup-progress.json (the setup exe shows it).
+    Log: C:\ProgramData\HTPC\logs\setup-<time>.log (the last 10 kept); step results:
+    setup-last.json; while it runs, setup-progress.json (the setup exe shows it).
 
 .PARAMETER Only
     Run just these steps, e.g. -Only Edge,Power
@@ -70,7 +70,11 @@ param(
     [switch]$Uninstall
 )
 
-$lib = Join-Path $PSScriptRoot 'lib'
+# Before any command can load a module: Windows' and Program Files' module folders only, never
+# the user's Documents\WindowsPowerShell\Modules (elevated, a module put there would run as
+# administrator). Common.ps1 makes the rest of the environment Windows' own too.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' + [IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
+$lib = [IO.Path]::Combine($PSScriptRoot, 'lib')
 . "$lib\Common.ps1"
 $BoundArgs = $PSBoundParameters
 $RelaunchTask = 'HTPC setup'
@@ -140,33 +144,43 @@ function Split-List([string[]]$Values) { @($Values | ForEach-Object { $_ -split 
 
 # --- Get to an elevated process outside any app container ---------------------------------
 
-if (Test-AppDataRedirected) {
+# Not under TV Box Setup (HTPC_SETUP_WIZARD, SetupRunner.cs): it is elevated and in no package,
+# and the probe would be an elevated write in the user's AppData.
+if ($env:HTPC_SETUP_WIZARD -ne '1' -and (Test-AppDataRedirected)) {
     Write-Host 'Relaunching setup outside this app (its AppData writes are redirected)...'
     # Already admin: the task runs elevated too, so no second UAC prompt.
     $runLevel = if (Test-Admin) { 'Highest' } else { 'Limited' }
     $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel $runLevel
+    $since = Get-Date
     Register-ScheduledTask -TaskName $RelaunchTask -Action $action -Principal $principal -Force | Out-Null
-    Start-ScheduledTask -TaskName $RelaunchTask
+    # One-shot: the task (PowerShell running this folder's setup.ps1, maybe at Highest) goes as
+    # soon as its run has started, whatever that run does next (the run keeps going; removing a
+    # task does not end it). Never left behind for anything to start again.
+    try {
+        Start-ScheduledTask -TaskName $RelaunchTask
+        for ($i = 0; $i -lt 30; $i++) {
+            $task = Get-ScheduledTask -TaskName $RelaunchTask -ErrorAction SilentlyContinue
+            if (-not $task) { break }   # the relaunched copy removed it already
+            if ($task.State -eq 'Running' -or ($task | Get-ScheduledTaskInfo).LastRunTime -ge $since) { break }
+            Start-Sleep -Milliseconds 500
+        }
+    } finally {
+        Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
+    }
     Write-Host "Setup continues in its own window. Logs: $HtpcData\logs"
     exit 0
 }
+
+# The relaunched copy, elevated or not yet: the relaunch task goes first of all (its launcher
+# removes it too, once this run started; see above).
+Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
 
 if (-not (Test-Admin)) {
     Write-Host 'Asking for admin rights (UAC)...'
     Start-Process (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -ArgumentList (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     exit 0
 }
-
-Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
-
-# --- Run the steps -------------------------------------------------------------------------
-
-$Only = Split-List $Only
-$Skip = Split-List $Skip
-$Apps = Split-List $Apps
-$unknown = @($Only + $Skip) | Where-Object { $Steps.Keys -notcontains $_ }
-if ($unknown) { throw "Unknown step(s): $($unknown -join ', '). Steps: $($Steps.Keys -join ', ')" }
 
 # One setup at a time (TV Box Setup closed while it installed, then opened again, would start a
 # second one over the first): a second run says so and ends with exit code 3 (TV Box Setup's
@@ -178,9 +192,32 @@ if (-not $owned) {
     exit 3
 }
 
+# C:\ProgramData\HTPC locked and owned by Administrators first of all, before this log or any
+# step writes there: made by a standard process (the launcher, or TV Box Setup before it asked for
+# administrator rights) it is the user's, who could plant links where the steps write. The
+# Library step does it again, with the task. Not locked, nothing is written there: setup stops.
+# (-Uninstall removes that folder: nothing to lock.)
+if (-not $Uninstall) {
+    try { & "$lib\Register-AppInstaller.ps1" -LockOnly }
+    catch { Write-Attention "Setup stopped: could not lock $HtpcData ($($_.Exception.Message)), and its steps write there as administrator"; exit 1 }
+}
+
+# --- Run the steps -------------------------------------------------------------------------
+
+$Only = Split-List $Only
+$Skip = Split-List $Skip
+$Apps = Split-List $Apps
+$unknown = @($Only + $Skip) | Where-Object { $Steps.Keys -notcontains $_ }
+if ($unknown) { throw "Unknown step(s): $($unknown -join ', '). Steps: $($Steps.Keys -join ', ')" }
+
 # -Uninstall removes ProgramData\HTPC: its log goes to the user's Documents instead.
 $logDir = if ($Uninstall) { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HTPC logs' } else { Join-Path $HtpcData 'logs' }
 New-Item -ItemType Directory -Force $logDir | Out-Null
+# Only the last 10 setup logs are kept (setup runs again for repairs, and the box runs for
+# years): the 9 newest stay, this run's makes 10. The names sort by time.
+Get-ChildItem -Path $logDir -Filter 'setup-*.log' -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^setup-\d{8}-\d{6}\.log$' } | Sort-Object Name -Descending |
+    Select-Object -Skip 9 | Remove-Item -Force -ErrorAction SilentlyContinue
 $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
 Write-Host "HTPC setup$(if ($Uninstall) { ' -Uninstall' }) on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"

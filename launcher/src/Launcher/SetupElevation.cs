@@ -7,12 +7,21 @@ using System.Text;
 namespace Htpc.Launcher;
 
 /// <summary>
-/// TV Box Setup asks Windows for administrator rights once, as it opens, as itself: the
-/// permission prompt (UAC) names this program, where it used to come at the end of the wizard
-/// and name Windows PowerShell. Not through a requireAdministrator manifest: the same exe is the
-/// everyday launcher, which never runs elevated. Setup mode started without the rights starts
-/// itself again with them (runas, the same arguments and --elevated) and ends; declined, a
-/// screen says setup needs them (A: try again, B: quit).
+/// TV Box Setup asks Windows for administrator rights once, as it opens, where it used to ask at
+/// the end of the wizard. Not through a requireAdministrator manifest: the same exe is the
+/// everyday launcher, which never runs elevated. Setup mode started without the rights asks
+/// for them and ends; declined, a screen says setup needs them (A: try again, B: quit).
+///
+/// Never elevated where the user can write: this exe is one self-extracting file, and .NET
+/// unpacks it (code, ui\, setup\, the watchdog) into %LOCALAPPDATA%\HTPC\bundle or %TEMP%\.net,
+/// reusing what is there without checking it; setup.ps1 and Install-Launcher would then run and
+/// install those files as administrator, into what the SYSTEM task runs. So what Windows elevates
+/// is its own command processor (System32\cmd.exe, the prompt names it), which copies this exe to
+/// Program Files\HTPC\Setup (admin-only) and starts that copy with .NET unpacking it into
+/// Program Files\HTPC\Setup\bundle (Trampoline). An elevated setup anywhere else (Run as
+/// administrator, an admin with User Account Control off) moves there the same way, with no
+/// prompt. The elevated copy gets only harmless arguments (no --ui, --catalog or --dev), and in
+/// setup mode the page may only send setup's own messages (IsSetupMessage).
 ///
 /// The elevated wizard runs setup.ps1 directly (SetupRunner), with a WebView2 profile of its own
 /// (setup-webview: the launcher's stays the standard-rights one it always was), and holds the
@@ -26,8 +35,119 @@ static class SetupElevation
     public const string ElevatedFlag = "--elevated";
     /// <summary>The home screen, not setup, even from "TV Box Setup.exe" (after setup, no launcher installed).</summary>
     public const string HomeFlag = "--home";
+    /// <summary>The elevated setup's copy of this exe, in TrustedDir.</summary>
+    public const string TrustedExeName = "TV Box Setup.exe";
+    /// <summary>The only arguments the elevated copy gets besides --setup and --elevated.</summary>
+    static readonly string[] Forwarded = ["--no-tv", "--windowed"];
 
-    public enum Step { Run, Elevate, NeedsAdmin }
+    /// <summary>Program Files\HTPC\Setup: where the elevated setup runs from (admin-only, as Program Files is).</summary>
+    public static string TrustedDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup");
+
+    /// <summary>
+    /// PowerShell's module path for anything elevated: Windows' and Program Files' module folders,
+    /// from Windows itself (not the environment). Never the user's Documents\WindowsPowerShell\
+    /// Modules, which Windows PowerShell adds by default and loads a command's module from before
+    /// Windows' own: elevated, a module the user put there would run as administrator. Not the
+    /// machine value as written (PowerShell adds the user's folder back to that one).
+    /// </summary>
+    public static string SystemModulePath =>
+        Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\Modules") + ";" +
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"WindowsPowerShell\Modules");
+
+    /// <summary>Program Files\HTPC\Setup\temp: the elevated setup's TEMP and TMP (admin-only), never the user's %TEMP%.</summary>
+    public static string TrustedTemp => Path.Combine(TrustedDir, "temp");
+
+    /// <summary>Variables that load code or write files into a program (.NET, WebView2): never kept, from anywhere.</summary>
+    static readonly string[] DroppedPrefixes = ["COMPlus_", "DOTNET_", "CORECLR_", "COR_", "WEBVIEW2_"];
+
+    /// <summary>
+    /// The elevated setup's environment, for itself and all it starts (setup.ps1, the installers,
+    /// WebView2), made from Windows' own values instead of the one it was started with: elevated,
+    /// a process gets the user's variables too (HKCU\Environment is theirs to write), so
+    /// $env:ProgramFiles, SystemRoot, PATH or a .NET switch could point it wherever they chose.
+    /// What it holds, in this order (a later one wins):
+    ///   - the machine's variables (HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\
+    ///     Environment: Path, PATHEXT, ComSpec, OS, PROCESSOR_*...), expanded with Windows' folders
+    ///     and each other, never with a user's variable;
+    ///   - Windows' folders from Windows itself: SystemRoot, windir, SystemDrive, ProgramFiles,
+    ///     ProgramFiles(x86), ProgramW6432, CommonProgramFiles, CommonProgramFiles(x86),
+    ///     CommonProgramW6432, ProgramData, ALLUSERSPROFILE, PUBLIC, COMPUTERNAME;
+    ///   - the user's basics, from their account and known folders: USERNAME, USERDOMAIN,
+    ///     USERPROFILE, HOMEDRIVE, HOMEPATH, APPDATA, LOCALAPPDATA (read by setup's steps; nothing
+    ///     elevated writes there);
+    ///   - TEMP and TMP = TrustedTemp; PSModulePath = SystemModulePath; HTPC_SETUP_WIZARD = 1.
+    /// Everything else goes: the user's own variables and PATH additions, and any COMPlus_*,
+    /// DOTNET_*, CORECLR_*, COR_* or WEBVIEW2_* variable, the machine's included.
+    /// </summary>
+    public static Dictionary<string, string> CleanEnvironment(IReadOnlyDictionary<string, string> machine)
+    {
+        static string Folder(Environment.SpecialFolder f) => Environment.GetFolderPath(f);
+        var win = Folder(Environment.SpecialFolder.Windows);
+        var profile = Folder(Environment.SpecialFolder.UserProfile);
+        var windows = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SystemRoot"] = win, ["windir"] = win, ["SystemDrive"] = Path.GetPathRoot(win)!.TrimEnd('\\'),
+            ["ProgramFiles"] = Folder(Environment.SpecialFolder.ProgramFiles), ["ProgramW6432"] = Folder(Environment.SpecialFolder.ProgramFiles),
+            ["ProgramFiles(x86)"] = Folder(Environment.SpecialFolder.ProgramFilesX86),
+            ["CommonProgramFiles"] = Folder(Environment.SpecialFolder.CommonProgramFiles), ["CommonProgramW6432"] = Folder(Environment.SpecialFolder.CommonProgramFiles),
+            ["CommonProgramFiles(x86)"] = Folder(Environment.SpecialFolder.CommonProgramFilesX86),
+            ["ProgramData"] = Folder(Environment.SpecialFolder.CommonApplicationData), ["ALLUSERSPROFILE"] = Folder(Environment.SpecialFolder.CommonApplicationData),
+            ["PUBLIC"] = Path.GetDirectoryName(Folder(Environment.SpecialFolder.CommonDocuments)) ?? "",
+            ["COMPUTERNAME"] = Environment.MachineName,
+        };
+        var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // %NAME% from Windows' folders or the machine's own variables, never the user's.
+        string Expand(string value, int depth = 0) => depth > 4 ? value : System.Text.RegularExpressions.Regex.Replace(value, "%([^%]+)%", m =>
+            windows.TryGetValue(m.Groups[1].Value, out var w) ? w
+            : machine.TryGetValue(m.Groups[1].Value, out var v) ? Expand(v, depth + 1) : m.Value);
+        foreach (var (name, value) in machine)
+            if (!DroppedPrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase))) env[name] = Expand(value);
+        foreach (var (name, value) in windows) env[name] = value;
+        env["USERNAME"] = Environment.UserName;
+        env["USERDOMAIN"] = Environment.UserDomainName;
+        env["USERPROFILE"] = profile;
+        env["HOMEDRIVE"] = Path.GetPathRoot(profile)!.TrimEnd('\\');
+        env["HOMEPATH"] = profile[env["HOMEDRIVE"].Length..];
+        env["APPDATA"] = Folder(Environment.SpecialFolder.ApplicationData);
+        env["LOCALAPPDATA"] = Folder(Environment.SpecialFolder.LocalApplicationData);
+        env["TEMP"] = env["TMP"] = TrustedTemp;
+        env["PSModulePath"] = SystemModulePath;
+        env["HTPC_SETUP_WIZARD"] = "1";
+        return env;
+    }
+
+    /// <summary>The machine's variables as stored (not expanded): HKLM's Session Manager\Environment.</summary>
+    static Dictionary<string, string> MachineEnvironment()
+    {
+        var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+        foreach (var name in key?.GetValueNames() ?? Array.Empty<string>())
+            if (name.Length > 0 && key!.GetValue(name, null, Microsoft.Win32.RegistryValueOptions.DoNotExpandEnvironmentNames) is string value) vars[name] = value;
+        return vars;
+    }
+
+    /// <summary>
+    /// Main, the elevated setup: this process's environment becomes CleanEnvironment's, for
+    /// everything it starts from now on (its own .NET switches were cleared by the trampoline
+    /// before it started). TrustedTemp is made.
+    /// </summary>
+    public static void ApplyCleanEnvironment()
+    {
+        var clean = CleanEnvironment(MachineEnvironment());
+        Directory.CreateDirectory(TrustedTemp);
+        var dropped = 0;
+        foreach (var name in Environment.GetEnvironmentVariables().Keys.Cast<string>().ToList())
+            if (!clean.ContainsKey(name)) { Environment.SetEnvironmentVariable(name, null); dropped++; }
+        foreach (var (name, value) in clean) Environment.SetEnvironmentVariable(name, value);
+        Log.Info($"Setup: environment made Windows' own ({clean.Count} variables, {dropped} of the user's dropped; TEMP {TrustedTemp})");
+    }
+
+    /// <summary>
+    /// Run: the launcher, or setup elevated in a trusted place. Elevate: setup without the rights.
+    /// NeedsAdmin: the copy from asking, still without them. Relocate: elevated, but unpacked where
+    /// the user can write. Unsafe: the copy started to fix that, still there.
+    /// </summary>
+    public enum Step { Run, Elevate, NeedsAdmin, Relocate, Unsafe }
 
     /// <summary>Setup mode: --setup, or "setup" in the exe's name ("TV Box Setup.exe"), unless --home.</summary>
     public static bool IsSetupMode(IReadOnlyCollection<string> args, string? exePath) =>
@@ -35,16 +155,132 @@ static class SetupElevation
         && (args.Contains("--setup") || Path.GetFileName(exePath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// What this start does: the launcher, or setup that is elevated already, runs. Setup without
-    /// the rights asks for them, unless this copy came from asking (User Account Control off, or an
-    /// account that is not an administrator: asking again would start copy after copy); that one
-    /// says it needs them instead.
+    /// What this start does: the launcher, or setup that is elevated already in a trusted place
+    /// (RunsFromTrustedPlace), runs. Setup without the rights asks for them, unless this copy came
+    /// from asking (User Account Control off, or an account that is not an administrator: asking
+    /// again would start copy after copy); that one says it needs them instead. Elevated elsewhere,
+    /// it moves to the trusted place, once: a copy that came from moving (--elevated) and is still
+    /// not there stops.
     /// </summary>
-    public static Step Decide(bool setupMode, bool elevated, IReadOnlyCollection<string> args) =>
-        !setupMode || elevated ? Step.Run : args.Contains(ElevatedFlag) ? Step.NeedsAdmin : Step.Elevate;
+    public static Step Decide(bool setupMode, bool elevated, bool trustedPlace, IReadOnlyCollection<string> args) =>
+        !setupMode ? Step.Run
+        : elevated ? (trustedPlace ? Step.Run : args.Contains(ElevatedFlag) ? Step.Unsafe : Step.Relocate)
+        : args.Contains(ElevatedFlag) ? Step.NeedsAdmin : Step.Elevate;
 
-    /// <summary>The elevated copy's arguments: these, in order, and --elevated once.</summary>
-    public static List<string> ElevatedArgs(IEnumerable<string> args) => args.Where(a => a != ElevatedFlag).Append(ElevatedFlag).ToList();
+    /// <summary>
+    /// Whether nothing this process runs came from a folder the user can write: a build (a folder
+    /// of files, unpacked nowhere: the developer's own), or the copy in TrustedDir unpacked into
+    /// TrustedDir\bundle. A single-file exe's base directory is where .NET unpacked it.
+    /// </summary>
+    public static bool RunsFromTrustedPlace(string? exe, string baseDir, string trustedDir)
+    {
+        if (exe is null) return false;
+        static string Full(string p) => Path.GetFullPath(p).TrimEnd('\\');
+        if (string.Equals(Full(Path.GetDirectoryName(exe)!), Full(baseDir), StringComparison.OrdinalIgnoreCase)) return true;
+        return string.Equals(Full(exe), Full(Path.Combine(trustedDir, TrustedExeName)), StringComparison.OrdinalIgnoreCase)
+            && Full(baseDir).StartsWith(Full(Path.Combine(trustedDir, "bundle")) + "\\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The elevated copy's arguments: --setup, the harmless ones of these (--no-tv, --windowed), --elevated.</summary>
+    public static List<string> ElevatedArgs(IEnumerable<string> args) =>
+        ["--setup", .. Forwarded.Where(f => args.Contains(f)), ElevatedFlag];
+
+    /// <summary>
+    /// cmd.exe's command line that starts the elevated setup (Relaunch, Relocate): .NET told to
+    /// unpack into TrustedDir\bundle, this exe copied to TrustedDir (unless it is that copy; one
+    /// in use is renamed aside first, suffix: a name no one can guess), that copy started. /d:
+    /// no AutoRun commands, /e:on and /v:off whatever the user's registry says (HKCU is theirs to
+    /// write, and so is HKCU\Environment: this line holds no %variable%, which cmd would fill in
+    /// from it, and the .NET switches that load code from elsewhere are cleared: a profiler, a
+    /// startup hook, extra dependencies, the diagnostics ports, host traces, crash dumps). Windows'
+    /// folders (SystemRoot, windir, ProgramFiles...), PATH (Windows' own), PSModulePath and TEMP
+    /// (TrustedTemp) are set from Windows itself, until the copy remakes its whole environment
+    /// (ApplyCleanEnvironment). Null when the exe's path has a % in it (it cannot be written
+    /// here safely).
+    /// </summary>
+    public static string? Trampoline(string exe, IEnumerable<string> args, string trustedDir, string suffix)
+    {
+        if (exe.Contains('%') || trustedDir.Contains('%') || suffix.Any(c => !char.IsAsciiLetterOrDigit(c))) return null;
+        var target = Path.Combine(trustedDir, TrustedExeName);
+        var bundle = Path.Combine(trustedDir, "bundle");
+        var temp = Path.Combine(trustedDir, "temp");
+        var sys = Environment.SystemDirectory;
+        var steps = new List<string>
+        {
+            $"set \"DOTNET_BUNDLE_EXTRACT_BASE_DIR={bundle}\"",
+            "set \"DOTNET_EnableDiagnostics=0\"", "set \"DOTNET_STARTUP_HOOKS=\"", "set \"DOTNET_ADDITIONAL_DEPS=\"",
+            "set \"CORECLR_ENABLE_PROFILING=\"", "set \"COR_ENABLE_PROFILING=\"",
+            // Nor anything .NET's host or runtime writes as it starts: traces, crash dumps, an ICU of its own.
+            "set \"COREHOST_TRACE=\"", "set \"COREHOST_TRACEFILE=\"", "set \"DOTNET_HOST_TRACE=\"", "set \"DOTNET_HOST_TRACEFILE=\"",
+            "set \"DOTNET_DbgEnableMiniDump=\"", "set \"COMPlus_DbgEnableMiniDump=\"", "set \"DOTNET_EnableCrashReport=\"",
+            "set \"COMPlus_EnableCrashReport=\"", "set \"DOTNET_SYSTEM_GLOBALIZATION_APPLOCALICU=\"",
+            // PowerShell's modules from Windows' and Program Files' folders only, never the user's
+            // Documents\WindowsPowerShell\Modules (setup.ps1 and every script it starts).
+            $"set \"PSModulePath={SystemModulePath}\"",
+        };
+        // Windows' folders from Windows itself, PATH Windows' own and TEMP admin-only until the
+        // copy remakes its whole environment (CleanEnvironment): what it loads as it starts
+        // (a COM server's %SystemRoot%\... path, a DLL by name) must not come from the user's.
+        foreach (var (name, value) in new[]
+        {
+            ("SystemRoot", Environment.GetFolderPath(Environment.SpecialFolder.Windows)), ("windir", Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
+            ("ProgramFiles", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)), ("ProgramW6432", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)),
+            ("ProgramFiles(x86)", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)),
+            ("CommonProgramFiles", Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles)), ("CommonProgramW6432", Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles)),
+            ("CommonProgramFiles(x86)", Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86)),
+            ("ProgramData", Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)), ("ALLUSERSPROFILE", Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)),
+            ("PATH", $@"{sys};{Environment.GetFolderPath(Environment.SpecialFolder.Windows)};{sys}\Wbem;{sys}\WindowsPowerShell\v1.0\"),
+            ("TEMP", temp), ("TMP", temp),
+        })
+        {
+            if (value.Contains('%') || value.Contains('"')) return null;
+            steps.Add($"set \"{name}={value}\"");
+        }
+        steps.Add($"mkdir \"{temp}\" 2>nul");
+        var start = $"start \"\" /d \"{trustedDir}\" \"{target}\" {CommandLine(args)}".TrimEnd();
+        if (string.Equals(Path.GetFullPath(exe), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+            steps.Add(start);
+        else
+        {
+            steps.Add($"mkdir \"{bundle}\" 2>nul");
+            steps.Add($"move /y \"{target}\" \"{target}.{suffix}.old\" >nul 2>nul");
+            steps.Add($"copy /b /y \"{exe}\" \"{target}\" >nul && {start}");
+        }
+        return $"/d /e:on /v:off /s /c \"{string.Join(" & ", steps)}\"";
+    }
+
+    /// <summary>
+    /// The elevated setup running from TrustedDir: copies an earlier run renamed aside (*.old) and
+    /// what .NET unpacked for other versions of it go. Best effort, in the background; all of it
+    /// is admin-only, nothing a standard user could have put there.
+    /// </summary>
+    public static void TidyTrustedDir()
+    {
+        var dir = TrustedDir;
+        var current = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\');
+        if (!current.StartsWith(Path.Combine(dir, "bundle") + "\\", StringComparison.OrdinalIgnoreCase)) return;
+        Task.Run(() =>
+        {
+            try
+            {
+                foreach (var old in Directory.GetFiles(dir, "*.old"))
+                    try { File.Delete(old); } catch (Exception) { } // still running: next time
+                foreach (var other in Directory.GetDirectories(Path.GetDirectoryName(current)!))
+                    if (!string.Equals(other.TrimEnd('\\'), current, StringComparison.OrdinalIgnoreCase))
+                        try { Directory.Delete(other, true); Log.Info($"Setup: removed {other} (an earlier version, unpacked)"); } catch (Exception) { }
+            }
+            catch (Exception e) { Log.Warn($"Setup: tidying {dir}: {e.Message}"); }
+        });
+    }
+
+    /// <summary>
+    /// The page's messages setup mode takes: its own (ready, install, finish, restart) and those
+    /// of the TV, Wi-Fi and text-field parts it shows. Nothing else reaches the elevated window
+    /// (launch, power, setting, library...), whatever the page sends.
+    /// </summary>
+    public static bool IsSetupMessage(string? type) =>
+        type is "ready" or "install" or "finish" or "restart"
+        || type is not null && (type.StartsWith("tv.", StringComparison.Ordinal) || type.StartsWith("wifi.", StringComparison.Ordinal) || type.StartsWith("text.", StringComparison.Ordinal));
 
     /// <summary>The home screen's arguments after setup: these without setup's own, and --home.</summary>
     public static List<string> HomeArgs(IEnumerable<string> args) =>
@@ -69,11 +305,41 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// The WebView2 profile: setup's own, so nothing an elevated WebView2 writes ever lands in the
-    /// launcher's, which runs at standard rights every day.
+    /// The WebView2 profile. The elevated setup's: Program Files\HTPC\Setup\webview, admin-only
+    /// (the elevated wizard is its only user), so nothing an elevated WebView2 writes lands in the
+    /// user's profile, where a link they planted could send it anywhere. The launcher's, and a
+    /// setup at standard rights (a dev run): its own in %LOCALAPPDATA%\HTPC, as always.
     /// </summary>
-    public static string WebViewFolder(bool setupMode) =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+    public static string WebViewFolder(bool setupMode, bool elevated) =>
+        setupMode && elevated ? Path.Combine(TrustedDir, "webview")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+
+    /// <summary>
+    /// Why a folder is not safe for an elevated process to rely on, or null when it is: a junction
+    /// or link, an owner other than SYSTEM, Administrators or TrustedInstaller, or write rights
+    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#).
+    /// </summary>
+    public static string? UntrustedReason(string dir)
+    {
+        string[] trusted = ["S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
+        const FileSystemRights write = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes |
+            FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles |
+            FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+        var info = new DirectoryInfo(dir);
+        if (!info.Exists) return $"{dir} is not there";
+        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) return $"{dir} is a junction or link";
+        var acl = info.GetAccessControl();
+        var owner = acl.GetOwner(typeof(SecurityIdentifier))?.Value;
+        if (owner is null || !trusted.Contains(owner)) return $"{dir} is owned by {owner}";
+        foreach (FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            var sid = rule.IdentityReference.Value;
+            if (rule.AccessControlType != AccessControlType.Allow || trusted.Contains(sid) || sid == "S-1-3-0") continue; // CREATOR OWNER: only what someone creates
+            // 0x40000000 GENERIC_WRITE, 0x10000000 GENERIC_ALL (seen on inherit-only entries)
+            if ((rule.FileSystemRights & write) != 0 || ((int)rule.FileSystemRights & 0x50000000) != 0) return $"{dir} lets {sid} change it";
+        }
+        return null;
+    }
 
     /// <summary>
     /// Who takes over when the wizard is done: the installed launcher, through its watchdog when
@@ -110,21 +376,40 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// Starts this program again with administrator rights (Windows' permission prompt, which
-    /// names it). Null once the elevated copy runs, else why not, for the screen.
+    /// Starts the elevated setup from its trusted place (Trampoline): through Windows' permission
+    /// prompt (runas), or, already elevated, directly. cmd's window hidden; it copies setup, starts
+    /// the copy and ends, and its exit code says whether the copy went. Null once the elevated copy
+    /// runs, else why not, for the screen.
     /// </summary>
-    static string? Relaunch(IEnumerable<string> args)
+    static string? Relaunch(IEnumerable<string> args, bool prompt = true)
     {
-        var psi = new ProcessStartInfo(Environment.ProcessPath!, CommandLine(ElevatedArgs(args)))
+        var line = Trampoline(Environment.ProcessPath!, ElevatedArgs(args), TrustedDir, Guid.NewGuid().ToString("N")[..12]);
+        if (line is null)
         {
-            UseShellExecute = true,
-            Verb = "runas",   // the prompt
-            WorkingDirectory = Environment.CurrentDirectory, // --ui and --catalog may be relative to it
+            Log.Warn($"Setup: not started from {Environment.ProcessPath} (a % in its path)");
+            return "Setup can't start from a file or folder with % in its name. Rename or move it, then start it again.";
+        }
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), line)
+        {
+            UseShellExecute = prompt,
+            Verb = prompt ? "runas" : "",   // the prompt
+            WindowStyle = ProcessWindowStyle.Hidden,
+            CreateNoWindow = !prompt,
+            WorkingDirectory = Environment.SystemDirectory,
         };
         try
         {
             using var p = Process.Start(psi);
-            Log.Info($"Setup: started again with administrator rights (pid {p?.Id})");
+            try
+            {
+                if (p is not null && p.WaitForExit(120_000) && p.ExitCode != 0)
+                {
+                    Log.Warn($"Setup: copying it to {TrustedDir} failed (cmd exit code {p.ExitCode})");
+                    return $"Windows could not put setup in {TrustedDir} (error {p.ExitCode}), so nothing was changed.";
+                }
+            }
+            catch (Exception e) when (e is Win32Exception or InvalidOperationException) { } // no exit code to read: it went
+            Log.Info($"Setup: started from {TrustedDir} with administrator rights{(prompt ? "" : " (it had them already)")}");
             return null;
         }
         catch (Win32Exception e) when (e.NativeErrorCode == 1223) // ERROR_CANCELLED: the prompt was declined
@@ -140,19 +425,30 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// Main, setup mode without administrator rights: asks for them (the elevated copy carries
-    /// on), else the "needs administrator rights" screen until they are given or the user quits.
-    /// The watchdog is paused for 15 minutes from each try: a launcher that closed for setup
-    /// (About › Run setup again) is not started again over the prompt. Quitting lifts the pause.
-    /// Nothing else is done without the rights: a running launcher is left alone.
+    /// Main, setup mode not running yet (Decide): without administrator rights, asks for them (the
+    /// elevated copy carries on), else the "needs administrator rights" screen until they are given
+    /// or the user quits. Elevated but unpacked where the user can write: starts the trusted copy
+    /// (no prompt) and ends. The watchdog is paused for 15 minutes from each try: a launcher that
+    /// closed for setup (About › Run setup again) is not started again over the prompt. Quitting
+    /// lifts the pause. Nothing else is done meanwhile: a running launcher is left alone.
     /// </summary>
     public static void GetRights(Step step, string[] args)
     {
-        Log.Info($"Setup started without administrator rights ({string.Join(' ', args)}): " +
-            (step == Step.Elevate ? "asking Windows for them" : "it came from asking already, so not again"));
+        Log.Info($"Setup started ({string.Join(' ', args)}) from {Environment.ProcessPath}, unpacked in {AppContext.BaseDirectory}: " + step switch
+        {
+            Step.Elevate => "no administrator rights, asking Windows for them",
+            Step.NeedsAdmin => "no administrator rights, and it came from asking already, so not again",
+            Step.Relocate => $"elevated, but not from {TrustedDir}: starting from there",
+            _ => $"elevated, not from {TrustedDir} although it was started to be: stopped",
+        });
         WatchdogPause.Set(TimeSpan.FromMinutes(15));
-        var why = step == Step.Elevate ? Relaunch(args)
-            : "Windows started setup without them: User Account Control may be off, or this account is not an administrator.";
+        var why = step switch
+        {
+            Step.Elevate => Relaunch(args),
+            Step.Relocate => Relaunch(args, prompt: false),
+            Step.NeedsAdmin => "Windows started setup without them: User Account Control may be off, or this account is not an administrator.",
+            _ => $"Setup did not start from its copy in {TrustedDir}, so it stopped before changing anything.",
+        };
         if (why is null) return;
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
@@ -160,7 +456,7 @@ static class SetupElevation
         using var screen = new AdminNeededForm(why, () =>
         {
             WatchdogPause.Set(TimeSpan.FromMinutes(15));
-            return Relaunch(args);
+            return Relaunch(args, prompt: !Environment.IsPrivilegedProcess);
         });
         Application.Run(screen);
         if (screen.HandedOver) return;

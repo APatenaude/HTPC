@@ -16,7 +16,8 @@
 
     Nothing may pop up on the TV:
       - an app its installer starts (Stremio does) is closed again;
-      - install.firstRun files are written before the app first starts, when missing (VLC);
+      - install.firstRun files are written before the app first starts, when missing (VLC); by
+        the launcher, as the user, at its start (elevated, setup never writes the user's profile);
       - programs listed in install.blockInbound get an inbound Block rule, so Windows does not ask
         to allow them on the network (Stremio's streaming service): before a picked app first
         runs, and on every run for every catalog app installed (a rule gone missing comes back,
@@ -38,8 +39,7 @@ param(
 . "$PSScriptRoot\Common.ps1"
 . "$PSScriptRoot\AppCore.ps1"
 . "$PSScriptRoot\AppAutostart.ps1"
-
-$WorkDir = Join-Path $env:TEMP 'htpc-setup\apps'
+. "$PSScriptRoot\UpdateCore.ps1"   # New-AdminWorkDir
 
 $entries = (Get-Content $Catalog -Raw | ConvertFrom-Json).apps
 $Ids = @($Ids | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
@@ -60,23 +60,34 @@ $missing = @($picked | Where-Object { $_.install -and $_.install.source -ne 'bui
 $offline = $missing.Count -and -not (Test-Internet)
 if ($offline) { Write-Attention "no internet connection: $(($missing | ForEach-Object { $_.name }) -join ', ') not installed" }
 
+# Downloads staged where only administrators can write (AppCore's GitHub installers run from
+# there, elevated), never in %TEMP%, which is the user's: a checked installer could be swapped
+# there before it runs. At standard rights (a dev run), %TEMP% is theirs anyway.
+$WorkDir = if (Test-Admin) { New-AdminWorkDir 'apps' } else { Join-Path $env:TEMP 'htpc-setup\apps' }
+
 $failed = @()
-foreach ($app in $picked) {
-    if ($offline -and $missing -contains $app) { continue }
-    try {
-        if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
-        if (Test-InstallsLater $app) {
-            Write-Attention "$($app.name) must be installed without admin rights; install it from the library"; continue
+try {
+    foreach ($app in $picked) {
+        if ($offline -and $missing -contains $app) { continue }
+        try {
+            if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
+            if (Test-InstallsLater $app) {
+                Write-Attention "$($app.name) must be installed without admin rights; install it from the library"; continue
+            }
+            if (Test-Admin) { Add-InboundBlock $app $null }   # before the app can first run
+            $before = @(Get-Process | Select-Object -ExpandProperty Id)
+            Install-App $app $null $WorkDir
+            Stop-StartedByInstaller $app $before
+            # Elevated, never in the user's profile (a link planted there could send the write
+            # anywhere): the launcher writes the missing first-run files as the user at its start.
+            if (-not (Test-Admin)) { Write-FirstRunFiles $app }
+        } catch {
+            Write-Attention "$($app.name): $($_.Exception.Message)"
+            $failed += $app.name
         }
-        if (Test-Admin) { Add-InboundBlock $app $null }   # before the app can first run
-        $before = @(Get-Process | Select-Object -ExpandProperty Id)
-        Install-App $app $null $WorkDir
-        Stop-StartedByInstaller $app $before
-        Write-FirstRunFiles $app
-    } catch {
-        Write-Attention "$($app.name): $($_.Exception.Message)"
-        $failed += $app.name
     }
+} finally {
+    if (Test-Admin) { Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 # Every installed catalog app's Block rules, not only the ones picked now.
 if (Test-Admin) {

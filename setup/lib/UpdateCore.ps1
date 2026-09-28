@@ -3,8 +3,9 @@
 #
 # These run as SYSTEM through the \HTPC\Jobs task, so everything here assumes its input may
 # have been prepared by someone else on the box:
-#   - downloads come only from the pinned source (APatenaude/HTPC over HTTPS, redirects only to
-#     GitHub's own hosts), with the size and SHA-256 the release's update.json gives;
+#   - downloads come only from the pinned source (APatenaude/HTPC over HTTPS: github.com under
+#     that repository's path, then redirects only there or to GitHub's *.githubusercontent.com
+#     download hosts), with the size and SHA-256 the release's update.json gives;
 #   - every folder a job reads from, runs from or writes to must be owned by SYSTEM,
 #     Administrators or TrustedInstaller, grant no write to anyone else, and contain no
 #     junction or symbolic link on the way (Assert-TrustedPath). Anything else is refused.
@@ -20,15 +21,20 @@ try { $tls = $tls -bor [Net.SecurityProtocolType]'Tls13' } catch { }
 
 # --- Where updates come from ------------------------------------------------------------------
 
-# A source: the repository releases come from and the only places a download may go. Redirects
-# must stay on the same scheme and on these hosts (and port, for the tests' local server).
+# A source: the repository releases come from and the only places a download may go. Every hop
+# keeps the scheme and port (443; the tests' local server pins its own). The first goes to
+# exactly one of AllowedHosts, and any hop back to those stays under the repository's own path
+# (/<owner>/<repo>/, or /repos/<owner>/<repo>/ on the API): a redirect elsewhere means the
+# repository moved or was renamed, an error ('moved'), never followed. The hops after the first
+# may also go to any host under RedirectDomains: GitHub sends release downloads to
+# release-assets.githubusercontent.com (checked 26 Sept 2026; objects. before that) and may
+# rename it again; TLS and the SHA-256 in update.json carry the integrity, not that host's name.
 function New-UpdateSource {
     param(
         [string]$Repo = 'APatenaude/HTPC',
         [string]$BaseUrl = 'https://github.com',
-        # GitHub sends release downloads from github.com to release-assets.githubusercontent.com
-        # (checked 26 Sept 2026); objects.githubusercontent.com is the older name for it.
-        [string[]]$AllowedHosts = @('github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'),
+        [string[]]$AllowedHosts = @('github.com'),
+        [string[]]$RedirectDomains = @('githubusercontent.com'),
         [int]$MaxHops = 5,
         # 429 / 403 with Retry-After: wait at most this long once, then give up.
         [int]$MaxRetryWaitSec = 60
@@ -40,6 +46,7 @@ function New-UpdateSource {
         Scheme          = $base.Scheme
         Port            = $base.Port
         AllowedHosts    = @($AllowedHosts | ForEach-Object { $_.ToLowerInvariant() })
+        RedirectDomains = @($RedirectDomains | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant().Trim('.') })
         MaxHops         = $MaxHops
         MaxRetryWaitSec = $MaxRetryWaitSec
     }
@@ -57,14 +64,26 @@ function Get-RepoSource([pscustomobject]$Source, [string]$Repo) {
     $copy
 }
 
-function Test-AllowedUrl([pscustomobject]$Source, [Uri]$Uri) {
+# -Redirect: a hop after the first, which may also go to a host under RedirectDomains.
+function Test-AllowedUrl([pscustomobject]$Source, [Uri]$Uri, [switch]$Redirect) {
     if (-not $Uri.IsAbsoluteUri) { return $false }
     if ($Uri.Scheme -ne $Source.Scheme) { return $false }
     if ($Uri.UserInfo) { return $false }
-    if ($Source.AllowedHosts -notcontains $Uri.Host.ToLowerInvariant()) { return $false }
     # The pinned source is plain HTTPS (443); a test source also pins its port.
     if ($Uri.Port -ne $Source.Port) { return $false }
-    $true
+    $h = $Uri.Host.ToLowerInvariant()
+    if ($Source.AllowedHosts -contains $h) { return $true }
+    if (-not $Redirect) { return $false }
+    [bool](@($Source.RedirectDomains) | Where-Object { $h -eq $_ -or $h.EndsWith(".$_") })
+}
+
+# The repository part of a URL's path, "/<owner>/<repo>/" (or "/repos/<owner>/<repo>/" on the
+# API), in lower case; $null when the path is shorter.
+function Get-RepoPath([Uri]$Uri) {
+    $parts = @($Uri.AbsolutePath.Split([char[]]'/', [StringSplitOptions]::RemoveEmptyEntries))
+    $n = if ($parts.Count -gt 0 -and $parts[0] -eq 'repos') { 3 } else { 2 }
+    if ($parts.Count -lt $n) { return $null }
+    ('/' + ($parts[0..($n - 1)] -join '/') + '/').ToLowerInvariant()
 }
 
 # Thrown for the "try again later" cases, so a caller can say so instead of "failed".
@@ -94,8 +113,13 @@ function Invoke-PinnedRequest {
     )
     $uri = [Uri]$Url
     $retried = $false
+    $repoPath = Get-RepoPath $uri
     for ($hop = 0; ; $hop++) {
-        if (-not (Test-AllowedUrl $Source $uri)) { throw (New-UpdateError 'refused' "Refused to download from $($uri.GetLeftPart('Path')) (not the pinned source)") }
+        if (-not (Test-AllowedUrl $Source $uri -Redirect:($hop -gt 0))) { throw (New-UpdateError 'refused' "Refused to download from $($uri.GetLeftPart('Path')) (not the pinned source)") }
+        if ($hop -gt 0 -and $Source.AllowedHosts -contains $uri.Host.ToLowerInvariant() -and
+            -not $uri.AbsolutePath.StartsWith("$repoPath", [StringComparison]::OrdinalIgnoreCase)) {
+            throw (New-UpdateError 'moved' "$($Source.Repo) seems to have moved: GitHub sent $($uri.AbsolutePath) instead (updates wait for a release that knows its new place)")
+        }
         $request = [Net.HttpWebRequest]::Create($uri)
         $request.AllowAutoRedirect = $false
         $request.Method = 'GET'
@@ -120,10 +144,11 @@ function Invoke-PinnedRequest {
             $uri = New-Object Uri($uri, $location)
             continue
         }
-        # GitHub's rate limit (unauthenticated: 60 API calls an hour) answers 403 or 429.
-        if ($code -in 403, 429) {
+        # GitHub's rate limit (unauthenticated: 60 API calls an hour) answers 429, or 403 with
+        # X-RateLimit-Remaining: 0 or a Retry-After. Any other 403 is a plain refusal (below).
+        $retryAfter = $response.Headers['Retry-After']
+        if ($code -eq 429 -or ($code -eq 403 -and ($retryAfter -or "$($response.Headers['X-RateLimit-Remaining'])".Trim() -eq '0'))) {
             $wait = 0
-            $retryAfter = $response.Headers['Retry-After']
             $response.Close()
             if ($retryAfter -and [int]::TryParse($retryAfter, [ref]$wait) -and -not $retried -and $wait -le $Source.MaxRetryWaitSec) {
                 $retried = $true
@@ -141,15 +166,20 @@ function Invoke-PinnedRequest {
 
 # The newest release's tag, read from where github.com/<repo>/releases/latest redirects
 # (github.com/<repo>/releases/tag/<tag>). No API call: the API allows 60 requests an hour.
-# $null when the repository has no release yet (it then redirects to /releases).
+# $null when the repository has no release yet (it then redirects to /<repo>/releases); a
+# redirect anywhere else (a renamed or moved repository) is an error ('moved'), not "no release".
 function Get-LatestTag([pscustomobject]$Source) {
     $r = Invoke-PinnedRequest -Source $Source -Url "$($Source.BaseUrl)/$($Source.Repo)/releases/latest" -NoFollow
     if ($r.Response) { $r.Response.Close(); throw (New-UpdateError 'failed' 'releases/latest did not redirect') }
     $target = New-Object Uri($r.Url, [string]$r.Location)
     if (-not (Test-AllowedUrl $Source $target)) { throw (New-UpdateError 'refused' "releases/latest pointed away from $($Source.BaseUrl)") }
-    $prefix = "/$($Source.Repo)/releases/tag/"
+    $releases = "/$($Source.Repo)/releases"
+    $prefix = "$releases/tag/"
     $path = $target.AbsolutePath
-    if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    if ($path.TrimEnd('/') -ieq $releases) { return $null }
+    if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw (New-UpdateError 'moved' "$($Source.Repo) seems to have moved: its releases/latest points to $path")
+    }
     $tag = [Uri]::UnescapeDataString($path.Substring($prefix.Length))
     if ($tag -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw (New-UpdateError 'refused' "Odd release tag: $tag") }
     $tag
@@ -353,6 +383,19 @@ function New-TrustedDirectory([string]$Path, [string]$Root, [switch]$UsersRead) 
     $security.SetOwner((New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'))
     [void][IO.Directory]::CreateDirectory($Path, $security)
     Assert-TrustedPath $Path $Root
+}
+
+# A fresh admin-only folder for an elevated setup step's downloads: ProgramData\HTPC\state\work\
+# <Name>-<random>, made admin-only as it is created, with everything from ProgramData\HTPC down
+# checked. Never %TEMP%, which the user can write: an installer checked there could be swapped
+# before it runs as administrator. The caller deletes it when done.
+function New-AdminWorkDir([string]$Name, [string]$DataRoot = (Join-Path $env:ProgramData 'HTPC')) {
+    $state = Join-Path $DataRoot 'state'
+    New-TrustedDirectory $state $DataRoot -UsersRead
+    New-TrustedDirectory (Join-Path $state 'work') $DataRoot
+    $dir = Join-Path $state ('work\{0}-{1}' -f $Name, [guid]::NewGuid().ToString('N').Substring(0, 12))
+    New-TrustedDirectory $dir $DataRoot
+    $dir
 }
 
 # --- Moving files so a power cut leaves either the old or the new one --------------------------

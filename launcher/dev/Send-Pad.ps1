@@ -11,6 +11,9 @@
     Tests the button presets and the on-screen keyboard end to end: the same code path as the
     real controller, from the controller thread onwards.
 
+    Only a launcher started with --dev answers the message (Start-Launcher.ps1 -Dev); a release
+    ignores it, and so does the published setup exe (its elevated copy never gets --dev).
+
 .EXAMPLE
     powershell -File launcher\dev\Send-Pad.ps1 -Press A
 .EXAMPLE

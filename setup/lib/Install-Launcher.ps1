@@ -20,10 +20,15 @@
     WatchdogPauseUntil), and the watchdog starts the new one; a replaced watchdog is ended and
     started again for the signed-in user, not elevated (through a one-shot scheduled task).
 
+    Never a downgrade: a TV Box Setup older than the launcher or kept setup scripts on the box
+    is refused before anything changes (the wizard shows why). lib\, jobs\ and the kept setup
+    folder are mirrored (built anew, swapped in), never merged into the old ones.
+
     Also: the files' "downloaded from the internet" mark removed (the setup exe may come from a
     browser), and single-file .NET apps unpack to %LOCALAPPDATA%\HTPC\bundle instead of %TEMP%
     (DOTNET_BUNDLE_EXTRACT_BASE_DIR), where disk cleanup would delete them from under the
-    running launcher.
+    running launcher. (Not the elevated setup: it unpacks in Program Files\HTPC\Setup\bundle,
+    SetupElevation.cs.)
 
 .PARAMETER Exe
     The launcher executable to install.
@@ -36,12 +41,28 @@ param(
 )
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\UpdateCore.ps1"   # versions (ConvertTo-SemVer, Get-FileSemVer) and the trusted owners
 Assert-Admin
 
 $installDir = Join-Path $env:ProgramFiles 'HTPC\Launcher'
 $launcher = Join-Path $installDir 'HtpcLauncher.exe'
 $watchdog = Join-Path $installDir 'HtpcWatchdog.exe'
 if (-not (Test-Path -LiteralPath $Exe)) { throw "Launcher not found: $Exe" }
+
+# Never older than what the box has: an earlier release's TV Box Setup would put its launcher,
+# watchdog, job runner and catalog back over newer ones (a launcher update may have come since).
+# Its version: setup\VERSION (the build writes it), else its exe's. The box's: the installed
+# launcher's, or the kept setup folder's, whichever is newer. Refused before anything changes.
+function Get-VersionFile([string]$Dir) {
+    $f = Join-Path $Dir 'VERSION'
+    if (Test-Path -LiteralPath $f -PathType Leaf) { ConvertTo-SemVer ([IO.File]::ReadAllText($f).Trim()) } else { $null }
+}
+$incoming = Get-VersionFile $SetupDir
+if (-not $incoming) { $incoming = Get-FileSemVer $Exe }
+$onBox = @((Get-FileSemVer $launcher), (Get-VersionFile (Join-Path $HtpcData 'setup'))) | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
+if ($incoming -and $onBox -and $incoming -lt $onBox) {
+    throw "This TV Box Setup is version $(Format-SemVer $incoming), older than the $(Format-SemVer $onBox) on this box, so the launcher was left as it is. Use TV Box Setup $(Format-SemVer $onBox) or newer."
+}
 # The setup exe's own (in its bundle, beside its setup folder) first; a copy beside $Exe (a build,
 # launcher\dist) may be an older one left in that folder.
 $watchdogFrom = @(
@@ -140,12 +161,67 @@ if ($restartWatchdog) {
     Write-Change 'watchdog started again'
 }
 
+# --- Folders mirrored, never merged -------------------------------------------------------------
+
+# Relative path -> SHA-256 of every file under $Dir.
+function Get-TreeHashes([string]$Dir) {
+    $root = [IO.Path]::GetFullPath($Dir).TrimEnd('\')
+    $hashes = @{}
+    foreach ($f in @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force)) { $hashes[$f.FullName.Substring($root.Length + 1)] = (Get-FileHash -LiteralPath $f.FullName).Hash }
+    $hashes
+}
+
+# True when neither $Path nor anything under it is a link or owned by anyone but SYSTEM,
+# Administrators or TrustedInstaller (UpdateCore's $TrustedSids): only such a folder is deleted
+# by setup. Looks into no link.
+function Test-OwnTree([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    $owner = try { (Get-Acl -LiteralPath $Path).GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { $null }
+    if ($TrustedSids -notcontains $owner) { return $false }
+    if ($item.PSIsContainer) {
+        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force)) { if (-not (Test-OwnTree $child.FullName)) { return $false } }
+    }
+    $true
+}
+
+# Deletes a folder setup or SYSTEM made (the .NET delete removes a link, never goes through one).
+# One with anything else in it was put there before ProgramData\HTPC was locked: left where it is
+# (renamed aside already), never opened through.
+function Remove-OwnTree([string]$Dir) {
+    if (-not (Test-OwnTree $Dir)) { Write-Attention "$Dir holds something setup did not make; left as it is"; return }
+    try { [IO.Directory]::Delete($Dir, $true) } catch { Write-Attention "$Dir could not be removed yet: $($_.Exception.Message)" }
+}
+
+# Makes $To an exact copy of $From: a mirror, never a merge (a file this version no longer has
+# must not stay behind, nor one from a newer version). Built anew beside it (<To>.new), then
+# swapped in with two renames; the old one is deleted. Unchanged when the two are the same.
+function Sync-Folder([string]$From, [string]$To) {
+    foreach ($old in @(Get-ChildItem -LiteralPath (Split-Path $To -Parent) -Filter "$(Split-Path $To -Leaf).old-*" -Directory -Force -ErrorAction SilentlyContinue)) { Remove-OwnTree $old.FullName }
+    if (Test-Path -LiteralPath $To) {
+        $want = Get-TreeHashes $From
+        $have = Get-TreeHashes $To
+        if ($want.Count -eq $have.Count -and -not @($want.Keys | Where-Object { $have[$_] -ne $want[$_] }).Count) { Write-Same "$To already as in $From"; return }
+    }
+    $new = "$To.new"
+    if (Test-Path -LiteralPath $new) { Remove-OwnTree $new }
+    if (Test-Path -LiteralPath $new) { throw "$new is in the way" }
+    New-Item -ItemType Directory $new | Out-Null
+    Copy-Item (Join-Path $From '*') $new -Recurse -Force
+    $old = $null
+    if (Test-Path -LiteralPath $To) {
+        $old = '{0}.old-{1}' -f $To, [guid]::NewGuid().ToString('N').Substring(0, 8)
+        [IO.Directory]::Move($To, $old)
+    }
+    [IO.Directory]::Move($new, $To)
+    if ($old) { Remove-OwnTree $old }
+    Write-Change "$To mirrored from $From"
+}
+
 $keep = Join-Path $HtpcData 'setup'
 $from = (Resolve-Path -LiteralPath $SetupDir).Path.TrimEnd('\')
 if ($from -ne $keep) {
-    New-Item -ItemType Directory -Force $keep | Out-Null
-    Copy-Item (Join-Path $from '*') $keep -Recurse -Force
-    Write-Change "setup scripts and app catalog kept in $keep"
+    Sync-Folder $from $keep
 } else {
     Write-Same "setup scripts already in $keep"
 }
@@ -153,15 +229,13 @@ if ($from -ne $keep) {
 # The install/uninstall job runner and the catalog it trusts live beside the launcher in Program
 # Files (admin-write only), so a standard process cannot tamper with what the elevated \HTPC\Jobs
 # task runs or the ids it trusts. The launcher reads this catalog too.
-$jobLib = Join-Path $installDir 'lib'
-$jobDir = Join-Path $installDir 'jobs'
-New-Item -ItemType Directory -Force $jobLib | Out-Null
-New-Item -ItemType Directory -Force $jobDir | Out-Null
 # All of lib\: the job verbs use the update scripts too (UpdateCore, LauncherUpdate,
 # WindowsUpdate, AppUpdaters, Install-Winget), and a launcher update replaces this folder with
 # its release's lib\ as a whole (lib\LauncherUpdate.ps1), so both keep the same set.
-Copy-Item (Join-Path $from 'lib\*.ps1') $jobLib -Force
-if (Test-Path (Join-Path $from 'jobs')) { Copy-Item (Join-Path $from 'jobs\*') $jobDir -Force }
+Sync-Folder (Join-Path $from 'lib') (Join-Path $installDir 'lib')
+if (Test-Path (Join-Path $from 'jobs')) { Sync-Folder (Join-Path $from 'jobs') (Join-Path $installDir 'jobs') }
+# What the task runs (lib\Start-Job.ps1 says why it sits outside lib\ and jobs\).
+Copy-Item (Join-Path $from 'lib\Start-Job.ps1') (Join-Path $installDir 'Start-Job.ps1') -Force 
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
 Write-Change "job runner and trusted catalog in $installDir"
 
@@ -176,8 +250,13 @@ $leftovers = @(foreach ($base in (Join-Path $installDir 'HtpcLauncher'), (Join-P
     }) + @(Get-ChildItem -LiteralPath $installDir -Filter '*.old-*' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
 foreach ($item in $leftovers) {
     if (-not (Test-Path -LiteralPath $item)) { continue }
+    if (Test-Path -LiteralPath $item -PathType Container) {
+        Remove-OwnTree $item   # never through a link someone put in its place
+        if (-not (Test-Path -LiteralPath $item)) { Write-Change "removed $item (left by a launcher update)" }
+        continue
+    }
     # A program still running from one (an old watchdog) stays until the next setup or update.
-    try { Remove-Item -LiteralPath $item -Recurse -Force; Write-Change "removed $item (left by a launcher update)" }
+    try { Remove-Item -LiteralPath $item -Force; Write-Change "removed $item (left by a launcher update)" }
     catch { Write-Attention "$item is in use; left for later" }
 }
 

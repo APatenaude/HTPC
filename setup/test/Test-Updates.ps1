@@ -9,15 +9,29 @@
     Everything happens under %TEMP%\htpc-updtest: a fake Program Files\HTPC and ProgramData\HTPC,
     fake launchers and a fake watchdog (small C# programs built with the .NET Framework's csc),
     and a fake GitHub on http://127.0.0.1 (Serve-FakeRelease.ps1).
-      Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs)
-      Download  pinned redirects: another host, another scheme, more than 5 hops, a lying
-                Content-Length, a longer stream, 429 short and long, 404, a wrong SHA-256
+      Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs), the
+                real watchdog's rules (Watchdog.cs compiled with checks: a job's pause or watch
+                file, how an exit counts, never a fallback while an update watches)
+      Download  pinned redirects: another host, another scheme, more than 5 hops, another
+                repository's path (a renamed one: "moved", also for releases/latest), no release
+                yet, a lying Content-Length, a longer stream, 429 short and long, 403 with and
+                without GitHub's rate-limit headers, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
-                first roll back), not newer, no watchdog, a bad download (nothing touched)
-      Faults    the job ended hard after each journal step, then reconcile: the old launcher or
-                the new one, never half of each, and the launcher running is the one on disk
+                first roll back; the next update that works removes the .bad copies), not
+                newer, no watchdog, not enough free space, a bad download, never back at Home
+                (an app in front: it gives up; nothing touched, nothing stopped); in each, the
+                fake watchdog, judging exits as the real one does, counts none (the job's watch
+                covers the crash loop it rolls back, its pause the launcher it stops)
+      Faults    the job ended hard after each journal step, then reconcile, started the way the
+                box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
+                the update, even with lib\ or jobs\ gone): the old launcher or the new one, never
+                half of each, and the launcher running is the one on disk; and a rollback cut
+                short before or between its slots: the reconcile finishes it
       Planting  a junction for the staging folder, a user-owned .new file, a Users write entry
-                on state\: all refused (run it as SYSTEM in the VM too: -Only Planting)
+                on state\: all refused (run it as SYSTEM in the VM too: -Only Planting); a
+                ProgramData\HTPC the user owns: Administrators' after the lock, and trusted; the
+                app jobs' runner: nothing written in a state\ Users can change or that is a
+                junction, an admin-only work folder and atomic progress in a good one
       Wua       the Windows Update child faked: a hang is ended in time, the count leaves out
                 Defender's definitions and the removal tool, installs report "n of m", a stuck
                 service answers "busy" without starting anything
@@ -66,8 +80,10 @@ function Build-Fake([string]$Name, [string]$Source) {
     $out
 }
 
-# A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once) or hang (never
-# signals). It leaves with 75 when the job says "ready" (the progress file, written after it started).
+# A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once), hang (never
+# signals) or busy (healthy, but an app stays in front). When the job says "ready" (the progress
+# file, written after it started) it says it is at Home (Local\HtpcLeaving_<v>_<pid>; busy never
+# does); when the job says "leave" it exits with 75.
 function Get-FakeLauncher([string]$Version, [string]$Mode) {
     Build-Fake "launcher-$Version-$Mode.exe" @"
 using System; using System.IO; using System.Threading; using System.Reflection; using System.Diagnostics;
@@ -77,36 +93,66 @@ class P { static int Main() {
   if ("$Mode" == "crash") { Thread.Sleep(300); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
   var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
-  EventWaitHandle ev = null;
-  if ("$Mode" == "healthy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + Process.GetCurrentProcess().Id);
+  var me = Process.GetCurrentProcess().Id;
+  EventWaitHandle ev = null, leaving = null;
+  if ("$Mode" == "healthy" || "$Mode" == "busy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + me);
   for (var i = 0; i < 3000; i++) {
-    try { if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started && File.ReadAllText(progress).Contains("\"phase\":\"ready\"")) return 75; } catch (Exception) { }
+    try {
+      if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started) {
+        var text = File.ReadAllText(progress);
+        if (text.Contains("\"phase\":\"leave\"")) return 75;
+        if (text.Contains("\"phase\":\"ready\"") && leaving == null && "$Mode" != "busy")
+          leaving = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcLeaving_$($Version)_" + me);
+      }
+    } catch (Exception) { }
     Thread.Sleep(200);
   }
-  GC.KeepAlive(ev); return 0; } }
+  GC.KeepAlive(ev); GC.KeepAlive(leaving); return 0; } }
 "@
 }
 
 # The watchdog: starts HtpcLauncher.exe from its folder whenever none runs from there, unless
-# the job's pause file names a live process. Stops when <root>\stop-watchdog exists.
+# the job's pause file names a live process. Each exit of a launcher it started is judged as the
+# real one judges it, into <root>\watchdog-exits.log: "planned" (exit code 75), "covered" (a
+# job's pause or watch file names a live process: not counted) or "counted" (a crash the real
+# watchdog would count towards restarting the box). Stops when <root>\stop-watchdog exists.
 function Get-FakeWatchdog {
     Build-Fake 'HtpcWatchdog.exe' @'
 using System; using System.IO; using System.Threading; using System.Diagnostics; using System.Text.RegularExpressions;
-class W { static void Main() {
+class W {
+  static bool Holds(string path) {
+    try { var m = Regex.Match(File.ReadAllText(path), "\"jobPid\":\\s*(\\d+)");
+          if (m.Success) { using (Process.GetProcessById(int.Parse(m.Groups[1].Value))) return true; } } catch (Exception) { }
+    return false;
+  }
+  static void Main() {
   var dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
   var exe = Path.Combine(dir, "HtpcLauncher.exe");
   var root = Path.GetFullPath(Path.Combine(dir, @"..\..\.."));
   var pause = Path.Combine(root, @"PD\HTPC\state\watchdog-pause");
+  var watch = Path.Combine(root, @"PD\HTPC\state\watchdog-watch");
+  var log = Path.Combine(root, "watchdog-exits.log");
+  Process child = null;
+  var nextStart = DateTime.MinValue;
   while (!File.Exists(Path.Combine(root, "stop-watchdog"))) {
-    var paused = false;
-    try { var m = Regex.Match(File.ReadAllText(pause), "\"jobPid\":\\s*(\\d+)");
-          if (m.Success) { try { Process.GetProcessById(int.Parse(m.Groups[1].Value)); paused = true; } catch (Exception) { } } } catch (Exception) { }
-    var running = false;
+    if (child != null && child.HasExited) {
+      var what = child.ExitCode == 75 ? "planned" : Holds(pause) || Holds(watch) ? "covered" : "counted";
+      try { File.AppendAllText(log, what + " " + child.ExitCode + Environment.NewLine); } catch (Exception) { }
+      child = null;
+      nextStart = DateTime.UtcNow.AddSeconds(1);
+    }
+    var running = child != null;
     foreach (var p in Process.GetProcessesByName("HtpcLauncher")) { try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) running = true; } catch (Exception) { } }
-    if (!paused && !running && File.Exists(exe)) { try { Process.Start(exe); } catch (Exception) { } Thread.Sleep(1500); }
-    Thread.Sleep(250);
+    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(exe); } catch (Exception) { } }
+    Thread.Sleep(100);
   } } }
 '@
+}
+
+# The exits of a fake box's launcher its watchdog would have counted as crashes (see above).
+function Get-CountedExits([string]$Root) {
+    $log = Join-Path $Root 'watchdog-exits.log'
+    @(if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log | Where-Object { $_ -like 'counted*' } })
 }
 
 # An admin-only folder (SYSTEM and Administrators full, Users read), as the box's are.
@@ -134,23 +180,28 @@ function New-SetupCopy([string]$To, [string]$Version, [switch]$BrokenRunner) {
         Copy-Item -LiteralPath $f.FullName $dest
     }
     [IO.File]::WriteAllText((Join-Path $To 'VERSION'), "$Version`n")
+    # Which release a lib\ or jobs\ folder came from (the Faults section checks the bootstrap
+    # never pairs one release's lib\ with the other's jobs\).
+    foreach ($part in 'lib', 'jobs') { [IO.File]::WriteAllText((Join-Path $To "$part\test-version.txt"), $Version) }
     if ($BrokenRunner) { Add-Content (Join-Path $To 'lib\Invoke-AppJob.ps1') "`n}{ broken" }
 }
 
-# A box: Program Files\HTPC\Launcher with launcher 0.1.0, the watchdog and the job runner, and
-# ProgramData\HTPC with the kept setup. The watchdog is started (it starts the launcher).
-function New-FakeBox([string]$Name) {
+# A box: Program Files\HTPC\Launcher with launcher 0.1.0 (healthy, or busy: an app always in
+# front), the watchdog and the job runner, and ProgramData\HTPC with the kept setup. The watchdog
+# is started (it starts the launcher).
+function New-FakeBox([string]$Name, [string]$Mode = 'healthy') {
     $root = Join-Path $work $Name
     New-AdminFolder $root
     $dir = Join-Path $root 'PF\HTPC\Launcher'
     New-Item -ItemType Directory -Force $dir, (Join-Path $root 'PD\HTPC') | Out-Null
-    Copy-Item (Get-FakeLauncher '0.1.0' 'healthy') (Join-Path $dir 'HtpcLauncher.exe')
+    Copy-Item (Get-FakeLauncher '0.1.0' $Mode) (Join-Path $dir 'HtpcLauncher.exe')
     Copy-Item (Get-FakeWatchdog) (Join-Path $dir 'HtpcWatchdog.exe')
     $setup = Join-Path $root 'PD\HTPC\setup'
     New-SetupCopy $setup '0.1.0'
     Copy-Item (Join-Path $setup 'lib') (Join-Path $dir 'lib') -Recurse
     Copy-Item (Join-Path $setup 'jobs') (Join-Path $dir 'jobs') -Recurse
     Copy-Item (Join-Path $setup 'catalog.json') $dir
+    Copy-Item (Join-Path $setup 'lib\Start-Job.ps1') $dir
     Start-Process (Join-Path $dir 'HtpcWatchdog.exe') | Out-Null
     [void](Wait-For { Get-Running $root '0.1.0' } 20)
     $root
@@ -192,7 +243,7 @@ function Start-FakeGitHub {
     [void](Wait-For { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', $port); $c.Close(); $true } catch { $false } } 15)
 }
 function Set-Scenario([string]$Name) { [IO.File]::WriteAllText((Join-Path $serverRoot 'scenario'), $Name) }
-$source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
+$source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 
 # Release v<Version> on the fake GitHub: the launcher in the given mode, setup.zip, update.json.
 function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switch]$BrokenRunner, [switch]$WrongHash) {
@@ -217,16 +268,19 @@ function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switc
     [IO.File]::WriteAllText((Join-Path $dir 'update.json'), ($m | ConvertTo-Json -Depth 4))
 }
 
-# Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would.
-function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt) {
+# Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would:
+# with the fake box's own lib\ (what its task runs), or the one its bootstrap picked (-Lib).
+function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [string]$Lib) {
+    if (-not $Lib) { $Lib = Join-Path $Root 'PF\HTPC\Launcher\lib' }
     $script = Join-Path $work "job-$PID.ps1"
     @"
-. '$lib\UpdateCore.ps1'
-. '$lib\LauncherUpdate.ps1'
+. '$Lib\UpdateCore.ps1'
+. '$Lib\LauncherUpdate.ps1'
 `$UpdateProgressFile = '$Root\PD\HTPC\state\test-progress.json'
 `$HealthyWait = [TimeSpan]::FromSeconds(25)
+`$LeaveWait = [TimeSpan]::FromSeconds(10)
 `$UpdateFaultAt = $(if ($FaultAt) { "'$FaultAt'" } else { '$null' })
-`$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
+`$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 `$paths = Get-LauncherPaths -InstallRoot '$Root\PF\HTPC' -DataRoot '$Root\PD\HTPC'
 try { $Action; 'RESULT ok' } catch { "RESULT `$(Get-UpdateErrorKind `$_): `$(`$_.Exception.Message)" }
 "@ | Set-Content -LiteralPath $script -Encoding ASCII
@@ -246,9 +300,24 @@ function Get-Leftovers([string]$Root) {
 }
 
 # The runner's own dry run (it refuses a bad token with an error on stderr: not this script's).
-function Test-Token([string]$Token) {
+function Test-Token([string]$Token, [string[]]$More) {
     $ErrorActionPreference = 'Continue'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Invoke-AppJob.ps1" -Job $Token -DryRun 2>&1 | Out-Null
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Invoke-AppJob.ps1" -Job $Token -DryRun @More 2>&1 | Out-Null
+}
+
+# The runner a fake box's task would start now (its Start-Job.ps1 -Resolve): its lib\ and jobs\,
+# the release each came from (test-version.txt), and whether both are there whole.
+function Resolve-FakeRunner([string]$Root) {
+    $ErrorActionPreference = 'Continue'
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\PF\HTPC\Launcher\Start-Job.ps1" -Resolve -DataRoot "$Root\PD\HTPC" 2>&1 | Out-String
+    $found = @{}
+    foreach ($line in $out -split "`r?`n") { if ($line -match '^(lib|jobs)=(.+)$') { $found[$Matches[1]] = $Matches[2].Trim() } }
+    $from = { param($dir) $f = if ($dir) { Join-Path $dir 'test-version.txt' }; if ($f -and (Test-Path -LiteralPath $f)) { ([IO.File]::ReadAllText($f)).Trim() } else { '?' } }
+    [pscustomobject]@{
+        Lib = $found['lib']; Jobs = $found['jobs']
+        LibFrom = & $from $found['lib']; JobsFrom = & $from $found['jobs']
+        Whole = [bool]($found['lib'] -and $found['jobs'] -and (Test-Path -LiteralPath (Join-Path $found['lib'] 'Invoke-AppJob.ps1')) -and (Test-Path -LiteralPath (Join-Path $found['jobs'] 'reconcile.ps1')))
+    }
 }
 # --- Run -----------------------------------------------------------------------------------------------
 
@@ -274,6 +343,20 @@ try {
             try { [void](ConvertFrom-ReleaseManifest $bad.text $bad.tag) } catch { $refused = (Kind $_) -eq 'refused' }
             Check $refused "update.json refused: $($bad.why)"
         }
+        # The box's own source: github.com first, then any *.githubusercontent.com (HTTPS, 443).
+        $hops = @(
+            @{ url = 'https://github.com/APatenaude/HTPC/releases/download/v1.0.0/update.json'; redirect = $false; ok = $true }
+            @{ url = 'https://release-assets.githubusercontent.com/github-production-release-asset/1'; redirect = $false; ok = $false }
+            @{ url = 'https://release-assets.githubusercontent.com/github-production-release-asset/1'; redirect = $true; ok = $true }
+            @{ url = 'https://new-name.githubusercontent.com/x'; redirect = $true; ok = $true }
+            @{ url = 'https://evilgithubusercontent.com/x'; redirect = $true; ok = $false }
+            @{ url = 'https://x.githubusercontent.com.example.net/x'; redirect = $true; ok = $false }
+            @{ url = 'http://release-assets.githubusercontent.com/x'; redirect = $true; ok = $false }
+            @{ url = 'https://release-assets.githubusercontent.com:8443/x'; redirect = $true; ok = $false }
+            @{ url = 'https://user@release-assets.githubusercontent.com/x'; redirect = $true; ok = $false })
+        foreach ($h in $hops) {
+            Check ((Test-AllowedUrl $PinnedSource ([Uri]$h.url) -Redirect:$h.redirect) -eq $h.ok) "$(if ($h.ok) { 'allowed' } else { 'refused' })$(if ($h.redirect) { ' after a redirect' } else { ' first' }): $($h.url)"
+        }
         foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update') {
             Test-Token $t
             Check ($LASTEXITCODE -eq 0) "job token accepted: $t"
@@ -281,6 +364,71 @@ try {
         foreach ($t in 'launcher-update:1.2;calc', 'WINDOWS-SCAN', 'launcher-update:../x', 'nosuchverb') {
             Test-Token $t
             Check ($LASTEXITCODE -ne 0) "job token refused: $t"
+        }
+        # A token that carries parameters in: the verb scripts only ever come from jobs\ (or the
+        # .prev/.new copies an update makes), the journal is only read from ProgramData.
+        Test-Token 'reconcile' @('-JobsDir', $env:TEMP)
+        Check ($LASTEXITCODE -ne 0) 'the runner refuses a jobs folder of the caller''s choosing'
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Start-Job.ps1" -Job reconcile -DataRoot $env:TEMP 2>&1 | Out-Null }
+        Check ($LASTEXITCODE -ne 0) 'the bootstrap refuses -DataRoot without -Resolve'
+
+        # What an update applies of setup: each machine step once per change of its script (the
+        # steps faked: nothing on this machine changes), a failed one again next time.
+        $box = Join-Path $work 'machine'
+        New-AdminFolder $box
+        $mp = Get-LauncherPaths -InstallRoot "$box\PF\HTPC" -DataRoot "$box\PD\HTPC"
+        New-Item -ItemType Directory -Force (Join-Path $mp.LauncherDir 'lib'), $mp.StateRoot | Out-Null
+        foreach ($s in $MachineSteps.Values) { Copy-Item (Join-Path $lib $s) (Join-Path $mp.LauncherDir "lib\$s") }
+        $ran = New-Object Collections.ArrayList
+        $fake = { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)) }
+        Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-EdgePolicy.ps1,Set-SystemPolicy.ps1') "an update applies the machine part of the Edge and System steps ($($ran -join ','))"
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check ($ran.Count -eq 0) '  not again while their scripts stay the same'
+        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-EdgePolicy.ps1') '# changed'
+        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-SystemPolicy.ps1') '# changed'
+        $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*') { throw 'failed' } }
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
+
+        # The real watchdog's rules (launcher\src\Watchdog\Watchdog.cs, compiled here with checks,
+        # as the build does: the Framework's csc, warnings as errors): a job's pause or watch file,
+        # how an exit counts, when it falls back to restarting the box or the desktop.
+        $wdChecks = Join-Path $bin 'watchdog-checks.cs'
+        [IO.File]::WriteAllText($wdChecks, @'
+using System;
+namespace Htpc.Watchdog {
+static class Checks {
+  static int failed;
+  static void Check(bool ok, string what) { Console.WriteLine((ok ? "PASS " : "FAIL ") + what); if (!ok) failed++; }
+  static int Main() {
+    var boot = new DateTime(2026, 9, 28, 8, 0, 0, DateTimeKind.Utc);
+    var now = boot.AddHours(2);
+    Func<int, bool> running = pid => pid == 4321;
+    var file = "{\"jobPid\":4321,\"expiresUtc\":\"" + now.AddMinutes(10).ToString("o") + "\"}";
+    Check(Program.JobFileHolds(file, now.AddMinutes(-1), boot, now, running), "a job's pause or watch holds: written since the box started, not expired, its job running");
+    Check(!Program.JobFileHolds(file.Replace("4321", "4322"), now.AddMinutes(-1), boot, now, running), "  not once its job is gone");
+    Check(!Program.JobFileHolds(file, boot.AddMinutes(-5), boot, now, running), "  not when written before the box started");
+    Check(!Program.JobFileHolds(file, now.AddMinutes(-1), boot, now.AddMinutes(11), running), "  not once expired");
+    Check(!Program.JobFileHolds("{\"jobPid\":4321}", now, boot, now, running) && !Program.JobFileHolds(null, now, boot, now, running), "  not without an expiry, nor without a file");
+    var early = TimeSpan.FromSeconds(5);
+    Check(Program.Judge(1, early, false, false) == Program.Exit.Fast, "a crash 5 s after its start: a fast exit");
+    Check(Program.Judge(1, early, false, true) == Program.Exit.NotCounted, "  not counted while a job watches or pauses (the update judges it)");
+    Check(Program.Judge(75, early, false, false) == Program.Exit.NotCounted, "exit code 75 (planned): not counted");
+    Check(Program.Judge(null, TimeSpan.FromSeconds(90), true, false) == Program.Exit.Fast, "ended as hung 90 s in: a fast exit");
+    Check(Program.Judge(1, TimeSpan.FromMinutes(2), false, false) == Program.Exit.Settled, "a crash 2 min in: it had settled");
+    Check(Program.Judge(null, TimeSpan.FromMinutes(6), true, false) == Program.Exit.Settled, "ended as hung 6 min in: it had settled");
+    Check(Program.FallBack(3, -1, false), "3 fast exits in a row: restart the box or the desktop");
+    Check(!Program.FallBack(3, -1, true), "  never while a launcher update watches the launcher it put in place");
+    Check(!Program.FallBack(2, -1, false) && !Program.FallBack(3, 0, false), "  not before 3, nor again while in the fallback");
+    return failed;
+  } } }
+'@)
+        $wdExe = Join-Path $bin 'watchdog-checks.exe'
+        $built = & { $ErrorActionPreference = 'Continue'; & $csc /nologo /target:exe /warnaserror+ /main:Htpc.Watchdog.Checks "/out:$wdExe" (Join-Path $repo 'launcher\src\Watchdog\Watchdog.cs') $wdChecks 2>&1 | Out-String }
+        Check ($LASTEXITCODE -eq 0) "the watchdog compiles with its checks $(if ($LASTEXITCODE) { $built.Trim() })"
+        if (Test-Path -LiteralPath $wdExe) {
+            foreach ($line in & $wdExe) { if ($line -match '^(PASS|FAIL) (.+)$') { Check ($Matches[1] -eq 'PASS') "watchdog: $($Matches[2])" } }
         }
     }
 
@@ -309,6 +457,14 @@ try {
         Check ((& $try 'ratelimit') -eq 'ok') '429 with a short Retry-After: waits once, then downloads'
         Check ((& $try 'ratelimitlong') -eq 'ratelimited') '429 with a long Retry-After: "try again later"'
         Check ((& $try 'notfound') -eq 'notfound') '404: not found'
+        Check ((& $try 'forbidden') -eq 'failed') '403 without the rate-limit headers: a refusal, not "try again later"'
+        Check ((& $try 'forbiddenlimit') -eq 'ratelimited') '403 with X-RateLimit-Remaining: 0: "try again later"'
+        Check ((& $try 'moved') -eq 'moved') 'a redirect to another repository''s path on the pinned host: "moved", not followed'
+        foreach ($case in @(@{ s = 'norelease'; want = 'none' }, @{ s = 'movedlatest'; want = 'moved' })) {
+            Set-Scenario $case.s
+            $got = try { $t = Get-LatestTag $source; if ($null -eq $t) { 'none' } else { $t } } catch { Kind $_ }
+            Check ($got -eq $case.want) "releases/latest ($($case.s)): $($case.want) ($got)"
+        }
         Set-Scenario 'normal'
         Remove-Item $out -ErrorAction SilentlyContinue
         $wrong = try { Save-ReleaseAsset -Source $source -Tag 'v0.2.0' -Name $f.name -Size $f.size -Sha256 ('0' * 64) -OutFile $out; 'ok' } catch { Kind $_ }
@@ -322,6 +478,8 @@ try {
 
         Publish-FakeRelease '0.2.0' 'healthy'
         $root = New-FakeBox 'swap-ok'
+        $bootstrap = Join-Path $root 'PF\HTPC\Launcher\Start-Job.ps1'
+        Add-Content -LiteralPath $bootstrap '# an older copy of the bootstrap'
         $r = Invoke-FakeJob $root $update
         $j = Get-Journal $root
         Check ($r -eq 'ok' -and $j.step -eq 'done') "healthy 0.2.0: done ($r, $($j.step))"
@@ -331,6 +489,12 @@ try {
         Check ((Get-Leftovers $root).Count -eq 0) 'no .new left'
         $r = Invoke-FakeJob $root 'Invoke-LauncherRollback -Paths $paths'
         Check ($r -eq 'ok' -and (Get-Journal $root).step -eq 'rolledback' -and (Wait-For { Get-Running $root '0.1.0' } 20)) "rollback on request: back on 0.1.0 ($r)"
+        # Its reconcile (no update under way) brought the task's bootstrap in line with lib\.
+        Check ((Get-FileHash $bootstrap).Hash -eq (Get-FileHash (Join-Path $root 'PF\HTPC\Launcher\lib\Start-Job.ps1')).Hash) "the task's bootstrap is lib\'s copy again"
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrap -Job reconcile -DryRun 2>&1 | Out-Null }
+        Check ($LASTEXITCODE -eq 0) '  and a dry run through it reaches the runner'
+        $counted = Get-CountedExits $root
+        Check ($counted.Count -eq 0 -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-watch'))) "no exit counted by the watchdog, its watch gone ($($counted -join '; '))"
         Remove-FakeBox $root
 
         foreach ($case in @(@{ mode = 'crash' }, @{ mode = 'hang' }, @{ mode = 'healthy'; broken = $true })) {
@@ -341,9 +505,33 @@ try {
             $j = Get-Journal $root
             Check ($j.step -eq 'rolledback' -and (Get-ExeVersion $root) -eq '0.1.0') "$label rolls back ($($j.message))"
             Check (Wait-For { Get-Running $root '0.1.0' } 20) "  and 0.1.0 runs again"
+            # The crash loop the job rolled back was never the watchdog's to act on (no restart of
+            # the box, no desktop): the watch covered every exit from the swap on, the rollback's
+            # pause the one it stopped.
+            $counted = Get-CountedExits $root
+            $covered = @(Get-Content -LiteralPath (Join-Path $root 'watchdog-exits.log') -ErrorAction SilentlyContinue | Where-Object { $_ -like 'covered*' })
+            Check ($counted.Count -eq 0 -and ($case.mode -ne 'crash' -or $covered.Count -ge 2) -and
+                -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-watch')) -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause'))) "  no exit counted by the watchdog ($($covered.Count) covered by the job; counted: $($counted -join '; ')), watch and pause gone"
             Check ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left'
+            if ($case.mode -eq 'crash') {
+                # Kept only until an update works.
+                Publish-FakeRelease '0.2.0' 'healthy'
+                $r = Invoke-FakeJob $root $update
+                $bad = @(Get-ChildItem (Join-Path $root 'PF\HTPC\Launcher'), (Join-Path $root 'PD\HTPC') -Filter '*.bad*' -ErrorAction SilentlyContinue)
+                Check ((Get-Journal $root).step -eq 'done' -and $bad.Count -eq 0) "  the next update that works removes the .bad copies ($r, $($bad.Count) left)"
+            }
             Remove-FakeBox $root
         }
+
+        # An app in front the whole time: the download goes ahead, the swap never does.
+        Publish-FakeRelease '0.2.0' 'healthy'
+        $root = New-FakeBox 'swap-busy' 'busy'
+        $before = @(Get-Running $root | ForEach-Object ProcessId)
+        $r = Invoke-FakeJob $root $update
+        $after = @(Get-Running $root | ForEach-Object ProcessId)
+        Check ($r -like 'timeout*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0') "never back at Home: the update gives up, nothing moved ($r)"
+        Check ($before.Count -eq 1 -and "$before" -eq "$after" -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause')) -and (Get-Leftovers $root).Count -eq 0) '  the launcher was never stopped, the watchdog never paused, nothing left'
+        Remove-FakeBox $root
 
         Publish-FakeRelease '0.2.0' 'healthy' -WrongHash
         $root = New-FakeBox 'swap-badhash'
@@ -354,6 +542,9 @@ try {
         Check ((Get-ExeVersion $root) -eq '0.1.0' -and "$before" -eq "$after" -and (Get-Leftovers $root).Count -eq 0) '  the running launcher was never stopped, nothing left'
         $r = Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.1.0 -Source $src -Paths $paths'
         Check ($r -like 'refused*not newer*') "the same version again: refused ($r)"
+        Publish-FakeRelease '0.2.0' 'healthy'
+        $r = Invoke-FakeJob $root "`$UpdateMinFree = 1PB; $update"
+        Check ($r -like 'refused*free disk space*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0' -and (Get-Leftovers $root).Count -eq 0) "not enough free space: refused before the download, nothing left ($r)"
         New-Item -ItemType File -Force (Join-Path $root 'stop-watchdog') | Out-Null
         [void](Wait-For { -not (Get-CimInstance Win32_Process -Filter "Name = 'HtpcWatchdog.exe'" | Where-Object { $_.ExecutablePath -like "$root*" }) } 10)
         Publish-FakeRelease '0.2.0' 'healthy'
@@ -371,15 +562,46 @@ try {
         foreach ($step in $steps) {
             $root = New-FakeBox "fault-$($step -replace '[:.]', '_')"
             [void](Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths' $step)
-            $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths'
+            # The power back: the task starts the box's bootstrap, which must find a whole runner
+            # (lib\ may be gone, or new beside the old jobs\), the one that began the update; the
+            # reconcile runs from there, not from this repository.
+            $pick = Resolve-FakeRunner $root
+            Check ($pick.Whole -and $pick.LibFrom -eq '0.1.0' -and $pick.JobsFrom -eq '0.1.0') "after '$step': the task's bootstrap finds the whole runner that began the update (lib $($pick.LibFrom), jobs $($pick.JobsFrom))"
+            $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths' -Lib $pick.Lib
             $j = Get-Journal $root
             $v = Get-ExeVersion $root
             $consistent = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
             $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
             $sameSetup = ($v -eq '0.1.0' -and $kept -eq '0.1.0') -or ($v -eq '0.2.0' -and $kept -eq '0.2.0')
             $runs = Wait-For { Get-Running $root $v } 25
+            $next = Resolve-FakeRunner $root
             Check ($consistent -and $sameSetup -and $runs -and (Get-Leftovers $root).Count -eq 0) "after '$step': $v on disk and running, journal $($j.step), setup $kept ($r)"
+            Check ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"
             Remove-FakeBox $root
+        }
+
+        # A rollback cut short (the new launcher crashes, then a power cut before or between the
+        # slots it puts back; or a rollback asked for, cut the same way): the reconcile finishes
+        # it, leaving what it put back already as it is.
+        $cases = @(
+            @{ release = 'crash'; action = 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths'; faults = @('rollingback', 'restored-launcher', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') }
+            @{ release = 'healthy'; action = 'Invoke-LauncherRollback -Paths $paths'; faults = @('restored-setup:lib') })
+        foreach ($case in $cases) {
+            Publish-FakeRelease '0.2.0' $case.release
+            foreach ($step in $case.faults) {
+                $root = New-FakeBox "fault-rb-$($case.release)-$($step -replace '[:.]', '_')"
+                if ($case.release -eq 'healthy') { [void](Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths') }
+                [void](Invoke-FakeJob $root $case.action $step)
+                $cut = (Get-Journal $root).step
+                $pick = Resolve-FakeRunner $root
+                $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths' -Lib $pick.Lib
+                $j = Get-Journal $root
+                $v = Get-ExeVersion $root
+                $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
+                $runs = Wait-For { Get-Running $root '0.1.0' } 25
+                Check ($cut -eq 'rollingback' -and $pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $runs -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($case.release)) cut after '$step' ($cut): finished, 0.1.0 on disk and running, setup $kept ($r; $($j.message))"
+                Remove-FakeBox $root
+            }
         }
     }
 
@@ -417,6 +639,81 @@ try {
         $r = Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths'
         Check ($r -like 'refused*' -and (Get-ExeVersion $root) -eq '0.1.0') "state\ that Users can change: refused ($r)"
         Remove-FakeBox $root
+
+        # ProgramData\HTPC made at standard rights (TV Box Setup's log before it asked for the
+        # rights), so the user's, with state\, setup\ and a journal of theirs in it: the lock
+        # (Register-AppInstaller -LockOnly) gives the folders to Administrators and renames the
+        # journal aside, and the jobs then trust them.
+        $data = Join-Path $work 'owner\HTPC'
+        New-Item -ItemType Directory -Force (Join-Path $data 'state'), (Join-Path $data 'setup\lib'), (Join-Path $data 'logs') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $data 'state\launcher-update.json'), '{}')
+        # logs\ as an older setup left it: Users may change it, with the launcher's own log in it.
+        & icacls "$data\logs" /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+        [IO.File]::WriteAllText((Join-Path $data 'logs\launcher.log'), 'old')
+        foreach ($p in $data, "$data\state", "$data\state\launcher-update.json", "$data\setup", "$data\logs\launcher.log") { & icacls $p /setowner "*$me" | Out-Null }
+        $ownerOf = { param($p) (Get-Acl -LiteralPath $p).GetOwner([Security.Principal.SecurityIdentifier]).Value }
+        Check ((& $ownerOf $data) -eq $me) "  (the fake ProgramData\HTPC is $me's to start with)"
+        $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
+        $owners = @($data, "$data\state", "$data\setup") | ForEach-Object { & $ownerOf $_ }
+        Check (@($owners | Where-Object { $_ -ne 'S-1-5-32-544' }).Count -eq 0) "ProgramData\HTPC, state\ and setup\ the user made: now Administrators' ($($owners -join ', '))"
+        Check ($null -eq (Get-UntrustedReason $data) -and $null -eq (Get-UntrustedReason "$data\state") -and $null -eq (Get-UntrustedReason "$data\setup")) "  and the SYSTEM jobs trust them ($(Get-UntrustedReason $data)$(Get-UntrustedReason "$data\state"))"
+        Check (-not (Test-Path -LiteralPath "$data\state\launcher-update.json") -and @(Get-ChildItem "$data\state" -Filter 'launcher-update.json.untrusted-*').Count -eq 1) '  the journal the user owned: renamed aside, never read'
+        $usersModify = { param($p) [bool]((Get-Acl -LiteralPath $p).Access | Where-Object { $_.IdentityReference -eq (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545').Translate([Security.Principal.NTAccount]) -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) -eq [Security.AccessControl.FileSystemRights]::Modify }) }
+        Check ($null -eq (Get-UntrustedReason "$data\logs") -and -not (& $usersModify "$data\logs")) "  logs\ setup's own now: Users' write gone, trusted ($(Get-UntrustedReason "$data\logs"))"
+        Check (-not (Test-Path -LiteralPath "$data\logs\launcher.log") -and @(Get-ChildItem "$data\logs" -Filter 'launcher.log.untrusted-*').Count -eq 1) '  the launcher log the user owned there: renamed aside'
+        Check ((& $usersModify "$data\user") -and (& $usersModify "$data\tv")) '  user\ and tv\ still user-writable'
+        $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
+        Check ($out -notmatch 'now by Administrators|renamed aside|threw|setup''s own now') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
+
+        # The app jobs' runner as SYSTEM (Job-Common.ps1, in its own PowerShell, SYSTEM faked):
+        # state\ checked before anything is written there, the progress written atomically.
+        $appJob = {
+            param([string]$Data)
+            $script = Join-Path $work "appjob-$PID.ps1"
+            @"
+. '$lib\Common.ps1'; . '$lib\AppCore.ps1'; . '$lib\UpdateCore.ps1'; . '$lib\Job-Common.ps1'
+`$script:IsSystem = `$true
+`$script:HtpcData = '$Data'
+`$script:ProgressPath = Join-Path '$Data' 'state\library-progress.json'
+Set-JobContext 'install:vlc' 'install'
+try { Assert-JobState; `$temp = New-AdminTemp; Write-JobProgress 'start' 0 'Starting install'; "RESULT ok `$temp" }
+catch { Write-JobProgress 'failed' 0 `$_.Exception.Message; "RESULT refused: `$(`$_.Exception.Message)" }
+"@ | Set-Content -LiteralPath $script -Encoding ASCII
+            $o = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script 2>&1 | Out-String
+            $l = $o -split "`r?`n" | Where-Object { $_ -like 'RESULT *' } | Select-Object -Last 1
+            if ($l) { $l.Substring(7) } else { "ended: $o" }
+        }
+        $data = Join-Path $work 'appjob-open\HTPC'
+        New-AdminFolder $data
+        New-Item -ItemType Directory -Force "$data\state" | Out-Null
+        & icacls "$data\state" /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+        $r = & $appJob $data
+        Check ($r -like 'refused*' -and -not (Test-Path "$data\state\library-progress.json") -and -not (Test-Path "$data\state\work")) "app job, state\ that Users can change: refused, nothing written there, not even 'failed' ($r)"
+        $data = Join-Path $work 'appjob-link\HTPC'
+        New-AdminFolder $data
+        $elsewhere = Join-Path $work 'appjob-elsewhere'
+        New-Item -ItemType Directory -Force $elsewhere | Out-Null
+        cmd /c mklink /J "$data\state" "$elsewhere" | Out-Null
+        $r = & $appJob $data
+        Check ($r -like 'refused*' -and @(Get-ChildItem $elsewhere).Count -eq 0) "app job, state\ a junction: refused, nothing written through it ($r)"
+        cmd /c rmdir "$data\state" | Out-Null
+        $data = Join-Path $work 'appjob-good\HTPC'
+        New-AdminFolder $data
+        $r = & $appJob $data
+        $progress = try { [IO.File]::ReadAllText("$data\state\library-progress.json") | ConvertFrom-Json } catch { $null }
+        $temp = if ($r -match '^ok (.+)$') { $Matches[1].Trim() } else { $null }
+        Check ($r -like 'ok *' -and $progress.phase -eq 'start' -and $progress.jobId -eq 'install:vlc') "app job, a trusted state\: made its work folder and wrote its progress ($r)"
+        Check ($temp -and (Test-Path -LiteralPath $temp) -and $null -eq (Get-UntrustedReason $temp) -and (Get-Acl -LiteralPath $temp).AreAccessRulesProtected) '  the work folder: admin-only, made so as it was created'
+        Check (@(Get-ChildItem "$data\state" -Filter '*.tmp*').Count -eq 0) '  no temp file left beside the progress'
+
+        # Setup's downloads (Install-Apps, Install-Codecs): an admin-only work folder, never %TEMP%.
+        $data = Join-Path $work 'workdir\HTPC'
+        New-AdminFolder $data
+        $d = try { New-AdminWorkDir 'apps' $data } catch { $null }
+        Check ($d -and $d.StartsWith("$data\state\work\apps-") -and $null -eq (Get-UntrustedReason $d) -and (Get-Acl -LiteralPath $d).AreAccessRulesProtected) "setup's download folder: admin-only, under state\work ($d)"
+        & icacls "$data\state" /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+        $k = try { [void](New-AdminWorkDir 'apps' $data); 'made' } catch { Kind $_ }
+        Check ($k -eq 'refused') "  ... refused under a state\ Users can change ($k)"
     }
 
     if (Section 'Wua') {

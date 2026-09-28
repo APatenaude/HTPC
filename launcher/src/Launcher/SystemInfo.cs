@@ -65,18 +65,34 @@ static class SystemInfo
         Directory.CreateDirectory(target);
         var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
         var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC");
-        var files = new[] { Path.Combine(data, "logs"), Path.Combine(local, "logs") }
-            .Where(Directory.Exists).SelectMany(d => Directory.GetFiles(d)); // logs\ has the decode report too
+        // Setup's (ProgramData\HTPC\logs), the launcher's and watchdog's with the decode report
+        // (%LOCALAPPDATA%\HTPC\logs), and the elevated wizard's own (Program Files\HTPC\Setup\logs,
+        // saved as setup-*: its launcher.log is not this one); only the 10 newest setup logs (Recent).
+        var files = new[] { (Path.Combine(data, "logs"), ""), (Path.Combine(local, "logs"), ""), (Path.Combine(SetupElevation.TrustedDir, "logs"), "setup-") }
+            .Where(d => Directory.Exists(d.Item1)).SelectMany(d => Recent(Directory.GetFiles(d.Item1)).Select(f => (File: f, Prefix: d.Item2)));
         var count = 0;
-        foreach (var file in files)
+        foreach (var (file, prefix) in files)
         {
             // The launcher's own log is open for writing: read it shared.
             using var from = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var to = File.Create(Path.Combine(target, Path.GetFileName(file)));
+            using var to = File.Create(Path.Combine(target, prefix + Path.GetFileName(file)));
             from.CopyTo(to);
             count++;
         }
         Log.Info($"Logs saved to {target} ({count} files)");
         return target;
+    }
+
+    /// <summary>
+    /// A logs folder's files without the older setup logs: the 10 newest setup-&lt;time&gt;.log
+    /// (setup.ps1 keeps no more than that; a box set up before it did may have many), every
+    /// other file.
+    /// </summary>
+    internal static IEnumerable<string> Recent(IEnumerable<string> files)
+    {
+        static bool IsSetupLog(string f) => System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(f), @"^setup-\d{8}-\d{6}\.log$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var all = files.ToList();
+        var setupLogs = all.Where(IsSetupLog).OrderByDescending(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase).Take(10).ToHashSet();
+        return all.Where(f => !IsSetupLog(f) || setupLogs.Contains(f));
     }
 }

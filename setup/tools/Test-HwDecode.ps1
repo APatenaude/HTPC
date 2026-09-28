@@ -504,6 +504,23 @@ function Get-DriverCapability {
     $result
 }
 
+# Elevated (setup's DecodeCheck step), a player runs as administrator: only one no standard user
+# can change, the file and every folder above it (the drive's root aside: anyone may add a folder
+# there, none may swap one) owned by SYSTEM, Administrators or TrustedInstaller with no write for
+# anyone else (UpdateCore's Get-UntrustedReason). Never one from the user's PATH or profile.
+$elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+function Test-AdminOnly([string]$Path) {
+    . (Join-Path $PSScriptRoot '..\lib\UpdateCore.ps1')   # in this function's scope only
+    $p = [IO.Path]::GetFullPath($Path)
+    while ($p) {
+        $parent = [IO.Path]::GetDirectoryName($p)
+        if (-not $parent) { break }   # the drive's root
+        if (Get-UntrustedReason $p) { return $false }
+        $p = $parent
+    }
+    $true
+}
+
 function Find-Player {
     $pathDirs = @($env:PATH, [Environment]::GetEnvironmentVariable('Path', 'User'),
         [Environment]::GetEnvironmentVariable('Path', 'Machine')) -join ';' -split ';' |
@@ -527,7 +544,9 @@ function Find-Player {
             $candidates += Join-Path $env:USERPROFILE "scoop\apps\$($tool.Name)\current\bin\$file"
             foreach ($candidate in $candidates) {
                 $hit = Get-Item -Path $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($hit -and -not $hit.PSIsContainer) { return $hit.FullName }
+                if (-not $hit -or $hit.PSIsContainer) { continue }
+                if ($elevated -and -not (Test-AdminOnly $hit.FullName)) { Write-Verbose "skipped (a standard user can change it): $($hit.FullName)"; continue }
+                return $hit.FullName
             }
         }
     }

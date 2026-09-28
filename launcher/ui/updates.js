@@ -8,6 +8,7 @@
 //                  updates.windowsScan  updates.windowsCancel  updates.windowsInstall {when: now|tonight}
 //                  updates.restart {when: now|tonight}  updates.tonightCancel
 //   From the host: updates.state (UpdateService.Describe)  updates.restarting {version}
+//                  updates.stay (the launcher update stopped before its restart)
 //
 // Demo (a plain browser): index.html#settings/updates, and ?upd=<state> for the other states
 // (uptodate, checking, running, failed, winfound, winscan, wininstall, winrestart, wintonight,
@@ -44,7 +45,7 @@ function updStatus(row) {
     if (j.status === 'done') return ['ok', 'check', 'Updated'];
     if (j.status === 'failed') return ['bad', 'warn', 'Not updated'];
   }
-  if (row.update) return ['update', 'download', 'Update'];
+  if (row.update) return ['update', 'download', row.skipped ? 'Try again' : 'Update'];
   if (row.error) return ['quiet', 'warn', 'Not checked'];
   return ['ok', 'check', 'Up to date'];
 }
@@ -64,8 +65,11 @@ function updVersions(a) {
   return a.installed || '';
 }
 
+// A launcher version rolled back here (launcher.skipped) is not counted and not in Update all.
+function updLauncherOffered(s) { return s.launcher.update && !s.launcher.skipped; }
+
 function updPending(s) {
-  return s.apps.filter((a) => a.update).length + (s.launcher.update ? 1 : 0);
+  return s.apps.filter((a) => a.update).length + (updLauncherOffered(s) ? 1 : 0);
 }
 
 function updRunningApps(s) {
@@ -75,16 +79,17 @@ function updRunningApps(s) {
 function renderUpdatesSection() {
   const s = upd.s;
   let html = '<header><h1>Updates</h1><p>Nothing updates by itself. You decide when.</p></header>';
-  if (!s) return html + '<p class="caption">Reading what is installed…</p>';
+  if (!s) return html + `<p class="caption">${hostWaitText('updates', 'Reading what is installed…', 'The list of what is installed didn’t come. Open Updates again to try once more.')}</p>`;
 
   const list = [];
   const L = s.launcher;
   list.push(updRow('launcher', 'app', '#8CC2FF', 'TV launcher',
-    L.update ? `${L.installed} → ${L.latest}` : L.installed, { update: L.update, job: L.job },
+    L.update ? `${L.installed} → ${L.latest}${L.skipped ? ' · did not start here last time' : ''}` : L.installed, { update: L.update, skipped: L.skipped, job: L.job },
     L.update && L.notes ? `<span class="notes">${esc(L.notes)}</span>` : ''));
   for (const a of s.apps) list.push(updRow(a.id, a.id === 'winget' ? 'download' : a.glyph, a.id === 'winget' ? '#B3B5BC' : a.color, a.name, updVersions(a), a));
   const self = (id, glyph, color, name, version) =>
-    `<div class="srow upd-row" data-nav data-id="upd-${id}"><span class="glyph" style="color:${color}">${icon(glyph, 34)}</span>` +
+    // data-noa: A does nothing here (no A in the hints, no select sound).
+    `<div class="srow upd-row" data-nav data-id="upd-${id}" data-noa><span class="glyph" style="color:${color}">${icon(glyph, 34)}</span>` +
     `<div class="text"><span class="label">${esc(name)}</span><span class="caption">${esc(version || '')}</span></div>` +
     `<span class="upd-status quiet">${icon('restart', 26, 2)}Updates itself</span></div>`;
   if (s.builtIn.edge) list.push(self('edge', 'globe', '#3CCB9A', 'Microsoft Edge', s.builtIn.edge));
@@ -155,7 +160,7 @@ function updWindowsCard(w) {
 
 settingsSection('updates', {
   render: renderUpdatesSection,
-  shown() { send({ type: 'updates.get' }); },
+  shown() { hostAsked('updates'); send({ type: 'updates.get' }); },
   // Two columns: left and right move between the list and the cards (app.js's settingsPress, as
   // in every section); left from the list goes to the section list.
   demo() { updDemo(); },
@@ -166,18 +171,21 @@ settingsSection('updates', {
 onAction('upd-row', (el, id) => {
   const s = upd.s;
   if (!s) return;
+  // A row whose last try failed can be pressed again; one running or waiting cannot.
+  const busy = (job) => job && job.status !== 'failed';
   if (id === 'launcher') {
     const L = s.launcher;
-    if (!L.update || L.job) return;
+    if (!L.update || busy(L.job)) return;
     ask({
-      title: `Update the TV launcher to ${L.latest}?`,
-      text: 'The launcher restarts by itself; open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
+      title: `${L.skipped ? 'Try' : 'Update'} the TV launcher ${L.skipped ? 'again ' : ''}to ${L.latest}?`,
+      text: (L.skipped ? `Last time ${L.latest} did not start here and the box went back to ${L.installed}. ` : '') +
+        'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
       yes: 'Update', onYes: () => send({ type: 'updates.app', id: 'launcher' }),
     });
     return;
   }
   const a = s.apps.find((x) => x.id === id);
-  if (!a || !a.update || a.job) return;
+  if (!a || !a.update || busy(a.job)) return;
   const open = state.tiles.some((t) => t.id === id && t.running);
   ask({
     title: `Update ${a.name}?`,
@@ -191,12 +199,12 @@ onAction('upd-all', () => {
   if (!s) return;
   const apps = s.apps.filter((a) => a.update);
   const open = updRunningApps(s);
-  const n = apps.length + (s.launcher.update ? 1 : 0);
+  const n = apps.length + (updLauncherOffered(s) ? 1 : 0);
   ask({
     title: `Update ${n === 1 ? 'it' : `all ${n}`}?`,
     text: 'A restore point is saved first.' +
       (open.length ? ` Open apps close first: ${open.map((a) => a.name).join(', ')}.` : '') +
-      (s.launcher.update ? ' The TV launcher goes last and restarts by itself.' : ''),
+      (updLauncherOffered(s) ? ' The TV launcher goes last and restarts by itself at Home.' : ''),
     yes: 'Update all', onYes: () => send({ type: 'updates.all', close: open.map((a) => a.id) }),
   });
 });
@@ -220,11 +228,15 @@ onAction('upd-tonight-cancel', () => send({ type: 'updates.tonightCancel' }));
 
 hostMessage('updates.', (m) => {
   if (m.type === 'updates.state') {
+    hostAnswered('updates');
     upd.s = m;
     if (state.view === 'settings' && state.section === 'updates') render();
   } else if (m.type === 'updates.restarting') {
     upd.restarting = m.version;
-    go('updrestart');
+    if (state.view !== 'updrestart') go('updrestart');
+  } else if (m.type === 'updates.stay') {
+    // The update stopped before the restart: back where "Restarting" was shown from.
+    if (state.view === 'updrestart') back();
   }
 });
 
@@ -242,8 +254,8 @@ addView('updrestart', {
 
 // ---- Demo data (a plain browser) -------------------------------------------------------------
 
-function updDemo() {
-  const kind = new URLSearchParams(location.search).get('upd') || 'ready';
+function updDemo(kindArg) {
+  const kind = kindArg || new URLSearchParams(location.search).get('upd') || 'ready';
   const hour = 3600000;
   const app = (id, name, glyph, color, installed, available, update, job) => ({ id, name, glyph, color, installed, available, update, job: job || null });
   const s = {

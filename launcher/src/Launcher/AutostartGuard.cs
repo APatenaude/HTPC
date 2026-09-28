@@ -7,13 +7,13 @@ namespace Htpc.Launcher;
 
 /// <summary>
 /// Keeps the catalog's apps from starting by themselves (the box has few resources), for this
-/// user: the launcher's part of setup\lib\AppAutostart.ps1. HKCU's Run and RunOnce values that
-/// belong to a catalog app are removed, with Explorer's StartupApproved record of them, and the
-/// apps' autostart.prefs are set (Spotify's "autostart off", so it stops writing its Run value
-/// back while it runs). MainForm.Autostart.cs calls it at start and after each app exits.
-/// Registry reads and a small settings file only, no process scan. Machine-wide places, the
-/// Startup folders, tasks and services are the SYSTEM jobs' (install, upgrade, the reconcile at
-/// every Windows start).
+/// user: the launcher's part of setup\lib\AppAutostart.ps1. HKCU's Run and RunOnce values and
+/// this user's Startup folder files that belong to a catalog app are removed, with Explorer's
+/// StartupApproved record of them, and the apps' autostart.prefs are set (Spotify's "autostart
+/// off", so it stops writing its Run value back while it runs). MainForm.Autostart.cs calls it at
+/// start and after each app exits. Registry reads, one folder and a small settings file, no
+/// process scan. Machine-wide places, the all-users Startup folder, tasks and services are the
+/// SYSTEM jobs' (install, upgrade, the reconcile at every Windows start).
 ///
 /// A value is an app's when its name is one the catalog declares (autostart.run, * a wildcard)
 /// or its command runs from the app's folder (launch.exe's) or its exe. Never touched, whatever
@@ -40,6 +40,7 @@ sealed class AutostartGuard
     public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     public const string RunOnceKey = @"Software\Microsoft\Windows\CurrentVersion\RunOnce";
     public const string ApprovedRunKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+    public const string ApprovedStartupKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder";
     static readonly string[] KeepNames = { "HTPC launcher", "SecurityHealth" };
     static readonly string WindowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
     static readonly string Ours = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC") + "\\";
@@ -192,6 +193,61 @@ sealed class AutostartGuard
             }
             return removed;
         }
+    }
+
+    /// <summary>
+    /// This user's Startup folder: a file there that starts a catalog app (a shortcut to its
+    /// program, or a file of its own) is deleted, with Explorer's StartupApproved record of it; how
+    /// many. Only this pass looks there: the SYSTEM jobs leave the user's folder alone (it is the
+    /// user's to change, and SYSTEM would open the user's shortcuts in it). Judged by what it
+    /// starts, as a Run value is. folder and linkTarget: the tests' fakes. Never throws.
+    /// </summary>
+    public int CheckStartupFolder(string why, string? folder = null, Func<string, string>? linkTarget = null)
+    {
+        folder ??= Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+        linkTarget ??= lnk => ShortcutCommand(lnk);
+        lock (gate)
+        {
+            var removed = 0;
+            string[] files;
+            try { files = Directory.Exists(folder) ? Directory.GetFiles(folder) : Array.Empty<string>(); }
+            catch (Exception e) { Log.Warn($"Autostart: reading the Startup folder: {e.Message}"); return 0; }
+            foreach (var file in files)
+            {
+                var name = Path.GetFileName(file);
+                if (name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase)) continue;
+                string command;
+                try { command = name.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) ? linkTarget(file) : file; }
+                catch (Exception e) { Log.Warn($"Autostart: Startup '{name}' not read: {e.Message}"); continue; }
+                var (verdict, rule) = Owner("", command, rules);   // by what it starts (autostart.run names are Run values')
+                if (verdict == Verdict.App)
+                {
+                    try
+                    {
+                        File.Delete(file);
+                        store.Remove(ApprovedStartupKey, name);
+                        removed++;
+                        Log.Info($"Autostart ({why}): {rule!.Name}: removed Startup '{name}' ({command})");
+                    }
+                    catch (Exception e) { Log.Warn($"Autostart: could not remove Startup '{name}': {e.Message}"); }
+                }
+                else if (verdict == Verdict.None && reported.Add($"Startup\\{name}"))
+                    Log.Info($"Autostart: left alone (no catalog app's): Startup '{name}' ({command})");
+            }
+            return removed;
+        }
+    }
+
+    /// <summary>What a shortcut starts: its target, quoted, and its arguments (Windows' own shortcut reader).</summary>
+    static string ShortcutCommand(string lnk)
+    {
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true)!)!;
+        try
+        {
+            dynamic shortcut = shell.CreateShortcut(lnk);
+            return $"\"{(string)shortcut.TargetPath}\" {(string)shortcut.Arguments}".Trim();
+        }
+        finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell); }
     }
 
     /// <summary>

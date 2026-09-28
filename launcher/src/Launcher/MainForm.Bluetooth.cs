@@ -66,7 +66,7 @@ sealed partial class MainForm
                         if (step.Announce is { } text)
                             alerts.Raise(new AlertSpec { Id = "sound", Title = text, Glyph = step.Bluetooth ? "headphones" : "speaker", Urgent = true, Duration = TimeSpan.FromSeconds(5) });
                         PushState();   // the slider reads the output now in use
-                        volumeWatch.Poll();
+                        PollVolume();  // on the audio thread (MainForm.Timer.cs)
                         if (btWanted) PostBluetooth();
                     });
             }

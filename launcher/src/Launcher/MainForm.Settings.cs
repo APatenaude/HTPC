@@ -60,8 +60,9 @@ sealed partial class MainForm
                 {
                     if (!t.Result) Post(new { type = "toast", text = "Windows did not switch the sound output", kind = "warn" });
                     _ = PostAudio(switchFailed: !t.Result);
+                    audio.Refresh(); // the slider follows once read (AudioVolume.Changed)
                     PushState();
-                    volumeWatch.Poll(); // the volume indicator with the output's name, at once
+                    PollVolume(); // the volume indicator with the output's name, at once (the audio thread)
                 }));
                 break;
             case "sound.test": TestSound.Play(); break;

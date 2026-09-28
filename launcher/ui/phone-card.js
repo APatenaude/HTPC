@@ -31,7 +31,7 @@
       `<div class="pc-qr">${qr}</div>` +
       '<div class="pc-text"><b>Add the remote to your phone</b>' +
         '<span>Scan the code with your phone’s camera, then add the page to your home screen ' +
-        '(Share › Add to Home Screen, or ⋮ › Install app).</span>' +
+        '(iPhone: Share › Add to Home Screen; Android: ⋮ › Add to Home screen).</span>' +
         '<div class="pc-foot"><span class="pc-wait"><span></span>Waiting for your phone</span>' +
         '<div class="pc-btn" data-nav data-id="phone-card-hide" data-act="phone-card-hide">Not now</div></div></div>';
     tiles.appendChild(card);

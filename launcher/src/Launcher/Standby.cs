@@ -71,33 +71,85 @@ sealed class LauncherSettings
     /// <summary>Standby turned the Wi-Fi radio off (on a cable): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
     public bool WifiOffInStandby { get; set; }
 
+    /// <summary>
+    /// The time of the elevated setup's copy (SetupCopyPath) this user's file last took in; null
+    /// before any. A newer copy is taken in at the launcher's next start.
+    /// </summary>
+    public DateTime? SetupCopyUtc { get; set; }
+
     // (Older files also have "showAppHints", the in-app hint's switch: the hint is gone, and
     // unknown keys are skipped when reading.)
 
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
-    static readonly string BackupPath = FilePath + ".bak";
+
+    /// <summary>
+    /// Where the elevated setup keeps what it changed (the tiles picked, the TV): it never writes
+    /// the user's profile, where a link they planted could send an elevated write anywhere. Admin-
+    /// only, readable by the user; the launcher takes it in at its next start, as the user.
+    /// </summary>
+    static string SetupCopyPath => Path.Combine(SetupElevation.TrustedDir, "settings.json");
 
     // Several threads save (the UI thread on a settings change, the library job thread when a tile
     // is added): one save at a time, and one never sees another half-written file.
     static readonly object Gate = new();
 
+    /// <summary>
+    /// This user's settings.json, or the elevated setup's copy when that is newer than what the
+    /// file last took in (setup ran since): at standard rights it is taken in and saved, as the
+    /// user; elevated (setup run again before the launcher started) it is the one to go on from.
+    /// </summary>
     public static LauncherSettings Load()
+    {
+        var mine = Load(FilePath);
+        try
+        {
+            if (!File.Exists(SetupCopyPath)) return mine;
+            var at = File.GetLastWriteTimeUtc(SetupCopyPath);
+            if (mine.SetupCopyUtc is { } taken && at <= taken) return mine;
+            if (JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(SetupCopyPath), Json) is not { } fromSetup) return mine;
+            fromSetup.SetupCopyUtc = at;
+            if (!Environment.IsPrivilegedProcess)
+            {
+                fromSetup.Save();
+                Log.Info($"Settings: took in what setup chose ({SetupCopyPath}, {at:u})");
+            }
+            return fromSetup;
+        }
+        catch (Exception e) { Log.Warn($"Settings: setup's copy not taken in: {e.Message}"); return mine; }
+    }
+
+    /// <summary>
+    /// settings.json, else its backup. Read from the backup, settings.json is written again from it
+    /// at once (the unreadable one kept as settings.json.unreadable): the next save would otherwise
+    /// make the unreadable file the backup, and the good copy would be gone. The path: tests.
+    /// </summary>
+    internal static LauncherSettings Load(string file)
     {
         lock (Gate)
         {
-            foreach (var path in new[] { FilePath, BackupPath })
+            var backup = file + ".bak";
+            foreach (var path in new[] { file, backup })
             {
                 try
                 {
                     if (!File.Exists(path)) continue;
-                    var loaded = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), Json);
-                    if (loaded is not null)
+                    var text = File.ReadAllText(path);
+                    var loaded = JsonSerializer.Deserialize<LauncherSettings>(text, Json);
+                    if (loaded is null) { Log.Warn($"Settings unreadable at {path}: empty"); continue; }
+                    if (path == backup)
                     {
-                        if (path == BackupPath) Log.Warn("Settings read from the backup copy (settings.json was unreadable)");
-                        return loaded;
+                        Log.Warn("Settings read from the backup copy (settings.json was unreadable): settings.json written again from it");
+                        try
+                        {
+                            if (File.Exists(file)) File.Copy(file, file + ".unreadable", overwrite: true);
+                            WriteFlushed(file + ".tmp", text);
+                            File.Move(file + ".tmp", file, overwrite: true);
+                        }
+                        catch (Exception e) { Log.Warn($"settings.json not written again from the backup: {e.Message}"); }
                     }
+                    return loaded;
                 }
                 catch (Exception e) { Log.Warn($"Settings unreadable at {path}: {e.Message}"); }
             }
@@ -106,25 +158,53 @@ sealed class LauncherSettings
     }
 
     /// <summary>
-    /// Writes settings.json atomically: a full temp file is written, the current file is kept as
-    /// settings.json.bak, and the temp file replaces it in one step (File.Replace). A crash mid-save
-    /// leaves either the old file or the backup intact, never a half-written one.
+    /// Writes settings.json atomically: a full temp file is written and flushed to the disk, the
+    /// current file is kept as settings.json.bak, and the temp file replaces it in one step
+    /// (File.Replace). A crash or a power cut mid-save leaves either the old file or the backup
+    /// intact, never a half-written one. Saves are few: a setting changed, the sliders once they
+    /// rest (MainForm.SaveSoon), the Wi-Fi radio switched by standby on a cable.
     /// </summary>
-    public void Save()
+    public void Save() => Save(FilePath);
+
+    internal void Save(string file)
     {
         lock (Gate)
         {
+            // Elevated (TV Box Setup): its own admin-only copy, never the user's file (SetupCopyPath).
+            // A new file of an unguessable name, moved over the old one.
+            if (Environment.IsPrivilegedProcess)
+            {
+                try
+                {
+                    Directory.CreateDirectory(SetupElevation.TrustedDir);
+                    var temp = Path.Combine(SetupElevation.TrustedDir, $"settings.{Guid.NewGuid():N}.tmp");
+                    using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        JsonSerializer.Serialize(stream, this, Json);
+                    File.Move(temp, SetupCopyPath, overwrite: true);
+                }
+                catch (Exception e) { Log.Error("Saving setup's settings", e); }
+                return;
+            }
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
                 var json = JsonSerializer.Serialize(this, Json);
-                var temp = FilePath + ".tmp";
-                File.WriteAllText(temp, json);
-                if (File.Exists(FilePath)) File.Replace(temp, FilePath, BackupPath);
-                else File.Move(temp, FilePath);
+                var temp = file + ".tmp";
+                WriteFlushed(temp, json);
+                if (File.Exists(file)) File.Replace(temp, file, file + ".bak");
+                else File.Move(temp, file);
             }
             catch (Exception e) { Log.Error("Saving settings", e); }
         }
+    }
+
+    // On the disk before it replaces anything (FlushFileBuffers): after a power cut the renamed
+    // file must have its content, not only its name. UTF-8 without a BOM, as File.WriteAllText.
+    static void WriteFlushed(string path, string text)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        stream.Write(new System.Text.UTF8Encoding(false).GetBytes(text));
+        stream.Flush(flushToDisk: true);
     }
 
     /// <summary>Applies one value sent by the Settings screen; false for an unknown key or value.</summary>
@@ -457,12 +537,12 @@ sealed class Standby
     /// When someone last used the box: a controller button, trigger or stick past its dead zone,
     /// a key or the mouse (not the launcher's own Alt tap or mouse nudge), the phone remote. Not
     /// the launcher merely being on screen, nor a controller's analog noise. The TV's binding check
-    /// counts only this as "in use".
+    /// counts only this as "in use". UTC, as the TV code's clock is (SystemTvClock).
     /// </summary>
     public DateTime LastUserInput()
     {
         var last = LastUseTick();
-        return last == long.MinValue ? DateTime.MinValue : DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64 - last);
+        return last == long.MinValue ? DateTime.MinValue : DateTime.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64 - last);
     }
 
     /// <summary>LastUserInput as a tick count (Environment.TickCount64); long.MinValue: none since the box started.</summary>

@@ -19,16 +19,24 @@
 
 .PARAMETER ComputerName
     Renaming needs a restart; setup.ps1 reports it.
+.PARAMETER MachineOnly
+    Only the machine's part: the HKLM values, the services, the sign-in screen's picture and
+    colour. Not this user's settings (HKCU), the networks, the task or the name. What a launcher
+    update applies again, as SYSTEM, when this script changed (lib\LauncherUpdate.ps1).
 #>
 param(
-    [string]$ComputerName = 'TV'
+    [string]$ComputerName = 'TV',
+    [switch]$MachineOnly
 )
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\UpdateCore.ps1"   # Get-UntrustedReason (the sign-in picture)
 Assert-Admin
 
 $policies = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows'
 $cdm = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'
+# This user's settings (HKCU): not with -MachineOnly (as SYSTEM, HKCU is SYSTEM's own).
+$user = -not $MachineOnly
 
 Write-Host '  Privacy and nags'
 Set-RegValue "$policies\DataCollection" 'AllowTelemetry' 0
@@ -36,23 +44,27 @@ Set-RegValue "$policies\CloudContent" 'DisableWindowsConsumerFeatures' 1
 Set-RegValue "$policies\CloudContent" 'DisableSoftLanding' 1
 Set-RegValue "$policies\CloudContent" 'DisableCloudOptimizedContent' 1
 Set-RegValue "$policies\CloudContent" 'DisableConsumerAccountStateContent' 1
-Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
-Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableTailoredExperiencesWithDiagnosticData' 1
-Set-RegValue $cdm 'SubscribedContent-338389Enabled' 0
-Set-RegValue $cdm 'SubscribedContent-310093Enabled' 0
-Set-RegValue $cdm 'SystemPaneSuggestionsEnabled' 0
-Set-RegValue $cdm 'SoftLandingEnabled' 0
-Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement' 'ScoobeSystemSettingEnabled' 0
+if ($user) {
+    Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
+    Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableTailoredExperiencesWithDiagnosticData' 1
+    Set-RegValue $cdm 'SubscribedContent-338389Enabled' 0
+    Set-RegValue $cdm 'SubscribedContent-310093Enabled' 0
+    Set-RegValue $cdm 'SystemPaneSuggestionsEnabled' 0
+    Set-RegValue $cdm 'SoftLandingEnabled' 0
+    Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement' 'ScoobeSystemSettingEnabled' 0
+}
 
 Write-Host '  Nothing over the TV'
 Set-RegValue "$policies\Personalization" 'NoLockScreen' 1
-Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' 'ToastEnabled' 0
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' 'DontShowUI' 1
-Set-RegValue 'HKCU:\Control Panel\Accessibility\StickyKeys' 'Flags' '506' 'String'
-Set-RegValue 'HKCU:\Control Panel\Accessibility\Keyboard Response' 'Flags' '122' 'String'
-Set-RegValue 'HKCU:\Control Panel\Accessibility\ToggleKeys' 'Flags' '58' 'String'
 Set-RegValue "$policies\GameDVR" 'AllowGameDVR' 0
-Set-RegValue 'HKCU:\Software\Microsoft\GameBar' 'UseNexusForGameBarEnabled' 0
+if ($user) {
+    Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' 'ToastEnabled' 0
+    Set-RegValue 'HKCU:\Control Panel\Accessibility\StickyKeys' 'Flags' '506' 'String'
+    Set-RegValue 'HKCU:\Control Panel\Accessibility\Keyboard Response' 'Flags' '122' 'String'
+    Set-RegValue 'HKCU:\Control Panel\Accessibility\ToggleKeys' 'Flags' '58' 'String'
+    Set-RegValue 'HKCU:\Software\Microsoft\GameBar' 'UseNexusForGameBarEnabled' 0
+}
 # LTSC has no Xbox Game Bar, yet the controller's Home button opens ms-gamebar links and
 # Windows asks which app should open them. Point those links at systray.exe, which does
 # nothing (the launcher reads the Home button itself).
@@ -64,9 +76,11 @@ foreach ($protocol in 'ms-gamebar', 'ms-gamebarservices', 'ms-gamingoverlay') {
     Set-RegValue "$key\shell\open\command" '(default)' "`"$env:SystemRoot\System32\systray.exe`"" 'String'
 }
 
-Write-Host '  Dark mode (Windows and apps that follow it: Edge, the website apps, dialogs)'
-Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'AppsUseLightTheme' 0
-Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'SystemUsesLightTheme' 0
+if ($user) {
+    Write-Host '  Dark mode (Windows and apps that follow it: Edge, the website apps, dialogs)'
+    Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'AppsUseLightTheme' 0
+    Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'SystemUsesLightTheme' 0
+}
 
 Write-Host '  Less background work (lower power, especially in standby)'
 # A TV box has no files to index and no app launch patterns worth prefetching.
@@ -85,9 +99,11 @@ foreach ($service in 'WSearch', 'SysMain') {
 Set-RegValue "$policies\DeliveryOptimization" 'DODownloadMode' 0
 
 Write-Host '  Network, time zone, name'
-foreach ($net in Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Public' }) {
-    Set-NetConnectionProfile -InterfaceIndex $net.InterfaceIndex -NetworkCategory Private
-    Write-Change "$($net.InterfaceAlias) network set to Private"
+if ($user) {
+    foreach ($net in Get-NetConnectionProfile | Where-Object { $_.NetworkCategory -eq 'Public' }) {
+        Set-NetConnectionProfile -InterfaceIndex $net.InterfaceIndex -NetworkCategory Private
+        Write-Change "$($net.InterfaceAlias) network set to Private"
+    }
 }
 # "Set time zone automatically": the tzautoupdate service on demand, location allowed.
 Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' 'Start' 3
@@ -97,10 +113,12 @@ Set-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc\Service\Configuratio
 # desktop app gets the list of networks only with location allowed, for this user, for desktop
 # apps and for that program (else ERROR_ACCESS_DENIED, or a prompt nobody can answer with the
 # controller). A "Deny" left from an earlier answer is replaced.
-$consent = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'
-$launcherExe = Join-Path $env:ProgramFiles 'HTPC\Launcher\HtpcLauncher.exe'
-foreach ($key in $consent, "$consent\NonPackaged", "$consent\NonPackaged\$($launcherExe -replace '\\', '#')") {
-    Set-RegValue $key 'Value' 'Allow' 'String'
+if ($user) {
+    $consent = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'
+    $launcherExe = Join-Path $env:ProgramFiles 'HTPC\Launcher\HtpcLauncher.exe'
+    foreach ($key in $consent, "$consent\NonPackaged", "$consent\NonPackaged\$($launcherExe -replace '\\', '#')") {
+        Set-RegValue $key 'Value' 'Allow' 'String'
+    }
 }
 Write-Host "  Time zone now: $((Get-TimeZone).Id) (updates itself when Windows locates the box)"
 
@@ -117,14 +135,23 @@ $bitmap = New-Object System.Drawing.Bitmap 1920, 1080
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.Clear([System.Drawing.Color]::FromArgb($bg.R, $bg.G, $bg.B))
 $graphics.Dispose()
-$fresh = Join-Path $env:TEMP 'htpc-sign-in-background.png'
-$bitmap.Save($fresh, [System.Drawing.Imaging.ImageFormat]::Png)
+$png = New-Object IO.MemoryStream
+$bitmap.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
 $bitmap.Dispose()
-$same = (Test-Path $picture) -and ((Get-FileHash $picture).Hash -eq (Get-FileHash $fresh).Hash)
-if ($same) { Write-Same $picture; Remove-Item $fresh }
+$bytes = $png.ToArray()
+$want = [BitConverter]::ToString((New-Object Security.Cryptography.SHA256Managed).ComputeHash($bytes)).Replace('-', '')
+# The sign-in screen (SYSTEM) reads this picture: only administrators may change it. A copy an
+# earlier setup moved in from %TEMP% kept the user's permissions, so it is written again too.
+$same = (Test-Path -LiteralPath $picture -PathType Leaf) -and (Get-FileHash -LiteralPath $picture).Hash -eq $want -and -not (Get-UntrustedReason $picture)
+if ($same) { Write-Same $picture }
 else {
+    # Written where it goes, as a new file that then takes the old one's place: it gets
+    # ProgramData\HTPC's permissions (admin-write), and never passes through %TEMP%, where the
+    # user could swap it before it moved.
     New-Item -ItemType Directory -Force (Split-Path $picture) | Out-Null
-    Move-Item $fresh $picture -Force
+    $tmp = "$picture.new-$PID"
+    [IO.File]::WriteAllBytes($tmp, $bytes)
+    Move-Item -LiteralPath $tmp $picture -Force
     Write-Change "$picture (solid #0D0E11)"
 }
 Set-RegValue "$policies\Personalization" 'LockScreenImage' $picture 'String'
@@ -138,6 +165,11 @@ Remove-RegValue "$policies\System" 'DisableLogonBackgroundImage'
 $rgb = "$($bg.R) $($bg.G) $($bg.B)"
 Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'Background' $rgb 'String'
 Set-RegValue 'Registry::HKEY_USERS\.DEFAULT\Control Panel\Colors' 'Background' $rgb 'String'
+if ($MachineOnly) {
+    # The rest is this user's desktop (HKCU, and this session's colours): setup again.
+    Write-Host '  The machine part only: the rest of this step (this user''s settings) comes with TV Box Setup'
+    return
+}
 Set-RegValue 'HKCU:\Control Panel\Colors' 'Background' $rgb 'String'
 Set-RegValue 'HKCU:\Control Panel\Desktop' 'WallPaper' '' 'String'
 Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers' 'BackgroundType' 1

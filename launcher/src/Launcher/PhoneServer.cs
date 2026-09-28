@@ -205,7 +205,7 @@ sealed class PhoneServer
     {
         this.host = host;
         this.certificates = certificates;
-        now = clock ?? (() => DateTime.Now);
+        now = clock ?? (() => DateTime.UtcNow);
         this.root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         this.pairing = pairing;
         this.bindTo = bindTo;

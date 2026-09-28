@@ -59,9 +59,9 @@ function renderPhoneSection() {
         '<span class="phone-how">iPhone: the “Send to TV” Shortcut. Android: this box’s certificate' +
         (p.secure && p.fingerprint ? '; its SHA-256 fingerprint on the phone must read:</span>' +
             `<span class="phone-fingerprint">${esc(fingerprintLines(p.fingerprint))}</span>`
-          : ', once HTTPS runs (it isn’t: the launcher log says why).</span>') + '</div></div>' +
+          : ', once the box’s secure connection runs. It isn’t running: run TV Box Setup again.</span>') + '</div></div>' +
     '</div>';
-  const problem = !p.listening ? ['The remote isn’t running', 'Another program has its port. The launcher log says which ports it tried.'] : PHONE_REACH[p.reach] || (p.chainMissing ? PHONE_CHAIN : null);
+  const problem = !p.listening ? ['The remote isn’t running', 'Another program on the box is using its network port. Restarting the box usually frees it.'] : PHONE_REACH[p.reach] || (p.chainMissing ? PHONE_CHAIN : null);
   if (problem) {
     body += `<div class="srow phone-warn"><div class="text"><span class="label">${esc(problem[0])}</span>` +
       `<span class="caption">${esc(problem[1])}</span></div></div>`;
@@ -102,28 +102,9 @@ function fingerprintLines(fp) {
   return lines.join('\n');
 }
 
-// The section can be taller than the screen (every phone and key is listed): its pane scrolls on
-// its own (no scrollbar) to keep the focused row in view; the rest of the screen stays put.
-// (scrollIntoView would also scroll the stage and the view, overflow: hidden or not.) A render
-// makes a new pane: it keeps the scroll it had, until the section is left.
-const phoneScroll = { top: 0 };
-function keepPhoneRowInView() {
-  if (state.view !== 'settings' || state.section !== 'phone') { phoneScroll.top = 0; return; }
-  const main = document.querySelector('#settings .spane main');
-  const el = main && main.querySelector('.srow.focused');
-  if (!el) return;
-  if (main.scrollTop !== phoneScroll.top) main.scrollTop = phoneScroll.top;
-  if (el === main.querySelector('[data-nav]')) main.scrollTop = 0; // the first row: the codes show again
-  else {
-    const m = main.getBoundingClientRect(), r = el.getBoundingClientRect();
-    const scale = m.height / main.clientHeight || 1; // the stage is scaled to the screen
-    const pad = 24 * scale;
-    if (r.top < m.top + pad) main.scrollTop -= (m.top + pad - r.top) / scale;
-    else if (r.bottom > m.bottom - pad) main.scrollTop += (r.bottom - m.bottom + pad) / scale;
-  }
-  phoneScroll.top = main.scrollTop;
-}
-new MutationObserver(keepPhoneRowInView).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+// The section can be taller than the screen (every phone and key is listed): Settings scrolls
+// its pane to the focused row (app.js settingsFocused), the first row back to the top where the
+// codes show, and a render updates the pane in place, its scroll kept.
 
 // Settings rows with keys "phone.*" (app.js's changeSetting hands them here).
 function phoneSetting(key) {

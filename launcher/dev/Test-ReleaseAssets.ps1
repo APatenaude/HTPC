@@ -4,8 +4,9 @@
     Downloads a published release the way a box does and checks every file against update.json.
 
 .DESCRIPTION
-    The release workflow runs this right after publishing, and fails the run (and turns the
-    release back into a draft, which boxes never see) if anything differs. It uses the box's own
+    The release workflow runs this right after publishing (not as "latest" yet), and fails the
+    run if anything differs: the release is then deleted, never made "latest", which is all
+    boxes look at. It uses the box's own
     code (setup\lib\UpdateCore.ps1): the pinned hosts and redirects, update.json's checks, exact
     sizes and SHA-256. With -Expected it also compares with the files just built.
 

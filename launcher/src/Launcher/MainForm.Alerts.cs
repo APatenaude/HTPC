@@ -21,7 +21,7 @@ sealed partial class MainForm
     readonly List<Action> beforeHandle = new();   // UI work asked for before the window existed
     AlertPlace alertPlace = AlertPlace.Launcher;
     string? lastFrontApp;                          // the catalog app last seen in front, and when
-    DateTime lastFrontSeen;
+    DateTime lastFrontSeen;                        // UTC: a daylight-saving change must not move it
     long? idleWarnedAt;                            // tick count (the clock can jump)
     int alertTicks;
 
@@ -34,7 +34,7 @@ sealed partial class MainForm
         alertOverlay = new AlertsFormOverlay(overlay);
         alertCenter = new AlertCenter(alertOverlay, Post, OnUiQueued);
         internet = new InternetWatch(online => OnUiQueued(() => OnInternet(online)));
-        internetRules.Woke(DateTime.Now); // the launcher just started: the network may still be coming up
+        internetRules.Woke(DateTime.UtcNow); // the launcher just started: the network may still be coming up
 
         mouseWatch.Tick += (_, _) => UpdateAlertPlace();
         clock.Tick += (_, _) => AlertsTick();
@@ -46,7 +46,7 @@ sealed partial class MainForm
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.
             if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; WifiPlaceChanged(); BluetoothPlaceChanged(); });
-            if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUiQueued(() => internetRules.Woke(DateTime.Now));
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUiQueued(() => internetRules.Woke(DateTime.UtcNow));
         };
         Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => apps.MarkAllClosing("Windows is signing out or shutting down");
         InitBluetooth(); // MainForm.Bluetooth.cs
@@ -103,7 +103,7 @@ sealed partial class MainForm
         {
             place = AlertPlace.App;
             moonlight = foregroundApp?.Id == "moonlight";
-            if (foregroundApp is { } front) { lastFrontApp = front.Id; lastFrontSeen = DateTime.Now; }
+            if (foregroundApp is { } front) { lastFrontApp = front.Id; lastFrontSeen = DateTime.UtcNow; }
         }
         if (place != alertPlace)
         {
@@ -120,7 +120,7 @@ sealed partial class MainForm
     // (TurnOnResult), or in 3 s when the box does not control the TV.
     void Awake()
     {
-        internetRules.Woke(DateTime.Now);
+        internetRules.Woke(DateTime.UtcNow);
         internet.Paused = false;
         if (foreignWindows is not null) foreignWindows.Paused = false;
         if (options.NoTv || tv.Profile is not { OnWithBox: true })
@@ -171,7 +171,7 @@ sealed partial class MainForm
     void OnInternet(bool online)
     {
         if (setupMode || standby is null || standby.Active) return;
-        switch (internetRules.Update(online, DateTime.Now))
+        switch (internetRules.Update(online, DateTime.UtcNow))
         {
             case InternetRules.Say.Offline:
                 alertCenter.Raise(new AlertSpec
@@ -198,7 +198,7 @@ sealed partial class MainForm
 
     void OnAppExit(AppExit e)
     {
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         var inFront = lastFrontApp == e.Id && now - lastFrontSeen < TimeSpan.FromSeconds(1.5);
         var kind = exitClassifier.Classify(e, inFront, now);
         // Ended quickly by handing over to its own copy already running (an Edge profile open

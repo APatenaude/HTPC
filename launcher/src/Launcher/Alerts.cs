@@ -130,14 +130,14 @@ sealed class AlertCenter : IAlerts
     /// <param name="overlay">The layer over apps.</param>
     /// <param name="postWeb">Sends a message to the launcher's page (MainForm.Post).</param>
     /// <param name="onUiThread">Runs an action on the UI thread (BeginInvoke); tests queue it.</param>
-    /// <param name="clock">Now; a fake clock in tests.</param>
+    /// <param name="clock">Now, in UTC (a daylight-saving change must not keep a card up for an hour); a fake clock in tests.</param>
     public AlertCenter(IAlertOverlay overlay, Action<object> postWeb, Action<Action> onUiThread,
         Func<DateTime>? clock = null, Action<string>? log = null)
     {
         this.overlay = overlay;
         this.postWeb = postWeb;
         this.onUiThread = onUiThread;
-        this.clock = clock ?? (() => DateTime.Now);
+        this.clock = clock ?? (() => DateTime.UtcNow);
         this.log = log ?? Log.Info;
         overlay.Hidden += () => lastOverlay = OverlayViews.Empty;
     }

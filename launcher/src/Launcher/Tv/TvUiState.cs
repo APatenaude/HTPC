@@ -107,7 +107,8 @@ static class TvUiState
                 methodLabel = tv.DriverFor(kv.Value.Method)?.Info.Label ?? (kv.Value.Method == "none" ? "No TV control" : kv.Value.Method),
                 input = kv.Value.Input,
                 current = kv.Key == screen?.Key,
-                lastUsed = lastUsed.TryGetValue(kv.Key, out var when) ? when.ToString("yyyy-MM-dd") : null,
+                // Kept in UTC (SystemTvClock), shown in local time; older files have local times.
+                lastUsed = lastUsed.TryGetValue(kv.Key, out var when) ? (when.Kind == DateTimeKind.Utc ? when.ToLocalTime() : when).ToString("yyyy-MM-dd") : null,
             }),
         };
     }

@@ -5,8 +5,10 @@ Scripts that turn a clean Windows 11 IoT Enterprise LTSC 2024 install into the f
 
 The usual way in is **TV Box Setup.exe** (`launcher\dev\Publish-Setup.ps1` builds it): the
 launcher in setup mode, one self-contained file with these scripts inside. It asks for
-Windows' permission once, as it opens (the UAC prompt names it; declined, it says setup needs
-administrator rights: try again or quit), asks the questions (controller check, TV, apps), then
+Windows' permission once, as it opens (the UAC prompt is for Windows' command processor, which
+puts a copy of setup in the admin-only `Program Files\HTPC\Setup` and runs that, so nothing the
+user can write runs elevated; declined, it says setup needs administrator rights: try again or
+quit), asks the questions (controller check, TV, apps), then
 runs setup.ps1 with no further prompt, shows its progress, and hands over to the launcher it
 installed, started as the signed-in user, not elevated (launcher/README.md, SetupElevation.cs).
 
@@ -16,7 +18,9 @@ installed, started as the signed-in user, not elevated (launcher/README.md, Setu
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Only Edge,Power
 
 It elevates itself (UAC; started elevated, as TV Box Setup starts it, it just runs), is safe
-to re-run, keeps going when one step fails, and logs to
+to re-run, keeps going when one step fails, runs with Windows' own environment, never the user's
+(PSModulePath reset first of all; `lib\Common.ps1` resets Windows' folders, PATH and TEMP and
+drops the .NET switches for any elevated or SYSTEM script), and logs to
 `C:\ProgramData\HTPC\logs` (`setup-last.json` has the step results: OK, `FAILED: <why>`, or
 `skipped: <why>` for a step that does not apply here). After a USB install the first sign-in runs
 it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the media
@@ -26,7 +30,7 @@ it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the me
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
 | Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store), when it is missing or does not answer (`-IfMissing`: its updates are the `winget-update` job's, and a run again needs no GitHub) |
-| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
+| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC; written by the launcher as the user at its start: nothing elevated writes the user's profile), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service; every installed catalog app's, on each run, so a rerun puts back a missing one). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Offline, the apps already there are dealt with and the rest named. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment); force-installed extensions: uBlock Origin Lite (its "annoyances-others" list on too, which hides Google's "Switch to Chrome", and no first-run page), FrankerFaceZ (Twitch), Video Speed Controller; no first-run, promotions, shopping, sidebar or telemetry; never offers to save a password (one saved before fills without asking for the Windows password); autoplay and hardware acceleration on; nothing of Edge running with no window open (`StartupBoostEnabled` and `BackgroundModeEnabled` 0, the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed) |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
@@ -35,11 +39,17 @@ it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the me
 | Bluetooth | `lib/Install-BluetoothDriver.ps1` | the Bluetooth adapter's own driver from Windows Update instead of Windows' generic `bth.inf`, matched by its exact hardware ID and class, whatever the chipset; nothing if there is no adapter, no such driver (the first N97 box's Realtek 8821CE has none there) or its maker's driver is in already. `-Check` only searches |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network (and every network joined later, a SYSTEM task), automatic time zone, location for the launcher's Wi-Fi list, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
-| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell |
-| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\`, `user\` and `tv\` (the TV address cache) stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
+| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup` (`lib\`, `jobs\` and the kept folder mirrored, built anew and swapped in, never merged); the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell. A TV Box Setup older than what the box has (the installed launcher, or the kept `setup\VERSION`) is refused before anything changes, and the wizard says so |
+| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (owned by Administrators, SYSTEM/Administrators full, Users read; `user\` and `tv\` (the TV address cache and keys) stay user-writable, `state\` and `logs\` (setup's own logs; the launcher and watchdog log in `%LOCALAPPDATA%\HTPC\logs`) are admin-write/user-read; the root, `state\`, `logs\` and `setup\` taken from whoever else owned them, since an owner can always undo the lock, and what a standard user owned inside them renamed aside; setup.ps1, and TV Box Setup as it opens, do this part first of all, `-LockOnly`) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
 | PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80, 8765 and 443) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
 | Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `lib/Invoke-DecodeCheck.ps1` | `tools/Test-HwDecode.ps1 -NoPlayback`: does the GPU that drives the TV (the primary display's, whatever its maker; with two GPUs the other is named) decode H.264, HEVC, VP9 and AV1 in 4K, as its driver says (no clip played); says "Microsoft Basic Display Adapter" when a graphics chip has no driver. Skipped in a VM |
+
+**TODO (1.0):** the Drivers step (the drivers Windows Update has for the box's devices, at setup)
+and `setup.ps1 -Uninstall` are not in this branch yet: add the Drivers row above and an
+"Uninstall" section below (what it undoes, what it leaves) when they land. The landing page
+(README.md) already describes `-Uninstall` as
+`powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall`.
 
 `catalog.json` is the one app list for setup and the launcher's library.
 
@@ -82,7 +92,11 @@ The launcher runs at standard rights (the TV account is an Administrator, but it
 medium integrity). To install or uninstall a machine-wide app it hands the `\HTPC\Jobs` task one
 token, `install:<id>` / `uninstall:<id>` / `upgrade:<id>` / `firewall:<id>`. The task runs
 `lib/Invoke-AppJob.ps1` as SYSTEM, which dispatches to `jobs/<verb>.ps1` (a table other parts of
-the box add to: the updates' verbs below). Nothing but that one catalog id reaches a command:
+the box add to: the updates' verbs below). It starts it through `Start-Job.ps1` beside `lib\`
+(from `lib/Start-Job.ps1`), the one part of the runner a launcher update never swaps: after a
+power cut in the middle of an update it still finds a whole runner, the one that began the
+update, so the reconcile at Windows start can put things right. Nothing but that one catalog id
+reaches a command:
 
 - the token must match `^(verb)(:[A-Za-z0-9][A-Za-z0-9._-]{0,60})?$`, the verb must be a known
   `jobs/<verb>.ps1`, and the id must be in the trusted catalog in Program Files (case-sensitive);
@@ -111,6 +125,23 @@ run as SYSTEM, take no argument unless shown, and first put right an interrupted
 | `upgrade:<id>` | also GitHub-zip apps (VacuumTube: `lib/AppUpdaters.ps1`) |
 | `winget-update` | winget itself, as the signed-in user (not the task) |
 
+### What an update applies
+
+A launcher update from the TV (`launcher-update`) replaces files: the launcher, the watchdog, the
+job runner (`lib\`, `jobs\`), the trusted `catalog.json` and the kept setup scripts. Of setup's
+steps it applies again only their machine part, as SYSTEM, from the new `lib\`, and only for the
+steps whose script changed since the last time (`state\machine-settings.json`; also at the next
+reconcile after an update made by an older runner, or after one that failed):
+
+| Step | Applied by an update | Needs TV Box Setup again |
+|---|---|---|
+| Edge | every Edge policy (HKLM: extensions and uBOL's lists, search, password saving, startup boost...) | the startup boost's HKCU Run value (the launcher and the jobs remove it anyway) |
+| System | the HKLM values, the services, the sign-in screen's picture and colour | this user's settings (HKCU: notifications, accessibility keys, dark mode, location consent), the networks, the "Networks private" task, the computer name |
+| PhoneRemote | nothing (the firewall rules name the same exe) | the certificate: made as the signed-in user and put in the machine's CA store (Settings > Phone says "Run TV Box Setup again for Android's Share" when it is missing) |
+| every other step | nothing | all of it |
+
+Release notes say when a release needs setup to run again for something it brings.
+
 On a box that runs a dev build of the launcher (launcher\dev\Start-Launcher.ps1), the phone
 remote's rule must name that exe too, before the build first runs (else Windows asks over the TV):
 
@@ -134,8 +165,8 @@ catalog's apps set up and takes it away:
 
 Never touched, whatever the catalog says: ours (`HTPC launcher`, tasks under `\HTPC\` or named
 `HTPC...`, anything in `Program Files\HTPC`), Windows' own (`SecurityHealth`, tasks under
-`\Microsoft\`, programs in the Windows folder), Edge's updater (`\MicrosoftEdgeUpdateTask*`, the
-user's choice) and `CoworkVMService` (the Claude desktop app's, a dev tool). A folder too broad to
+`\Microsoft\`, programs in the Windows folder) and Edge's updater (`\MicrosoftEdgeUpdateTask*`,
+the user's choice). A service is changed only when the catalog names it. A folder too broad to
 mean one app (Program Files itself, AppData itself) is never used, nor a declared name with fewer
 than 4 characters besides `*`. What no catalog app claims is left alone and logged.
 
@@ -143,8 +174,9 @@ It runs:
 - **as SYSTEM** at the end of every `install:` and `upgrade:` job (that app) and in `reconcile`
   (every catalog app, at every Windows start): HKLM, the signed-in user's hive (`HKU\<SID>`, the
   user the jobs already resolve for firewall paths; only while it is loaded: a hive is never
-  loaded by hand), both Startup folders (no junction followed in the user's profile), tasks,
-  services. SYSTEM never writes in a user's folders, so no prefs. Log:
+  loaded by hand), the all-users Startup folder, tasks, services. SYSTEM never looks into or
+  writes in a user's folders, so no prefs and not the user's Startup folder: the launcher clears
+  that one as the user (`AutostartGuard.CheckStartupFolder`, with its Run values). Log:
   `C:\ProgramData\HTPC\state\autostart.log`;
 - **as the user** at the end of per-user `install:` / `upgrade:` jobs and `winget-update`: HKCU,
   the user's Startup folder, prefs. Log: `C:\ProgramData\HTPC\logs\autostart.log`;
@@ -212,7 +244,11 @@ answering; not while Windows signs out or restarts, not while a pause is set
 SYSTEM jobs), and not for exit code 75 (a planned exit). Three exits within a minute of starting
 in a row: the box restarts once (at most every 6 hours), then the Windows desktop with "The TV
 launcher keeps closing. Back to TV to try again.", with new tries after 30 s, 2 min and 10 min.
-Log: `C:\ProgramData\HTPC\logs\watchdog.log`.
+While a launcher update checks the launcher it just put in place
+(`C:\ProgramData\HTPC\state\watchdog-watch`, set before its pause is lifted and kept until the
+new launcher is judged), the launcher is started as usual but none of its exits counts and there
+is no restart or desktop: a crash loop there is the update's to roll back.
+Log: `%LOCALAPPDATA%\HTPC\logs\watchdog.log`.
 
 Desktop mode (Power menu, one confirmation) starts Explorer: desktop, taskbar, Start menu. The
 launcher stays behind it; Home still opens the menu over the desktop. Back to TV (Power menu,

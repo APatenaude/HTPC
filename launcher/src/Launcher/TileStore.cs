@@ -134,4 +134,13 @@ static class TileStore
         var prefix = kind == "program" ? "app" : "web";
         return $"{prefix}-{Guid.NewGuid():N}"[..(prefix.Length + 1 + 8)];
     }
+
+    static readonly Regex WebsiteId = new(@"\Aweb-[0-9a-f]{8}\z", RegexOptions.Compiled);
+
+    /// <summary>
+    /// An added website's id as NewId makes it: the name of its Edge profile folder, which goes
+    /// when the tile is removed. Nothing else is ever deleted that way (a hand-edited
+    /// settings.json with "..\x" as an id, a catalog site).
+    /// </summary>
+    public static bool IsWebsiteId(string? id) => id is not null && WebsiteId.IsMatch(id);
 }

@@ -19,23 +19,26 @@
 #                            only: SYSTEM never writes in a user's folders
 # Never touched, whatever the catalog says: ours (the HTPC launcher value, tasks under \HTPC\ or
 # named HTPC..., anything in Program Files\HTPC), Windows' own (SecurityHealth, tasks under
-# \Microsoft\, programs in the Windows folder), Edge's updater (the user chose Edge updates) and
-# CoworkVMService. What no catalog app claims is left alone, and logged on a pass over the whole
-# catalog (-ReportOthers).
+# \Microsoft\, programs in the Windows folder) and Edge's updater (the user chose Edge updates).
+# A service is only ever changed when the catalog names it. What no catalog app claims is left
+# alone, and logged on a pass over the whole catalog (-ReportOthers).
 #
 # Where it looks depends on who runs it (Get-AutostartPlaces):
 #   SYSTEM (the \HTPC\Jobs task)  HKLM, the signed-in user's hive (HKU\<SID>, only while loaded:
-#                                 a hive is never loaded by hand), both Startup folders, tasks,
-#                                 services; logs to ProgramData\HTPC\state\autostart.log
-#   an admin (setup)              HKLM, HKCU, both Startup folders, tasks, services, prefs
-#   the user (per-user jobs)      HKCU, the user's Startup folder, prefs
-#   (both: ProgramData\HTPC\logs\autostart.log)
+#                                 a hive is never loaded by hand), the all-users Startup folder,
+#                                 tasks, services; logs to ProgramData\HTPC\state\autostart.log.
+#                                 Not the user's Startup folder (theirs to change under SYSTEM's
+#                                 feet): the launcher clears that one (AutostartGuard.cs)
+#   an admin (setup)              HKLM, HKCU, the all-users Startup folder, tasks, services; logs
+#                                 to ProgramData\HTPC\logs (setup's, admin-write). Nothing in the
+#                                 user's profile (their Startup folder, prefs): the launcher's
+#   the user (per-user jobs)      HKCU, the user's Startup folder, prefs; logs to
+#                                 %LOCALAPPDATA%\HTPC\logs\autostart.log
 # The registry, tasks, services and file removals go through $AutostartIO, which the tests replace
 # with fakes under %TEMP% (setup\test\Test-Autostart.ps1): nothing there touches the real ones.
 
 $AutostartKeepRun = @('HTPC launcher', 'SecurityHealth')
 $AutostartKeepTasks = @('\Microsoft\*', '\HTPC*', '\MicrosoftEdgeUpdateTask*')
-$AutostartKeepServices = @('CoworkVMService')
 $AutostartVersion = 'SOFTWARE\Microsoft\Windows\CurrentVersion'
 $AutostartApproved = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved'
 
@@ -192,7 +195,6 @@ function Get-AutostartOwner([string]$Kind, [string]$Name, [string]$Command, $Rul
     switch ($Kind) {
         'run'     { if ($AutostartKeepRun -contains $Name) { return $keep } }
         'task'    { foreach ($p in $AutostartKeepTasks) { if ($Name -like $p) { return $keep } } }
-        'service' { if ($AutostartKeepServices -contains $Name) { return $keep } }
         'startup' { if ($Name -ieq 'desktop.ini') { return $keep } }
     }
     if ($cmd.IndexOf((Join-Path $env:ProgramFiles 'HTPC\'), [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $keep }
@@ -240,17 +242,28 @@ function Get-AutostartPlaces {
         if (-not $user) {
             $note = 'nobody signed in: only the machine-wide places'
         } else {
+            # The user's Startup folder is not SYSTEM's to look into: the user can change it at any
+            # moment (a checked folder swapped for a link before the delete), and its shortcuts
+            # would be opened as SYSTEM. The launcher (AutostartGuard.CheckStartupFolder) and the
+            # user-context passes clear it, as the user; SYSTEM keeps to the user's registry.
             $userProfile = $user.Profile
-            $userStartup = Join-Path $user.Profile 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
-            $startup += @{ Label = 'Startup (user)'; Dir = $userStartup; Approved = "HKU\$($user.Sid)\$AutostartApproved\StartupFolder"; Root = $user.Profile }
             if (& $AutostartIO.KeyExists "HKU\$($user.Sid)") { $run += New-AutostartRunPlaces "HKU\$($user.Sid)" 'HKCU' }
             else { $note = "the signed-in user's registry is not loaded: HKCU left to the launcher" }
         }
     } else {
         $run += New-AutostartRunPlaces 'HKCU' 'HKCU'
-        $startup += @{ Label = 'Startup (user)'; Dir = [Environment]::GetFolderPath('Startup'); Approved = "HKCU\$AutostartApproved\StartupFolder"; Root = $null }
+        # Elevated (setup), not the user's Startup folder nor their prefs files either: nothing
+        # elevated writes or deletes in the user's profile (a link they planted could send it
+        # anywhere). The launcher does both as the user at its start (AutostartGuard.cs).
+        if (-not $isAdmin) {
+            $startup += @{ Label = 'Startup (user)'; Dir = [Environment]::GetFolderPath('Startup'); Approved = "HKCU\$AutostartApproved\StartupFolder"; Root = $env:USERPROFILE }
+        }
     }
-    $logDir = Join-Path $env:ProgramData ("HTPC\" + $(if ($isSystem) { 'state' } else { 'logs' }))
+    # SYSTEM: state\ (admin-write); setup: logs\ (setup's own, admin-write); the user: their own
+    # %LOCALAPPDATA%\HTPC\logs. Never where a standard user could plant a link for an elevated write.
+    $logDir = if ($isSystem) { Join-Path $env:ProgramData 'HTPC\state' } elseif ($isAdmin) { Join-Path $env:ProgramData 'HTPC\logs' }
+              else { Join-Path $env:LOCALAPPDATA 'HTPC\logs' }
+    if (-not $isAdmin) { New-Item -ItemType Directory -Force $logDir -ErrorAction SilentlyContinue | Out-Null }
     $logDirItem = Get-Item -LiteralPath $logDir -Force -ErrorAction SilentlyContinue
     [pscustomobject]@{
         Who      = if ($isSystem) { 'SYSTEM' } elseif ($isAdmin) { 'admin' } else { 'user' }
@@ -259,9 +272,8 @@ function Get-AutostartPlaces {
         Startup  = $startup
         Tasks    = $isAdmin
         Services = $isAdmin
-        Prefs    = -not $isSystem
+        Prefs    = -not $isAdmin
         Note     = $note
-        # SYSTEM writes only in state\ (admin-write): never where a standard user could plant a link.
         Log      = if ($logDirItem -and -not ($logDirItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Join-Path $logDir 'autostart.log' } else { $null }
     }
 }
