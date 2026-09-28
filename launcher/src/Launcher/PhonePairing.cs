@@ -193,13 +193,15 @@ sealed class PhonePairing
         }
     }
 
-    public (PairOutcome Outcome, string? Token, PairedPhone? Phone) TryKey(string key, string name)
+    /// <summary>A QR key: used up either way; a phone already paired (its cookie still good) stays the phone it is (no new entry, no new token).</summary>
+    public (PairOutcome Outcome, string? Token, PairedPhone? Phone) TryKey(string key, string name, PairedPhone? already = null)
     {
         lock (gate)
         {
             var hash = Hash(key);
             if (!keys.TryGetValue(hash, out var until) || now() >= until) return (PairOutcome.NoCode, null, null);
             keys.Remove(hash);
+            if (already is not null && data.Phones.Contains(already)) return (PairOutcome.Paired, null, already);
             var (token, phone) = Add(name);
             return (PairOutcome.Paired, token, phone);
         }
