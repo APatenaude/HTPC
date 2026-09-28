@@ -35,6 +35,8 @@ param(
     [switch]$Test
 )
 $ErrorActionPreference = 'Stop'
+# git reports progress on stderr; with Stop, PowerShell 5.1 would turn that into an error.
+function Invoke-Git { $ErrorActionPreference = 'Continue'; & git @args 2>&1 | ForEach-Object { "$_" } }
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $scratch = Join-Path $repo '.claude\worktrees\merge-scratch'
 $branch = (git -C $repo rev-parse --abbrev-ref HEAD).Trim()
@@ -42,11 +44,11 @@ $branch = (git -C $repo rev-parse --abbrev-ref HEAD).Trim()
 if (-not $Continue) {
     if (-not $Ref -or -not $Message) { throw 'Give -Ref and -Message (or -Continue after resolving)' }
     if (git -C $repo status --porcelain) { throw 'The main checkout has changes: commit or set them aside first' }
-    if (Test-Path $scratch) { git -C $repo worktree remove --force $scratch 2>$null | Out-Null }
-    git -C $repo worktree add --detach $scratch $branch 2>&1 | Out-Null
+    if (Test-Path $scratch) { Invoke-Git -C $repo worktree remove --force $scratch | Out-Null }
+    Invoke-Git -C $repo worktree add --detach $scratch $branch | Out-Null
     $msgFile = Join-Path $env:TEMP "merge-branch-$PID.txt"
     [IO.File]::WriteAllText($msgFile, "$Message`n", (New-Object Text.UTF8Encoding $false))
-    git -C $scratch merge --no-ff -F $msgFile $Ref 2>&1 | Select-String 'CONFLICT|changed|Already'
+    Invoke-Git -C $scratch merge --no-ff -F $msgFile $Ref | Select-String 'CONFLICT|changed|Already'
     Remove-Item $msgFile -ErrorAction SilentlyContinue
     $conflicts = @(git -C $scratch diff --name-only --diff-filter=U)
     if ($conflicts.Count) {
@@ -61,5 +63,5 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { "Tests failed: nothing fast-forwarded. Fix in $scratch, commit, -Continue -Test."; exit 1 }
 }
 $tip = (git -C $scratch rev-parse HEAD).Trim()
-git -C $repo merge --ff-only $tip 2>&1 | Select-Object -Last 1
+Invoke-Git -C $repo merge --ff-only $tip | Select-Object -Last 1
 git -C $repo log --oneline -1
