@@ -94,6 +94,29 @@ try {
         Check ($rejected -and (Test-Path -LiteralPath (Join-Path $atarget 'sentinel.txt'))) 'a junction is refused, its target left untouched'
         cmd /c rmdir "$alink" | Out-Null
 
+        # As Set-Acl did: the locked folder's rules reach a sub-folder that inherits (CI regression:
+        # state\ kept the full control its creator had inherited from %TEMP%), but not a junction's
+        # target below it; an unprotected grant keeps the inherited rules.
+        $proot = Join-Path $work 'acl-prop'
+        $pchild = Join-Path $proot 'state'
+        $pouter = Join-Path $work 'acl-prop-outside'
+        New-Item -ItemType Directory -Force $pchild, $pouter | Out-Null
+        New-Junction (Join-Path $proot 'tv') $pouter
+        $who = { param($p) @((Get-Acl -LiteralPath $p).Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique) -join ',' }
+        $outerBefore = & $who $pouter
+        Set-DirSecurityNoReparse $proot $acl
+        $want = (@($me.Value, 'S-1-5-32-545') | Sort-Object) -join ','
+        Check ((& $who $pchild) -eq $want) "a sub-folder that inherits takes the locked folder's rules only ($(& $who $pchild))"
+        Check ((& $who $pouter) -eq $outerBefore) 'a junction below is not followed: its target keeps its rules'
+        $grant = Get-Acl -LiteralPath $pchild
+        $grant.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'Modify', $inherit, 'None', 'Allow')))
+        Set-DirSecurityNoReparse $pchild $grant
+        $after = Get-Acl -LiteralPath $pchild
+        $explicit = @($after.Access | Where-Object { -not $_.IsInherited })
+        $inherited = @($after.Access | Where-Object { $_.IsInherited })
+        Check ((-not $after.AreAccessRulesProtected) -and $explicit.Count -eq 1 -and $inherited.Count -ge 2) "an unprotected grant: one explicit rule, the inherited ones kept ($($explicit.Count) explicit, $($inherited.Count) inherited)"
+        cmd /c rmdir "$(Join-Path $proot 'tv')" | Out-Null
+
         if ($elevated) {
             # Register-AppInstaller -LockOnly replaces a junction planted where tv\ should be with a
             # real folder (Assert-RealFolder), and sets its security without following the link.
@@ -109,6 +132,11 @@ try {
             $tvReal = $tvItem -and -not ($tvItem.Attributes -band [IO.FileAttributes]::ReparsePoint)
             Check ($tvReal) "tv\ planted as a junction is now a real folder ($($out -replace '\s+',' ' | Select-Object -First 1))"
             Check (Test-Path -LiteralPath (Join-Path $ltarget 'sentinel.txt')) 'the junction''s target is left untouched (the grant did not follow it)'
+            # Made under %TEMP% by this account, as on CI (Test-Updates Planting): after the lock the
+            # root and state\ are trusted by the SYSTEM jobs (no write left for their creator).
+            $whyRoot = Get-UntrustedReason $data
+            $whyState = Get-UntrustedReason (Join-Path $data 'state')
+            Check ((-not $whyRoot) -and (-not $whyState)) "the locked root and state\ are trusted ($whyRoot$whyState)"
         } else {
             Skip 'Register-AppInstaller -LockOnly (takeown/Set-Acl, tv\ junction replaced)'
         }
@@ -124,10 +152,14 @@ try {
         Check ($userOut -notmatch [regex]::Escape($refusal)) 'a normal user is not refused for -DryRun'
 
         if ($elevated) {
-            # Run Start-Job.ps1 as SYSTEM through a one-shot task, capturing its output.
-            function Invoke-AsSystem([string]$Args) {
+            # Runs Start-Job.ps1 as SYSTEM through a one-shot task. Returns ONE string: its output, or
+            # the message it threw (caught, so an error record's line wrapping cannot split it), with
+            # the whitespace collapsed. -ResolveMark sets HTPC_JOB_RESOLVE first (the bootstrap's call).
+            function Invoke-StartJobAsSystem([string]$Arguments, [switch]$ResolveMark) {
                 $result = Join-Path $work ("sysjob-" + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.txt')
-                $inner = "& '$startJob' $Args *>&1 | Out-File -LiteralPath '$result' -Encoding ascii"
+                $mark = if ($ResolveMark) { "`$env:HTPC_JOB_RESOLVE = '1'; " } else { '' }
+                $inner = "$mark`$r = try { & '$startJob' $Arguments *>&1 | Out-String -Width 4096 } catch { 'THREW: ' + `$_.Exception.Message }; " +
+                    "Set-Content -LiteralPath '$result' -Value ([string]`$r) -Encoding ascii"
                 $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
                 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
                 $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
@@ -136,33 +168,24 @@ try {
                 $tn = 'HTPC rights test'
                 try {
                     Register-ScheduledTask -TaskName $tn -Action $action -Principal $principal -Settings $settings -Force | Out-Null
-                    Start-ScheduledTask -TaskName $tn
+                    Start-ScheduledTask -TaskName $tn | Out-Null
                     $deadline = (Get-Date).AddSeconds(60)
                     do { Start-Sleep -Milliseconds 400; $state = (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue).State } while ("$state" -eq 'Running' -and (Get-Date) -lt $deadline)
                 } finally { Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue }
-                if (Test-Path -LiteralPath $result) { Get-Content -LiteralPath $result -Raw } else { '' }
+                $text = if (Test-Path -LiteralPath $result) { [IO.File]::ReadAllText($result) } else { '' }
+                [string]($text -replace '\s+', ' ')
             }
-            $sysDry = Invoke-AsSystem '-Job reconcile -DryRun'
-            Check ($sysDry -match [regex]::Escape($refusal)) 'as SYSTEM, -DryRun is refused'
-            $sysCat = Invoke-AsSystem '-Job reconcile -Catalog C:\x.json'
-            Check ($sysCat -match [regex]::Escape($refusal)) 'as SYSTEM, -Catalog is refused'
-            $sysRes = Invoke-AsSystem '-Resolve -DataRoot C:\Windows\Temp'
-            Check ($sysRes -match [regex]::Escape($refusal)) 'as SYSTEM, -Resolve/-DataRoot is refused'
+            $pattern = [regex]::Escape($refusal)
+            $sysDry = Invoke-StartJobAsSystem '-Job reconcile -DryRun'
+            Check ([bool]($sysDry -match $pattern)) "as SYSTEM, -DryRun is refused ($sysDry)"
+            $sysCat = Invoke-StartJobAsSystem '-Job reconcile -Catalog C:\x.json'
+            Check ([bool]($sysCat -match $pattern)) "as SYSTEM, -Catalog is refused ($sysCat)"
+            $sysRes = Invoke-StartJobAsSystem '-Resolve -DataRoot C:\Windows\Temp'
+            Check ([bool]($sysRes -match $pattern)) "as SYSTEM, -Resolve/-DataRoot is refused ($sysRes)"
             # The update bootstrap's exemption: HTPC_JOB_RESOLVE lets -Resolve through (it then fails
             # only because this Start-Job has no runner beside it, not with the SYSTEM refusal).
-            $result = Join-Path $work ("sysres-" + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.txt')
-            $inner = "`$env:HTPC_JOB_RESOLVE='1'; & '$startJob' -Resolve -DataRoot C:\Windows\Temp *>&1 | Out-File -LiteralPath '$result' -Encoding ascii"
-            $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-            $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-            $tn = 'HTPC rights test'
-            try {
-                Register-ScheduledTask -TaskName $tn -Action (New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc") -Principal (New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::FromMinutes(2))) -Force | Out-Null
-                Start-ScheduledTask -TaskName $tn
-                $deadline = (Get-Date).AddSeconds(60)
-                do { Start-Sleep -Milliseconds 400; $state = (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue).State } while ("$state" -eq 'Running' -and (Get-Date) -lt $deadline)
-            } finally { Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue }
-            $sysExempt = if (Test-Path -LiteralPath $result) { Get-Content -LiteralPath $result -Raw } else { '' }
-            Check ($sysExempt -notmatch [regex]::Escape($refusal)) 'as SYSTEM with HTPC_JOB_RESOLVE, -Resolve is allowed (the update bootstrap)'
+            $sysExempt = Invoke-StartJobAsSystem '-Resolve -DataRoot C:\Windows\Temp' -ResolveMark
+            Check ([bool]($sysExempt -and $sysExempt -notmatch $pattern)) "as SYSTEM with HTPC_JOB_RESOLVE, -Resolve is allowed (the update bootstrap) ($sysExempt)"
         } else {
             Skip 'Start-Job.ps1 refusal as SYSTEM (needs a SYSTEM scheduled task)'
         }
