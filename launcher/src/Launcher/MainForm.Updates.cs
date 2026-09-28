@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -9,7 +11,8 @@ namespace Htpc.Launcher;
 ///   - "updates.*" messages from the UI, "updates.state" back to it;
 ///   - the "healthy" signal a launcher update waits for: once the UI said ready and the
 ///     controller thread runs, the event Local\HtpcHealthy_&lt;version&gt;_&lt;pid&gt; exists (the SYSTEM
-///     job opens it through Session\&lt;n&gt;\; nothing is written anywhere);
+///     job opens it through Session\&lt;n&gt;\ and checks its owner, UpdateSignal; nothing is
+///     written anywhere);
 ///   - leaving for an update: at Home or in standby only, "Restarting..." and the event
 ///     Local\HtpcLeaving_&lt;version&gt;_&lt;pid&gt; the job waits for, then, told to leave, exit code 75
 ///     (which the watchdog does not count as a crash); and restarting the box for Windows
@@ -132,12 +135,34 @@ sealed partial class MainForm
         if (healthySignal is not null || !controller.Alive) return;
         try
         {
-            healthySignal = new EventWaitHandle(true, EventResetMode.ManualReset, $@"Local\HtpcHealthy_{Program.Version}_{Environment.ProcessId}");
+            healthySignal = UpdateSignal($@"Local\HtpcHealthy_{Program.Version}_{Environment.ProcessId}");
             Log.Info($"Launcher {Program.Version} healthy (UI ready, controller thread running)");
             // Healthy: the other versions' unpacked files can go (a minute on, the start settled).
             _ = Task.Delay(TimeSpan.FromMinutes(1)).ContinueWith(_ => UpdateService.RemoveOtherBundles(), TaskScheduler.Default);
         }
         catch (Exception e) { Log.Warn($"Healthy signal: {e.Message}"); }
+    }
+
+    /// <summary>
+    /// One of the events the update job reads (healthy, leaving), made so the job can tell who made
+    /// it: owned by this launcher's user, named explicitly (elevated with no split token, an
+    /// object's owner would otherwise be Administrators), and only that user and SYSTEM may open it.
+    /// The job takes it only when its owner is the launcher process's user (setup\lib\
+    /// LauncherUpdate.ps1, Test-LauncherEvent), so a program of another account in this session
+    /// cannot fake it. One that is there already was made by someone else: refused (throws).
+    /// </summary>
+    static EventWaitHandle UpdateSignal(string name)
+    {
+        var me = WindowsIdentity.GetCurrent().User!;
+        var security = new EventWaitHandleSecurity();
+        security.SetOwner(me);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var who in new[] { me, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null) })
+            security.AddAccessRule(new EventWaitHandleAccessRule(who, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+        var signal = EventWaitHandleAcl.Create(true, EventResetMode.ManualReset, name, out var created, security);
+        if (created) return signal;
+        signal.Dispose();
+        throw new InvalidOperationException($"{name} was there already (made by another program)");
     }
 
     // --- Leaving for an update ---------------------------------------------------------------------
@@ -151,7 +176,7 @@ sealed partial class MainForm
     {
         if (leaving || leavingSignal is not null) return true;
         if (!(standby.Active || (LauncherActive && !keyboard.Visible && apps.ForegroundApp() is null))) return false;
-        try { leavingSignal = new EventWaitHandle(true, EventResetMode.ManualReset, $@"Local\HtpcLeaving_{Program.Version}_{Environment.ProcessId}"); }
+        try { leavingSignal = UpdateSignal($@"Local\HtpcLeaving_{Program.Version}_{Environment.ProcessId}"); }
         catch (Exception e) { Log.Warn($"Leaving signal: {e.Message}"); return false; }
         leavingFor = version;
         Log.Info($"At Home for launcher {version}: the update job may restart this launcher");
