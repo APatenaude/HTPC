@@ -181,6 +181,8 @@ static class Program
         // locked and Administrators' (TvFiles refuses otherwise); everything else it keeps in
         // Program Files\HTPC\Setup, never in the user's profile.
         if (options.Setup && elevated) SetupRunner.LockData();
+        // The elevated setups' WebView2 profiles, one per run in the user's profile: the launcher removes them, as the user.
+        if (!options.Setup) SetupElevation.ClearSetupWebViews();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);
         Application.ThreadException += (_, e) => Log.Error("UI thread", e.Exception);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);

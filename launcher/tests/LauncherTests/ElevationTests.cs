@@ -228,7 +228,12 @@ static class ElevationTests
         // WebView2: setup's profile is not the launcher's.
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         Check(SetupElevation.WebViewFolder(false, false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
-        Check(SetupElevation.WebViewFolder(true, true) == Path.Combine(SetupElevation.TrustedDir, "webview"), "the elevated setup's: admin-only, in Program Files\\HTPC\\Setup, never the user's profile");
+        // The elevated setup's: WebView2 runs its browser at the user's rights, which cannot write
+        // admin-only Program Files (the VM run, runtime 154): a new one each run in the user's profile.
+        var setupView = SetupElevation.WebViewFolder(true, true);
+        Check(setupView.StartsWith(Path.Combine(local, "HTPC", "setup-webview", "run-"), StringComparison.OrdinalIgnoreCase) && setupView == SetupElevation.WebViewFolder(true, true),
+            $"the elevated setup's: its own for this run, in the user's profile, where its de-elevated browser can write ({setupView})");
+        Check(!setupView.StartsWith(SetupElevation.TrustedDir, StringComparison.OrdinalIgnoreCase), "... never in admin-only Program Files\\HTPC\\Setup");
         Check(SetupElevation.WebViewFolder(true, false) == Path.Combine(local, "HTPC", "setup-webview"), "a setup at standard rights (a dev run): its own in the user's profile");
 
         // The C# trust check (UpdateCore's Get-UntrustedReason): Windows' own folder passes, a
