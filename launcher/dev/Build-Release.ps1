@@ -15,6 +15,8 @@
       update.json              what a box checks before it installs anything: version, tag,
                                notes, minimumFrom, and each file's name, role, size and SHA-256
       <file>.sha256            "<hash>  <name>", for people checking a download by hand
+      LICENSE, THIRD-PARTY-NOTICES.txt
+                               the project's license and what the exe bundles (also in setup.zip)
     The version is Directory.Build.props's; with -Tag the tag must be exactly v<version>. The
     built exe must report that version (--version and its file version), and update.json must
     pass the same checks a box applies (setup\lib\UpdateCore.ps1).
@@ -82,6 +84,9 @@ try {
         if ($errors) { throw "$($f.FullName): $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))" }
     }
     $zip = Join-Path $Out 'setup.zip'
+    # The license and the third-party notices: release assets, and in setup.zip's root.
+    $notices = @('LICENSE', 'THIRD-PARTY-NOTICES.txt') | ForEach-Object { Join-Path $repoRoot $_ }
+    foreach ($f in $notices) { Copy-Item -LiteralPath $f $Out }
     $archive = [IO.Compression.ZipFile]::Open($zip, 'Create')
     try {
         # The same parts the exe carries (Launcher.csproj): not dev\, test\ or autounattend\.
@@ -90,6 +95,7 @@ try {
             if ($relative -match '^(dev|test|autounattend)\\') { continue }
             [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $relative.Replace('\', '/'))
         }
+        foreach ($f in $notices) { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f, (Split-Path $f -Leaf)) }
         $entry = $archive.CreateEntry('VERSION')
         $writer = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding $false))
         $writer.Write("$version`n")
