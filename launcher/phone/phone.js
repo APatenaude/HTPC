@@ -99,7 +99,7 @@ function connect() {
   if (ws && ws.readyState <= WebSocket.OPEN) return;
   if (state.conn !== 'pairing') setConn('connecting');
   // The /share page asks for the Share sheet's ticket (share=1); other tabs leave it alone.
-  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${pendingShare !== undefined ? '?share=1' : ''}`);
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${pendingShare !== undefined ? `?share=1&url=${encodeURIComponent(pendingShare || '')}` : ''}`);
   ws = socket;
   socket.onopen = () => {
     retryMs = 500;
@@ -810,12 +810,23 @@ const isLoopback = () => ['127.0.0.1', 'localhost', '[::1]'].includes(location.h
 
 // Opened on the box's IP address (the QR code): if this phone can reach tv.local, move there,
 // so the Home Screen app keeps a name that survives the router handing the box a new address.
-function probeTvLocal() {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1500);
-    fetch(`${location.protocol}//tv.local${location.port ? ':' + location.port : ''}/api/hello`, { mode: 'no-cors', cache: 'no-store' })
-      .then(() => { clearTimeout(timer); resolve(true); }, () => { clearTimeout(timer); resolve(false); });
-  });
+// Only when tv.local is this very box (the same id from both): the one-time key in the address
+// must not go to whatever else answers to tv.local.
+async function boxId(base, signal) {
+  const res = await fetch(`${base}/api/hello`, { cache: 'no-store', signal });
+  return res.ok ? (await res.json()).box : null;
+}
+async function probeTvLocal() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const [here, there] = await Promise.all([boxId('', ctl.signal), boxId(`${location.protocol}//tv.local${location.port ? ':' + location.port : ''}`, ctl.signal)]);
+    return !!here && here === there;
+  } catch (e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function boot() {

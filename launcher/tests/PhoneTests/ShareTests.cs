@@ -320,6 +320,34 @@ static partial class Program
             var shared = await https.SendAsync(shareOverHttps);
             Check(shared.StatusCode == HttpStatusCode.SeeOther && shared.Headers.GetValues("Set-Cookie").Any(v => v.StartsWith("htpc_share=") && v.Contains("secure")),
                 "over HTTPS the ticket cookie is Secure (http://tv.local never sees it)");
+            // Paired over HTTPS: its own cookie (__Host-, Secure), never sent to http://tv.local; there
+            // only that one counts, and over HTTP only the plain one.
+            var httpsOrigin = $"https://tv.local:{httpsPort}";
+            var pairOverHttps = new HttpRequestMessage(HttpMethod.Post, "/api/pair")
+            {
+                Content = new StringContent($"{{\"key\":\"{pairing.NewKey()}\"}}", Encoding.UTF8, "application/json"), Headers = { { "Origin", httpsOrigin } },
+            };
+            var pairedOverHttps = await https.SendAsync(pairOverHttps);
+            var secureCookie = pairedOverHttps.Headers.TryGetValues("Set-Cookie", out var sc) ? sc.First() : "";
+            Check(pairedOverHttps.StatusCode == HttpStatusCode.OK && secureCookie.StartsWith(PhoneServer.SecureCookieName + "=") && secureCookie.Contains("secure"),
+                $"paired over HTTPS: its own cookie, __Host- and Secure ({pairedOverHttps.StatusCode})");
+            var secureToken = secureCookie.Split(';')[0].Split('=', 2)[1];
+            pairing.RequireCode = true;
+            async Task<bool?> PairedOverWss(string cookieHeader)
+            {
+                using var ws = new ClientWebSocket();
+                ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+                ws.Options.SetRequestHeader("Origin", httpsOrigin);
+                ws.Options.SetRequestHeader("Cookie", cookieHeader);
+                try { await ws.ConnectAsync(new Uri($"wss://127.0.0.1:{httpsPort}/ws"), CancellationToken.None); }
+                catch (WebSocketException) { return null; }
+                var hello = await Receive(ws);
+                ws.Abort();
+                return hello?.GetProperty("paired").GetBoolean();
+            }
+            Check(await PairedOverWss($"{PhoneServer.SecureCookieName}={secureToken}") == true && await PairedOverWss($"{PhoneServer.CookieName}={secureToken}") == false,
+                "over HTTPS the __Host- cookie pairs, the plain one does not");
+            pairing.RequireCode = false;
             var crt = await https.GetByteArrayAsync("/ca.crt");
             Check(crt.SequenceEqual(ca.RawData), "/ca.crt is the root (public)");
             Check(page.Headers.TryGetValues("Content-Security-Policy", out var csp) && csp.First().Contains("wss://tv.local ") && !csp.First().Contains(" ws: ") && !csp.First().Contains(" wss: "),
@@ -413,22 +441,25 @@ static partial class Program
         var getCross = await Share(HttpMethod.Get, "cross-site", oldTicket: ticket);
         Check(getCross.Ticket is null && getCross.Deleted, "GET /share from a web page: the ticket cookie deleted");
 
-        async Task<string?> HelloShare(string cookies, bool ask = true)
+        async Task<string?> HelloShare(string cookies, bool ask = true, string link = "https://vimeo.com/1")
         {
             var ws = new ClientWebSocket();
             ws.Options.SetRequestHeader("Origin", origin);
             ws.Options.SetRequestHeader("Cookie", cookies);
-            try { await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws{(ask ? "?share=1" : "")}"), CancellationToken.None); }
+            try { await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws{(ask ? "?share=1&url=" + Uri.EscapeDataString(link) : "")}"), CancellationToken.None); }
             catch (WebSocketException) { return "(refused)"; }
             var hello = await Receive(ws);
             ws.Abort();
             return hello?.GetProperty("share").ValueKind == JsonValueKind.String ? hello?.GetProperty("share").GetString() : null;
         }
         Check(await HelloShare($"{cookie}; {ticket}", ask: false) is null, "another tab connecting (no share=1) does not use the ticket up");
+        var wrongLink = (await Share(HttpMethod.Post, "none")).Ticket;
+        Check(await HelloShare($"{cookie}; {wrongLink}", link: "https://vimeo.com/other") is null && await HelloShare($"{cookie}; {wrongLink}") is null,
+            "a ticket asked for with another link: no link back (the page asks), and the ticket is used up");
         Check(await HelloShare($"{cookie}; {ticket}") == "https://vimeo.com/1", "the /share page's socket gets exactly the shared link: it plays at once");
         Check(await HelloShare($"{cookie}; {ticket}") is null, "the ticket works once (after that the page asks)");
         var other = (await Share(HttpMethod.Post, "none", "https://vimeo.com/2")).Ticket;
-        Check(await HelloShare($"{cookie}; {other}") == "https://vimeo.com/2", "each ticket is bound to its own link");
+        Check(await HelloShare($"{cookie}; {other}", link: "https://vimeo.com/2") == "https://vimeo.com/2", "each ticket is bound to its own link");
         var late = (await Share(HttpMethod.Post, "none")).Ticket;
         now = now.AddSeconds(61);
         Check(await HelloShare($"{cookie}; {late}") is null, "the ticket lasts 60 s (after that the page asks)");
@@ -454,7 +485,9 @@ static partial class Program
         for (var i = 0; i < 5 && reply?.GetProperty("t").GetString() != "shortcutKey"; i++) reply = await Receive(phone!);
         var token = reply?.GetProperty("token").GetString();
         Check(token is { Length: >= 40 } && reply?.GetProperty("url").GetString() == $"http://tv.local:{port}/api/open", "a paired phone gets a Shortcut key and the URL");
-        Check(pairing.Phones.Any(p => p.Shortcut && p.Name == "Phone Shortcut") && !File.ReadAllText(file).Contains(token!), "kept as a hash, listed as a Shortcut");
+        var owner = pairing.Find(cookie.Split('=', 2)[1])!;
+        Check(pairing.Phones.Any(p => p.Shortcut && p.Name == "Phone Shortcut" && p.Owner == owner.Id) && !File.ReadAllText(file).Contains(token!), "kept as a hash, listed as a Shortcut of the phone that made it");
+        Check(await WaitFor(host, "shortcut Phone"), "the TV says a Shortcut key was made");
         Check(pairing.Find(token) is null && pairing.FindShortcut(cookie.Split('=', 2)[1]) is null, "a Shortcut key is no remote cookie, and the other way round");
         phone!.Abort();
 
@@ -492,7 +525,7 @@ static partial class Program
         var codes = new List<HttpStatusCode>();
         for (var i = 0; i < 21; i++) codes.Add(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/4\"}"));
         Check(codes.Take(20).All(c => c == HttpStatusCode.OK) && codes[20] == HttpStatusCode.TooManyRequests, "20 links a minute per key (keyless requests elsewhere do not count), then 429");
-        var second = pairing.NewShortcut("iPhone")!;
+        var second = pairing.NewShortcut(owner)!.Value.Token;
         Check(await Open(http, "Bearer " + second, "{\"url\":\"https://vimeo.com/5\"}") == HttpStatusCode.OK, "another key is not held up by the first one's limit");
         now = now.AddMinutes(2);
         for (var i = 0; i < 10; i++) await Open(other2, "Bearer wrong", "{}");
@@ -511,8 +544,58 @@ static partial class Program
         Check(server.LimitCount <= PhoneServer.MaxLimits, $"270 devices with wrong keys: the table stays at 256 at most ({server.LimitCount})");
         pairing.Forget(pairing.FindShortcut(token)!.Id);
         Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/9\"}") == HttpStatusCode.Unauthorized, "removed in Settings: 401");
-        for (var i = 0; i < PhonePairing.MaxShortcuts; i++) pairing.NewShortcut("iPhone");
-        Check(pairing.NewShortcut("iPhone") is null, "at most 10 Shortcut keys");
+        for (var i = 0; i < PhonePairing.MaxShortcuts; i++) pairing.NewShortcut(owner);
+        Check(pairing.NewShortcut(owner) is null, "at most 10 Shortcut keys");
+
+        // Forgetting a phone forgets its Shortcut keys.
+        foreach (var k in pairing.Phones.Where(p => p.Shortcut).ToList()) pairing.Forget(k.Id);
+        var ownKey = pairing.NewShortcut(owner)!.Value.Token;
+        var gone = pairing.Forget(owner.Id);
+        Check(gone.Count == 2 && pairing.FindShortcut(ownKey) is null && await Open(http, "Bearer " + ownKey, "{\"url\":\"https://vimeo.com/10\"}") == HttpStatusCode.Unauthorized,
+            "forgetting a phone forgets its Shortcut keys (401 after)");
+
+        // /api/hello: this run's id, readable from our own pages only (the IP page asks tv.local).
+        async Task<(string? Box, string? Allow)> Hello(string fromOrigin)
+        {
+            var m = new HttpRequestMessage(HttpMethod.Get, "/api/hello");
+            m.Headers.Add("Origin", fromOrigin);
+            var res = await http.SendAsync(m);
+            var box = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.GetProperty("box").GetString();
+            return (box, res.Headers.TryGetValues("Access-Control-Allow-Origin", out var a) ? a.First() : null);
+        }
+        var fromUs = await Hello(origin);
+        var fromElsewhere = await Hello("http://evil.example");
+        Check(fromUs.Box == server.BoxId && fromUs.Box is { Length: 24 } && fromUs.Allow == origin && fromElsewhere.Allow is null,
+            "/api/hello: the box's id, readable across our own origins only");
+
+        // At most 12 connections from one address; a 13th is closed at once.
+        var held = new List<Socket>();
+        try
+        {
+            for (var i = 0; i < PhoneServer.MaxConnectionsPerAddress + 1; i++)
+            {
+                var s = new Socket(SocketType.Stream, ProtocolType.Tcp);
+                s.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.9"), 0));
+                await s.ConnectAsync(IPAddress.Loopback, port);
+                held.Add(s);
+            }
+            async Task<string> Ask(Socket s)
+            {
+                var request = Encoding.ASCII.GetBytes($"GET /api/hello HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+                try
+                {
+                    await s.SendAsync(request);
+                    var buffer = new byte[256];
+                    using var cts = new CancellationTokenSource(3000);
+                    var n = await s.ReceiveAsync(buffer, SocketFlags.None, cts.Token);
+                    return Encoding.ASCII.GetString(buffer, 0, n);
+                }
+                catch (Exception e) when (e is SocketException or OperationCanceledException) { return ""; }
+            }
+            Check((await Ask(held[PhoneServer.MaxConnectionsPerAddress - 1])).StartsWith("HTTP/1.1 200") && (await Ask(held[^1])) == "",
+                $"{PhoneServer.MaxConnectionsPerAddress} connections from one address are served, one more is closed");
+        }
+        finally { foreach (var s in held) s.Dispose(); }
 
         await server.StopAsync();
         File.Delete(file);

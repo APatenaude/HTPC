@@ -448,7 +448,7 @@ partial class MainForm
         {
             case "phone.info": PostPhoneInfo(qr: true); CheckPhoneReach(); break;
             case "phone.forget":
-                if (Str("id") is { } id && pairing?.Forget(id) == true) phones?.Disconnect(id);
+                if (Str("id") is { } id && pairing?.Forget(id) is { Count: > 0 } gone) phones?.Disconnect(gone);
                 PostPhoneInfo(qr: false);
                 break;
             case "phone.requireCode":
@@ -492,7 +492,7 @@ partial class MainForm
                 reach = phoneReach,
                 unpaired = phones.Clients.Count(c => c.Phone is null),
                 phones = pairing.Phones.OrderByDescending(p => p.LastSeen)
-                    .Select(p => new { id = p.Id, name = p.Name, connected = connected.Contains(p.Id), lastSeen = Unix(p.LastSeen), shortcut = p.Shortcut }),
+                    .Select(p => new { id = p.Id, name = p.Name, connected = connected.Contains(p.Id), lastSeen = Unix(p.LastSeen), shortcut = p.Shortcut, owner = p.Owner }),
             },
         });
     }
@@ -580,6 +580,10 @@ partial class MainForm
         public void OnDisconnected(PhoneClient phone) => form.OnUi(() => { form.ReleasePhoneDrag(); form.WatchMediaForPhones(); });
         public void HidePairingCode(bool paired) => form.OnUi(() => form.HidePairCode(paired));
         public void PhonesChanged() => form.OnUi(() => { form.PostPhoneInfo(qr: false); form.PushState(); });
+        public void ShortcutKeyMade(string phoneName) => form.OnUi(() => form.phoneAlerts.Raise(new AlertSpec
+        {
+            Id = "phone-shortcut", Title = "Shortcut key made", Body = $"{phoneName}: its Shortcut can now send links to the TV", Glyph = "share", Duration = TimeSpan.FromSeconds(8),
+        }));
         public void OpenShared(string url) => form.OnUi(() =>
         {
             if (form.standby.Active) form.standby.Wake("shared link"); // sharing to the TV turns it on

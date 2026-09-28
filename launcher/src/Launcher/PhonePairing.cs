@@ -15,6 +15,9 @@ sealed class PairedPhone
 
     /// <summary>A Shortcut key (iPhone: Share › Send to TV, /api/open), not a phone's remote cookie: the two never stand in for each other.</summary>
     public bool Shortcut { get; set; }
+
+    /// <summary>A Shortcut key's phone (its Id): forgetting the phone forgets its keys. None on keys made before 1.0.</summary>
+    public string? Owner { get; set; }
 }
 
 enum PairOutcome { Paired, Wrong, NoCode, Locked }
@@ -204,17 +207,18 @@ sealed class PhonePairing
 
     public const int MaxShortcuts = 10;
 
-    /// <summary>A new Shortcut key for a paired phone (null: 10 already, Settings removes them). Its token shows once.</summary>
-    public string? NewShortcut(string phoneName)
+    /// <summary>A new Shortcut key for a paired phone, kept as its own (null: 10 already, Settings removes them). Its token shows once.</summary>
+    public (string Token, PairedPhone Key)? NewShortcut(PairedPhone owner)
     {
         lock (gate)
         {
             if (data.Phones.Count(p => p.Shortcut) >= MaxShortcuts) return null;
-            return Add($"{phoneName} Shortcut", shortcut: true).Token;
+            if (!data.Phones.Any(p => p.Id == owner.Id && !p.Shortcut)) return null;   // forgotten meanwhile
+            return Add($"{owner.Name} Shortcut", shortcut: true, owner: owner.Id);
         }
     }
 
-    (string Token, PairedPhone Phone) Add(string name, bool shortcut = false)
+    (string Token, PairedPhone Phone) Add(string name, bool shortcut = false, string? owner = null)
     {
         var token = Base64Url(RandomNumberGenerator.GetBytes(32));
         var taken = data.Phones.Select(p => p.Name).ToHashSet();
@@ -223,7 +227,7 @@ sealed class PhonePairing
         var phone = new PairedPhone
         {
             Id = Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-            Name = unique, TokenHash = Hash(token), Paired = now(), LastSeen = now(), Shortcut = shortcut,
+            Name = unique, TokenHash = Hash(token), Paired = now(), LastSeen = now(), Shortcut = shortcut, Owner = owner,
         };
         data.Phones.Add(phone);
         if (!shortcut) { wrong = 0; lockout = FirstLockout; }
@@ -261,13 +265,17 @@ sealed class PhonePairing
         }
     }
 
-    public bool Forget(string id)
+    /// <summary>Forgets a phone and its Shortcut keys (or one key). The ids that went.</summary>
+    public List<string> Forget(string id)
     {
         lock (gate)
         {
-            var removed = data.Phones.RemoveAll(p => p.Id == id) > 0;
-            if (removed) { Save(); Log.Info($"Phone forgotten: {id}"); }
-            return removed;
+            var gone = data.Phones.Where(p => p.Id == id || (p.Shortcut && p.Owner == id)).Select(p => p.Id).ToList();
+            if (gone.Count == 0) return gone;
+            data.Phones.RemoveAll(p => gone.Contains(p.Id));
+            Save();
+            Log.Info($"Phone forgotten: {id}{(gone.Count > 1 ? $" and its {gone.Count - 1} Shortcut key(s)" : "")}");
+            return gone;
         }
     }
 
