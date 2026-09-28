@@ -13,9 +13,11 @@
     each verb script checks its arg against the trusted catalog in Program Files.
 
     Security: the caller passes only this token; the winget id, GitHub asset, install folder and
-    firewall paths all come from the trusted catalog, never from the token. As SYSTEM this stages
-    downloads in a fresh admin-only folder, resolves winget.exe from its signed package, and reads
-    or writes nothing in a user-writable location.
+    firewall paths all come from the trusted catalog, never from the token. As SYSTEM this first
+    checks ProgramData\HTPC\state and the folders above it (owners, no write for others, no links:
+    UpdateCore's checks, as the update jobs use them), stages downloads in a fresh admin-only
+    folder, resolves winget.exe from its signed package, and reads or writes nothing in a
+    user-writable location.
 
 .PARAMETER Job
     The token, e.g. install:vlc, uninstall:kodi, firewall:stremio, upgrade:plex.
@@ -49,6 +51,7 @@ if (@($jobsHome, "$jobsHome.prev", "$jobsHome.new") -notcontains [IO.Path]::GetF
 $JobLib = $here
 . "$here\Common.ps1"
 . "$here\AppCore.ps1"
+. "$here\UpdateCore.ps1"     # the trust checks (Assert-JobState, New-AdminTemp) and Write-AtomicText
 . "$here\Job-Common.ps1"
 . "$here\AppAutostart.ps1"
 
@@ -83,6 +86,9 @@ if ($DryRun) {
 Set-JobContext $Job $verb
 $temp = $null
 try {
+    # As SYSTEM, state\ is checked before anything is written there; refused, not even "failed"
+    # goes in (the launcher gives up on a job that says nothing).
+    Assert-JobState
     $temp = New-AdminTemp
     Write-JobProgress 'start' 0 "Starting $verb"
     . $verbScript -Arg $arg

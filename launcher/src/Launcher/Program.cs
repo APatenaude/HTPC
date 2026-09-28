@@ -1,3 +1,8 @@
+// Every Windows DLL this program imports by name (user32, xinput1_4, wlanapi, d3d11, powrprof,
+// userenv, dwmapi...) comes from System32 only, never from the exe's folder (the setup exe may sit
+// in Downloads) or wherever .NET unpacked it: see Program.Main for the rest of the process.
+[assembly: System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+
 namespace Htpc.Launcher;
 
 /// <summary>
@@ -5,9 +10,9 @@ namespace Htpc.Launcher;
 /// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV),
 /// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"; it
 /// runs elevated, see SetupElevation.cs), --elevated (the copy setup started with administrator
-/// rights), --home (not setup even so: the home screen after setup when no launcher was installed),
+/// rights, from Program Files\HTPC\Setup; it gets no --ui, --catalog or --dev), --home (not setup even so: the home screen after setup when no launcher was installed),
 /// --version (prints the version and ends; see Program.Main), --phone-certificates-create (setup, as the user: the phone
-/// remote's CA made; ends), --phone-certificates (setup, elevated: its intermediate certificate in the machine's store; ends),
+/// remote's CA made; ends), --phone-certificates (setup, elevated: its intermediate certificate in the machine's store; ends), 
 /// --restarted (started again by the watchdog: the TV is left as it is) with
 /// --restart-reason=WHY (why the watchdog started it again, for the log: Watchdog.cs lists them),
 /// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one).
@@ -92,9 +97,18 @@ static class Program
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetDefaultDllDirectories(uint flags);
+    const uint LoadLibrarySearchSystem32 = 0x800;   // LOAD_LIBRARY_SEARCH_SYSTEM32
+
     [STAThread]
     static void Main(string[] args)
     {
+        // Before anything loads a DLL by name: from System32 only, for the whole process (Windows'
+        // own components and drivers too), not the exe's folder, the current one or PATH. What .NET
+        // itself loads (WebView2Loader.dll, the runtime's own) it loads by its full path from where
+        // it unpacked, so that is unchanged; the drivers' DLLs are loaded by their full paths too.
+        SetDefaultDllDirectories(LoadLibrarySearchSystem32);
         // --version: prints the version and ends, before anything else (no window, no single-instance
         // lock, and above all not setup mode's "replace the running launcher": the release build
         // runs "TV-Box-Setup.exe --version" to check what it built).
@@ -129,11 +143,14 @@ static class Program
         // Back to TV with a launcher running: it is told, this copy is not needed. Without one,
         // this becomes the launcher (and closes the desktop once its UI is up).
         if (options.BackToTv && !options.Setup && DesktopMode.SignalRunningLauncher()) return;
-        // Setup runs elevated, asked for once as it opens (SetupElevation.cs): without the rights
-        // this copy starts an elevated one and ends, or shows that setup needs them.
+        // Setup runs elevated, asked for once as it opens, and only from its admin-only copy in
+        // Program Files\HTPC\Setup (SetupElevation.cs): anything else starts that and ends, or
+        // shows why setup cannot run.
         var elevated = Environment.IsPrivilegedProcess;
-        var step = SetupElevation.Decide(options.Setup, elevated, args);
+        var trusted = SetupElevation.RunsFromTrustedPlace(Environment.ProcessPath, AppContext.BaseDirectory, SetupElevation.TrustedDir);
+        var step = SetupElevation.Decide(options.Setup, elevated, trusted, args);
         if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
+        if (options.Setup && elevated) SetupElevation.TidyTrustedDir();
         // Setup replaces a launcher that is already running (setup run again on a finished box).
         // The watchdog must not start it again meanwhile. Only this session's: setup is elevated.
         if (options.Setup)

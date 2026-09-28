@@ -1,13 +1,15 @@
 # Shared helpers for the \HTPC\Jobs runner (lib\Invoke-AppJob.ps1 and jobs\*.ps1). Dot-sourced
-# after Common.ps1 and AppCore.ps1. ASCII only, Windows PowerShell 5.1.
+# after Common.ps1, AppCore.ps1 and UpdateCore.ps1. ASCII only, Windows PowerShell 5.1.
 #
 # Context: a machine job runs as SYSTEM through the scheduled task; a user job runs as the
 # interactive user, started non-elevated by the launcher. SYSTEM writes progress to
 # ProgramData\HTPC\state (admin-write, user-read) and stages downloads in an admin-only temp; it
-# never reads, runs or writes anything in a user-writable place. The user context writes progress
-# to ProgramData\HTPC\user.
+# never reads, runs or writes anything in a user-writable place. Any user process can queue these
+# jobs, so SYSTEM checks state\ first, as the update jobs do (Assert-JobState), and writes nothing
+# before that. The user context writes progress to ProgramData\HTPC\user.
 
 $script:IsSystem = ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18')
+$script:StateTrusted = $false   # SYSTEM: state\ checked (Assert-JobState); nothing is written there before
 $script:HtpcData = Join-Path $env:ProgramData 'HTPC'
 $script:ProgressPath = if ($script:IsSystem) {
     Join-Path $script:HtpcData 'state\library-progress.json'
@@ -25,8 +27,19 @@ function Set-JobContext([string]$JobId, [string]$Action) {
     $script:Seq = 0
 }
 
+# SYSTEM's first act, before its temp folder or any progress: ProgramData\HTPC\state and every
+# folder from ProgramData\HTPC down to it must be SYSTEM's, Administrators' or TrustedInstaller's,
+# with no write for anyone else and no junction or link on the way (UpdateCore's
+# New-TrustedDirectory, as the update jobs check it; made so when missing). Throws otherwise.
+function Assert-JobState {
+    if (-not $script:IsSystem) { return }
+    New-TrustedDirectory (Join-Path $script:HtpcData 'state') $script:HtpcData -UsersRead
+    $script:StateTrusted = $true
+}
+
 # Writes the progress file atomically (temp then rename), with the job id, a rising sequence and
-# the writer's pid so a stale file from an earlier run is easy to tell apart.
+# the writer's pid so a stale file from an earlier run is easy to tell apart. SYSTEM: only into a
+# checked state\ (Assert-JobState), through UpdateCore's Write-AtomicText (write-through rename).
 function Write-JobProgress([string]$Phase, $Percent, [string]$Message) {
     $script:Seq++
     # The runner's own closing line keeps a verb's final words (the update jobs say what happened).
@@ -37,6 +50,10 @@ function Write-JobProgress([string]$Phase, $Percent, [string]$Message) {
         phase = $Phase; percent = [int]($Percent); message = $Message; at = (Get-Date).ToString('s')
     }
     try {
+        if ($script:IsSystem) {
+            if ($script:StateTrusted) { Write-AtomicText $script:ProgressPath ($obj | ConvertTo-Json -Compress) }
+            return
+        }
         New-Item -ItemType Directory -Force (Split-Path $script:ProgressPath -Parent) | Out-Null
         $tmp = "$script:ProgressPath.tmp"
         [IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Compress))
@@ -73,27 +90,21 @@ function Assert-ScopeContext($App) {
     if ($scope -eq 'user' -and $script:IsSystem) { throw "'$($App.id)' installs per-user and must not run as SYSTEM" }
 }
 
-# A fresh admin-only staging folder for SYSTEM downloads. Refuses a path that already exists (a
-# planted folder) or is a reparse point, and returns it with TEMP/TMP pointed at it.
+# A fresh admin-only staging folder for SYSTEM downloads, state\work\<guid>: made admin-only as it
+# is created (New-TrustedDirectory), with state\work and everything above it checked; a path that
+# already exists (a planted folder) is refused. Returns it with TEMP/TMP pointed at it.
 function New-AdminTemp {
     if (-not $script:IsSystem) {
         $dir = Join-Path $env:TEMP ("htpc-job-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force $dir | Out-Null
         return $dir
     }
-    $dir = Join-Path $script:HtpcData ("state\work\" + [guid]::NewGuid().ToString('N'))
-    if (Test-Path $dir) { throw "staging folder already exists: $dir" }
-    New-Item -ItemType Directory -Force $dir | Out-Null
-    $item = Get-Item $dir
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Remove-Item $dir -Force; throw "staging folder is a reparse point" }
-    $acl = New-Object Security.AccessControl.DirectorySecurity
-    $acl.SetAccessRuleProtection($true, $false)
-    foreach ($who in 'SYSTEM', 'Administrators') {
-        $sid = if ($who -eq 'SYSTEM') { 'S-1-5-18' } else { 'S-1-5-32-544' }
-        $id = New-Object Security.Principal.SecurityIdentifier($sid)
-        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($id, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
-    }
-    Set-Acl -LiteralPath $dir -AclObject $acl
+    if (-not $script:StateTrusted) { throw 'state\ was not checked (Assert-JobState)' }
+    $work = Join-Path $script:HtpcData 'state\work'
+    New-TrustedDirectory $work $script:HtpcData
+    $dir = Join-Path $work ([guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $dir) { throw "staging folder already exists: $dir" }
+    New-TrustedDirectory $dir $script:HtpcData
     $env:TEMP = $dir; $env:TMP = $dir
     $dir
 }

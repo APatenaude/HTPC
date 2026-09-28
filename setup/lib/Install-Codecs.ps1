@@ -34,9 +34,13 @@
     H.264, VP9 and AV1 need nothing: Edge and the players decode them directly.
     Tested 2026-09-26 on the N97 box (10.0.26100, elevated): installed 2.4.109.0.
 #>
-param([string]$WorkDir = (Join-Path $env:TEMP 'htpc-setup\codecs'))
+# $WorkDir: where the package is downloaded; by default a fresh admin-only folder (New-AdminWorkDir),
+# never %TEMP%, which the user can write: the checked package could be swapped there before
+# Windows installs it for every user.
+param([string]$WorkDir)
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\UpdateCore.ps1"   # New-AdminWorkDir
 Assert-Admin
 
 $ProductId = '9N4WGH0Z6VHQ'
@@ -293,20 +297,26 @@ $frameworks = @($catalog.Packages | Where-Object { $_.PackageFullName -eq $packa
     ForEach-Object { $_.FrameworkDependencies } | Where-Object { $_ } | ForEach-Object { $_.PackageIdentity })
 if ($frameworks.Count) { throw "$($package.Moniker) now needs frameworks this script does not install: $($frameworks -join ', ')" }
 
-$path = Save-Package $package
+$ownWorkDir = -not $WorkDir
+if ($ownWorkDir) { $WorkDir = New-AdminWorkDir 'codecs' }
+try {
+    $path = Save-Package $package
 
-if (-not $provisioned) {
-    Write-Host '  Provisioning it for every user (added at their next sign-in)'
-    Add-AppxProvisionedPackage -Online -PackagePath $path -SkipLicense | Out-Null
-    if (-not (Get-ProvisionedPackage)) { throw "$($package.Moniker) is not listed as provisioned after Add-AppxProvisionedPackage" }
-    Write-Change "$($package.Moniker) provisioned"
-}
-if (-not $userPackage) {
-    Write-Host "  Installing it for $env:USERNAME"
-    Add-AppxPackage -Path $path
-    $userPackage = Get-UserPackage
-    if (-not $userPackage) { throw "$PackageName is not installed for $env:USERNAME after Add-AppxPackage" }
-    Write-Change "HEVC Video Extensions $($userPackage.Version) installed for $env:USERNAME"
+    if (-not $provisioned) {
+        Write-Host '  Provisioning it for every user (added at their next sign-in)'
+        Add-AppxProvisionedPackage -Online -PackagePath $path -SkipLicense | Out-Null
+        if (-not (Get-ProvisionedPackage)) { throw "$($package.Moniker) is not listed as provisioned after Add-AppxProvisionedPackage" }
+        Write-Change "$($package.Moniker) provisioned"
+    }
+    if (-not $userPackage) {
+        Write-Host "  Installing it for $env:USERNAME"
+        Add-AppxPackage -Path $path
+        $userPackage = Get-UserPackage
+        if (-not $userPackage) { throw "$PackageName is not installed for $env:USERNAME after Add-AppxPackage" }
+        Write-Change "HEVC Video Extensions $($userPackage.Version) installed for $env:USERNAME"
+    }
+} finally {
+    if ($ownWorkDir) { Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 if (Get-Process msedge -ErrorAction SilentlyContinue) {

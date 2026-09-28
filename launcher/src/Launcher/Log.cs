@@ -3,7 +3,8 @@ using System.Collections.Concurrent;
 namespace Htpc.Launcher;
 
 /// <summary>
-/// Plain text log in C:\ProgramData\HTPC\logs\launcher.log (SPEC: the launcher writes logs).
+/// Plain text log in C:\ProgramData\HTPC\logs\launcher.log (SPEC: the launcher writes logs), or
+/// %LOCALAPPDATA%\HTPC\logs before setup made that folder (PickPath).
 /// Lines are queued and written by a background thread, so logging never blocks the caller
 /// (the controller thread logs every Home press).
 /// </summary>
@@ -23,13 +24,23 @@ static class Log
         }) { IsBackground = true, Name = "Log", Priority = ThreadPriority.BelowNormal }.Start();
     }
 
+    /// <summary>
+    /// ProgramData\HTPC\logs, only once C:\ProgramData\HTPC is there (setup makes and locks it), or
+    /// when this process is elevated; else %LOCALAPPDATA%\HTPC\logs. Never ProgramData\HTPC made
+    /// at standard rights: TV Box Setup logs before it asks for administrator rights, and a folder
+    /// made then would be the user's, whose owner may always change its permissions again (undoing
+    /// setup's lock; the SYSTEM update jobs then refuse it).
+    /// </summary>
     static string PickPath()
     {
-        foreach (var root in new[] { Environment.SpecialFolder.CommonApplicationData, Environment.SpecialFolder.LocalApplicationData })
+        var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
+        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC");
+        var roots = Directory.Exists(data) || Environment.IsPrivilegedProcess ? new[] { data, local } : new[] { local };
+        foreach (var root in roots)
         {
             try
             {
-                var dir = Path.Combine(Environment.GetFolderPath(root), "HTPC", "logs");
+                var dir = Path.Combine(root, "logs");
                 Directory.CreateDirectory(dir);
                 var path = Path.Combine(dir, "launcher.log");
                 File.AppendAllText(path, "");

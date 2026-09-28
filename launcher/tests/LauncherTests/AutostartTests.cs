@@ -16,6 +16,8 @@ static class AutostartTests
         Check = check;
         Console.WriteLine("== Autostart: HKCU Run values (a fake registry)");
         RunValues();
+        Console.WriteLine("== Autostart: this user's Startup folder (a temp folder, shortcuts faked)");
+        StartupFolder();
         Console.WriteLine("== Autostart: whose a value is, what is never touched");
         Owners();
         Console.WriteLine("== Autostart: the apps' prefs files");
@@ -50,6 +52,39 @@ static class AutostartTests
     static readonly string Pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
     static readonly string Win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
     const string EdgeValue = "MicrosoftEdgeAutoLaunch_8714F0D917266FE3AFB7F8BB98EEBC18";
+
+    // The user's Startup folder is the launcher's to clear (SYSTEM no longer looks into it): a
+    // catalog app's shortcut goes with its StartupApproved record, anything else stays.
+    static void StartupFolder()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"htpc-startup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Spotify.lnk"] = $"\"{appData}\\Spotify\\Spotify.exe\" --minimized",
+                ["Notes.lnk"] = $"\"{Win}\\notepad.exe\"",
+                ["Other.lnk"] = "\"C:\\Tools\\other.exe\"",
+                ["Broken.lnk"] = "!throw",
+            };
+            foreach (var name in targets.Keys.Append("desktop.ini")) File.WriteAllText(Path.Combine(dir, name), "");
+            string Target(string file) { var t = targets[Path.GetFileName(file)]; return t == "!throw" ? throw new IOException("unreadable") : t; }
+            var store = new FakeRunStore();
+            store.Set(AutostartGuard.ApprovedStartupKey, "Spotify.lnk", "02");
+            store.Set(AutostartGuard.ApprovedStartupKey, "Other.lnk", "02");
+            var guard = new AutostartGuard(AutostartGuard.Load(CatalogPath()), store);
+            Check(guard.CheckStartupFolder("test", dir, Target) == 1, "Startup folder: one catalog app's shortcut removed");
+            Check(!File.Exists(Path.Combine(dir, "Spotify.lnk")) && !store.Has(AutostartGuard.ApprovedStartupKey, "Spotify.lnk"), "  Spotify's, with its StartupApproved record");
+            Check(File.Exists(Path.Combine(dir, "Notes.lnk")) && File.Exists(Path.Combine(dir, "Other.lnk")) && File.Exists(Path.Combine(dir, "desktop.ini"))
+                && File.Exists(Path.Combine(dir, "Broken.lnk")) && store.Has(AutostartGuard.ApprovedStartupKey, "Other.lnk"),
+                "  Windows' own, nobody's, desktop.ini and an unreadable shortcut kept");
+            Check(guard.CheckStartupFolder("again", dir, Target) == 0, "  a second check: nothing to do");
+            Check(guard.CheckStartupFolder("missing", Path.Combine(dir, "none"), Target) == 0, "  no Startup folder: nothing, no error");
+        }
+        finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+    }
 
     static void RunValues()
     {

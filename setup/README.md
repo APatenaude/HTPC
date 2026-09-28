@@ -5,8 +5,10 @@ Scripts that turn a clean Windows 11 IoT Enterprise LTSC 2024 install into the f
 
 The usual way in is **TV Box Setup.exe** (`launcher\dev\Publish-Setup.ps1` builds it): the
 launcher in setup mode, one self-contained file with these scripts inside. It asks for
-Windows' permission once, as it opens (the UAC prompt names it; declined, it says setup needs
-administrator rights: try again or quit), asks the questions (controller check, TV, apps), then
+Windows' permission once, as it opens (the UAC prompt is for Windows' command processor, which
+puts a copy of setup in the admin-only `Program Files\HTPC\Setup` and runs that, so nothing the
+user can write runs elevated; declined, it says setup needs administrator rights: try again or
+quit), asks the questions (controller check, TV, apps), then
 runs setup.ps1 with no further prompt, shows its progress, and hands over to the launcher it
 installed, started as the signed-in user, not elevated (launcher/README.md, SetupElevation.cs).
 
@@ -32,8 +34,8 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Bluetooth | `lib/Install-BluetoothDriver.ps1` | the Bluetooth adapter's own driver from Windows Update, matched by its exact hardware ID and class, whatever the chipset; nothing if there is none (this box's Realtek 8821CE has none there) or its maker's driver is in already. `-Check` only searches |
 | System | `lib/Set-SystemPolicy.ps1` | no popups over the TV, Private network (and every network joined later, a SYSTEM task), automatic time zone, location for the launcher's Wi-Fi list, computer name TV |
 | AutoLogon | `lib/Set-AutoLogon.ps1` | open box: no Windows password, automatic sign-in, nothing locks |
-| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup`; the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell |
-| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (SYSTEM/Administrators full, Users read; `logs\`, `user\` and `tv\` (the TV address cache) stay user-writable, `state\` is admin-write/user-read) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
+| Launcher | `lib/Install-Launcher.ps1` | the launcher (`-LauncherExe`, which the setup exe passes: itself) and its watchdog `HtpcWatchdog.exe` into `Program Files\HTPC\Launcher`, with the job runner (`lib/Invoke-AppJob.ps1`, `jobs/*.ps1`) and a trusted copy of `catalog.json` beside it; these scripts also kept in `ProgramData\HTPC\setup` (`lib\`, `jobs\` and the kept folder mirrored, built anew and swapped in, never merged); the watchdog (so the launcher) starts at sign-in from HKCU Run while Explorer is the shell. A TV Box Setup older than what the box has (the installed launcher, or the kept `setup\VERSION`) is refused before anything changes, and the wizard says so |
+| Library | `lib/Register-AppInstaller.ps1` | lets the TV install and uninstall catalog apps without a permission prompt each time (SPEC W5): locks `C:\ProgramData\HTPC` (owned by Administrators, SYSTEM/Administrators full, Users read; `logs\`, `user\` and `tv\` (the TV address cache) stay user-writable, `state\` is admin-write/user-read; the root, `state\` and `setup\` taken from whoever else owned them, since an owner can always undo the lock, and what a standard user owned inside `state\` or `setup\` renamed aside; setup.ps1 does this part first of all, `-LockOnly`) and registers the `\HTPC\Jobs` scheduled task (runs `Invoke-AppJob.ps1` as SYSTEM, one instance, 4-hour limit for Windows updates, the TV user may run it; also at Windows start with no token, which puts right a launcher update a power cut interrupted) |
 | PhoneRemote | `lib/Set-PhoneRemote.ps1` | Windows Firewall, group "HTPC": the phone remote (the launcher, TCP 80, 8765 and 443) and the programs in `install.allowInbound` (VacuumTube, for YouTube's cast button) allowed from the local subnet on Private networks, blocked on Public ones (so Windows never asks "allow access?" over the TV); rules left by an answer to that question dealt with (Block rules removed, Allow rules turned off); the built-in mDNS rule for Private networks on (tv.local). Per program: the global "notify on listen" stays on |
 | Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
@@ -128,8 +130,9 @@ It runs:
 - **as SYSTEM** at the end of every `install:` and `upgrade:` job (that app) and in `reconcile`
   (every catalog app, at every Windows start): HKLM, the signed-in user's hive (`HKU\<SID>`, the
   user the jobs already resolve for firewall paths; only while it is loaded: a hive is never
-  loaded by hand), both Startup folders (no junction followed in the user's profile), tasks,
-  services. SYSTEM never writes in a user's folders, so no prefs. Log:
+  loaded by hand), the all-users Startup folder, tasks, services. SYSTEM never looks into or
+  writes in a user's folders, so no prefs and not the user's Startup folder: the launcher clears
+  that one as the user (`AutostartGuard.CheckStartupFolder`, with its Run values). Log:
   `C:\ProgramData\HTPC\state\autostart.log`;
 - **as the user** at the end of per-user `install:` / `upgrade:` jobs and `winget-update`: HKCU,
   the user's Startup folder, prefs. Log: `C:\ProgramData\HTPC\logs\autostart.log`;

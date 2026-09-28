@@ -13,24 +13,10 @@ function Report-Phase($Report, [string]$Phase, $Percent, [string]$Message) {
     if ($Report) { & $Report $Phase $Percent $Message }
 }
 
-# winget.exe to use. Under SYSTEM the per-user WindowsApps alias does not exist, so resolve the
-# newest provisioned App Installer package under Program Files\WindowsApps and check it is
-# Microsoft-signed before trusting it.
-function Get-WingetForContext {
-    $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
-    if (Test-Path $alias) { return $alias }
-    $pkgRoot = Join-Path $env:ProgramFiles 'WindowsApps'
-    $candidates = Get-ChildItem $pkgRoot -Directory -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' -ErrorAction SilentlyContinue |
-        Sort-Object { try { [version](($_.Name -split '_')[1]) } catch { [version]'0.0' } } -Descending
-    foreach ($dir in $candidates) {
-        $exe = Join-Path $dir.FullName 'winget.exe'
-        if (-not (Test-Path $exe)) { continue }
-        $sig = Get-AuthenticodeSignature $exe
-        if ($sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -like '*Microsoft Corporation*') { return $exe }
-        throw "winget.exe at $exe is not validly Microsoft-signed"
-    }
-    throw 'winget is not available in this context'
-}
+# winget.exe to use (Common.ps1's Get-WingetPath): the user's alias at standard rights; elevated
+# (setup) or as SYSTEM (the jobs) the newest App Installer package under Program Files\WindowsApps,
+# Microsoft-signed, never the alias in the user's writable WindowsApps folder.
+function Get-WingetForContext { Get-WingetPath }
 
 function Get-WingetScope($App) {
     if ($App.install.PSObject.Properties['wingetScope'] -and $App.install.wingetScope) { return $App.install.wingetScope }

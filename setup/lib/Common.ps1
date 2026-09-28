@@ -55,10 +55,32 @@ function Invoke-Program([string]$FilePath, [string[]]$ArgumentList) {
     $LASTEXITCODE
 }
 
+# winget.exe to run. At standard rights: the user's own alias, %LOCALAPPDATA%\Microsoft\
+# WindowsApps\winget.exe. Elevated or as SYSTEM never that one (SYSTEM has none, and the folder is
+# the user's to write: anything could be put there under that name): the newest App Installer
+# package under Program Files\WindowsApps (admin-only), found by listing that folder (SYSTEM may)
+# or from Get-AppxPackage (an elevated admin), its winget.exe checked to be validly signed by
+# Microsoft before it is trusted.
 function Get-WingetPath {
-    $winget = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
-    if (-not (Test-Path $winget)) { throw 'winget is not installed (run the Winget step first).' }
-    $winget
+    if (-not (Test-Admin)) {
+        $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
+        if (Test-Path -LiteralPath $alias) { return $alias }
+        throw 'winget is not installed (run the Winget step first).'
+    }
+    $pkgRoot = Join-Path $env:ProgramFiles 'WindowsApps'
+    $dirs = @(Get-ChildItem -LiteralPath $pkgRoot -Directory -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    try { $dirs += @(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction SilentlyContinue | ForEach-Object { $_.InstallLocation }) } catch { }
+    $candidates = $dirs | Where-Object { $_ -and (Split-Path $_ -Leaf) -match '^Microsoft\.DesktopAppInstaller_[0-9.]+_x64__8wekyb3d8bbwe$' -and
+            [IO.Path]::GetFullPath($_).StartsWith($pkgRoot + '\', [StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -Unique | Sort-Object { try { [version]((Split-Path $_ -Leaf) -split '_')[1] } catch { [version]'0.0' } } -Descending
+    foreach ($dir in $candidates) {
+        $exe = Join-Path $dir 'winget.exe'
+        if (-not (Test-Path -LiteralPath $exe)) { continue }
+        $sig = Get-AuthenticodeSignature -LiteralPath $exe
+        if ($sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -like '*Microsoft Corporation*') { return $exe }
+        throw "winget.exe at $exe is not validly Microsoft-signed"
+    }
+    throw 'winget is not installed for all users (Program Files\WindowsApps): run the Winget step first'
 }
 
 # Uninstall entries (machine and user) whose DisplayName matches a regex.

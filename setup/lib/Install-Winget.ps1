@@ -17,26 +17,29 @@
     Tested 2026-09-26 on the N97 box, not elevated, with v1.29.380.
     The elevated (provisioning) path is not tested yet.
 
+    Elevated, the winget it runs to check the version is the App Installer package's own in
+    Program Files\WindowsApps, signature checked (Common.ps1's Get-WingetPath), never the alias in
+    the user's writable %LOCALAPPDATA%\Microsoft\WindowsApps; the downloads go to an admin-only
+    folder (New-AdminWorkDir), never %TEMP%.
+
 .PARAMETER Version
     Release tag such as v1.29.380, or 'latest'.
+.PARAMETER WorkDir
+    Where the downloads go (default: an admin-only folder when elevated, else %TEMP%\htpc-setup\winget).
 #>
 param(
     [string]$Version = 'latest',
-    [string]$WorkDir = (Join-Path $env:TEMP 'htpc-setup\winget')
+    [string]$WorkDir
 )
 
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+. "$PSScriptRoot\Common.ps1"       # Test-Admin, Get-WingetPath
+. "$PSScriptRoot\UpdateCore.ps1"   # New-AdminWorkDir
 
-$wingetExe = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
 $bundleName = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
 $depsName = 'DesktopAppInstaller_Dependencies.zip'
 
-function Test-Admin {
-    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
+# The winget.exe this context runs (Get-WingetPath), or $null while there is none.
+function Find-Winget { try { Get-WingetPath } catch { $null } }
 
 function Save-Asset([object]$Release, [string]$Pattern) {
     $asset = $Release.assets | Where-Object { $_.name -match $Pattern } | Select-Object -First 1
@@ -65,36 +68,45 @@ $api = if ($Version -eq 'latest') { 'releases/latest' } else { "releases/tags/$V
 $release = Invoke-RestMethod "https://api.github.com/repos/microsoft/winget-cli/$api" -Headers @{ 'User-Agent' = 'htpc-setup' }
 $tag = $release.tag_name
 
-if ((Test-Path $wingetExe) -and ((& $wingetExe --version) -eq $tag)) {
+$current = Find-Winget
+if ($current -and ((& $current --version) -eq $tag)) {
     Write-Host "winget $tag is already installed"
     return
 }
 
-New-Item -ItemType Directory -Force $WorkDir | Out-Null
-Write-Host "Downloading winget $tag"
-$bundle = Save-Asset $release ([regex]::Escape($bundleName) + '$')
-Assert-Sha256 $bundle (Save-Asset $release '^Microsoft\.DesktopAppInstaller_8wekyb3d8bbwe\.txt$')
-$depsZip = Save-Asset $release ([regex]::Escape($depsName) + '$')
-Assert-Sha256 $depsZip (Save-Asset $release '^DesktopAppInstaller_Dependencies\.txt$')
-$license = Save-Asset $release '_License1\.xml$'
+$ownWorkDir = -not $WorkDir -and (Test-Admin)
+if ($ownWorkDir) { $WorkDir = New-AdminWorkDir 'winget' }
+elseif (-not $WorkDir) { $WorkDir = Join-Path $env:TEMP 'htpc-setup\winget' }
+try {
+    New-Item -ItemType Directory -Force $WorkDir | Out-Null
+    Write-Host "Downloading winget $tag"
+    $bundle = Save-Asset $release ([regex]::Escape($bundleName) + '$')
+    Assert-Sha256 $bundle (Save-Asset $release '^Microsoft\.DesktopAppInstaller_8wekyb3d8bbwe\.txt$')
+    $depsZip = Save-Asset $release ([regex]::Escape($depsName) + '$')
+    Assert-Sha256 $depsZip (Save-Asset $release '^DesktopAppInstaller_Dependencies\.txt$')
+    $license = Save-Asset $release '_License1\.xml$'
 
-$depsDir = Join-Path $WorkDir 'deps'
-Expand-Archive $depsZip -DestinationPath $depsDir -Force
-$deps = Get-ChildItem $depsDir -Recurse -Include *.appx, *.msix | Where-Object { $_.FullName -match '\\x64\\' }
+    $depsDir = Join-Path $WorkDir 'deps'
+    Expand-Archive $depsZip -DestinationPath $depsDir -Force
+    $deps = Get-ChildItem $depsDir -Recurse -Include *.appx, *.msix | Where-Object { $_.FullName -match '\\x64\\' }
 
-if (Test-Admin) {
-    Write-Host 'Provisioning App Installer for all users'
-    Add-AppxProvisionedPackage -Online -PackagePath $bundle -DependencyPackagePath $deps.FullName -LicensePath $license | Out-Null
-}
+    if (Test-Admin) {
+        Write-Host 'Provisioning App Installer for all users'
+        Add-AppxProvisionedPackage -Online -PackagePath $bundle -DependencyPackagePath $deps.FullName -LicensePath $license | Out-Null
+    }
 
-$needed = @($deps | Where-Object { Test-DependencyNeeded $_ })
-Write-Host "Installing App Installer for $env:USERNAME (new dependencies: $(($needed | ForEach-Object Name) -join ', '))"
-if ($needed.Count) {
-    Add-AppxPackage -Path $bundle -DependencyPath $needed.FullName
-} else {
-    Add-AppxPackage -Path $bundle
+    $needed = @($deps | Where-Object { Test-DependencyNeeded $_ })
+    Write-Host "Installing App Installer for $env:USERNAME (new dependencies: $(($needed | ForEach-Object Name) -join ', '))"
+    if ($needed.Count) {
+        Add-AppxPackage -Path $bundle -DependencyPath $needed.FullName
+    } else {
+        Add-AppxPackage -Path $bundle
+    }
+} finally {
+    if ($ownWorkDir) { Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # The winget.exe alias can take a moment to appear after registration.
-for ($i = 0; $i -lt 10 -and -not (Test-Path $wingetExe); $i++) { Start-Sleep -Seconds 1 }
-Write-Host "winget $(& $wingetExe --version) ready"
+for ($i = 0; $i -lt 10 -and -not ($current = Find-Winget); $i++) { Start-Sleep -Seconds 1 }
+if (-not $current) { throw 'winget did not appear after App Installer was installed' }
+Write-Host "winget $(& $current --version) ready"
