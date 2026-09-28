@@ -46,6 +46,7 @@ param(
 )
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\UpdateCore.ps1"   # Set-DirSecurityNoReparse (set an ACL without following a link)
 Assert-Admin
 if ($DataRoot) { $HtpcData = $DataRoot }
 
@@ -81,6 +82,9 @@ function Test-Link([string]$Path) {
 function Set-AdminOwner([string]$Path, [switch]$Reset) {
     $owner = Get-OwnerSid $Path
     if ($TrustedOwners -contains $owner) { return }
+    # takeown follows a junction or link, taking over its target: the check comes first, not only
+    # after (a swap while takeown runs is caught by the second one).
+    if (Test-Link $Path) { throw "$Path is a link; refusing to take ownership through it" }
     & (Join-Path $env:SystemRoot 'System32\takeown.exe') /F $Path /A | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "could not make Administrators the owner of $Path (takeown exit code $LASTEXITCODE)" }
     if (Test-Link $Path) { throw "$Path became a link while it was being taken over" }
@@ -123,12 +127,14 @@ $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($SidA
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($SidUsers, 'ReadAndExecute', $Inherit, 'None', 'Allow')))
 $acl.SetOwner($SidAdmins)
 
+# Set through a handle (Set-DirSecurityNoReparse), never Set-Acl by path, which would follow the
+# root if it had been swapped for a link (Assert-RealFolder replaced any such link just above).
 $current = Get-Acl -LiteralPath $HtpcData
 if (-not $current.AreAccessRulesProtected) {
-    Set-Acl -LiteralPath $HtpcData -AclObject $acl
+    Set-DirSecurityNoReparse $HtpcData $acl
     Write-Change "locked $HtpcData (SYSTEM/Administrators full, Users read)"
 } else {
-    Set-Acl -LiteralPath $HtpcData -AclObject $acl
+    Set-DirSecurityNoReparse $HtpcData $acl
     Write-Same "$HtpcData already locked"
 }
 # Checked again now that the root is locked (Users can no longer create anything in it): state\,
@@ -182,7 +188,10 @@ foreach ($sub in @('user', 'tv')) {
     $hasWrite = $subAcl.Access | Where-Object { $_.IdentityReference -eq $SidUsers.Translate([Security.Principal.NTAccount]) -and $_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify -and -not $_.IsInherited }
     if (-not $hasWrite) {
         $subAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($SidUsers, 'Modify', $Inherit, 'None', 'Allow')))
-        Set-Acl -LiteralPath $path -AclObject $subAcl
+        # Through a handle, not Set-Acl by path: user\ and tv\ stay user-writable, so a link planted
+        # in their place must not send the grant to its target. The ACL is not protected, so their
+        # inherited SYSTEM/Administrators full and Users read stay.
+        Set-DirSecurityNoReparse $path $subAcl
         Write-Change "$path is user-writable"
     } else {
         Write-Same "$path already user-writable"

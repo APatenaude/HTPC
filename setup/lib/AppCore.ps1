@@ -129,9 +129,15 @@ function Get-ConsoleUser {
     }
     if (-not $sid) {
         # Windows may name nobody while the launcher is the shell (no Explorer): the owner of the
-        # running watchdog or launcher is the TV user.
+        # running watchdog or launcher is the TV user. Only the installed copy counts (a standard
+        # user could run their own process of the same name from anywhere and be taken for the TV
+        # user); its path must be the one in the admin-only Program Files\HTPC\Launcher.
+        $installDir = Join-Path $env:ProgramFiles 'HTPC\Launcher'
         foreach ($name in 'HtpcWatchdog.exe', 'HtpcLauncher.exe') {
-            $process = Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $expected = Join-Path $installDir $name
+            $process = Get-CimInstance Win32_Process -Filter "Name = '$name'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $expected, [StringComparison]::OrdinalIgnoreCase) } |
+                Select-Object -First 1
             if (-not $process) { continue }
             $result = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction SilentlyContinue
             if ($result -and $result.Sid) { $sid = $result.Sid; break }

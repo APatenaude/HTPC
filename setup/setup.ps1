@@ -53,7 +53,8 @@
     Close the window at the end without waiting for Enter.
 .PARAMETER Uninstall
     Undo what the steps can instead (lib\Uninstall-Htpc.ps1 lists what goes and what stays; the
-    apps stay). Its log and a copy of the box's logs go to Documents\HTPC logs.
+    apps stay). Its log and a copy of the box's logs are written to an admin-only place first, then
+    copied to Documents\HTPC logs as the user (not elevated), since Documents is the user's to write.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1
@@ -127,16 +128,22 @@ function Get-ArgumentLine {
     $line -join ' '
 }
 
-# True when files this process writes under AppData end up in a packaged app's private copy.
+# True when files this process writes under AppData end up in a packaged app's private copy. The
+# packaged parent (the Claude desktop app) can itself run elevated, so this must still probe when
+# elevated (elevation does not leave that container here); it cannot simply be skipped. The probe
+# file is created new (FileMode.CreateNew): a random name that already exists, or a link a user
+# planted at that name, makes the create fail rather than letting an elevated write follow it
+# somewhere. It is removed straight away.
 function Test-AppDataRedirected {
     $name = "htpc-probe-$([guid]::NewGuid().ToString('N')).tmp"
     $probe = Join-Path $env:LOCALAPPDATA $name
     try {
-        [IO.File]::WriteAllText($probe, 'probe')
+        $stream = [IO.File]::Open($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $bytes = [Text.Encoding]::ASCII.GetBytes('probe'); $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         $packages = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -ErrorAction SilentlyContinue
         [bool]($packages | Where-Object { Test-Path (Join-Path $_.FullName "LocalCache\Local\$name") } | Select-Object -First 1)
     } finally {
-        Remove-Item $probe -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -210,14 +217,20 @@ $Apps = Split-List $Apps
 $unknown = @($Only + $Skip) | Where-Object { $Steps.Keys -notcontains $_ }
 if ($unknown) { throw "Unknown step(s): $($unknown -join ', '). Steps: $($Steps.Keys -join ', ')" }
 
-# -Uninstall removes ProgramData\HTPC: its log goes to the user's Documents instead.
-$logDir = if ($Uninstall) { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HTPC logs' } else { Join-Path $HtpcData 'logs' }
+# -Uninstall removes ProgramData\HTPC, and Documents is the user's to write (an elevated write there
+# could be sent through a link they planted): its log and the kept copies go to an admin-only
+# staging folder first (New-UninstallWorkDir, lib\Uninstall-Htpc.ps1), then to Documents as the user
+# at the end (Publish-UninstallLogs). Other runs log in the locked ProgramData\HTPC\logs.
+$logDir = if ($Uninstall) { New-UninstallWorkDir } else { Join-Path $HtpcData 'logs' }
 New-Item -ItemType Directory -Force $logDir | Out-Null
 # Only the last 10 setup logs are kept (setup runs again for repairs, and the box runs for
-# years): the 9 newest stay, this run's makes 10. The names sort by time.
-Get-ChildItem -Path $logDir -Filter 'setup-*.log' -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^setup-\d{8}-\d{6}\.log$' } | Sort-Object Name -Descending |
-    Select-Object -Skip 9 | Remove-Item -Force -ErrorAction SilentlyContinue
+# years): the 9 newest stay, this run's makes 10. The names sort by time. The uninstall's staging
+# folder is new each run, so there is nothing to prune there.
+if (-not $Uninstall) {
+    Get-ChildItem -Path $logDir -Filter 'setup-*.log' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^setup-\d{8}-\d{6}\.log$' } | Sort-Object Name -Descending |
+        Select-Object -Skip 9 | Remove-Item -Force -ErrorAction SilentlyContinue
+}
 $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
 Write-Host "HTPC setup$(if ($Uninstall) { ' -Uninstall' }) on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
@@ -277,6 +290,19 @@ Write-Host "Log: $log"
 Save-Progress '' $true
 Stop-Transcript | Out-Null
 $setupMutex.ReleaseMutex()
+
+# -Uninstall wrote everything to an admin-only staging folder; hand it to the user (Documents\HTPC
+# logs) as the user, not elevated, then remove the staging folder. Done after Stop-Transcript so the
+# log is closed and complete.
+if ($Uninstall) {
+    $delivered = Publish-UninstallLogs $logDir
+    if ($delivered) {
+        Remove-Tree $logDir
+        Write-Host "Logs and a copy of setup are in: $delivered"
+    } else {
+        Write-Host "Logs are kept (administrators only) in: $logDir"
+    }
+}
 
 if (-not $Unattended -and -not $NoPause) { Read-Host 'Press Enter to close' | Out-Null }
 if (@($results.Values | Where-Object { $_ -ne 'OK' -and $_ -notlike 'skipped*' }).Count) { exit 1 }

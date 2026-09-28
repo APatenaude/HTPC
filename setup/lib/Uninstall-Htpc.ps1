@@ -65,6 +65,81 @@ function Remove-RegKey([string]$Path) {
     else { Write-Same "$Path absent" }
 }
 
+# Deletes a file or folder and everything in it without ever following a reparse point (junction or
+# symbolic link). Windows PowerShell 5.1's Remove-Item -Recurse enters a junction and deletes its
+# target; here a link met on the way (including inside the user-writable tv\ and user\) is removed
+# as a link, never opened through. Read-only items are cleared first (a copy from read-only media
+# keeps the flag). Best effort per item; the caller reports what is left.
+function Remove-Tree([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        # A link (directory or file): remove the link itself, never its target.
+        if ($item.PSIsContainer) { [IO.Directory]::Delete($Path) } else { [IO.File]::Delete($Path) }
+        return
+    }
+    if ($item.Attributes -band [IO.FileAttributes]::ReadOnly) { $item.Attributes = $item.Attributes -band -bnot [IO.FileAttributes]::ReadOnly }
+    if ($item.PSIsContainer) {
+        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)) { Remove-Tree $child.FullName }
+        [IO.Directory]::Delete($Path)
+    } else {
+        [IO.File]::Delete($Path)
+    }
+}
+
+# An admin-only folder the uninstall writes its log and kept copies to, before handing them to the
+# user (Publish-UninstallLogs). Outside the HTPC trees the Files step removes, and outside the
+# user's writable Documents where an elevated write could be sent through a planted link. Under
+# C:\Windows, which a standard user cannot write (so none of this can be their link); the folder is
+# made with its own DACL - SYSTEM and Administrators full, Users read (so the not-elevated hand-off
+# task can copy from it) - and removed once its contents have been handed over.
+function New-UninstallWorkDir {
+    $dir = Join-Path $env:SystemRoot ('HTPC-uninstall-{0}' -f [guid]::NewGuid().ToString('N').Substring(0, 12))
+    $security = New-Object Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'), 'FullControl', $inherit, 'None', 'Allow')))
+    $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'), 'FullControl', $inherit, 'None', 'Allow')))
+    $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'ReadAndExecute', $inherit, 'None', 'Allow')))
+    $security.SetOwner((New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'))
+    [void][IO.Directory]::CreateDirectory($dir, $security)
+    $dir
+}
+
+# Copies the admin-only staging folder's contents to the user's Documents\HTPC logs AS THE USER, not
+# elevated: the elevated uninstall never writes Documents (the user's to write, so a link they
+# planted could send an elevated write elsewhere). The same one-shot Limited task pattern as
+# Install-Launcher / Set-PhoneRemote. Returns the target folder when it was delivered, else $null
+# (the logs stay in the admin-only staging folder, which is then kept).
+function Publish-UninstallLogs([string]$Staging) {
+    $target = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HTPC logs'
+    $task = 'HTPC uninstall logs'
+    $t = $target -replace "'", "''"
+    $s = $Staging -replace "'", "''"
+    $command = "New-Item -ItemType Directory -Force '$t' | Out-Null; Copy-Item -LiteralPath '$s\*' -Destination '$t' -Recurse -Force"
+    $argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$command`""
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $action = New-ScheduledTaskAction -Execute $powershell -Argument $argument -WorkingDirectory $env:SystemRoot
+    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::FromMinutes(2)) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    try {
+        Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+        Start-ScheduledTask -TaskName $task
+        $deadline = (Get-Date).AddSeconds(90)
+        do {
+            Start-Sleep -Milliseconds 500
+            $state = (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).State
+        } while ("$state" -eq 'Running' -and (Get-Date) -lt $deadline)
+        if (Test-Path -LiteralPath $target) { return $target }
+        return $null
+    } catch {
+        Write-Attention "could not hand the logs to $env:USERNAME as the user ($($_.Exception.Message)); they are in $Staging"
+        return $null
+    } finally {
+        Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+    }
+}
+
 $UninstallSteps = [ordered]@{
     Apps = {
         $catalog = Join-Path $lib '..\catalog.json'
@@ -241,21 +316,26 @@ $UninstallSteps = [ordered]@{
                 Write-Change "$from copied to $keep"
             }
         }
-        # This setup too, beside the logs: ProgramData\HTPC\setup goes below, and a second run
-        # (after a restart, for what was in use) starts from this copy.
+        # This setup too, beside the logs (in the admin-only staging folder; Publish-UninstallLogs
+        # hands it to the user afterwards): a second run (after a restart, for what was in use)
+        # starts from the copy in Documents\HTPC logs.
         $setupFrom = [IO.Path]::GetFullPath((Split-Path $lib -Parent)).TrimEnd('\')
         $setupCopy = [IO.Path]::GetFullPath((Join-Path $logDir 'setup')).TrimEnd('\')
+        $userSetup = Join-Path (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HTPC logs') 'setup'
         if ($setupFrom -ieq $setupCopy) { Write-Same "setup runs from $setupCopy" }
         else {
-            if (Test-Path -LiteralPath $setupCopy) { Remove-Item -LiteralPath $setupCopy -Recurse -Force }
+            if (Test-Path -LiteralPath $setupCopy) { Remove-Tree $setupCopy }   # never through a link
             Copy-Item -LiteralPath $setupFrom -Destination $setupCopy -Recurse -Force
-            Write-Change "setup copied to $setupCopy (to run this again: $setupCopy\setup.ps1 -Uninstall)"
+            Write-Change "setup copied for the user (to run this again: `"$userSetup\setup.ps1`" -Uninstall)"
         }
+        # Reparse-safe delete: ProgramData\HTPC holds the user-writable tv\ and user\, where a
+        # junction could otherwise send an elevated recursive delete to its target (Remove-Tree
+        # never follows one).
         foreach ($dir in $HtpcProgramFiles, $HtpcData) {
             if (-not (Test-Path -LiteralPath $dir)) { Write-Same "$dir absent"; continue }
-            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            try { Remove-Tree $dir } catch { }
             # Once more after a moment: a file an ended program held a little longer.
-            if (Test-Path -LiteralPath $dir) { Start-Sleep -Seconds 3; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $dir) { Start-Sleep -Seconds 3; try { Remove-Tree $dir } catch { } }
             if (Test-Path -LiteralPath $dir) { Write-Attention "$dir partly left (files in use): delete it after the restart" }
             else { Write-Change "removed $dir" }
         }

@@ -356,7 +356,11 @@ function Sync-JobBootstrap($Paths) {
             [void][Management.Automation.Language.Parser]::ParseFile($next, [ref]$tokens, [ref]$errors)
             if ($errors) { throw "lib\Start-Job.ps1 does not parse: $($errors[0].Message)" }
             $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-            $out = & { $ErrorActionPreference = 'Continue'; & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $next -Resolve -DataRoot $Paths.DataRoot 2>&1 | Out-String }
+            # As SYSTEM this is a legitimate -Resolve; Start-Job.ps1 refuses -Resolve/-DataRoot from
+            # the task ($(Arg0) injection) but allows this internal call, marked by HTPC_JOB_RESOLVE.
+            $env:HTPC_JOB_RESOLVE = '1'
+            try { $out = & { $ErrorActionPreference = 'Continue'; & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $next -Resolve -DataRoot $Paths.DataRoot 2>&1 | Out-String } }
+            finally { Remove-Item Env:\HTPC_JOB_RESOLVE -ErrorAction SilentlyContinue }
             if ($LASTEXITCODE -ne 0) { throw "lib\Start-Job.ps1 finds no runner: $($out.Trim())" }
             Sync-FileTree $next
             Move-WriteThrough $next $Paths.Bootstrap -Replace

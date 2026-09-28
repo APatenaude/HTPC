@@ -344,6 +344,56 @@ function Get-UntrustedReason([string]$Path) {
     $null
 }
 
+# Sets a directory's security through a handle opened with FILE_FLAG_OPEN_REPARSE_POINT, so it can
+# never act on a junction or symbolic link's target (Set-Acl and icacls, given a path, follow one:
+# the security would land on wherever the link points - Program Files\HTPC, state\...). The handle
+# is checked to be a real directory and not a reparse point before anything is written. The DACL is
+# marked protected only when the given security is (Set-AccessRuleProtection): a folder that keeps
+# its inherited rules (user\, tv\) is left unprotected.
+function Set-DirSecurityNoReparse {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][Security.AccessControl.DirectorySecurity]$Security
+    )
+    if (-not ('HtpcUpdate.DirSec' -as [type])) {
+        Add-Type -Namespace HtpcUpdate -Name DirSec -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string path, uint access, uint share, System.IntPtr sec, uint disposition, uint flags, System.IntPtr template);
+
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION info);
+
+[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+public static extern bool SetKernelObjectSecurity(Microsoft.Win32.SafeHandles.SafeFileHandle handle, uint securityInformation, byte[] descriptor);
+
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct BY_HANDLE_FILE_INFORMATION {
+    public uint FileAttributes;
+    public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime, LastAccessTime, LastWriteTime;
+    public uint VolumeSerialNumber, FileSizeHigh, FileSizeLow, NumberOfLinks, FileIndexHigh, FileIndexLow;
+}
+'@
+    }
+    # WRITE_DAC | WRITE_OWNER | READ_CONTROL; share read/write/delete; OPEN_EXISTING;
+    # FILE_FLAG_BACKUP_SEMANTICS (open a directory) | FILE_FLAG_OPEN_REPARSE_POINT (the link, not its target).
+    $access = [uint32](0x40000 -bor 0x80000 -bor 0x20000)
+    $flags = [uint32](0x02000000 -bor 0x00200000)
+    $handle = [HtpcUpdate.DirSec]::CreateFileW($Path, $access, [uint32]7, [IntPtr]::Zero, [uint32]3, $flags, [IntPtr]::Zero)
+    if ($handle.IsInvalid) { throw "could not open $Path to set its security: $((New-Object ComponentModel.Win32Exception ([Runtime.InteropServices.Marshal]::GetLastWin32Error())).Message)" }
+    try {
+        $info = New-Object HtpcUpdate.DirSec+BY_HANDLE_FILE_INFORMATION
+        if (-not [HtpcUpdate.DirSec]::GetFileInformationByHandle($handle, [ref]$info)) { throw "could not read the attributes of $Path" }
+        if (-not ($info.FileAttributes -band 0x10)) { throw "$Path is not a directory" }        # FILE_ATTRIBUTE_DIRECTORY
+        if ($info.FileAttributes -band 0x400) { throw "$Path is a reparse point (junction or link)" }   # FILE_ATTRIBUTE_REPARSE_POINT
+        # OWNER (0x1) | DACL (0x4), and PROTECTED_DACL (0x80000000) only for a protected ACL. The
+        # 'L' keeps 0x80000005 from wrapping to a negative Int32 before the cast (Windows PowerShell 5.1).
+        $si = if ($Security.AreAccessRulesProtected) { [uint32]0x80000005L } else { [uint32]0x00000005 }
+        if (-not [HtpcUpdate.DirSec]::SetKernelObjectSecurity($handle, $si, $Security.GetSecurityDescriptorBinaryForm())) {
+            throw "could not set the security of $($Path): $((New-Object ComponentModel.Win32Exception ([Runtime.InteropServices.Marshal]::GetLastWin32Error())).Message)"
+        }
+    } finally { $handle.Dispose() }
+}
+
 # Every existing part of $Path from $Root down must be trusted (Get-UntrustedReason). $Root
 # itself is checked too: a folder under an untrusted parent could be swapped out underneath.
 function Assert-TrustedPath([string]$Path, [string]$Root) {
