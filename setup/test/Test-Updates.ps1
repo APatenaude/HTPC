@@ -18,7 +18,9 @@
                 the new one, never half of each, and the launcher running is the one on disk
       Planting  a junction for the staging folder, a user-owned .new file, a Users write entry
                 on state\: all refused (run it as SYSTEM in the VM too: -Only Planting); a
-                ProgramData\HTPC the user owns: Administrators' after the lock, and trusted
+                ProgramData\HTPC the user owns: Administrators' after the lock, and trusted; the
+                app jobs' runner: nothing written in a state\ Users can change or that is a
+                junction, an admin-only work folder and atomic progress in a good one
       Wua       the Windows Update child faked: a hang is ended in time, the count leaves out
                 Defender's definitions and the removal tool, installs report "n of m", a stuck
                 service answers "busy" without starting anything
@@ -437,6 +439,47 @@ try {
         Check ((Get-Acl -LiteralPath "$data\logs").Access | Where-Object { $_.IdentityReference -eq (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545').Translate([Security.Principal.NTAccount]) -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) -eq [Security.AccessControl.FileSystemRights]::Modify }) '  logs\ still user-writable'
         $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
         Check ($out -notmatch 'now by Administrators|renamed aside|threw') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
+
+        # The app jobs' runner as SYSTEM (Job-Common.ps1, in its own PowerShell, SYSTEM faked):
+        # state\ checked before anything is written there, the progress written atomically.
+        $appJob = {
+            param([string]$Data)
+            $script = Join-Path $work "appjob-$PID.ps1"
+            @"
+. '$lib\Common.ps1'; . '$lib\AppCore.ps1'; . '$lib\UpdateCore.ps1'; . '$lib\Job-Common.ps1'
+`$script:IsSystem = `$true
+`$script:HtpcData = '$Data'
+`$script:ProgressPath = Join-Path '$Data' 'state\library-progress.json'
+Set-JobContext 'install:vlc' 'install'
+try { Assert-JobState; `$temp = New-AdminTemp; Write-JobProgress 'start' 0 'Starting install'; "RESULT ok `$temp" }
+catch { Write-JobProgress 'failed' 0 `$_.Exception.Message; "RESULT refused: `$(`$_.Exception.Message)" }
+"@ | Set-Content -LiteralPath $script -Encoding ASCII
+            $o = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script 2>&1 | Out-String
+            $l = $o -split "`r?`n" | Where-Object { $_ -like 'RESULT *' } | Select-Object -Last 1
+            if ($l) { $l.Substring(7) } else { "ended: $o" }
+        }
+        $data = Join-Path $work 'appjob-open\HTPC'
+        New-AdminFolder $data
+        New-Item -ItemType Directory -Force "$data\state" | Out-Null
+        & icacls "$data\state" /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+        $r = & $appJob $data
+        Check ($r -like 'refused*' -and -not (Test-Path "$data\state\library-progress.json") -and -not (Test-Path "$data\state\work")) "app job, state\ that Users can change: refused, nothing written there, not even 'failed' ($r)"
+        $data = Join-Path $work 'appjob-link\HTPC'
+        New-AdminFolder $data
+        $elsewhere = Join-Path $work 'appjob-elsewhere'
+        New-Item -ItemType Directory -Force $elsewhere | Out-Null
+        cmd /c mklink /J "$data\state" "$elsewhere" | Out-Null
+        $r = & $appJob $data
+        Check ($r -like 'refused*' -and @(Get-ChildItem $elsewhere).Count -eq 0) "app job, state\ a junction: refused, nothing written through it ($r)"
+        cmd /c rmdir "$data\state" | Out-Null
+        $data = Join-Path $work 'appjob-good\HTPC'
+        New-AdminFolder $data
+        $r = & $appJob $data
+        $progress = try { [IO.File]::ReadAllText("$data\state\library-progress.json") | ConvertFrom-Json } catch { $null }
+        $temp = if ($r -match '^ok (.+)$') { $Matches[1].Trim() } else { $null }
+        Check ($r -like 'ok *' -and $progress.phase -eq 'start' -and $progress.jobId -eq 'install:vlc') "app job, a trusted state\: made its work folder and wrote its progress ($r)"
+        Check ($temp -and (Test-Path -LiteralPath $temp) -and $null -eq (Get-UntrustedReason $temp) -and (Get-Acl -LiteralPath $temp).AreAccessRulesProtected) '  the work folder: admin-only, made so as it was created'
+        Check (@(Get-ChildItem "$data\state" -Filter '*.tmp*').Count -eq 0) '  no temp file left beside the progress'
     }
 
     if (Section 'Wua') {
