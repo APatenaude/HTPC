@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-/// <summary>A text field that has the keyboard focus in some app.</summary>
-sealed record TextField(int ProcessId, string Name, bool IsPassword, Rectangle Bounds);
+/// <summary>A text field that has the keyboard focus in some app. (Where it is does not matter: the keyboard is always at the bottom.)</summary>
+sealed record TextField(int ProcessId, string Name, bool IsPassword);
 
 /// <summary>
 /// Tells when a text field gets the keyboard focus in any app, through UI Automation's focus
@@ -127,7 +127,7 @@ sealed class TextFieldWatcher : IDisposable
     static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
     // UI Automation property ids (UIAutomationClient.h).
-    const int BoundingRectangle = 30001, ProcessId = 30002, ControlType = 30003, Name = 30005,
+    const int ProcessId = 30002, ControlType = 30003, Name = 30005,
         IsKeyboardFocusable = 30009, IsEnabled = 30010, IsPassword = 30019, ValueIsReadOnly = 30046,
         IsValuePatternAvailable = 30043;
     const int EditControl = 50004, ComboBoxControl = 50003, DocumentControl = 50030;
@@ -146,13 +146,10 @@ sealed class TextFieldWatcher : IDisposable
         var editable = type == EditControl
             || (type is ComboBoxControl or DocumentControl && Get(IsValuePatternAvailable) is true);
         var field = editable && Get(IsEnabled) is true && Get(IsKeyboardFocusable) is true && Get(ValueIsReadOnly) is not true
-            ? new TextField(pid, (Get(Name) as string ?? "").Trim(), Get(IsPassword) is true, ToRectangle(Get(BoundingRectangle)))
+            ? new TextField(pid, (Get(Name) as string ?? "").Trim(), Get(IsPassword) is true)
             : null;
         FocusChanged?.Invoke(field, pid);
     }
-
-    static Rectangle ToRectangle(object? value) =>
-        value is double[] { Length: 4 } r ? new Rectangle((int)r[0], (int)r[1], (int)r[2], (int)r[3]) : Rectangle.Empty;
 
     [ComVisible(true)]
     sealed class Handler : IUIAutomationFocusChangedEventHandler

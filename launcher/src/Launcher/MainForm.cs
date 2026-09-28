@@ -477,7 +477,7 @@ sealed partial class MainForm : Form
         keyboardField = field;
         keyboardAuto = auto;
         mapper.Map = null; // at once: the controller now drives the keyboard
-        keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false, field?.Bounds ?? Rectangle.Empty);
+        keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false);
         // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
         var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"";
         Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")}{label}")})");
@@ -486,8 +486,10 @@ sealed partial class MainForm : Form
     void CloseKeyboard(string reason)
     {
         closeSoon.Stop();
+        var ours = keyboard.Visible && keyboardField?.ProcessId == Environment.ProcessId;
         keyboard.Dismiss(reason);
         keyboardAuto = false;
+        if (ours) Post(new { type = "text.keyboardAt", top = (double?)null }); // the page puts its field back (textinput.js)
     }
 
     void OnKeyboardMessage(JsonElement m)

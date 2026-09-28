@@ -265,7 +265,7 @@ sealed partial class MainForm
         }
     }
 
-    /// <summary>text.keyboard {field, password, rect}: a field of the page wants the keyboard; text.done: that field closed.</summary>
+    /// <summary>text.keyboard {field, password}: a field of the page wants the keyboard; text.done: that field closed.</summary>
     [UiMessages("text.")]
     void OnTextMessage(string type, JsonElement m)
     {
@@ -280,17 +280,15 @@ sealed partial class MainForm
 
     /// <summary>
     /// A text field in the launcher's page (the Wi-Fi password) wants the on-screen keyboard:
-    /// field label, password or not, and its rectangle in physical pixels inside the page, so
-    /// the keyboard opens clear of it.
+    /// field label, password or not. The keyboard opens at the bottom, as everywhere; the page is
+    /// told where it starts, and lifts the field above it if it would be covered (textinput.js).
     /// </summary>
     void OpenKeyboardForPage(JsonElement m)
     {
         if (!LauncherActive) return;
-        var r = m.GetProperty("rect");
-        var topLeft = web.PointToScreen(new Point((int)r.GetProperty("x").GetDouble(), (int)r.GetProperty("y").GetDouble()));
-        var bounds = new Rectangle(topLeft, new Size((int)r.GetProperty("w").GetDouble(), (int)r.GetProperty("h").GetDouble()));
-        var field = new TextField(Environment.ProcessId, m.GetProperty("field").GetString() ?? "", m.GetProperty("password").GetBoolean(), bounds);
+        var field = new TextField(Environment.ProcessId, m.GetProperty("field").GetString() ?? "", m.GetProperty("password").GetBoolean());
         OpenKeyboard(field, auto: false);
+        Post(new { type = "text.keyboardAt", top = KeyboardForm.TopShare });
     }
 
     /// <summary>

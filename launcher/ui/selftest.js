@@ -79,7 +79,26 @@
   sent.length = 0;
   press('r3');
   const kb = lastSent('text.keyboard');
-  check('R3 on a field asks for the keyboard, password, with its rectangle', kb && kb.password === true && kb.rect && kb.rect.w > 0 && kb.field === 'Password for [Network]', JSON.stringify(kb));
+  check('R3 on a field asks for the keyboard, password', kb && kb.password === true && kb.field === 'Password for [Network]', JSON.stringify(kb));
+
+  // The keyboard opens across the bottom, always (from 0.48 of the height down): a field it
+  // would cover goes up above it with its screen, and back down once it closes.
+  textKeyboardAt(0.48);
+  check('keyboard at the bottom: a field high on the screen stays where it is', !document.querySelector('[data-kb-lift]'));
+  const low = document.createElement('div');
+  low.style.cssText = 'position: absolute; left: 100px; top: 900px; width: 600px; height: 60px';
+  low.innerHTML = '<input type="text" aria-label="Low field" style="width: 500px; height: 50px">';
+  $('stage').appendChild(low);
+  low.firstChild.focus();
+  const lowBottom = low.firstChild.getBoundingClientRect().bottom;
+  textKeyboardAt(0.48);
+  const lift = /translateY\(-(\d+)px\)/.exec(low.style.transform);
+  const s = $('stage').getBoundingClientRect().height / 1080;
+  check('keyboard at the bottom: a low field goes up above it, with its screen', low.dataset.kbLift === '' && lift && lowBottom - lift[1] * s <= innerHeight * 0.48 - 23 * s,
+    `${low.style.transform} ${lowBottom} ${innerHeight}`);
+  textKeyboardAt(null);
+  check('keyboard closed: the low field comes back down', low.dataset.kbLift === undefined && low.style.transform === '');
+  low.remove();
   field.blur();
   field.remove();
 
