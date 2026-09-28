@@ -319,7 +319,7 @@ settingsSection('about', {
     return '<header><h1>About &amp; Desktop mode</h1></header>' +
       `<div class="scard wide">${icon('desktop', 64, 1.5)}` +
         '<div class="text"><span class="scard-title big">Desktop mode</span>' +
-        '<span class="scard-text">Opens the normal Windows desktop for maintenance. Sign out or restart to come back to the TV.</span></div>' +
+        '<span class="scard-text">Opens the normal Windows desktop for maintenance. To come back, press Home, then Back to TV.</span></div>' +
         '<div class="sbutton" data-nav data-id="about-desktop" data-act="power-action" data-arg="desktop">Open Desktop mode</div></div>' +
       '<div class="facts">' +
         fact('Box name', s.boxName) + fact('Launcher', s.launcher) +

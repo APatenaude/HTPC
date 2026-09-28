@@ -76,9 +76,16 @@ function Invoke-Edge([string[]]$arguments, [string]$stdout, [scriptblock]$done, 
 $failed = 0
 if ($SelfTest) {
     $out = Join-Path $env:TEMP 'htpc-ui-selftest.html'
-    Remove-Item $out -ErrorAction SilentlyContinue
-    Invoke-Edge @('--dump-dom', "$url#selftest") $out { (Read-Shared $out) -match '</html>' }
-    $dom = Read-Shared $out
+    # Headless Edge now and then hands back the page before the self-test has run (a busy box,
+    # a slow first start): one more try before that counts as a failure.
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        Remove-Item $out -ErrorAction SilentlyContinue
+        try { Invoke-Edge @('--dump-dom', "$url#selftest") $out { (Read-Shared $out) -match '</html>' } }
+        catch { if ($attempt -eq 2) { throw }; Write-Warning "$($_.Exception.Message); trying again"; continue }
+        $dom = Read-Shared $out
+        if ($dom -match '<pre id="selftest-results">') { break }
+        if ($attempt -eq 1) { Write-Warning 'No self-test results in the page; trying again' }
+    }
     if ($dom -match '(?s)<pre id="selftest-results">(.*?)</pre>') {
         [Net.WebUtility]::HtmlDecode($Matches[1])
         if ($dom -match '<title>SELFTEST FAIL') { $failed = 1 }
@@ -87,9 +94,14 @@ if ($SelfTest) {
         $failed = 1
     }
     $out = Join-Path $env:TEMP 'htpc-ui-audit.html'
-    Remove-Item $out -ErrorAction SilentlyContinue
-    Invoke-Edge @('--dump-dom', "$url#audit") $out { (Read-Shared $out) -match '</html>' } -RealTime
-    $dom = Read-Shared $out
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        Remove-Item $out -ErrorAction SilentlyContinue
+        try { Invoke-Edge @('--dump-dom', "$url#audit") $out { (Read-Shared $out) -match '</html>' } -RealTime }
+        catch { if ($attempt -eq 2) { throw }; Write-Warning "$($_.Exception.Message); trying again"; continue }
+        $dom = Read-Shared $out
+        if ($dom -match '<pre id="audit-results">') { break }
+        if ($attempt -eq 1) { Write-Warning 'No audit results in the page; trying again' }
+    }
     if ($dom -match '(?s)<pre id="audit-results">(.*?)</pre>') {
         ''
         'UI audit in real time (index.html#audit):'
