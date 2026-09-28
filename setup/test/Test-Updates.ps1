@@ -259,18 +259,18 @@ function New-AdminFolder([string]$Path) {
 }
 
 # The setup folder a release carries (as Build-Release makes it: no dev, test or USB-media
-# files), picked from the repository once; copied whole from there (a file at a time costs half a
-# second each box).
+# files, nor the decoding test's clips), picked from the repository once; copied whole from there
+# (a file at a time costs half a second each box).
 function Get-SetupTemplate {
     $template = Join-Path $bin 'setup'
     if (-not (Test-Path -LiteralPath $template)) {
         $setup = Join-Path $repo 'setup'
-        foreach ($f in Get-ChildItem $setup -Recurse -File) {
-            $rel = $f.FullName.Substring($setup.Length + 1)
-            if ($rel -match '^(dev|test|autounattend)\\') { continue }
+        foreach ($f in [IO.Directory]::EnumerateFiles($setup, '*', 'AllDirectories')) {
+            $rel = $f.Substring($setup.Length + 1)
+            if ($rel -match '^(dev|test|autounattend|tools\\hwdecode-clips)\\') { continue }
             $dest = Join-Path $template $rel
             New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
-            Copy-Item -LiteralPath $f.FullName $dest
+            Copy-Item -LiteralPath $f $dest
         }
     }
     $template
@@ -382,9 +382,11 @@ function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switc
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::Open((Join-Path $dir 'setup.zip'), 'Create')
     try {
-        foreach ($f in Get-ChildItem -LiteralPath $template -Recurse -File) {
-            $rel = $f.FullName.Substring($template.Length + 1)
-            if (-not $own.ContainsKey($rel)) { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $rel.Replace('\', '/'), 'Fastest') }
+        # .NET's listing keeps the path as given: Get-ChildItem gives the long form of a short (8.3)
+        # %TEMP% like the runner's C:\Users\RUNNER~1, and the names cut from it were off.
+        foreach ($f in [IO.Directory]::EnumerateFiles($template, '*', 'AllDirectories')) {
+            $rel = $f.Substring($template.Length + 1)
+            if (-not $own.ContainsKey($rel)) { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f, $rel.Replace('\', '/'), 'Fastest') }
         }
         foreach ($rel in $own.Keys) {
             $writer = New-Object IO.StreamWriter(($zip.CreateEntry($rel.Replace('\', '/'), 'Fastest')).Open(), (New-Object Text.UTF8Encoding $false))
