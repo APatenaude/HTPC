@@ -44,8 +44,10 @@ jobs:
           global-json-file: global.json
 
       # Nothing is published unless every check passes: the launcher's console tests, the TV
-      # bench and the update jobs against fakes (Test-Updates.ps1 needs an administrator: the
-      # runner is one). Each exits 0 only when all its checks passed.
+      # bench and setup's tests against fakes (the update jobs, the autostart guard, the driver
+      # picks, the privilege checks; Test-Updates and Test-Rights need an administrator: the
+      # runner is one). Test-Library installs real apps: test VM only. Each exits 0 only when
+      # all its checks passed.
       - name: Tests
         shell: powershell
         env:
@@ -58,9 +60,11 @@ jobs:
             dotnet run -c Release --project $project
             if ($LASTEXITCODE -ne 0) { $failed += (Split-Path $project -Leaf) }
           }
-          Write-Host '== setup\test\Test-Updates.ps1'
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File setup\test\Test-Updates.ps1
-          if ($LASTEXITCODE -ne 0) { $failed += 'Test-Updates' }
+          foreach ($test in 'Test-Updates', 'Test-Autostart', 'Test-Drivers', 'Test-Rights') {
+            Write-Host "== setup\test\$test.ps1"
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "setup\test\$test.ps1"
+            if ($LASTEXITCODE -ne 0) { $failed += $test }
+          }
           if ($failed) { throw "Failed: $($failed -join ', ')" }
 
       - name: Build

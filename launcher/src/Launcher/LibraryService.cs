@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Htpc.Launcher;
 
@@ -265,8 +266,18 @@ sealed class LibraryService
 
     (bool, string) RunThroughTask(string token, CatalogApp app, bool waitForProgress) => RunThroughTask(token, NameOf(app), waitForProgress);
 
+    // The runner's own grammar (setup\lib\Invoke-AppJob.ps1): a verb, then an optional argument
+    // of letters, digits and ._- only. Checked here too, so no token that could carry a quote or
+    // a parameter ever reaches the task's $(Arg0); the runner refuses such a token regardless.
+    internal static readonly Regex TokenShape = new(@"\A[a-z][a-z-]{1,29}(?::[A-Za-z0-9][A-Za-z0-9._-]{0,60})?\z", RegexOptions.CultureInvariant);
+
     (bool, string) RunThroughTask(string token, JobName app, bool waitForProgress)
     {
+        if (!TokenShape.IsMatch(token))
+        {
+            Log.Warn($"Library: refused a job token that the runner would refuse ({token.Length} characters)");
+            return (false, $"{app.Name}: not a valid job");
+        }
         object? task = null;
         try { task = GetTask(); }
         catch (Exception e) { Log.Error("Library: the install task is missing", e); }
