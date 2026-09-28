@@ -33,7 +33,9 @@ sealed class SetupRunner
 
     /// <summary>
     /// The setup folder shipped with this exe (setup\ next to it), else the one setup keeps in
-    /// C:\ProgramData\HTPC\setup (the installed launcher running setup again from About).
+    /// C:\ProgramData\HTPC\setup (admin-write). Next to it means where .NET unpacked it: for the
+    /// elevated setup that is Program Files\HTPC\Setup\bundle, never a folder the user can write
+    /// (SetupElevation.RunsFromTrustedPlace).
     /// </summary>
     public static string? FindSetupDir()
     {
@@ -65,6 +67,8 @@ sealed class SetupRunner
     /// </summary>
     public static ProcessStartInfo StartInfo(string script, IReadOnlyCollection<string> apps, string? launcherExe)
     {
+        // Catalog ids only (lower-case letters, digits, hyphens): nothing else reaches this command line.
+        apps = apps.Where(id => System.Text.RegularExpressions.Regex.IsMatch(id, @"\A[a-z0-9][a-z0-9-]{0,39}\z")).ToList();
         var args = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\" -NoPause";
         args += apps.Count > 0 ? $" -Apps {string.Join(',', apps)}" : " -Skip Apps";
         if (launcherExe is not null) args += $" -LauncherExe \"{launcherExe}\"";

@@ -236,6 +236,12 @@ sealed partial class MainForm : Form
         using var doc = JsonDocument.Parse(e.WebMessageAsJson);
         var m = doc.RootElement;
         string? Str(string name) => m.TryGetProperty(name, out var v) ? v.ToString() : null;
+        // Setup mode is elevated: only setup's own messages, never "launch", power, settings...
+        if (setupMode && !SetupElevation.IsSetupMessage(Str("type")))
+        {
+            Log.Warn($"Setup: UI message {Str("type")} refused (not one of setup's)");
+            return;
+        }
         switch (Str("type"))
         {
             case "ready" when setupMode:

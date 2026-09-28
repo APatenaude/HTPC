@@ -5,7 +5,9 @@ using System.Security.Principal;
 namespace Htpc.Launcher;
 
 // Checks for TV Box Setup asking for administrator rights once, as it opens (SetupElevation.cs):
-// setup mode or not, elevated or not, the elevated copy's and the home screen's arguments, the
+// setup mode or not, elevated or not, in its trusted place (Program Files\HTPC\Setup) or not, the
+// messages setup mode takes, the command processor's line that puts it there, the elevated
+// copy's and the home screen's arguments, the
 // command line Windows splits back, who takes over after setup, the single-instance mutex's
 // security, how setup.ps1 starts, the not-elevated task, the WebView2 profiles and the "needs
 // administrator rights" screen. Nothing here asks Windows for rights, starts a program,
@@ -38,24 +40,61 @@ static class ElevationTests
         Check(!SetupElevation.IsSetupMode(["--setup", "--home"], @"C:\x\HtpcLauncher.exe"), "--home wins over --setup");
         Check(!SetupElevation.IsSetupMode(none, null), "no exe path and no --setup: not setup");
 
-        const SetupElevation.Step Runs = SetupElevation.Step.Run, Asks = SetupElevation.Step.Elevate, Screen = SetupElevation.Step.NeedsAdmin;
-        Check(SetupElevation.Decide(false, false, none) == Runs, "the launcher at standard rights: runs");
-        Check(SetupElevation.Decide(false, true, none) == Runs, "the launcher elevated (a dev shell): runs, asks nothing");
-        Check(SetupElevation.Decide(false, false, ["--elevated", "--home"]) == Runs, "the home screen after setup: runs, whatever flags it carries");
-        Check(SetupElevation.Decide(true, true, none) == Runs, "setup started as administrator: runs, no prompt");
-        Check(SetupElevation.Decide(true, true, ["--elevated"]) == Runs, "the elevated copy: runs, no second prompt");
-        Check(SetupElevation.Decide(true, false, none) == Asks, "setup at standard rights: asks for the rights");
-        Check(SetupElevation.Decide(true, false, ["--setup"]) == Asks, "setup from About (--setup): asks too");
-        Check(SetupElevation.Decide(true, false, ["--setup", "--elevated"]) == Screen,
+        const SetupElevation.Step Runs = SetupElevation.Step.Run, Asks = SetupElevation.Step.Elevate, Screen = SetupElevation.Step.NeedsAdmin,
+            Moves = SetupElevation.Step.Relocate, Stops = SetupElevation.Step.Unsafe;
+        Check(SetupElevation.Decide(false, false, false, none) == Runs, "the launcher at standard rights: runs");
+        Check(SetupElevation.Decide(false, true, false, none) == Runs, "the launcher elevated (a dev shell): runs, asks nothing, moves nowhere");
+        Check(SetupElevation.Decide(false, false, false, ["--elevated", "--home"]) == Runs, "the home screen after setup: runs, whatever flags it carries");
+        Check(SetupElevation.Decide(true, true, true, none) == Runs, "setup elevated in a trusted place (a build): runs, no prompt");
+        Check(SetupElevation.Decide(true, true, true, ["--elevated"]) == Runs, "the elevated copy in Program Files: runs, no second prompt");
+        Check(SetupElevation.Decide(true, false, false, none) == Asks, "setup at standard rights: asks for the rights");
+        Check(SetupElevation.Decide(true, false, true, ["--setup"]) == Asks, "setup from About (--setup): asks too");
+        Check(SetupElevation.Decide(true, false, true, ["--setup", "--elevated"]) == Screen,
             "the copy from asking, still not elevated: the screen, never another prompt (no loop)");
+        Check(SetupElevation.Decide(true, true, false, none) == Moves, "setup elevated where the user can write (Run as administrator): moves to Program Files, no prompt");
+        Check(SetupElevation.Decide(true, true, false, ["--setup", "--elevated"]) == Stops, "the copy started to move, still not there: stops (no loop)");
+
+        // Trusted: a build (unpacked nowhere), or the copy in Program Files\HTPC\Setup unpacked in its bundle\.
+        const string pf = @"C:\Program Files\HTPC\Setup";
+        Check(SetupElevation.RunsFromTrustedPlace(@"C:\dev\bin\HtpcLauncher.exe", @"C:\dev\bin\", pf), "a build: runs from its own folder");
+        Check(SetupElevation.RunsFromTrustedPlace(pf + @"\TV Box Setup.exe", pf + @"\bundle\TV Box Setup\abc123\", pf), "the copy in Program Files, unpacked in its bundle: trusted");
+        Check(!SetupElevation.RunsFromTrustedPlace(@"C:\Users\u\Downloads\TV-Box-Setup.exe", @"C:\Users\u\AppData\Local\HTPC\bundle\TV-Box-Setup\abc123\", pf), "the download, unpacked in %LOCALAPPDATA%: not trusted");
+        Check(!SetupElevation.RunsFromTrustedPlace(@"C:\Program Files\HTPC\Launcher\HtpcLauncher.exe", @"C:\Users\u\AppData\Local\Temp\.net\HtpcLauncher\abc\", pf), "the installed launcher, unpacked in %TEMP%: not trusted");
+        Check(!SetupElevation.RunsFromTrustedPlace(pf + @"\TV Box Setup.exe", @"C:\Users\u\AppData\Local\HTPC\bundle\TV Box Setup\abc\", pf), "the Program Files copy unpacked elsewhere: not trusted");
+        Check(!SetupElevation.RunsFromTrustedPlace(pf + @"\TV Box Setup.exe", pf + @"\bundle-evil\x\", pf), "... nor next to bundle\\");
+        Check(!SetupElevation.RunsFromTrustedPlace(null, @"C:\x\", pf), "no exe path: not trusted");
+        Check(SetupElevation.TrustedDir == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup"), "the trusted place: Program Files\\HTPC\\Setup");
+
+        // In setup mode (elevated) the page may send only setup's messages.
+        foreach (var t in new[] { "ready", "install", "finish", "restart", "tv.choose", "tv.refresh", "wifi.join", "text.keyboard" })
+            Check(SetupElevation.IsSetupMessage(t), $"setup's message {t}: taken");
+        foreach (var t in new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null })
+            Check(!SetupElevation.IsSetupMessage(t), $"{t ?? "(none)"}: refused in setup");
     }
 
     static void Arguments()
     {
-        var up = SetupElevation.ElevatedArgs(["--setup", "--dev", "--ui", @"C:\TV box\ui"]);
-        Check(up.SequenceEqual(["--setup", "--dev", "--ui", @"C:\TV box\ui", "--elevated"]), "the elevated copy: the same arguments, in order, then --elevated: " + string.Join(" | ", up));
-        Check(SetupElevation.ElevatedArgs(up).Count(a => a == "--elevated") == 1, "--elevated once when asked again");
-        Check(SetupElevation.ElevatedArgs([]).SequenceEqual(["--elevated"]), "no arguments: just --elevated");
+        var up = SetupElevation.ElevatedArgs(["--setup", "--dev", "--ui", @"C:\TV box\ui", "--catalog", @"C:\x\catalog.json", "--windowed", "--no-tv"]);
+        Check(up.SequenceEqual(["--setup", "--no-tv", "--windowed", "--elevated"]), "the elevated copy: --setup, --no-tv and --windowed only (no --dev, --ui, --catalog), then --elevated: " + string.Join(" | ", up));
+        Check(SetupElevation.ElevatedArgs(up).Count(a => a == "--elevated") == 1 && SetupElevation.ElevatedArgs(up).Count(a => a == "--setup") == 1, "--setup and --elevated once when asked again");
+        Check(SetupElevation.ElevatedArgs([]).SequenceEqual(["--setup", "--elevated"]), "no arguments: --setup --elevated");
+
+        // The command processor's line that puts setup in Program Files and starts it there.
+        const string pf = @"C:\Program Files\HTPC\Setup";
+        const string odd = @"C:\Users\Bob & Al (x)\Down^loads!\TV-Box-Setup.exe";
+        var line = SetupElevation.Trampoline(odd, ["--setup", "--elevated"], pf, "a1b2c3");
+        Check(line is not null && line.StartsWith("/d /e:on /v:off /s /c \"") && line.EndsWith("\""), $"cmd: no AutoRun, extensions on, no delayed expansion, one quoted command ({line})");
+        Check(line is not null && !line.Contains('%'), "... with no %variable% (cmd would fill it in from the user's environment)");
+        Check(line is not null && line.Contains($"set \"DOTNET_BUNDLE_EXTRACT_BASE_DIR={pf}\\bundle\""), "... .NET unpacks into Program Files\\HTPC\\Setup\\bundle");
+        Check(line is not null && line.Contains("set \"DOTNET_EnableDiagnostics=0\"") && line.Contains("set \"DOTNET_STARTUP_HOOKS=\"") && line.Contains("set \"CORECLR_ENABLE_PROFILING=\"") && line.Contains("set \"COR_ENABLE_PROFILING=\""),
+            "... no profiler, startup hook or diagnostics port from the user's environment");
+        Check(line is not null && line.Contains($"move /y \"{pf}\\TV Box Setup.exe\" \"{pf}\\TV Box Setup.exe.a1b2c3.old\"") && line.Contains($"copy /b /y \"{odd}\" \"{pf}\\TV Box Setup.exe\" >nul && start \"\" /d \"{pf}\" \"{pf}\\TV Box Setup.exe\" --setup --elevated\""),
+            "... the one in use renamed aside, this exe copied, the copy started only if the copy went");
+        Check(line is not null && line.IndexOf("copy /b", StringComparison.Ordinal) > line.IndexOf("DOTNET_BUNDLE_EXTRACT_BASE_DIR", StringComparison.Ordinal), "... the variables set before anything starts");
+        var again = SetupElevation.Trampoline(pf + @"\TV Box Setup.exe", ["--setup", "--elevated"], pf, "x");
+        Check(again is not null && !again.Contains("copy ") && again.Contains($"start \"\" /d \"{pf}\" \"{pf}\\TV Box Setup.exe\" --setup --elevated"), "the Program Files copy itself: started, not copied onto itself");
+        Check(SetupElevation.Trampoline(@"C:\Users\u\Downloads\TV%20Box%20Setup.exe", [], pf, "x") is null, "a % in the exe's path: refused (cmd would expand it)");
+        Check(SetupElevation.Trampoline(@"C:\x\TV Box Setup.exe", [], pf, "x&calc") is null, "a suffix that is not letters and digits: refused");
         var home = SetupElevation.HomeArgs(["--setup", "--dev", "--elevated", "--no-tv", "--home"]);
         Check(home.SequenceEqual(["--dev", "--no-tv", "--home"]), "the home screen: setup's own dropped, --home once: " + string.Join(" | ", home));
 
@@ -129,6 +168,8 @@ static class ElevationTests
         Check(psi.Arguments.Contains("-File \"C:\\x y\\setup\\setup.ps1\" -NoPause -Apps youtube,kodi -LauncherExe \"D:\\TV Box Setup.exe\""), "its arguments: " + psi.Arguments);
         Check(psi.WorkingDirectory == @"C:\x y\setup", "in the setup folder");
         Check(SetupRunner.StartInfo(@"C:\s\setup.ps1", [], null).Arguments.EndsWith("-NoPause -Skip Apps"), "no apps picked: -Skip Apps, and no -LauncherExe for a dev build");
+        var odd = SetupRunner.StartInfo(@"C:\s\setup.ps1", ["vlc", "x -LauncherExe C:\\evil.exe", "VLC", "kodi\n", "plex"], null).Arguments;
+        Check(odd.EndsWith("-NoPause -Apps vlc,plex"), $"only catalog-like ids reach setup.ps1's command line ({odd})");
 
         // The task the elevated wizard starts the watchdog through: built, never registered.
         try

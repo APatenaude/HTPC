@@ -5,8 +5,10 @@ Scripts that turn a clean Windows 11 IoT Enterprise LTSC 2024 install into the f
 
 The usual way in is **TV Box Setup.exe** (`launcher\dev\Publish-Setup.ps1` builds it): the
 launcher in setup mode, one self-contained file with these scripts inside. It asks for
-Windows' permission once, as it opens (the UAC prompt names it; declined, it says setup needs
-administrator rights: try again or quit), asks the questions (controller check, TV, apps), then
+Windows' permission once, as it opens (the UAC prompt is for Windows' command processor, which
+puts a copy of setup in the admin-only `Program Files\HTPC\Setup` and runs that, so nothing the
+user can write runs elevated; declined, it says setup needs administrator rights: try again or
+quit), asks the questions (controller check, TV, apps), then
 runs setup.ps1 with no further prompt, shows its progress, and hands over to the launcher it
 installed, started as the signed-in user, not elevated (launcher/README.md, SetupElevation.cs).
 
