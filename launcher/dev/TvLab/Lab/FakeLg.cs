@@ -60,6 +60,9 @@ sealed class FakeLg : IDisposable
     /// <summary>Its TLS port stops listening (connections refused), while it still answers searches.</summary>
     public void StopTls() => tls.Stop();
 
+    /// <summary>Another TLS key from now on (someone else answering as this TV).</summary>
+    public void ReplaceKey() => cert.Replace();
+
     public FakeLg(string label, IPAddress ip, int port, string udn, Trace trace)
     {
         Label = label; Ip = ip; Udn = udn; this.trace = trace;

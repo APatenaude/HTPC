@@ -148,6 +148,8 @@ static class PhaseBChecks
         var key = h.Tv.Credentials.Get("webos:udn-living")?.Value;
         Check.That(key is not null && key == lg.Key && lg.Prompts == 1, "LG: its client key kept, one prompt");
         Check.That(key is not null && NoSecretLogged(key), "LG: the client key is never logged");
+        var pinned = h.Tv.Credentials.Get("webos:udn-living")?.Pin;
+        Check.That(pinned is { Length: > 0 }, "LG: its TLS key pinned at pairing");
         await Eventually(() => h.Profiles[LgScreen.Key].Macs.Count == 2, 3);
         Check.That(h.Profiles[LgScreen.Key].Macs.Contains("02:00:00:00:1a:01"), "LG: MACs from the paired connection");
 
@@ -166,6 +168,20 @@ static class PhaseBChecks
         lg.Input = 3;
         await h.Wake();
         Check.That(await Eventually(() => lg.Input == 1), $"LG: switched to HDMI 1 after coming on elsewhere (input {lg.Input})");
+
+        // A pairing from before keys were pinned: pinned at the next connection the TV takes the key on.
+        var old = h.Tv.Credentials.Get("webos:udn-living")!;
+        h.Tv.Credentials.Set("webos:udn-living", new TvCredentials.Secret { Value = old.Value, Scheme = old.Scheme });
+        await h.Sleep(); await Eventually(() => !lg.On); await Task.Delay(500); await w.RunFor(10);
+        await h.Wake();
+        Check.That(await Eventually(() => h.Tv.Credentials.Get("webos:udn-living")?.Pin == pinned), "LG: a pairing from before pinning gets its pin at the next connection");
+        // Another TLS key answering as this TV (its UDN, its address): the client key is not sent.
+        await h.Sleep(); await Eventually(() => !lg.On); await Task.Delay(500); await w.RunFor(10);
+        lg.ReplaceKey();
+        before = w.Trace.Lines.Count;
+        await h.Wake(); await w.RunFor(20);
+        Check.That(!w.Trace.Lines.Skip(before).Any(l => l.Contains("lg register")) && h.Tv.Credentials.Get("webos:udn-living")?.Pin == pinned,
+            "LG: another TLS key at the TV's address: no register, the key not sent, the pin kept");
 
         // A stranger at the TV's address (DHCP): another LG, which never saw this box.
         lg.Dispose();

@@ -17,6 +17,11 @@ namespace Htpc.Launcher;
 /// client key on it; a TV that asks to pair instead is another one (nothing more is sent, no
 /// prompt left on it). Commands go only over that registered connection, and MACs are learned
 /// only there. "Screen Off" and a dropped connection read as unknown, not off.
+///
+/// Its TLS key is pinned when it is paired (as Samsung's): the client key goes only to the TV
+/// with that key, another one fails in the handshake before anything is sent (a UDN can be
+/// claimed by anyone on the network). A pairing from before the pin gets it at its first
+/// connection the TV takes the key on, logged. A TV with only the plain port has no key to pin.
 /// </summary>
 sealed class WebOsDriver : ITvDriver, ITvPairing
 {
@@ -31,6 +36,7 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
     readonly ConcurrentDictionary<string, (string Id, DateTime At)> seen = new();   // host -> UDN it answered with
     readonly ConcurrentDictionary<string, WebOsSession> sessions = new();           // device key -> live connection
     readonly ConcurrentDictionary<string, DateTime> failedAt = new();
+    readonly ConcurrentDictionary<string, byte> otherKey = new();                   // device keys whose pinned TLS key did not show (logged once)
     TvCredentials? credentials;
 
     public WebOsDriver(ITvNet net, ITvClock? clock = null, int port = 3001, int plainPort = 3000)
@@ -139,10 +145,18 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
         // Once a key exists the scheme is the one it was paired over (TLS unless the TV had only
         // the plain port): a key never goes out in clear because TLS failed once. Pairing (no key
         // yet) tries the plain port only when the TLS port refuses outright (a TV too old for it).
+        // Over TLS with a pin, only the TV with that key gets as far as the key.
         var plain = new UriBuilder(tv.Address) { Scheme = "ws", Port = plainPort }.Uri;
-        var (session, refused) = await WebOsSession.Connect(!pairing && stored?.Scheme == "ws" ? plain : tv.Address, cancel);
-        if (session is null && pairing && refused) (session, _) = await WebOsSession.Connect(plain, cancel);
-        if (session is null) return null;
+        var pin = pairing || stored?.Scheme == "ws" ? null : stored?.Pin;
+        var (session, refused, other) = await WebOsSession.Connect(!pairing && stored?.Scheme == "ws" ? plain : tv.Address, pin, cancel);
+        if (session is null && pairing && refused) (session, _, _) = await WebOsSession.Connect(plain, null, cancel);
+        if (session is null)
+        {
+            // Silent, as a TV that does not answer (the poll comes back every few seconds: logged once).
+            if (other && otherKey.TryAdd(tv.Key, 0)) Log.Warn($"LG at {tv.Address.Host} is not the paired TV (its TLS key differs): nothing sent to it");
+            return null;
+        }
+        otherKey.TryRemove(tv.Key, out _);
         try
         {
             var registered = await session.Register(key, () => step?.Invoke("prompt", $"Say yes on {tv.Name}: a prompt asks to allow “TV Box”."), pairing, cancel);
@@ -152,7 +166,13 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
                 if (!pairing) { Log.Warn($"LG at {tv.Address.Host} did not take this box's key: pairing was undone on it (pair again in Settings › TV)"); PairingLost?.Invoke(tv); }
                 return null;
             }
-            if (pairing) credentials?.Set(tv.Key, new TvCredentials.Secret { Value = registered, Scheme = session.Scheme });
+            if (pairing) credentials?.Set(tv.Key, new TvCredentials.Secret { Value = registered, Scheme = session.Scheme, Pin = session.Pin });
+            else if (stored is { Pin: null } && session.Pin is { } seen && session.Scheme == "wss")
+            {
+                // Paired before pins were kept: this TV took the key, so its TLS key is the one from now on.
+                credentials?.Set(tv.Key, new TvCredentials.Secret { Value = stored.Value, Scheme = stored.Scheme, Pfx = stored.Pfx, Pin = seen });
+                Log.Info($"LG {tv.Name}: its TLS key pinned (paired before keys were pinned)");
+            }
             await session.Start(cancel);
         }
         catch (Exception) { session.Dispose(); return null; } // dropped mid-handshake: silent, nothing left open
@@ -214,27 +234,44 @@ sealed class WebOsSession : IDisposable
     /// <summary>"wss" or "ws": what this connection is over (kept with the key at pairing).</summary>
     public string Scheme { get; private set; } = "wss";
 
-    /// <summary>A connection to exactly this URI; Refused when the TV turned the TCP connection down (nothing listens there).</summary>
-    public static async Task<(WebOsSession? Session, bool Refused)> Connect(Uri uri, CancellationToken cancel)
+    /// <summary>The TV's TLS key hash (SHA-256 of its public key, as TizenDriver's), seen in the handshake; null over ws.</summary>
+    public string? Pin { get; private set; }
+
+    static string PinOf(System.Security.Cryptography.X509Certificates.X509Certificate cert) =>
+        Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(new System.Security.Cryptography.X509Certificates.X509Certificate2(cert).PublicKey.ExportSubjectPublicKeyInfo()));
+
+    /// <summary>
+    /// A connection to exactly this URI; Refused when the TV turned the TCP connection down
+    /// (nothing listens there). With <paramref name="pin"/>, only the TV with that TLS key: its
+    /// certificate is LG's own (no CA to check), so the key itself says which TV it is; OtherKey
+    /// when another key answered.
+    /// </summary>
+    public static async Task<(WebOsSession? Session, bool Refused, bool OtherKey)> Connect(Uri uri, string? pin, CancellationToken cancel)
     {
         var socket = new ClientWebSocket();
-        socket.Options.RemoteCertificateValidationCallback = delegate { return true; }; // LG's own CA; the UDN and key check who it is
+        string? seen = null;
+        socket.Options.RemoteCertificateValidationCallback = (_, cert, _, _) =>
+        {
+            if (cert is null) return false;
+            seen = PinOf(cert);
+            return pin is null || seen == pin;
+        };
         socket.Options.Proxy = null;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             timeout.CancelAfter(TimeSpan.FromSeconds(4));
             await socket.ConnectAsync(uri, timeout.Token);
-            var session = new WebOsSession(socket) { Scheme = uri.Scheme };
+            var session = new WebOsSession(socket) { Scheme = uri.Scheme, Pin = uri.Scheme == "wss" ? seen : null };
             _ = session.ReceiveLoop();
-            return (session, false);
+            return (session, false, false);
         }
         catch (Exception e)
         {
             socket.Dispose();
             for (var x = (Exception?)e; x is not null; x = x.InnerException)
-                if (x is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused }) return (null, true);
-            return (null, false);
+                if (x is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused }) return (null, true, false);
+            return (null, false, pin is not null && seen is not null && seen != pin);
         }
     }
 
