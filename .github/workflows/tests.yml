@@ -4,7 +4,7 @@
 #   - setup's tests against fakes: the update jobs, the autostart guard, the driver picks and the
 #     privilege checks. Test-Updates and Test-Rights need an administrator: the runner is one.
 # Test-Library installs real apps: test VM only. Each exits 0 only when all its checks passed.
-# Two jobs run side by side, since Test-Updates alone takes about 7 minutes.
+# Two jobs run side by side, about 2 minutes each: the launcher's and TvLab, and Test-Updates.
 #
 # A release is only tagged on a commit whose run here passed (launcher\dev\New-Release.ps1 waits
 # for it), and the release workflow checks that again before it builds: a flaky check can never
