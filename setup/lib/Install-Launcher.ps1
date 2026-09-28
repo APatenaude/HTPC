@@ -267,8 +267,15 @@ Copy-Item (Join-Path $from 'lib\Start-Job.ps1') (Join-Path $installDir 'Start-Jo
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
 Clear-ReadOnly (Join-Path $installDir 'Start-Job.ps1'); Clear-ReadOnly (Join-Path $installDir 'catalog.json')
 Write-Change "job runner and trusted catalog in $installDir"
-# The staged copy of a user-writable source is no longer needed once everything is installed.
-if ($stagedFrom) { Remove-OwnTree $stagedFrom }
+# The staged copy of a user-writable source is no longer needed once everything is installed. It
+# is admin-only (New-AdminWorkDir) and holds only plain files this run copied (Copy-Item follows a
+# source link rather than copying a junction), so the .NET recursive delete - which removes a link
+# without going through it - clears it. Not Remove-OwnTree: files an elevated admin creates are
+# owned by that user, not the Administrators group, which Test-OwnTree would reject.
+if ($stagedFrom -and (Test-Path -LiteralPath $stagedFrom)) {
+    try { Clear-ReadOnly $stagedFrom; [IO.Directory]::Delete($stagedFrom, $true) }
+    catch { Write-Attention "staged setup source $stagedFrom could not be removed: $($_.Exception.Message)" }
+}
 
 # Setup replaces whatever a launcher update left: its journal (cleared above, so nothing ever
 # "rolls back" to the launcher before that update) and the copies it kept (.prev, .new, .bad,
