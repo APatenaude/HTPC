@@ -12,7 +12,8 @@ namespace Htpc.Launcher;
 static class Log
 {
     public static void Info(string m) => Console.WriteLine("    log INFO  " + m);
-    public static void Warn(string m) => Console.WriteLine("    log WARN  " + m);
+    public static readonly ConcurrentQueue<string> Warnings = new();
+    public static void Warn(string m) { Warnings.Enqueue(m); Console.WriteLine("    log WARN  " + m); }
     public static void Error(string m, Exception? e = null) => Console.WriteLine("    log ERROR " + m + (e is null ? "" : ": " + e.Message));
 }
 

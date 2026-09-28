@@ -155,7 +155,24 @@ static partial class Program
         certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
             "after a restart: the same root, intermediate and certificate, none made");
-        var moved = IPAddress.Parse("192.168.1.33");
+        // Setup, as the user (--phone-certificates-create): the pair only, made once.
+        var madeFolder = TempFolder();
+        var madeKeys = new MemoryKeyStore();
+        var maker = new PhoneCertificates(madeFolder, madeKeys, testName, () => now);
+        Check(maker.MakeAuthorities() && madeKeys.Names.SequenceEqual(new[] { PhoneCertificates.IntermediateKeyName })
+            && File.Exists(Path.Combine(madeFolder, "intermediate.cer")) && !File.Exists(Path.Combine(madeFolder, "server.cer")) && maker.Context is null,
+            "setup's create step makes the pair only (no server certificate, no handshake)");
+        var again = new PhoneCertificates(madeFolder, madeKeys, testName, () => now);
+        Check(again.MakeAuthorities() && again.Intermediate!.Thumbprint == maker.Intermediate!.Thumbprint, "run again, it keeps the pair it made");
+        PhoneCertificates.RemoveIntermediates(testName, inter.Thumbprint);
+        // Setup's step (--phone-certificates) only loads the launcher's pair; it never makes keys.
+        var keysBefore = store.Names.OrderBy(n => n).ToList();
+        var setupView = new PhoneCertificates(folder, store, testName, () => now);
+        Check(setupView.LoadExisting() && setupView.Intermediate!.Thumbprint == inter.Thumbprint && store.Names.OrderBy(n => n).SequenceEqual(keysBefore),
+            "setup's step loads the launcher's pair as it is, and makes no key");
+        var emptyFolder = TempFolder();
+        Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && !Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any(),
+            "before the launcher's first start there is nothing to load, and nothing is made");        var moved = IPAddress.Parse("192.168.1.33");
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "the box got a new address: new certificate");
         Check(certs.Current!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateIPAddresses().SequenceEqual(new[] { moved })
             && Chain(root, certs.Intermediate!, certs.Current!) == X509ChainStatusFlags.NoError && certs.Authority!.Thumbprint == root.Thumbprint,
@@ -251,6 +268,15 @@ static partial class Program
                 Check(!exported, "intermediate key: exporting it fails");
             }
 
+            // Windows sends the intermediate from the machine's CA store only (Schannel, in LSA). With
+            // administrator rights (TV Box Setup's step) it goes there; without them the machine store
+            // is left alone and the launcher says setup must do it.
+            var elevated = Environment.IsPrivilegedProcess;
+            if (elevated)
+                Check(certs.PlaceIntermediateInMachineStore() && certs.IntermediateInMachineStore, "with administrator rights (setup's step): the intermediate in the machine's CA store");
+            else
+                Check(!certs.PlaceIntermediateInMachineStore() && !certs.IntermediateInMachineStore && Log.Warnings.Any(w => w.Contains("not in Windows' machine store")),
+                    "without administrator rights: the machine store left alone, and the launcher says setup must put the intermediate there");
             var ca = certs.Authority!;
             var inter = certs.Intermediate!;
             SslPolicyErrors seen = SslPolicyErrors.None;
@@ -283,7 +309,10 @@ static partial class Program
             using var https = new HttpClient(handler) { BaseAddress = new Uri("https://tv.local") };
             var page = await https.GetAsync("/");
             Check(page.StatusCode == HttpStatusCode.OK && (seen & SslPolicyErrors.RemoteCertificateNameMismatch) == 0, "HTTPS at tv.local: the page, the certificate names tv.local");
-            Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, "the handshake sends the intermediate; the chain ends at the root");
+            if (elevated)
+                Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, $"the handshake sends the intermediate; the chain ends at the root (sent: {intermediateSent}; chain: {chainStatus})");
+            else
+                Console.WriteLine($"    info: not administrator: the intermediate {(intermediateSent ? "was" : "was not")} sent (setup's step puts it where Windows sends it from)");
             var shareOverHttps = new HttpRequestMessage(HttpMethod.Post, "/share")
             {
                 Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["url"] = "https://vimeo.com/1" }), Headers = { { "Sec-Fetch-Site", "none" } },
