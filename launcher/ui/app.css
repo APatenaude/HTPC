@@ -33,6 +33,10 @@
 }
 
 html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; cursor: none; user-select: none; }
+/* Over an app, app.js puts its frame on html too (beyond the stage on a screen not 16:9); body
+   is see-through then. Blank (the launcher behind an app, standby): dark, as the stage. */
+html.over-app body { background: transparent; }
+html:has(#stage.blank) { background: var(--bg) !important; }
 
 #stage {
   position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;

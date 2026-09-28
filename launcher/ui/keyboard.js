@@ -11,7 +11,12 @@ const send = (msg) => host ? host.postMessage(msg) : console.log('to host', msg)
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const kb = document.getElementById('kb');
-function fit() { kb.style.transform = `scale(${innerWidth / 1920})`; }
+// The 1920x560 band scaled to its window (the screen's width, 560/1080 of its height): by the
+// width, or by the height on a screen wider than 16:9 (an ultrawide: centred, the sides its colour).
+function fit() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 560) || innerWidth / 1920;
+  kb.style.transform = `translate(${Math.max(0, (innerWidth - 1920 * s) / 2)}px, ${Math.max(0, innerHeight - 560 * s)}px) scale(${s})`;
+}
 addEventListener('resize', fit);
 fit();
 
@@ -70,7 +75,7 @@ function render() {
       if (k.id === 'shift' && shift === 'once') cls.push('latched');
       if (k.id === 'shift' && shift === 'lock') cls.push('locked');
       const face = k.icon ? icon(k.icon, 28, 2) : esc(k.label || (k.text === ' ' ? '' : k.text));
-      return `<div class="${cls.join(' ')}" data-r="${r}" data-c="${c}" role="button" aria-label="${esc(k.aria || k.label || k.text)}">${face}</div>`;
+      return `<div class="${cls.join(' ')}" data-nav data-id="k${r}-${c}" data-r="${r}" data-c="${c}" role="button" aria-label="${esc(k.aria || k.label || k.text)}">${face}</div>`;
     }).join('')}</div>`).join('');
   if (rowsEl.dataset.html !== html) { rowsEl.innerHTML = html; rowsEl.dataset.html = html; }
   for (const el of rowsEl.querySelectorAll('.kb-key.on')) el.classList.remove('on');
@@ -173,6 +178,16 @@ if (host) {
     Backspace: 'x', ' ': 'y', Shift: 'lt', PageUp: 'lb', PageDown: 'rb', F2: 'select', F10: 'start' };
   addEventListener('keydown', (e) => { if (keys[e.key]) { e.preventDefault(); onButton(keys[e.key]); } });
   onHost({ type: 'open', field: 'Password', password: true });
+  // keyboard.html#audit (#audit?page=...): the UI audit's keyboard pages (audit.js), loaded
+  // before the page's load event, which waits for it.
+  if (location.hash.startsWith('#audit')) {
+    window.auditRoute = location.hash.slice(1);
+    addEventListener('DOMContentLoaded', () => {
+      const s = document.createElement('script');
+      s.src = 'audit.js';
+      document.body.appendChild(s);
+    });
+  }
 }
 render();
 send({ type: 'ready' });

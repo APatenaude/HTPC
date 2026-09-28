@@ -1,7 +1,7 @@
 /* On-screen keyboard: a 1920x560 band ("Keyboard over a website" on the design canvas),
    scaled to its window's width. */
 
-html, body { background: #16181C; }
+html, body { background: var(--panel); }   /* the band's colour, also beside it on an ultrawide screen */
 
 #kb {
   position: absolute; left: 0; top: 0; width: 1920px; height: 560px;
@@ -11,7 +11,7 @@ html, body { background: #16181C; }
   font-family: 'Atkinson Hyperlegible', sans-serif;
 }
 
-.kb-head { display: flex; align-items: center; gap: 20px; height: 68px; padding: 8px 96px 0; box-sizing: border-box; }
+.kb-head { display: flex; align-items: center; gap: 20px; height: 60px; padding: 8px 96px 0; box-sizing: border-box; }
 .kb-into { font-size: 22px; color: var(--muted); }
 .kb-field { font-size: 24px; font-weight: 700; max-width: 900px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .kb-typed { font-size: 24px; color: var(--text-2); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; max-width: 700px; }
@@ -37,4 +37,5 @@ html, body { background: #16181C; }
 .kb-key.hit { transform: scale(0.94); }
 .kb-key .icon { flex-shrink: 0; }
 
-#kb .hints { margin-top: auto; }
+/* Six rows of keys and the hints in 560 px: a lower hint bar, clear of the last row's rings. */
+#kb .hints { margin-top: auto; height: 80px; flex-shrink: 0; }
