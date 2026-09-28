@@ -96,7 +96,7 @@ if ($result.conclusion -ne 'success') {
 
 $message = Join-Path $env:TEMP "htpc-release-msg-$PID.txt"
 [IO.File]::WriteAllText($message, "$Notes`n", (New-Object Text.UTF8Encoding $false))
-git -C $repoRoot tag -a "v$Version" -F $message
+git -C $repoRoot tag -a "v$Version" $sha -F $message   # the tested commit, whatever HEAD is by now
 Remove-Item $message -Force
 git -C $repoRoot push -q origin "v$Version"
 if ($LASTEXITCODE) { throw "git push of the tag v$Version failed: push it by hand (git push origin v$Version)" }

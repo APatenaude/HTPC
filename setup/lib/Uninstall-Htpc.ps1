@@ -106,6 +106,18 @@ function New-UninstallWorkDir {
     $dir
 }
 
+# True when every file under $Staging is under $Target at the same relative path, with the same size.
+function Test-UninstallLogsCopied([string]$Staging, [string]$Target) {
+    if (-not (Test-Path -LiteralPath $Target -PathType Container)) { return $false }
+    $root = (Get-Item -LiteralPath $Staging -Force).FullName.TrimEnd('\')
+    foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -Force)) {
+        $copy = Join-Path $Target $file.FullName.Substring($root.Length + 1)
+        if (-not (Test-Path -LiteralPath $copy -PathType Leaf)) { return $false }
+        if ((Get-Item -LiteralPath $copy -Force).Length -ne $file.Length) { return $false }
+    }
+    return $true
+}
+
 # Copies the admin-only staging folder's contents to the user's Documents\HTPC logs AS THE USER, not
 # elevated: the elevated uninstall never writes Documents (the user's to write, so a link they
 # planted could send an elevated write elsewhere). The same one-shot Limited task pattern as
@@ -116,7 +128,9 @@ function Publish-UninstallLogs([string]$Staging) {
     $task = 'HTPC uninstall logs'
     $t = $target -replace "'", "''"
     $s = $Staging -replace "'", "''"
-    $command = "New-Item -ItemType Directory -Force '$t' | Out-Null; Copy-Item -LiteralPath '$s\*' -Destination '$t' -Recurse -Force"
+    # Get-ChildItem | Copy-Item, not Copy-Item -LiteralPath '<dir>\*': a literal path does not expand
+    # the *, so that copied nothing, without an error.
+    $command = "New-Item -ItemType Directory -Force '$t' | Out-Null; Get-ChildItem -LiteralPath '$s' -Force | Copy-Item -Destination '$t' -Recurse -Force"
     $argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$command`""
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $action = New-ScheduledTaskAction -Execute $powershell -Argument $argument -WorkingDirectory $env:SystemRoot
@@ -125,13 +139,17 @@ function Publish-UninstallLogs([string]$Staging) {
     try {
         Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Settings $settings -Force | Out-Null
         Start-ScheduledTask -TaskName $task
+        # Until it has run and ended: for a few seconds after the start the task can still be Ready
+        # with "has not run yet" (267011), as in Set-PhoneRemote's Invoke-AsUser.
         $deadline = (Get-Date).AddSeconds(90)
         do {
             Start-Sleep -Milliseconds 500
-            $state = (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).State
-        } while ("$state" -eq 'Running' -and (Get-Date) -lt $deadline)
-        if (Test-Path -LiteralPath $target) { return $target }
-        return $null
+            $info = Get-ScheduledTaskInfo -TaskName $task
+            $state = (Get-ScheduledTask -TaskName $task).State
+        } while (("$state" -eq 'Running' -or "$state" -eq 'Queued' -or $info.LastTaskResult -eq 267011) -and (Get-Date) -lt $deadline)
+        # Delivered only when every staged file is there, with its size: otherwise the staging folder
+        # is kept (setup.ps1 removes it only on a delivery).
+        return $(if (Test-UninstallLogsCopied $Staging $target) { $target } else { $null })
     } catch {
         Write-Attention "could not hand the logs to $env:USERNAME as the user ($($_.Exception.Message)); they are in $Staging"
         return $null

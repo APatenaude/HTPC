@@ -170,7 +170,13 @@ try {
                     Register-ScheduledTask -TaskName $tn -Action $action -Principal $principal -Settings $settings -Force | Out-Null
                     Start-ScheduledTask -TaskName $tn | Out-Null
                     $deadline = (Get-Date).AddSeconds(60)
-                    do { Start-Sleep -Milliseconds 400; $state = (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue).State } while ("$state" -eq 'Running' -and (Get-Date) -lt $deadline)
+                    # Until it has run and ended: just after the start it can still be Ready with
+                    # "has not run yet" (267011).
+                    do {
+                        Start-Sleep -Milliseconds 400
+                        $state = (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue).State
+                        $last = (Get-ScheduledTaskInfo -TaskName $tn -ErrorAction SilentlyContinue).LastTaskResult
+                    } while (("$state" -eq 'Running' -or "$state" -eq 'Queued' -or $last -eq 267011) -and (Get-Date) -lt $deadline)
                 } finally { Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue }
                 $text = if (Test-Path -LiteralPath $result) { [IO.File]::ReadAllText($result) } else { '' }
                 [string]($text -replace '\s+', ' ')
