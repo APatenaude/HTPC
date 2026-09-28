@@ -120,8 +120,17 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .tile .badge { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
 .tile .badge::before { content: ''; width: 12px; height: 12px; border-radius: 6px; background: var(--accent); }
 
-/* Focus ring shared by everything that can be selected */
-.focused { box-shadow: 0 0 0 4px var(--accent), 0 28px 64px rgba(0, 0, 0, 0.6) !important; }
+/* Focus ring shared by everything that can be selected: the ring alone, a spread with no blur,
+   cheap to grow in at 4K. The soft shadow of a tile or a card lifting is a pseudo-element faded
+   in (opacity, the compositor's), not a 64 px blur animated as a box-shadow on the two elements
+   of every move (it was redrawn each frame). inset -2px: over the tile's border. */
+.focused { box-shadow: 0 0 0 4px var(--accent) !important; }
+.tile, .card { position: relative; }
+.tile::before, .card::before {
+  content: ''; position: absolute; inset: -2px; z-index: -1; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 0.15s ease;
+}
+.tile.focused::before, .card.focused::before { opacity: 1; }
 .tile.focused, .card.focused { background: var(--tile-focus); border-color: var(--tile-focus); color: #FFFFFF; transform: scale(1.05); }
 .round.focused, .row.focused, .quick.focused { background: var(--tile-focus); color: #FFFFFF; }
 .opt.focused { transform: scale(1.04); }
