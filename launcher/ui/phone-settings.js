@@ -157,8 +157,8 @@ onAction('phone-forget', (el, id) => {
   ask({
     title: `Forget ${p.name}?`,
     text: p.shortcut ? 'The Shortcut that uses this key stops working. The phone can make a new key.'
-      : (state.phoneSettings.phones || []).some((k) => k.shortcut && k.owner === p.id) ? 'Its Shortcut keys stop working too. To be a remote again, it has to pair again.'
-      : 'To be a remote again, it has to pair again: scan the code on this screen.',
+      : (state.phoneSettings.phones || []).some((k) => k.shortcut && k.owner === p.id) ? 'Its Shortcut keys stop working too. To be a remote again, it pairs again: Show a code on the TV, on the phone.'
+      : 'To be a remote again, it pairs again: Show a code on the TV, on the phone.',
     yes: 'Forget',
     onYes: () => send({ type: 'phone.forget', id }),
   });

@@ -731,7 +731,12 @@ async function post(path, body) {
   }
 }
 
+// The Home Screen app (iPhone) or installed app (Android): scanning the TV's code opens the
+// browser, which pairs itself, not this app.
+const standalone = () => navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+
 function showPairing() {
+  if (standalone()) $('pair-note').textContent = 'Use the button above: scanning the code on the TV pairs the browser, not this app.';
   state.conn = 'pairing';
   $('pair').hidden = false;
   $('pair-start').hidden = false;
