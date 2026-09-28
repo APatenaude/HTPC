@@ -815,6 +815,21 @@ Console.WriteLine("== The launcher's origin");
     Check(LauncherOrigin.Describe("file:///C:/Users/x/secret.txt") == "a file", "a file is not named in the log");
 }
 
+// ---------------------------------------------------------------- The soak line
+// One line an hour: the launcher's weight and its WebView2 processes', for leaks over weeks.
+Console.WriteLine("== Soak line");
+{
+    const long MB = 1024 * 1024;
+    var line = SoakLog.Line(new ProcessStats(150 * MB, 1200, 60, 80),
+        new List<(string, ProcessStats?)> { ("browser", new(80 * MB, 900, 10, 20)), ("renderer", new(200 * MB, 300, -1, -1)), ("renderer", new(110 * MB, 250, -1, -1)), ("gpu", null) },
+        TimeSpan.FromHours(50), TimeSpan.FromDays(9));
+    Check(line.StartsWith("Soak: launcher 150 MB private, 1200 handles, 60 GDI, 80 USER objects;"), line);
+    Check(line.Contains("WebView2 4 processes: 390 MB private, 1450 handles, 10 GDI, 20 USER objects (browser 80 MB, 2 renderer 310 MB)"), "WebView2: the known ones summed, by kind: " + line);
+    Check(line.EndsWith("; up 2 d 2 h (the box 9 d 0 h)"), "uptimes: " + line);
+    Check(ProcessStats.Of(Environment.ProcessId) is { PrivateBytes: > 0, Handles: > 0, Gdi: >= 0, User: >= 0 }, "this process's own numbers read");
+    Check(SoakLog.Line(null, [], TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(7)) == "Soak: launcher ?; up 5 min (the box 7 min)", "nothing known: still one line");
+}
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 
