@@ -174,12 +174,18 @@ function Test-LauncherHealthy([string]$Version, $Process) { Test-LauncherEvent '
 # and it shows "Restarting..." until it is told to leave. The same kind of event, same rules.
 function Test-LauncherLeaving([string]$Version, $Process) { Test-LauncherEvent 'HtpcLeaving' $Version $Process }
 
+# Taken only when the event's owner is the launcher process's own user (the launcher names itself
+# the owner: MainForm.Updates.cs, UpdateSignal), so a program of another account in that session
+# cannot make it first and fake the signal.
 function Test-LauncherEvent([string]$Prefix, [string]$Version, $Process) {
     $name = "Session\$($Process.SessionId)\$($Prefix)_$($Version)_$($Process.ProcessId)"
     try {
-        $e = [Threading.EventWaitHandle]::OpenExisting($name)
-        $e.Dispose()
-        $true
+        $e = [Threading.EventWaitHandle]::OpenExisting($name, [Security.AccessControl.EventWaitHandleRights]'ReadPermissions, Synchronize')
+        try {
+            $owner = $e.GetAccessControl().GetOwner([Security.Principal.SecurityIdentifier]).Value
+            $user = (Invoke-CimMethod -InputObject $Process -MethodName GetOwnerSid -ErrorAction Stop).Sid
+            [bool]$owner -and $owner -eq $user
+        } finally { $e.Dispose() }
     } catch { $false }
 }
 

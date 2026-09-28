@@ -165,6 +165,9 @@ sealed partial class MainForm
                 apps = appVersions,
                 boxName = Environment.MachineName,
                 hardware = SystemInfo.Hardware(),
+                // Elevated with no standard-rights token (User Account Control off, the built-in
+                // Administrator): About says a TV account with User Account Control on is safer.
+                fullRights = Rights.Elevation == Rights.Token.NoSplit,
             };
         });
         Post(info);

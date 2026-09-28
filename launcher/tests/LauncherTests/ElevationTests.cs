@@ -21,6 +21,10 @@ static class ElevationTests
         Check = check;
         Console.WriteLine("== Setup elevation: setup mode, and what a start does");
         Decisions();
+        Console.WriteLine("== Rights: setup or not, and the token (split, no split, standard)");
+        RightsTable();
+        Console.WriteLine("== Setup elevation: setup runs as the user signed in here, or not at all");
+        SessionUserCheck();
         Console.WriteLine("== Setup elevation: arguments and the command line");
         Arguments();
         Console.WriteLine("== Setup elevation: who takes over after setup");
@@ -70,6 +74,73 @@ static class ElevationTests
             Check(SetupElevation.IsSetupMessage(t), $"setup's message {t}: taken");
         foreach (var t in new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null })
             Check(!SetupElevation.IsSetupMessage(t), $"{t ?? "(none)"}: refused in setup");
+    }
+
+    // Rights.cs: administrator rights never mean "this is setup". Setup mode with them alone uses
+    // setup's admin-only places; the everyday launcher's start depends on how its rights came.
+    static void RightsTable()
+    {
+        const Rights.Token Std = Rights.Token.Standard, Split = Rights.Token.Split, NoSplit = Rights.Token.NoSplit;
+        const Rights.Start Run = Rights.Start.Run, Warned = Rights.Start.RunWithFullRights, Again = Rights.Start.AgainAtStandard, Stop = Rights.Start.Stop;
+        Check(Rights.Decide(true, Split, false) == new Rights.Plan(true, Run), "setup elevated, User Account Control on: TV Box Setup, in its admin-only places");
+        Check(Rights.Decide(true, NoSplit, false) == new Rights.Plan(true, Run), "setup elevated with no split token (UAC off, the built-in Administrator): TV Box Setup too");
+        Check(Rights.Decide(true, Std, false) == new Rights.Plan(false, Run), "setup at standard rights: not TV Box Setup's places (SetupElevation.Decide asks for the rights)");
+        Check(Rights.Decide(false, Std, false) == new Rights.Plan(false, Run), "the launcher at standard rights: runs, in the user's folders");
+        Check(Rights.Decide(false, NoSplit, false) == new Rights.Plan(false, Warned),
+            "the launcher elevated with no split token: runs as usual in the user's folders (handoff, logos, certificates, HTTPS), warned; never setup's places");
+        Check(Rights.Decide(false, Split, false) == new Rights.Plan(false, Again), "the launcher elevated with a split token: starts again at standard rights, before any file work");
+        Check(Rights.Decide(false, Split, true) == new Rights.Plan(false, Stop), "... the copy started for that, still elevated: stops (no loop)");
+        Check(Rights.Decide(false, Std, true) == new Rights.Plan(false, Run) && Rights.Decide(false, NoSplit, true) == new Rights.Plan(false, Warned)
+            && Rights.Decide(true, Split, true) == new Rights.Plan(true, Run), "the copy's flag changes nothing else");
+        var again = Rights.AgainArgs(["--dev", "--ui", @"C:\my ui", Rights.AtStandardFlag, "--tv"]);
+        Check(again.SequenceEqual(["--dev", "--ui", @"C:\my ui", "--tv", Rights.AtStandardFlag]), $"the standard-rights copy: the same arguments, the flag once, last ({string.Join(" | ", again)})");
+
+        // Tests never run Program.Main: the launcher's own places, whatever this process's rights
+        // (an elevated CI runner too). The token as Windows gives it.
+        Check(!Rights.SetupElevated && Rights.Elevation == Std, "no Main here: not TV Box Setup (the launcher's places, elevated or not)");
+        var token = Rights.Read();
+        Check((token == Std) == !Environment.IsPrivilegedProcess && (token == NoSplit) == (Environment.IsPrivilegedProcess && TokenElevationType() == 1),
+            $"this process's token: {token} (elevated {Environment.IsPrivilegedProcess}, TokenElevationType {TokenElevationType()})");
+    }
+
+    // An administrator approving a standard account's prompt makes setup run as the administrator:
+    // it would set up that account (its autologon, its shell). Only the signed-in user goes on.
+    static void SessionUserCheck()
+    {
+        const string tv = "S-1-5-21-111-222-333-1001", admin = "S-1-5-21-111-222-333-1002";
+        const SetupElevation.SessionMatch Same = SetupElevation.SessionMatch.Same, Other = SetupElevation.SessionMatch.Other, Unknown = SetupElevation.SessionMatch.Unknown;
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", tv, @"BOX\tv") == Same, "setup as the signed-in user (an administrator): goes on");
+        Check(SetupElevation.CompareSessionUser(admin, @"BOX\admin", tv, @"BOX\tv") == Other, "a standard account, an administrator approved the prompt: refused");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", admin, @"BOX\tv") == Other, "the SID decides, not a name that matches");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", tv.ToLowerInvariant(), @"BOX\tv") == Same, "... in any case");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", null, @"box\TV") == Same, "the session's name with no SID Windows could find: compared by name, any case");
+        Check(SetupElevation.CompareSessionUser(admin, @"BOX\admin", null, @"BOX\tv") == Other, "... another name: refused");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", null, null) == Unknown && SetupElevation.CompareSessionUser(tv, @"BOX\tv", null, "") == Unknown,
+            "Windows says nobody is signed in here: unknown, which is refused too");
+
+        // This session, as Windows records it (a CI runner's service session may have nobody).
+        using var id = WindowsIdentity.GetCurrent();
+        var (name, sid) = SetupElevation.SessionUser();
+        if (name is null) Console.WriteLine("    info: nobody signed in to this session (a service): the live check is skipped");
+        else if (SetupElevation.CompareSessionUser(id.User!.Value, id.Name, sid, name) != Same)
+            Console.WriteLine($"    info: this session's user {name} is not this test's {id.Name} (a runner): the live check is skipped");
+        else Check(sid == id.User!.Value, $"this session's user ({name}) found by SID, this test's own ({sid})");
+
+        // The refusal: full screen, one button, built but never shown.
+        const string body = "Sign in as the TV account and run TV Box Setup from there. That account must be an administrator.";
+        using var screen = new AdminNeededForm(@"Windows started setup as BOX\admin, but BOX\tv is signed in here. Setup would have set up BOX\admin instead, so it changed nothing.",
+            askAgain: null, "Setup must run as the TV account", body);
+        var buttons = screen.Controls.OfType<Button>().ToList();
+        Check(buttons.Select(b => b.Text).SequenceEqual(["A   Quit"]) && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
+            "refusal: A Quit only (Enter and Esc quit too), nothing to try again");
+        Check(screen.Controls.OfType<Label>().Any(l => l.Text == body) && screen.Controls.OfType<Label>().Any(l => l.Text == "Setup must run as the TV account"),
+            "refusal: sign in as the TV account, an administrator, and run setup from there");
+        Check(screen.FormBorderStyle == FormBorderStyle.None && screen.StartPosition == FormStartPosition.Manual, "refusal: full screen, no frame");
+        var bounds = new Rectangle(Point.Empty, screen.Size);
+        Rectangle Box(Control c) => new(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size);
+        var boxes = screen.Controls.Cast<Control>().Select(Box).ToList();
+        Check(boxes.All(bounds.Contains) && boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x),
+            "refusal: everything on screen, nothing overlapping " + string.Join(" ", boxes));
     }
 
     static void Arguments()
@@ -244,6 +315,22 @@ static class ElevationTests
         try { Check(SetupElevation.UntrustedReason(mine) is { } why && (why.Contains("owned by") || why.Contains("lets")), $"a folder of the user's in %TEMP%: not trusted ({SetupElevation.UntrustedReason(mine)})"); }
         finally { Directory.Delete(mine); }
         Check(SetupElevation.UntrustedReason(mine) is { } gone && gone.Contains("not there"), "a folder that is not there: not trusted");
+        // TV Box Setup's own folder made by an administrator with no split token (UAC off): that
+        // user owns it and may write it, and is trusted for it (alsoTrusted), never anyone else.
+        var me = WindowsIdentity.GetCurrent().User!;
+        var own = Path.Combine(Path.GetTempPath(), $"htpc-trust-own-{Guid.NewGuid():N}");
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var who in new[] { me, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) })
+            security.AddAccessRule(new FileSystemAccessRule(who, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        new DirectoryInfo(own).Create(security);
+        try
+        {
+            Check(SetupElevation.UntrustedReason(own) is not null, $"a folder this user may write: not trusted as it is ({SetupElevation.UntrustedReason(own)})");
+            Check(SetupElevation.UntrustedReason(own, me.Value) is null, $"... trusted with this user named (setup's own folder, UAC off) ({SetupElevation.UntrustedReason(own, me.Value)})");
+            Check(SetupElevation.UntrustedReason(own, "S-1-5-21-111-222-333-1002") is not null, "... not with someone else named");
+        }
+        finally { Directory.Delete(own); }
 
         // The "needs administrator rights" screen, built but never shown: what it says, laid out
         // on this screen with nothing cut off or overlapping.
@@ -275,11 +362,16 @@ static class ElevationTests
         finally { LocalFree(argv); }
     }
 
-    static bool TokenElevated()
+    static bool TokenElevated() => TokenValue(20 /* TokenElevation */) != 0;
+
+    /// <summary>1 default (no split token), 2 full (elevated, split), 3 limited.</summary>
+    static int TokenElevationType() => TokenValue(18 /* TokenElevationType */);
+
+    static int TokenValue(int infoClass)
     {
         using var me = System.Diagnostics.Process.GetCurrentProcess();
         if (!OpenProcessToken(me.Handle, 0x8 /* TOKEN_QUERY */, out var token)) throw new InvalidOperationException("OpenProcessToken failed");
-        try { return GetTokenInformation(token, 20 /* TokenElevation */, out var elevated, 4, out _) && elevated != 0; }
+        try { return GetTokenInformation(token, infoClass, out var value, 4, out _) ? value : -1; }
         finally { CloseHandle(token); }
     }
 }

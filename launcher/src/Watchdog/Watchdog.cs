@@ -42,7 +42,7 @@
 //       between tries, so the watchdog never acts on a crash loop the job is about to roll back.
 //
 // Log: %LOCALAPPDATA%\HTPC\logs\watchdog.log (the user's own; ProgramData\HTPC\logs is setup's,
-// admin-write; none for an elevated start), moved to watchdog.old.log and started afresh whenever it passes 512 KB (checked
+// admin-write; none for an elevated start with a split token), moved to watchdog.old.log and started afresh whenever it passes 512 KB (checked
 // at every line: the watchdog runs for weeks).
 
 using System;
@@ -113,18 +113,24 @@ namespace Htpc.Watchdog
             sawExit = Array.IndexOf(args, "--restarted") >= 0;
             if (sawExit) restartReason = "watchdog-restarted";
 
-            // Elevated (started from an admin window) or inside an app package (started from the
-            // Claude desktop app): the launcher would inherit that. Start again as the signed-in
-            // user through a one-shot scheduled task. Once only: with UAC off every admin token
-            // counts as elevated. (An elevated start writes no log: its folders are the user's.)
+            // Elevated beside a standard-rights token (User Account Control on: started from an
+            // admin window) or inside an app package (started from the Claude desktop app): the
+            // launcher would inherit that. Start again as the signed-in user through a one-shot
+            // scheduled task, which gives the standard-rights token; once only. Elevated with no
+            // split token (User Account Control off, the built-in Administrator) there are no lower
+            // rights to go to: it runs as it is, and so does the launcher (the launcher's
+            // Rights.cs). (A split elevated start writes no log: its folders are the user's.)
             var elevated = Native.IsElevated();
-            if (!relaunched && (elevated || Native.IsPackaged()))
+            var split = elevated && Native.ElevationType() != 1; // 1: TokenElevationTypeDefault, no split token
+            if (!relaunched && (split || Native.IsPackaged()))
             {
-                Log.ToTemp = elevated;
-                Log.Info("Watchdog started " + (elevated ? "elevated" : "inside an app package") + ": starting again as the signed-in user");
+                Log.ToTemp = split;
+                Log.Info("Watchdog started " + (split ? "elevated" : "inside an app package") + ": starting again as the signed-in user");
                 return Native.RelaunchAsUser(asShell) ? 0 : 1;
             }
             Log.Info("Watchdog " + Assembly.GetExecutingAssembly().GetName().Version + " starting (" + string.Join(" ", args) + ")");
+            if (elevated && !split)
+                Log.Warn("Running with administrator rights and no standard-rights token (User Account Control off, or Windows' built-in Administrator): the launcher gets them too");
             // Task Scheduler starts programs below normal priority, and children inherit that.
             try { var me = Process.GetCurrentProcess(); if (me.PriorityClass != ProcessPriorityClass.Normal) me.PriorityClass = ProcessPriorityClass.Normal; }
             catch (Exception) { }
@@ -522,9 +528,10 @@ namespace Htpc.Watchdog
         static string path;
 
         /// <summary>
-        /// An elevated start (it only starts itself again as the user): no log file at all, since
-        /// its folders (%LOCALAPPDATA%, %TEMP%) are the user's, where an elevated write could be
-        /// sent anywhere by a link they planted.
+        /// An elevated start beside a standard-rights token (it only starts itself again as the
+        /// user): no log file at all, since its folders (%LOCALAPPDATA%, %TEMP%) are the user's,
+        /// where an elevated write could be sent anywhere by a link they planted. With no split
+        /// token (User Account Control off) the watchdog logs there as usual: nothing to cross.
         /// </summary>
         public static bool ToTemp;
 
@@ -749,6 +756,21 @@ namespace Htpc.Watchdog
             {
                 int elevated, size;
                 return GetTokenInformation(token, 20 /* TokenElevation */, out elevated, 4, out size) && elevated != 0;
+            }
+            finally { CloseHandle(token); }
+        }
+
+        // TokenElevationType: 1 default (no split token: a standard user, or an administrator with
+        // User Account Control off, the built-in Administrator), 2 full (elevated, a limited twin
+        // exists), 3 limited. 0 when Windows does not say.
+        public static int ElevationType()
+        {
+            IntPtr token;
+            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, out token)) return 0;
+            try
+            {
+                int type, size;
+                return GetTokenInformation(token, 18 /* TokenElevationType */, out type, 4, out size) ? type : 0;
             }
             finally { CloseHandle(token); }
         }

@@ -20,6 +20,8 @@ static class UnitChecks
         WakePackets();
         Console.WriteLine("Credentials file");
         Credentials();
+        Console.WriteLine("Setup's TV files, taken in by the launcher");
+        SetupTakeIn();
     }
 
     // --- EDID -------------------------------------------------------------------------------------
@@ -219,5 +221,72 @@ static class UnitChecks
             Check.That(!Htpc.Launcher.Log.Lines.Any(l => l.Contains("client-key-123")), "credentials: the key is never logged");
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+    }
+
+    // --- TV Box Setup's own files, taken in ---------------------------------------------------------
+
+    /// <summary>
+    /// TV Box Setup keeps the TV step's files in its own admin-only folder (it reads nothing from
+    /// ProgramData\HTPC\tv); the launcher takes them in at its start, once per time setup wrote
+    /// them. Folders of the test's own stand for both.
+    /// </summary>
+    static void SetupTakeIn()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tvlab-takein-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var setup = new TvFiles(Path.Combine(root, "setup", "tv"));
+            var mine = new TvFiles(Path.Combine(root, "launcher", "tv"));
+            var t0 = new DateTime(2026, 9, 28, 12, 0, 0, DateTimeKind.Utc);
+            Check.That(!mine.TakeIn(setup), "take-in: setup left nothing, nothing taken");
+
+            // The launcher's own: a TV paired before, under its box id; one TV seen long ago.
+            var own = TvCredentials.Load(mine);
+            own.Set("webos:lg", new TvCredentials.Secret { Value = "lg-key" });
+            var ownCache = TvCache.Load(mine);
+            ownCache.Devices["roku:1"] = new CachedTv { Method = "roku", Id = "1", Name = "Old name", Address = "http://192.168.1.10:8060/", LastSeen = t0 };
+            ownCache.Save();
+            // Setup's: the Sony it paired (under setup's own box id), the Roku seen again since.
+            var fromSetup = TvCredentials.Load(setup);
+            fromSetup.Set("bravia:sony", new TvCredentials.Secret { Value = "sony-cookie" });
+            var setupCache = TvCache.Load(setup);
+            setupCache.Devices["roku:1"] = new CachedTv { Method = "roku", Id = "1", Name = "Living room", Address = "http://192.168.1.11:8060/", LastSeen = t0.AddDays(1) };
+            setupCache.LastUsed["EDIDKEY"] = t0.AddDays(1);
+            setupCache.Save();
+
+            Check.That(mine.TakeIn(setup), "take-in: what setup wrote is taken in");
+            var keys = TvCredentials.Load(mine);
+            Check.That(keys.Get("webos:lg")?.Value == "lg-key" && keys.Get("bravia:sony")?.Value == "sony-cookie", "take-in: setup's pairing joins the launcher's, which stays");
+            Check.Equal(own.BoxId, keys.BoxId, "take-in: the launcher keeps its box id");
+            Check.That(keys.Get("bravia:sony")?.Box == fromSetup.BoxId && keys.Get("webos:lg")?.Box is null,
+                "take-in: the TV paired in setup keeps setup's box id (Sony's clientid), the launcher's own none");
+            var cache = TvCache.Load(mine);
+            Check.That(cache.Devices["roku:1"].Name == "Living room" && cache.LastUsed.ContainsKey("EDIDKEY"), "take-in: the newer sighting and setup's last-used times");
+            Check.That(cache.SetupTakenUtc == File.GetLastWriteTimeUtc(setup.Cache) || cache.SetupTakenUtc == File.GetLastWriteTimeUtc(setup.Credentials),
+                $"take-in: when setup last wrote is kept ({cache.SetupTakenUtc:o})");
+
+            // Once: the launcher's own changes since are not undone at its next start.
+            keys.Forget("bravia:sony");
+            Check.That(!mine.TakeIn(setup) && TvCredentials.Load(mine).Get("bravia:sony") is null, "take-in: once per time setup wrote, not at every start");
+            // Setup run again: taken in again.
+            File.SetLastWriteTimeUtc(setup.Credentials, DateTime.UtcNow.AddMinutes(5));
+            Check.That(mine.TakeIn(setup) && TvCredentials.Load(mine).Get("bravia:sony") is not null, "take-in: setup run again, taken in again");
+            Check.That(Directory.GetFiles(setup.Dir).Length == 2, "take-in: nothing is written in setup's folder");
+
+            // A launcher with no pairing yet takes setup's box id too (nothing is paired under its own).
+            var fresh = new TvFiles(Path.Combine(root, "fresh", "tv"));
+            Check.That(fresh.TakeIn(setup) && TvCredentials.Load(fresh).BoxId == fromSetup.BoxId && TvCredentials.Load(fresh).Get("bravia:sony")?.Box is null,
+                "take-in: a launcher with no keys yet takes setup's box id");
+
+            // Setup's own set is written only where its trust check passes.
+            var refused = new TvFiles(Path.Combine(root, "refused", "tv"), _ => "not admin-only");
+            TvCredentials.Load(refused).Set("roku:x", new TvCredentials.Secret { Value = "x" });
+            Check.That(!File.Exists(refused.Credentials) && Htpc.Launcher.Log.Lines.Any(l => l.Contains("Saving TV pairing keys failed")),
+                "setup's set: nothing written where its trust check fails");
+            var trusted = new TvFiles(Path.Combine(root, "trusted", "tv"), _ => null);
+            TvCredentials.Load(trusted).Set("roku:x", new TvCredentials.Secret { Value = "x" });
+            Check.That(File.Exists(trusted.Credentials), "setup's set: written where it passes");
+        }
+        finally { try { Directory.Delete(root, true); } catch (Exception) { } }
     }
 }

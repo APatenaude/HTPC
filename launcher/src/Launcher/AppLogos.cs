@@ -19,8 +19,9 @@ sealed record LogoSource(string Id, string? Url, Func<string?>? Exe);
 /// </summary>
 sealed class AppLogos
 {
-    // Elevated (TV Box Setup), admin-only Program Files\HTPC\Setup\logos: never a folder of the user's.
-    public static readonly string DefaultDir = Environment.IsPrivilegedProcess ? Path.Combine(SetupElevation.TrustedDir, "logos")
+    // TV Box Setup (elevated), admin-only Program Files\HTPC\Setup\logos: never a folder of the user's.
+    // The launcher's are the user's own, whatever its rights (Rights.cs).
+    public static readonly string DefaultDir = Rights.SetupElevated ? Path.Combine(SetupElevation.TrustedDir, "logos")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "logos");
     public const string Host = "logos.htpc";
     public static readonly TimeSpan RetryOffline = TimeSpan.FromMinutes(10), RetryNoIcon = TimeSpan.FromDays(1);

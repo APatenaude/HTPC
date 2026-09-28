@@ -84,26 +84,38 @@ function Build-Fake([string]$Name, [string]$Source) {
 # A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once), hang (never
 # signals) or busy (healthy, but an app stays in front). When the job says "ready" (the progress
 # file, written after it started) it says it is at Home (Local\HtpcLeaving_<v>_<pid>; busy never
-# does); when the job says "leave" it exits with 75.
+# does); when the job says "leave" it exits with 75. Its events are made as the launcher makes
+# them (UpdateSignal): owned by its user, whom the job checks (Test-LauncherEvent).
 function Get-FakeLauncher([string]$Version, [string]$Mode) {
     Build-Fake "launcher-$Version-$Mode.exe" @"
 using System; using System.IO; using System.Threading; using System.Reflection; using System.Diagnostics;
+using System.Security.AccessControl; using System.Security.Principal;
 [assembly: AssemblyVersion("$Version.0")] [assembly: AssemblyFileVersion("$Version.0")]
-class P { static int Main() {
+class P {
+static EventWaitHandle Signal(string name) {
+  var me = WindowsIdentity.GetCurrent().User;
+  var security = new EventWaitHandleSecurity();
+  security.SetOwner(me);
+  security.AddAccessRule(new EventWaitHandleAccessRule(me, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+  security.AddAccessRule(new EventWaitHandleAccessRule(new SecurityIdentifier("S-1-5-18"), EventWaitHandleRights.FullControl, AccessControlType.Allow));
+  bool created;
+  return new EventWaitHandle(true, EventResetMode.ManualReset, name, out created, security);
+}
+static int Main() {
   var started = DateTime.UtcNow;
   if ("$Mode" == "crash") { Thread.Sleep(300); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
   var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
   var me = Process.GetCurrentProcess().Id;
   EventWaitHandle ev = null, leaving = null;
-  if ("$Mode" == "healthy" || "$Mode" == "busy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + me);
+  if ("$Mode" == "healthy" || "$Mode" == "busy") ev = Signal("Local\\HtpcHealthy_$($Version)_" + me);
   for (var i = 0; i < 3000; i++) {
     try {
       if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started) {
         var text = File.ReadAllText(progress);
         if (text.Contains("\"phase\":\"leave\"")) return 75;
         if (text.Contains("\"phase\":\"ready\"") && leaving == null && "$Mode" != "busy")
-          leaving = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcLeaving_$($Version)_" + me);
+          leaving = Signal("Local\\HtpcLeaving_$($Version)_" + me);
       }
     } catch (Exception) { }
     Thread.Sleep(200);

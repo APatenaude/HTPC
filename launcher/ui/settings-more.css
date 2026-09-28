@@ -7,6 +7,7 @@
    settingsFocused; auto, not hidden: moved on the GPU, see app.css .tiles-wrap) */
 .spane main { overflow: hidden auto; scrollbar-width: none; }
 .snote { margin: 10px 0 0; font-size: 22px; line-height: 1.4; color: var(--muted); }
+.snote.warn { color: var(--warn); }
 .srow .toggle, .srow .value, .srow .sbutton { flex-shrink: 0; }
 
 /* Sliders in rows (volume, brightness, speeds) */

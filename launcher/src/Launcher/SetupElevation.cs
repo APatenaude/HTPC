@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -9,7 +10,8 @@ namespace Htpc.Launcher;
 /// <summary>
 /// TV Box Setup asks Windows for administrator rights once, as it opens, where it used to ask at
 /// the end of the wizard. Not through a requireAdministrator manifest: the same exe is the
-/// everyday launcher, which never runs elevated. Setup mode started without the rights asks
+/// everyday launcher, which runs at standard rights (Rights.cs: started elevated, it starts again
+/// without them, unless there are none to go to). Setup mode started without the rights asks
 /// for them and ends; declined, a screen says setup needs them (A: try again, B: quit).
 ///
 /// Never elevated where the user can write: this exe is one self-extracting file, and .NET
@@ -167,6 +169,71 @@ static class SetupElevation
         !setupMode ? Step.Run
         : elevated ? (trustedPlace ? Step.Run : args.Contains(ElevatedFlag) ? Step.Unsafe : Step.Relocate)
         : args.Contains(ElevatedFlag) ? Step.NeedsAdmin : Step.Elevate;
+
+    /// <summary>Same: setup runs as the user signed in here. Other: as someone else. Unknown: Windows did not say who is signed in.</summary>
+    public enum SessionMatch { Same, Other, Unknown }
+
+    /// <summary>
+    /// Whether the elevated setup runs as the user signed in to this session: by SID, or by
+    /// DOMAIN\name when the session's name could not be turned into one. Setup sets up the account
+    /// it runs as (USERNAME, HKCU: the autologon, the shell, the tiles), so a standard account
+    /// whose permission prompt an administrator approved would get the administrator's set up.
+    /// </summary>
+    public static SessionMatch CompareSessionUser(string tokenSid, string tokenName, string? sessionSid, string? sessionName) =>
+        sessionSid is not null ? (string.Equals(tokenSid, sessionSid, StringComparison.OrdinalIgnoreCase) ? SessionMatch.Same : SessionMatch.Other)
+        : string.IsNullOrEmpty(sessionName) ? SessionMatch.Unknown
+        : string.Equals(tokenName, sessionName, StringComparison.OrdinalIgnoreCase) ? SessionMatch.Same : SessionMatch.Other;
+
+    [DllImport("wtsapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool WTSQuerySessionInformationW(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
+    [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr memory);
+
+    /// <summary>
+    /// The user signed in to this session, from Windows' session record (not this process's
+    /// token): DOMAIN\name, and its SID when Windows can look the name up. Nulls when it says nothing.
+    /// </summary>
+    public static (string? Name, string? Sid) SessionUser()
+    {
+        static string? Query(int infoClass)
+        {
+            if (!WTSQuerySessionInformationW(IntPtr.Zero /* this server */, -1 /* this session */, infoClass, out var buffer, out _)) return null;
+            try { return Marshal.PtrToStringUni(buffer); }
+            finally { WTSFreeMemory(buffer); }
+        }
+        var user = Query(5 /* WTSUserName */);
+        if (string.IsNullOrEmpty(user)) return (null, null);
+        var domain = Query(7 /* WTSDomainName */);
+        var name = string.IsNullOrEmpty(domain) ? user : $@"{domain}\{user}";
+        try { return (name, new NTAccount(name).Translate(typeof(SecurityIdentifier)).Value); }
+        catch (Exception) { return (name, null); } // a name Windows cannot look up: compared by name
+    }
+
+    /// <summary>
+    /// Main, TV Box Setup with administrator rights, before it does anything: true when it runs as
+    /// the user signed in here. Otherwise (an administrator approved the prompt for a standard
+    /// account, or Run as another user) a full-screen refusal (A quits), the watchdog's pause the
+    /// first copy set in the signed-in user's registry lifted, and false: setup never goes on.
+    /// </summary>
+    public static bool RunsAsSessionUser()
+    {
+        using var me = WindowsIdentity.GetCurrent();
+        var (name, sid) = SessionUser();
+        var match = CompareSessionUser(me.User!.Value, me.Name, sid, name);
+        if (match == SessionMatch.Same) return true;
+        Log.Warn(match == SessionMatch.Other ? $"Setup: running as {me.Name}, but {name} is signed in here: refused (it would set up {me.Name}'s account)"
+            : $"Setup: running as {me.Name}, and Windows did not say who is signed in here: refused");
+        var why = match == SessionMatch.Other
+            ? $"Windows started setup as {me.Name}, but {name} is signed in here. Setup would have set up {me.Name} instead, so it changed nothing."
+            : $"Windows started setup as {me.Name} and did not say who is signed in here, so setup changed nothing.";
+        if (sid is not null) WatchdogPause.ClearFor(sid);
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        using var screen = new AdminNeededForm(why, askAgain: null, "Setup must run as the TV account",
+            "Sign in as the TV account and run TV Box Setup from there. That account must be an administrator.");
+        Application.Run(screen);
+        Log.Info("Setup: quit (not the signed-in user)");
+        return false;
+    }
 
     /// <summary>
     /// Whether nothing this process runs came from a folder the user can write: a build (a folder
@@ -336,7 +403,7 @@ static class SetupElevation
     /// </summary>
     public static void ClearSetupWebViews()
     {
-        if (Environment.IsPrivilegedProcess) return;   // never elevated: the user's folder
+        if (Environment.IsPrivilegedProcess) return;   // never with administrator rights: the user's folder
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "setup-webview");
         Task.Run(() =>
         {
@@ -353,11 +420,15 @@ static class SetupElevation
     /// <summary>
     /// Why a folder is not safe for an elevated process to rely on, or null when it is: a junction
     /// or link, an owner other than SYSTEM, Administrators or TrustedInstaller, or write rights
-    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#).
+    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#). alsoTrusted: one
+    /// more SID that may own and write it (TV Box Setup's own folder, made by an administrator with
+    /// no split token: its owner and its CREATOR OWNER rights are that user's, who is an
+    /// administrator whatever runs).
     /// </summary>
-    public static string? UntrustedReason(string dir)
+    public static string? UntrustedReason(string dir, string? alsoTrusted = null)
     {
         string[] trusted = ["S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
+        if (alsoTrusted is not null) trusted = [.. trusted, alsoTrusted];
         const FileSystemRights write = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes |
             FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles |
             FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
@@ -607,7 +678,9 @@ static class AsUser
 /// "Setup needs administrator rights to install", full screen in setup's colours, when Windows'
 /// permission prompt was declined or could not start setup. A, Enter or the button asks again;
 /// B, Esc or Quit ends setup. The controller is read directly, as everywhere in the launcher; the
-/// prompt itself needs a mouse or keyboard, which the screen says.
+/// prompt itself needs a mouse or keyboard, which the screen says. With nothing to try again (setup
+/// runs as another account than the one signed in: SetupElevation.RunsAsSessionUser) only
+/// "A Quit", which A, B, Enter and Esc all do.
 /// </summary>
 sealed class AdminNeededForm : Form
 {
@@ -615,7 +688,7 @@ sealed class AdminNeededForm : Form
         Muted = Color.FromArgb(0x8E, 0x91, 0x99), Accent = Color.FromArgb(0x8C, 0xC2, 0xFF),
         Warn = Color.FromArgb(0xF2, 0xB2, 0x4C), ButtonBg = Color.FromArgb(0x22, 0x25, 0x2B);
 
-    readonly Func<string?> askAgain;   // null: the elevated copy runs
+    readonly Func<string?>? askAgain;  // returns null once the elevated copy runs; null: only Quit
     readonly ControllerService controller = new();
     readonly Label note;
     long quietUntil;                   // presses made while the prompt was up arrive once it is gone
@@ -624,7 +697,7 @@ sealed class AdminNeededForm : Form
     public bool HandedOver { get; private set; }
 
     /// <summary>heading and body: another reason setup cannot go on (its screens did not show: MainForm.SetupCannotShow).</summary>
-    public AdminNeededForm(string why, Func<string?> askAgain, string? heading = null, string? body = null)
+    public AdminNeededForm(string why, Func<string?>? askAgain, string? heading = null, string? body = null)
     {
         this.askAgain = askAgain;
         Text = "TV Box Setup";
@@ -658,27 +731,36 @@ sealed class AdminNeededForm : Form
             b.LostFocus += (_, _) => b.FlatAppearance.BorderColor = Bg;
             return b;
         }
-        var again = Choice("A   Try again", true);
-        var quit = Choice("B   Quit", false);
-        again.Click += (_, _) => TryAgain();
+        // Nothing to try again: one button, Quit, as the primary one.
+        var again = askAgain is null ? null : Choice("A   Try again", true);
+        var quit = Choice(askAgain is null ? "A   Quit" : "B   Quit", askAgain is null);
+        if (again is not null) again.Click += (_, _) => TryAgain();
         quit.Click += (_, _) => Close();
-        AcceptButton = again;
+        AcceptButton = again ?? quit;
         CancelButton = quit;
 
         // Top to bottom, the block centred on the screen.
         var gap = (int)(36 * s);
         var parts = new Control[] { title, headingLine, bodyLine, note };
         var heights = parts.Select(c => c.GetPreferredSize(new Size(width, 0)).Height).ToArray();
-        var y = (Height - (heights.Sum() + again.Height + gap * parts.Length)) / 2;
+        var y = (Height - (heights.Sum() + quit.Height + gap * parts.Length)) / 2;
         for (var i = 0; i < parts.Length; i++)
         {
             parts[i].Location = new Point(left, y);
             y += heights[i] + gap;
         }
-        again.Location = new Point(left, y);
-        quit.Location = new Point(left + again.Width + (int)(24 * s), y);
-        Controls.AddRange([title, headingLine, bodyLine, note, again, quit]);
-        ActiveControl = again;
+        if (again is not null)
+        {
+            again.Location = new Point(left, y);
+            quit.Location = new Point(left + again.Width + (int)(24 * s), y);
+            Controls.AddRange([title, headingLine, bodyLine, note, again, quit]);
+        }
+        else
+        {
+            quit.Location = new Point(left, y);
+            Controls.AddRange([title, headingLine, bodyLine, note, quit]);
+        }
+        ActiveControl = again ?? quit;
 
         controller.Pressed += (pad, repeat) =>
         {
@@ -701,13 +783,13 @@ sealed class AdminNeededForm : Form
 
     void OnPad(Pad pad)
     {
-        if (pad == Pad.A) TryAgain();
-        else if (pad == Pad.B && Environment.TickCount64 >= quietUntil) Close();
+        if (pad == Pad.A && askAgain is not null) TryAgain();
+        else if (pad is Pad.A or Pad.B && Environment.TickCount64 >= quietUntil) Close();
     }
 
     void TryAgain()
     {
-        if (Environment.TickCount64 < quietUntil) return;
+        if (askAgain is null || Environment.TickCount64 < quietUntil) return;
         note.ForeColor = Muted;
         note.Text = "Windows is asking for permission: choose Yes with a mouse or keyboard.";
         note.Refresh();

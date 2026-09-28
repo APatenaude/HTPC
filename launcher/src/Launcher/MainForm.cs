@@ -35,8 +35,8 @@ sealed partial class MainForm : Form
     TextField? lastField;        // the latest text field that had the focus
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
-    // Elevated (TV Box Setup): admin-only, never the user's %TEMP%.
-    readonly string captureDir = Environment.IsPrivilegedProcess ? Path.Combine(SetupElevation.TrustedDir, "temp", "htpc-launcher")
+    // TV Box Setup (elevated): admin-only, never the user's %TEMP%.
+    readonly string captureDir = Rights.SetupElevated ? Path.Combine(SetupElevation.TrustedDir, "temp", "htpc-launcher")
         : Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
@@ -236,7 +236,7 @@ sealed partial class MainForm : Form
     async Task InitWebView()
     {
         // Setup (elevated) has a profile of its own, new each run: SetupElevation.WebViewFolder.
-        var dataDir = SetupElevation.WebViewFolder(options.Setup, Environment.IsPrivilegedProcess);
+        var dataDir = SetupElevation.WebViewFolder(options.Setup, Rights.SetupElevated);
         // The controller's presses reach the page as web messages, not user gestures: without
         // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
         // No error dialogs of the browser's own ("can't read and write to its data directory"):
@@ -676,7 +676,7 @@ sealed partial class MainForm : Form
     void FinishSetup()
     {
         var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
-        var elevated = Environment.IsPrivilegedProcess;
+        var elevated = Rights.SetupElevated;
         var next = SetupElevation.AfterSetup(installed, File.Exists(installed), File.Exists(Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe")),
             DesktopMode.WatchdogIsShell(), Environment.ProcessPath!, Environment.GetCommandLineArgs().Skip(1), elevated);
         if (next is not null)
