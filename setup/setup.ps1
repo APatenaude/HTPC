@@ -137,19 +137,35 @@ if (Test-AppDataRedirected) {
     $runLevel = if (Test-Admin) { 'Highest' } else { 'Limited' }
     $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel $runLevel
+    $since = Get-Date
     Register-ScheduledTask -TaskName $RelaunchTask -Action $action -Principal $principal -Force | Out-Null
-    Start-ScheduledTask -TaskName $RelaunchTask
+    # One-shot: the task (PowerShell running this folder's setup.ps1, maybe at Highest) goes as
+    # soon as its run has started, whatever that run does next (the run keeps going; removing a
+    # task does not end it). Never left behind for anything to start again.
+    try {
+        Start-ScheduledTask -TaskName $RelaunchTask
+        for ($i = 0; $i -lt 30; $i++) {
+            $task = Get-ScheduledTask -TaskName $RelaunchTask -ErrorAction SilentlyContinue
+            if (-not $task) { break }   # the relaunched copy removed it already
+            if ($task.State -eq 'Running' -or ($task | Get-ScheduledTaskInfo).LastRunTime -ge $since) { break }
+            Start-Sleep -Milliseconds 500
+        }
+    } finally {
+        Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
+    }
     Write-Host "Setup continues in its own window. Logs: $HtpcData\logs"
     exit 0
 }
+
+# The relaunched copy, elevated or not yet: the relaunch task goes first of all (its launcher
+# removes it too, once this run started; see above).
+Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
 
 if (-not (Test-Admin)) {
     Write-Host 'Asking for admin rights (UAC)...'
     Start-Process (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -ArgumentList (Get-ArgumentLine) -WorkingDirectory $PSScriptRoot
     exit 0
 }
-
-Unregister-ScheduledTask -TaskName $RelaunchTask -Confirm:$false -ErrorAction SilentlyContinue
 
 # C:\ProgramData\HTPC locked and owned by Administrators first of all, before this log or any
 # step writes there: made by a standard process (the launcher, or TV Box Setup before it asked for
