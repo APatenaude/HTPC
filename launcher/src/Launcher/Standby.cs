@@ -329,10 +329,12 @@ sealed class Standby
         try
         {
             if (!settings.WifiOffInStandby || Wifi is not { } wifi) return;
+            // The flag goes only once the radio is on: refused, it is tried again at the next wake
+            // or start, not left off for good.
+            if (!await wifi.Switch(true)) { Log.Warn($"Wi-Fi radio back on ({why}): Windows refused; tried again at the next wake or start"); return; }
             settings.WifiOffInStandby = false;
             settings.Save();
-            var on = await wifi.Switch(true);
-            Log.Info($"Wi-Fi radio back on ({why}){(on ? "" : ": Windows refused")}");
+            Log.Info($"Wi-Fi radio back on ({why})");
         }
         catch (Exception e) { Log.Warn($"Wi-Fi radio back on: {e.Message}"); }
     }
