@@ -48,6 +48,7 @@ sealed partial class MainForm
         if (next.Task == AsUser.WatchdogTask && DesktopMode.WatchdogRunning()) Log.Info("The watchdog is running: it starts the launcher");
         else AsUser.Start(next);
         WatchdogPause.Clear();
+        SetupElevation.HandedOver = true;
         Environment.ExitCode = 75;
     }
 

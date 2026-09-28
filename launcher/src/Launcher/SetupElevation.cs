@@ -464,7 +464,45 @@ static class SetupElevation
     /// A new copy of this setup, started the trusted way (Relaunch: no prompt when elevated), with
     /// this one's arguments; this one then ends. Null once it runs, else why not, for the screen.
     /// </summary>
-    public static string? StartAgain() => Relaunch(Environment.GetCommandLineArgs().Skip(1), prompt: !Environment.IsPrivilegedProcess);
+    public static string? StartAgain()
+    {
+        var why = Relaunch(Environment.GetCommandLineArgs().Skip(1), prompt: !Environment.IsPrivilegedProcess);
+        if (why is null) HandedOver = true;
+        return why;
+    }
+
+    /// <summary>
+    /// Setup handed over: the installed launcher (or its watchdog) started for the user, this window
+    /// became the home screen, or a new copy of setup took over. Otherwise its end puts things back
+    /// (RestoreAfterEarlyExit).
+    /// </summary>
+    public static bool HandedOver { get; set; }
+
+    /// <summary>
+    /// Setup ended before it handed over (closed, or its screens did not show): the watchdog's pause
+    /// it set goes, and a launcher it ended as it started comes back, started as the signed-in user
+    /// (AsUser: the one-shot not-elevated task), through the watchdog when it is installed. A
+    /// watchdog already running starts it by itself once the pause is off. Without this an install
+    /// from before the Shell step (the launcher started from Run, no watchdog) was left on a bare
+    /// desktop. Never throws.
+    /// </summary>
+    public static void RestoreAfterEarlyExit(int launchersEnded)
+    {
+        try
+        {
+            WatchdogPause.Clear();
+            if (launchersEnded == 0) return;
+            if (DesktopMode.WatchdogRunning()) { Log.Info("Setup ended early: the watchdog starts the launcher again"); return; }
+            var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
+            var watchdog = Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe");
+            if (!File.Exists(installed)) { Log.Info("Setup ended early: no installed launcher to start again"); return; }
+            var start = File.Exists(watchdog) ? new UserStart(watchdog, DesktopMode.WatchdogIsShell() ? "--shell" : "", AsUser.WatchdogTask)
+                : new UserStart(installed, "", AsUser.LauncherTask);
+            AsUser.Start(start);
+            Log.Info($"Setup ended early: {start.Exe} started again for the user");
+        }
+        catch (Exception e) { Log.Error("Setup ended early: starting the launcher again", e); }
+    }
 
     /// <summary>
     /// Main, setup mode not running yet (Decide): without administrator rights, asks for them (the

@@ -693,6 +693,7 @@ sealed partial class MainForm : Form
             if (elevated) { Post(new { type = "toast", text = "The home screen did not start. Restart the box to get to it.", kind = "warn" }); return; }
         }
         setupMode = false;
+        SetupElevation.HandedOver = true;   // this window is the home screen now (not elevated)
         tv.InSetup = false;
         uiReady = false;
         Log.Info("Setup finished: home screen");
