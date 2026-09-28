@@ -120,6 +120,7 @@ sealed partial class MainForm : Form
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
         InitAlerts();   // MainForm.Alerts.cs
         InitSettings(); // MainForm.Settings.cs
+        InitScreen();   // MainForm.Screen.cs: display changes
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -129,6 +130,7 @@ sealed partial class MainForm : Form
         var handoff = TakeHandoffAtStart();
         var screen = Screen.PrimaryScreen!.Bounds;
         Bounds = options.Windowed ? new Rectangle(screen.X + 80, screen.Y + 80, screen.Width / 2, screen.Height / 2) : screen;
+        fittedTo = screen; // and again at each display change (MainForm.Screen.cs)
         RestoreBrightness(); // MainForm.Settings.cs: the level set last, before the first frame
         apps.Adopt(); // apps left open by a previous launcher
         standby = new Standby(controller, settings, media);
@@ -984,6 +986,7 @@ sealed partial class MainForm : Form
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == DesktopMode.BackToTvMessage) { BackToTv(); return; } // HtpcLauncher.exe --tv
+        if (m.Msg == WM_DISPLAYCHANGE) ScreenChanged("display change"); // MainForm.Screen.cs; on to WinForms too
         if (m.Msg == StandbyMessage && standby is not null)
         {
             if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone

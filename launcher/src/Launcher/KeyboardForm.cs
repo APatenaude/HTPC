@@ -117,6 +117,19 @@ sealed class KeyboardForm : Form
         if (!Visible) Show();
     }
 
+    /// <summary>The primary screen changed (MainForm.Screen.cs): the band moves to the new one.</summary>
+    public void FitScreen()
+    {
+        if (Visible) Bounds = Band(Screen.PrimaryScreen!.Bounds);
+    }
+
+    // WinForms moves it to the rectangle Windows suggests for the new DPI: the band's instead.
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        FitScreen();
+    }
+
     /// <summary>Its place on a screen: the bottom band, the screen's whole width.</summary>
     public static Rectangle Band(Rectangle screen)
     {

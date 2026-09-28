@@ -101,12 +101,26 @@ static unsafe class ScreenCapture
     public static Size TargetSize(Size screen) =>
         screen.Width <= Width ? screen : new Size(Width, (int)Math.Round((double)screen.Height * Width / screen.Width));
 
+    static int displays;   // moved on at each display change: the duplication is set up again
+
+    /// <summary>
+    /// The displays changed (MainForm.Screen.cs; any thread): the next capture looks for the
+    /// output again. The primary screen is always at (0, 0), so another one of the same size (a
+    /// new primary, the TV now on another GPU) looks the same by its bounds alone.
+    /// </summary>
+    public static void ScreenChanged()
+    {
+        Interlocked.Increment(ref displays);
+        Interlocked.Exchange(ref noDuplicationUntil, 0); // the new screen may well be duplicated
+    }
+
     static Duplicator Duplication(Rectangle screen)
     {
-        if (duplicator is { } d && d.Bounds == screen) return d;
+        var now = Volatile.Read(ref displays);
+        if (duplicator is { } d && d.Bounds == screen && d.Displays == now) return d;
         duplicator?.Dispose();
         duplicator = null;
-        return duplicator = new Duplicator(screen);
+        return duplicator = new Duplicator(screen) { Displays = now };
     }
 
     // --- GDI, the fallback -------------------------------------------------------------------
@@ -269,6 +283,7 @@ static unsafe class ScreenCapture
         static readonly Guid ID3D11Texture2D = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
 
         public readonly Rectangle Bounds;
+        public int Displays { get; init; }   // ScreenCapture.displays when made
         IntPtr device, context, output;
 
         public Duplicator(Rectangle screen)
