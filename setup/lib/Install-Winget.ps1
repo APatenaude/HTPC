@@ -11,31 +11,38 @@
       - not elevated: installs it for the current user only (Add-AppxPackage)
 
     Dependencies already present at the same or a newer version are not re-registered:
-    doing so fails with 0x80073D02 while an app that uses them is running (on the N97 box,
-    Intel Graphics Software holds VCLibs open).
+    doing so fails with 0x80073D02 while an app that uses them is running (on the first box,
+    a graphics maker's Store app held VCLibs open).
 
-    Tested 2026-09-26 on the N97 box, not elevated, with v1.29.380.
-    The elevated (provisioning) path is not tested yet.
+    Tested 2026-09-26: on the N97 box not elevated, with v1.29.380; elevated (provisioning too)
+    in the clean-install VM, through setup.ps1.
+
+    Setup's Winget step (-IfMissing) leaves a winget that answers alone: updating it is the
+    winget-update job's (Settings > Updates), and setup run again must not need GitHub (offline,
+    or its API's rate limit). The job (no switch) updates to the latest release.
 
 .PARAMETER Version
     Release tag such as v1.29.380, or 'latest'.
+.PARAMETER IfMissing
+    Only when winget is missing or does not answer.
 #>
 param(
     [string]$Version = 'latest',
-    [string]$WorkDir = (Join-Path $env:TEMP 'htpc-setup\winget')
+    [string]$WorkDir = (Join-Path $env:TEMP 'htpc-setup\winget'),
+    [switch]$IfMissing
 )
 
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+. "$PSScriptRoot\Common.ps1"
 
 $wingetExe = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
 $bundleName = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'
 $depsName = 'DesktopAppInstaller_Dependencies.zip'
 
-function Test-Admin {
-    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# The installed winget's version (v1.29.380), or $null when it is missing or does not answer.
+function Get-InstalledWinget {
+    if (-not (Test-Path $wingetExe)) { return $null }
+    try { $v = "$(& $wingetExe --version)".Trim() } catch { return $null }
+    if ($LASTEXITCODE -eq 0 -and $v -match '^v\d') { $v } else { $null }
 }
 
 function Save-Asset([object]$Release, [string]$Pattern) {
@@ -61,15 +68,30 @@ function Test-DependencyNeeded([IO.FileInfo]$File) {
     $newest -lt [version]$parts[1]
 }
 
+$installed = Get-InstalledWinget
+if ($IfMissing -and $installed) {
+    Write-Host "winget $installed is installed (its updates: Settings > Updates)"
+    return
+}
+if (-not $installed) { Assert-Internet 'installing winget (from GitHub)' }
+
 $api = if ($Version -eq 'latest') { 'releases/latest' } else { "releases/tags/$Version" }
-$release = Invoke-RestMethod "https://api.github.com/repos/microsoft/winget-cli/$api" -Headers @{ 'User-Agent' = 'htpc-setup' }
+try {
+    $release = Invoke-RestMethod "https://api.github.com/repos/microsoft/winget-cli/$api" -Headers @{ 'User-Agent' = 'htpc-setup' }
+} catch {
+    # A winget that works is kept; without one there is nothing to fall back on.
+    if ($installed) { Write-Attention "GitHub did not answer ($($_.Exception.Message)); winget $installed kept"; return }
+    throw "GitHub did not answer, so winget cannot be downloaded: $($_.Exception.Message). Try again later (run setup again)."
+}
 $tag = $release.tag_name
 
-if ((Test-Path $wingetExe) -and ((& $wingetExe --version) -eq $tag)) {
+if ($installed -eq $tag) {
     Write-Host "winget $tag is already installed"
     return
 }
 
+# A fresh folder: files left by an interrupted run are never installed.
+if (Test-Path $WorkDir) { Remove-Item $WorkDir -Recurse -Force }
 New-Item -ItemType Directory -Force $WorkDir | Out-Null
 Write-Host "Downloading winget $tag"
 $bundle = Save-Asset $release ([regex]::Escape($bundleName) + '$')

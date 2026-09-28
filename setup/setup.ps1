@@ -81,7 +81,7 @@ $Steps = [ordered]@{
         Checkpoint-Computer -Description 'HTPC setup' -RestorePointType MODIFY_SETTINGS -WarningAction SilentlyContinue
         Write-Change 'restore point created'
     }
-    Winget       = { & "$lib\Install-Winget.ps1" }
+    Winget       = { & "$lib\Install-Winget.ps1" -IfMissing }
     Apps         = { & "$lib\Install-Apps.ps1" -Ids $Apps }
     Codecs       = { & "$lib\Install-Codecs.ps1" }
     Edge         = { & "$lib\Set-EdgePolicy.ps1" }

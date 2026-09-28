@@ -18,7 +18,11 @@
       - an app its installer starts (Stremio does) is closed again;
       - install.firstRun files are written before the app first starts, when missing (VLC);
       - programs listed in install.blockInbound get an inbound Block rule, so Windows does not ask
-        to allow them on the network (Stremio's streaming service).
+        to allow them on the network (Stremio's streaming service): before a picked app first
+        runs, and on every run for every catalog app installed (a rule gone missing comes back,
+        whether the app came from setup or the library).
+    Without an internet connection nothing is downloaded: the apps already there are dealt with,
+    and the step fails naming the ones not installed.
     Then nothing the catalog's apps set up starts by itself (lib\AppAutostart.ps1): every catalog
     app, installed now or earlier from the library, in the machine's places and this user's
     (Run values, Startup folders, tasks, declared services, Spotify's prefs).
@@ -43,11 +47,25 @@ $picked = if ($Ids) { $entries | Where-Object { $Ids -contains $_.id } } else { 
 $unknown = $Ids | Where-Object { ($entries.id) -notcontains $_ }
 if ($unknown) { throw "Not in the catalog: $($unknown -join ', ')" }
 
+# An app whose program is in place (launch.exe): installed, from setup or the library.
+function Test-AppFiles($App) {
+    [bool]($App.launch -and $App.launch.exe -and (Test-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($App.launch.exe))))
+}
+function Test-InstallsLater($App) {
+    $App.install.PSObject.Properties['elevated'] -and $App.install.elevated -eq $false -and (Test-Admin)
+}
+
+# Offline, only what is there already is dealt with; the others are named at the end.
+$missing = @($picked | Where-Object { $_.install -and $_.install.source -ne 'builtin' -and -not (Test-InstallsLater $_) -and -not (Test-AppFiles $_) })
+$offline = $missing.Count -and -not (Test-Internet)
+if ($offline) { Write-Attention "no internet connection: $(($missing | ForEach-Object { $_.name }) -join ', ') not installed" }
+
 $failed = @()
 foreach ($app in $picked) {
+    if ($offline -and $missing -contains $app) { continue }
     try {
         if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
-        if ($app.install.PSObject.Properties['elevated'] -and $app.install.elevated -eq $false -and (Test-Admin)) {
+        if (Test-InstallsLater $app) {
             Write-Attention "$($app.name) must be installed without admin rights; install it from the library"; continue
         }
         if (Test-Admin) { Add-InboundBlock $app $null }   # before the app can first run
@@ -60,6 +78,11 @@ foreach ($app in $picked) {
         $failed += $app.name
     }
 }
+# Every installed catalog app's Block rules, not only the ones picked now.
+if (Test-Admin) {
+    foreach ($app in $entries | Where-Object { $_.install -and $_.install.blockInbound -and (Test-AppFiles $_) }) { Add-InboundBlock $app $null }
+}
 Write-Host '  Apps that would start by themselves'
 [void](Invoke-AppAutostartGuard -Apps $entries -ReportOthers -Context 'setup')
+if ($offline) { throw "No internet connection: $(($missing | ForEach-Object { $_.name }) -join ', ') not installed. Connect the box (network cable or Wi-Fi), then run setup again." }
 if ($failed) { throw "Failed to install: $($failed -join ', ')" }

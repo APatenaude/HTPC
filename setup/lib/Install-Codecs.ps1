@@ -4,8 +4,8 @@
     Installs the HEVC Video Extensions, which Edge needs for HEVC (4K streaming sites).
 
 .DESCRIPTION
-    The GPU decodes HEVC already (docs/MACHINE.md); Edge reaches it through the Windows
-    HEVC extension, which LTSC lacks. This installs the free "HEVC Video Extensions from
+    The GPU's driver decodes HEVC (most GPUs of the last years do; the DecodeCheck step says);
+    Edge reaches that decoder through the Windows HEVC extension, which LTSC lacks. This installs the free "HEVC Video Extensions from
     Device Manufacturer" (Store id 9N4WGH0Z6VHQ) with neither the Store app nor winget:
     Microsoft's codec extensions are not in winget's msstore source ("No package found").
 
@@ -17,7 +17,7 @@
          prerequisites (OS and architecture checks) that a real client evaluates; the
          script reports them as installed and asks again until the packages come back.
       3. FE3 GetExtendedUpdateInfo2: the download URL of the chosen file.
-    It picks the newest version with an x64 package that runs on this Windows build.
+    It picks the newest version with an x64 package (the box is x64) that runs on this Windows build.
     (2.5.x needs 10.0.26200, i.e. 25H2; LTSC 2024 is 26100, so it gets 2.4.x.) The file
     comes over plain http, as Windows Update's do (the CDN has no valid certificate for
     https), and is installed only when
@@ -278,6 +278,7 @@ if ($userPackage -and $provisioned) {
     return
 }
 
+Assert-Internet 'installing the HEVC Video Extensions (from Microsoft''s Store servers)'
 Write-Host "  Looking up $ProductId in the Store catalog"
 $catalog = Get-CatalogProduct
 $candidates = @(Get-StorePackages $catalog.CategoryId |

@@ -25,7 +25,7 @@ it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the me
 | Step | Script | Does |
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
-| Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store) |
+| Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store), when it is missing or does not answer (`-IfMissing`: its updates are the `winget-update` job's, and a run again needs no GitHub) |
 | Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment), uBlock Origin Lite, no first-run or promos; nothing of Edge running with no window open (`StartupBoostEnabled` and `BackgroundModeEnabled` 0, the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed) |
