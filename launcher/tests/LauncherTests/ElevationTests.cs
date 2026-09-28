@@ -315,6 +315,22 @@ static class ElevationTests
         try { Check(SetupElevation.UntrustedReason(mine) is { } why && (why.Contains("owned by") || why.Contains("lets")), $"a folder of the user's in %TEMP%: not trusted ({SetupElevation.UntrustedReason(mine)})"); }
         finally { Directory.Delete(mine); }
         Check(SetupElevation.UntrustedReason(mine) is { } gone && gone.Contains("not there"), "a folder that is not there: not trusted");
+        // TV Box Setup's own folder made by an administrator with no split token (UAC off): that
+        // user owns it and may write it, and is trusted for it (alsoTrusted), never anyone else.
+        var me = WindowsIdentity.GetCurrent().User!;
+        var own = Path.Combine(Path.GetTempPath(), $"htpc-trust-own-{Guid.NewGuid():N}");
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var who in new[] { me, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) })
+            security.AddAccessRule(new FileSystemAccessRule(who, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        new DirectoryInfo(own).Create(security);
+        try
+        {
+            Check(SetupElevation.UntrustedReason(own) is not null, $"a folder this user may write: not trusted as it is ({SetupElevation.UntrustedReason(own)})");
+            Check(SetupElevation.UntrustedReason(own, me.Value) is null, $"... trusted with this user named (setup's own folder, UAC off) ({SetupElevation.UntrustedReason(own, me.Value)})");
+            Check(SetupElevation.UntrustedReason(own, "S-1-5-21-111-222-333-1002") is not null, "... not with someone else named");
+        }
+        finally { Directory.Delete(own); }
 
         // The "needs administrator rights" screen, built but never shown: what it says, laid out
         // on this screen with nothing cut off or overlapping.

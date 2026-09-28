@@ -420,11 +420,15 @@ static class SetupElevation
     /// <summary>
     /// Why a folder is not safe for an elevated process to rely on, or null when it is: a junction
     /// or link, an owner other than SYSTEM, Administrators or TrustedInstaller, or write rights
-    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#).
+    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#). alsoTrusted: one
+    /// more SID that may own and write it (TV Box Setup's own folder, made by an administrator with
+    /// no split token: its owner and its CREATOR OWNER rights are that user's, who is an
+    /// administrator whatever runs).
     /// </summary>
-    public static string? UntrustedReason(string dir)
+    public static string? UntrustedReason(string dir, string? alsoTrusted = null)
     {
         string[] trusted = ["S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
+        if (alsoTrusted is not null) trusted = [.. trusted, alsoTrusted];
         const FileSystemRights write = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes |
             FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles |
             FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;

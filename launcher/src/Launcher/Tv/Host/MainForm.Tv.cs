@@ -8,8 +8,13 @@ namespace Htpc.Launcher;
 /// </summary>
 sealed partial class MainForm
 {
-    /// <summary>TV Box Setup's own TV files (admin-only), which the launcher takes in at its start.</summary>
-    static TvFiles SetupTvFiles() => new(Path.Combine(SetupElevation.TrustedDir, "tv"), SetupElevation.UntrustedReason);
+    /// <summary>
+    /// TV Box Setup's own TV files (admin-only), which the launcher takes in at its start. Written
+    /// only while Program Files\HTPC\Setup passes the trust check; with no split token (UAC off)
+    /// the folder may be its administrator's own, whose rights are the same either way.
+    /// </summary>
+    static TvFiles SetupTvFiles() => new(Path.Combine(SetupElevation.TrustedDir, "tv"), dir =>
+        SetupElevation.UntrustedReason(dir, Rights.Elevation == Rights.Token.NoSplit ? System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value : null));
 
     TvService CreateTv()
     {
