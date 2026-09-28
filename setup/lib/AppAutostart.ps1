@@ -19,9 +19,9 @@
 #                            only: SYSTEM never writes in a user's folders
 # Never touched, whatever the catalog says: ours (the HTPC launcher value, tasks under \HTPC\ or
 # named HTPC..., anything in Program Files\HTPC), Windows' own (SecurityHealth, tasks under
-# \Microsoft\, programs in the Windows folder), Edge's updater (the user chose Edge updates) and
-# CoworkVMService. What no catalog app claims is left alone, and logged on a pass over the whole
-# catalog (-ReportOthers).
+# \Microsoft\, programs in the Windows folder) and Edge's updater (the user chose Edge updates).
+# A service is only ever changed when the catalog names it. What no catalog app claims is left
+# alone, and logged on a pass over the whole catalog (-ReportOthers).
 #
 # Where it looks depends on who runs it (Get-AutostartPlaces):
 #   SYSTEM (the \HTPC\Jobs task)  HKLM, the signed-in user's hive (HKU\<SID>, only while loaded:
@@ -37,7 +37,6 @@
 
 $AutostartKeepRun = @('HTPC launcher', 'SecurityHealth')
 $AutostartKeepTasks = @('\Microsoft\*', '\HTPC*', '\MicrosoftEdgeUpdateTask*')
-$AutostartKeepServices = @('CoworkVMService')
 $AutostartVersion = 'SOFTWARE\Microsoft\Windows\CurrentVersion'
 $AutostartApproved = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved'
 
@@ -194,7 +193,6 @@ function Get-AutostartOwner([string]$Kind, [string]$Name, [string]$Command, $Rul
     switch ($Kind) {
         'run'     { if ($AutostartKeepRun -contains $Name) { return $keep } }
         'task'    { foreach ($p in $AutostartKeepTasks) { if ($Name -like $p) { return $keep } } }
-        'service' { if ($AutostartKeepServices -contains $Name) { return $keep } }
         'startup' { if ($Name -ieq 'desktop.ini') { return $keep } }
     }
     if ($cmd.IndexOf((Join-Path $env:ProgramFiles 'HTPC\'), [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $keep }

@@ -20,7 +20,8 @@
     reports focus until input has been flowing for a few seconds: the test moves the pointer
     first.
 
-    The launcher must be running (Start-Launcher.ps1 -NoTv while nobody watches the TV). Edge's
+    The launcher must be running with --dev (Start-Launcher.ps1 -Dev, with -NoTv while nobody
+    watches the TV): only then does it answer Send-Pad.ps1. Edge's
     test profile lives in %TEMP%\htpc-input-test and the window is closed at the end.
 #>
 param([string]$Screenshot = (Join-Path $env:TEMP 'htpc-presets.png'), [switch]$KeepOpen, [switch]$Keyboard)

@@ -7,7 +7,8 @@
 
 .DESCRIPTION
     Samples package power for -Seconds with the box awake, sends the launcher into standby
-    (dev hook: the registered window message "HtpcLauncher.Standby"), lets it settle, samples
+    (dev hook: the registered window message "HtpcLauncher.Standby", answered only by a launcher
+    started with --dev: Start-Launcher.ps1 -Dev), lets it settle, samples
     again, then wakes it. The screen is off during the standby part and the TV is turned off
     (standby as the Power menu does it).
 

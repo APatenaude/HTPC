@@ -1,0 +1,174 @@
+THIRD-PARTY NOTICES
+
+TV box, https://github.com/APatenaude/HTPC
+
+The project's own code is under the MIT License (LICENSE). "TV Box Setup.exe"
+(TV-Box-Setup.exe on the releases page) is the launcher published as one
+self-contained file: besides that code it carries the components below, each
+under its own license, reproduced or referenced here. The same exe is what a box
+runs as its launcher (Program Files\HTPC\Launcher\HtpcLauncher.exe).
+
+Not in the exe: Microsoft.NET.ILLink.Tasks (listed in packages.release.lock.json)
+runs only while the exe is built. The Microsoft Edge WebView2 Runtime, which draws
+the launcher's pages, is part of Windows and is not distributed by this project.
+
+
+===============================================================================
+1. .NET runtime, Windows Desktop runtime and ASP.NET Core runtime
+===============================================================================
+
+Packages: Microsoft.NETCore.App.Runtime.win-x64,
+Microsoft.WindowsDesktop.App.Runtime.win-x64 (Windows Forms, and WindowsBase from
+WPF) and Microsoft.AspNetCore.App.Runtime.win-x64 (Kestrel, for the phone
+remote), .NET 10, the version the SDK in global.json brings.
+
+Sources, with the notices for the third-party code these runtimes contain (for
+example MsQuic, msquic.dll: MIT, https://github.com/microsoft/msquic):
+  https://github.com/dotnet/runtime
+  https://github.com/dotnet/winforms
+  https://github.com/dotnet/wpf
+  https://github.com/dotnet/aspnetcore
+(each repository's THIRD-PARTY-NOTICES file)
+
+The MIT License (MIT)
+
+Copyright (c) .NET Foundation and Contributors
+
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+===============================================================================
+2. Microsoft.Web.WebView2 (NuGet package 1.0.4191.47)
+===============================================================================
+
+Files: Microsoft.Web.WebView2.Core.dll, Microsoft.Web.WebView2.WinForms.dll,
+Microsoft.Web.WebView2.Wpf.dll, WebView2Loader.dll.
+The package's NOTICE.txt covers its code generator (tools\wv2winrt: Antlr3
+Runtime, StringTemplate4), which this project neither uses nor ships.
+
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * The name of Microsoft Corporation, or the names of its contributors
+may not be used to endorse or promote products derived from this
+software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+===============================================================================
+3. The Windows SDK for .NET (Microsoft.Windows.SDK.NET.Ref, 10.0.19041)
+===============================================================================
+
+Files: Microsoft.Windows.SDK.NET.dll, WinRT.Runtime.dll (the Windows APIs as .NET
+sees them: media sessions, radios, Bluetooth). Brought by the target framework
+net10.0-windows10.0.19041.0, not by a PackageReference.
+
+Copyright (c) Microsoft Corporation. Redistributed under the Microsoft Windows
+SDK license terms: https://aka.ms/WinSDKLicenseURL
+WinRT.Runtime.dll is C#/WinRT: https://github.com/microsoft/CsWinRT (MIT License).
+
+
+===============================================================================
+4. Fonts: Atkinson Hyperlegible and Sora
+===============================================================================
+
+Files: launcher\ui\fonts\*.woff2 (in the exe under ui\fonts, and served to
+phones by the phone remote).
+
+Atkinson Hyperlegible: Copyright 2020 Braille Institute of America, Inc.
+Sora: Copyright 2019 The Sora Project Authors (https://github.com/sora-xor/sora-font)
+
+Both under the SIL Open Font License, Version 1.1. The full license texts ship
+beside the fonts: launcher\ui\fonts\OFL-AtkinsonHyperlegible.txt and
+launcher\ui\fonts\OFL-Sora.txt (ui\fonts in the exe). The OFL, not this project's
+MIT License, applies to the fonts.
+
+
+===============================================================================
+5. qr.js: QR Code generator library (Project Nayuki)
+===============================================================================
+
+File: launcher\ui\qr.js, after Project Nayuki's TypeScript version, trimmed to
+what the launcher needs and written as plain JavaScript.
+https://www.nayuki.io/page/qr-code-generator-library
+
+Copyright (c) Project Nayuki. (MIT License)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+- The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+- The Software is provided "as is", without warranty of any kind, express or
+  implied, including but not limited to the warranties of merchantability,
+  fitness for a particular purpose and noninfringement. In no event shall the
+  authors or copyright holders be liable for any claim, damages or other
+  liability, whether in an action of contract, tort or otherwise, arising from,
+  out of or in connection with the Software or the use or other dealings in the
+  Software.
+
+
+===============================================================================
+NOT DISTRIBUTED BY THIS PROJECT
+===============================================================================
+
+Setup and the TV's app library download the following on the box itself, from
+their publishers' own sources, at install time. None of it is in the exe, in
+setup.zip or in this repository; each comes under its publisher's own license
+and terms, which the box's owner accepts by installing it.
+
+- winget (App Installer) and its dependencies (VCLibs, Windows App Runtime),
+  from the microsoft/winget-cli releases on GitHub.
+- HEVC Video Extensions from Device Manufacturer (Microsoft Store id
+  9N4WGH0Z6VHQ), from Microsoft's Store delivery service.
+- The apps in setup\catalog.json, through winget or their own GitHub releases:
+  VacuumTube (YouTube, github.com/shy1132/VacuumTube), Stremio, Jellyfin Media
+  Player, Moonlight, and from the library Kodi, VLC, Plex HTPC, Spotify, Feishin.
+- Edge extensions, installed by Edge itself from its add-on stores through
+  policy: uBlock Origin Lite, FrankerFaceZ, Video Speed Controller.
+- Device drivers, from Windows Update (the Bluetooth adapter's, and the Drivers
+  step's).
+- Microsoft Edge and the WebView2 Runtime, which Windows provides and updates.
+
+Website tiles (Twitch, Netflix and the others) only open those sites in Edge.

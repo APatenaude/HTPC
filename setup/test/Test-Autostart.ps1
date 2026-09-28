@@ -12,7 +12,7 @@
                 signed-in user), folder boundaries (VLC is not VLC2), folders and patterns too
                 broad to use, what is never touched whatever the catalog says (HTPC launcher,
                 SecurityHealth, Edge's updater tasks, \Microsoft\ and \HTPC\ tasks, the watchdog's
-                task, CoworkVMService, Program Files\HTPC), Windows' own
+                task, Program Files\HTPC), Windows' own, a service no app names
       Guard     whole passes over the fake places, as SYSTEM: Run and RunOnce values removed with
                 their StartupApproved records, all-users Startup shortcuts removed (the user's
                 Startup folder not even looked at), tasks disabled, declared services set to
@@ -141,7 +141,7 @@ $catalog = @'
   { "id": "stremio", "name": "Stremio", "type": "app", "launch": { "exe": "%LOCALAPPDATA%\\Programs\\Stremio\\stremio-shell-ng.exe" }, "install": { "source": "winget", "scope": "user" } },
   { "id": "broad", "name": "Broad", "type": "app", "launch": { "exe": "%ProgramFiles%\\broad.exe" }, "install": { "source": "winget" } },
   { "id": "careless", "name": "Careless", "type": "app", "launch": { "exe": "%ProgramFiles%\\Careless\\careless.exe" }, "install": { "source": "winget" },
-    "autostart": { "run": [ "*", "Se*", "SecurityHealth", "HTPC launcher" ], "tasks": [ "\\HTPC\\Jobs", "\\Microsoft\\*" ], "services": [ "CoworkVMService" ] } },
+    "autostart": { "run": [ "*", "Se*", "SecurityHealth", "HTPC launcher" ], "tasks": [ "\\HTPC\\Jobs", "\\Microsoft\\*" ] } },
   { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com" }
 ] }
 '@ | ConvertFrom-Json
@@ -182,7 +182,6 @@ try {
         Check ((& $owner 'task' '\HTPC\Jobs' 'powershell.exe -File x').Verdict -eq 'keep' -and (& $owner 'task' '\HTPC watchdog' "$pf\HTPC\Launcher\HtpcWatchdog.exe").Verdict -eq 'keep') 'tasks \HTPC\Jobs and \HTPC watchdog: never touched'
         Check ((& $owner 'task' '\Microsoft\Windows\Defrag\ScheduledDefrag' "$pf\Careless\careless.exe").Verdict -eq 'keep') 'tasks under \Microsoft\: never touched, even running an app''s program'
         Check ((& $owner 'task' '\MicrosoftEdgeUpdateTaskMachineCore{9F388D10-48C0-4592-A1CA-50B79C9A872E}' "`"$pf86\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe`" /c").Verdict -eq 'keep') 'Edge''s updater tasks: never touched (the user chose Edge updates)'
-        Check ((& $owner 'service' 'CoworkVMService' '"C:\Program Files\WindowsApps\Claude\cowork-svc.exe"').Verdict -eq 'keep') 'CoworkVMService: never touched'
         Check ((& $owner 'run' 'Something' "`"$env:SystemRoot\System32\thing.exe`"").Verdict -eq 'windows') 'a program in the Windows folder: Windows'' own'
         Check ((& $owner 'startup' 'desktop.ini' '').Verdict -eq 'keep') 'desktop.ini: never touched'
         Check ($null -eq (ConvertTo-NamePattern '*') -and $null -eq (ConvertTo-NamePattern 'Se*') -and [bool](ConvertTo-NamePattern 'Spot*')) 'patterns too short to be safe are refused ("*", "Se*")'
@@ -192,6 +191,7 @@ try {
         Check (& $is (& $owner 'task' '\Vendor\Updater' "`"$pf\Plex\Plex HTPC\Updater.exe`" /check") 'plex' 'folder') 'a task running a program from the app''s folder'
         Check (& $is (& $owner 'service' 'PlexHtpcHelper' 'C:\x.exe') 'plex' 'name') 'a declared service'
         Check (& $is (& $owner 'service' 'PlexOther' "`"$pf\Plex\Plex HTPC\svc.exe`"") 'plex' 'folder') 'an undeclared service from the app''s folder: found by folder (logged, not changed)'
+        Check ((& $owner 'service' 'VendorAgentService' "`"$pf\Vendor\agent-svc.exe`"").Verdict -eq 'none') 'a service no app names, outside every app''s folder: nobody''s (never changed)'
         Check (& $is (& $owner 'startup' 'Plex HTPC.lnk' '') 'plex' 'name') 'a declared Startup file name'
 
         # As the user itself (no profile given): %APPDATA% is this process's own.
@@ -232,7 +232,7 @@ try {
         [void]$tasks.Add([pscustomobject]@{ Path = '\SomeoneElse'; TaskPath = '\'; TaskName = 'SomeoneElse'; Command = 'C:\Tools\other.exe'; Enabled = $true })
         [void]$services.Add([pscustomobject]@{ Name = 'PlexHtpcHelper'; ImagePath = "`"$pf\Plex\Plex HTPC\helper-svc.exe`""; Start = 2 })
         [void]$services.Add([pscustomobject]@{ Name = 'PlexOther'; ImagePath = "`"$pf\Plex\Plex HTPC\other-svc.exe`""; Start = 2 })
-        [void]$services.Add([pscustomobject]@{ Name = 'CoworkVMService'; ImagePath = '"C:\Program Files\WindowsApps\Claude\cowork-svc.exe"'; Start = 2 })
+        [void]$services.Add([pscustomobject]@{ Name = 'VendorAgentService'; ImagePath = "`"$pf\Vendor\agent-svc.exe`""; Start = 2 })
         [void]$services.Add([pscustomobject]@{ Name = 'IntelGraphicsSoftwareService'; ImagePath = '"C:\Program Files\WindowsApps\Intel\IntelGraphicsSoftware.Service.exe"'; Start = 2 })
 
         # One app's pass (an install job): only that app's entries.
@@ -261,7 +261,7 @@ try {
         $svc = @{}; foreach ($s in $services) { $svc[$s.Name] = $s.Start }
         Check ($svc['PlexHtpcHelper'] -eq 3) '  the declared service set to Manual'
         Check ($svc['PlexOther'] -eq 2 -and @($did | Where-Object { $_.Action -eq 'left' -and $_.Name -eq 'PlexOther' }).Count -eq 1) '  an undeclared service from the app''s folder left Automatic, and logged'
-        Check ($svc['CoworkVMService'] -eq 2 -and $svc['IntelGraphicsSoftwareService'] -eq 2) '  CoworkVMService (declared by the careless entry) and Intel''s service untouched'
+        Check ($svc['VendorAgentService'] -eq 2 -and $svc['IntelGraphicsSoftwareService'] -eq 2) '  services no app names untouched (a vendor''s, Intel''s)'
         $log = if (Test-Path $logFile) { [IO.File]::ReadAllText($logFile) } else { '' }
         Check ($log -match "SYSTEM: reconcile: Browser: removed HKCU Run 'MicrosoftEdgeAutoLaunch_" -and $log -match "install:spotify: Spotify: removed HKCU Run 'Spotify'") '  every removal in the log, with who and why'
 

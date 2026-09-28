@@ -72,7 +72,9 @@ function views() {
   const s = state.step;
   if (s === 'welcome') return {
     main: '<div class="su-col" style="max-width:1200px"><h1 class="big">Let’s set up your TV box</h1>' +
-      '<p>A few questions, then it installs your apps and sets up Windows for the TV. Keep the TV remote nearby.</p></div>',
+      '<p>A few questions, then it installs your apps and sets up Windows for the TV. Keep the TV remote nearby.</p>' +
+      // The one prompt came before this page (SetupElevation.cs), for cmd.exe, not this exe.
+      '<span class="su-note">Windows asked for permission once, as setup opened: its prompt names Windows Command Processor (Microsoft), which starts setup from Program Files. Nothing else will ask.</span></div>',
     buttons: button('next', 'Start', true),
   };
   if (s === 'controller') {
