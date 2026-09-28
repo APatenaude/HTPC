@@ -14,10 +14,11 @@
                 SecurityHealth, Edge's updater tasks, \Microsoft\ and \HTPC\ tasks, the watchdog's
                 task, CoworkVMService, Program Files\HTPC), Windows' own
       Guard     whole passes over the fake places, as SYSTEM: Run and RunOnce values removed with
-                their StartupApproved records, Startup shortcuts removed, tasks disabled, declared
-                services set to Manual (others only logged), what nobody claims left alone and
-                logged; one app's pass touches that app's only; a second pass finds nothing; a
-                junction in the user's profile is not followed
+                their StartupApproved records, all-users Startup shortcuts removed (the user's
+                Startup folder not even looked at), tasks disabled, declared services set to
+                Manual (others only logged), what nobody claims left alone and logged; one app's
+                pass touches that app's only; a second pass finds nothing; as the user, the
+                user's Startup shortcut removed; a junction in the user's profile is not followed
       Prefs     Spotify's prefs: lines set, the others kept, line ends and BOM kept, twice = no
                 change, nothing written when the app is not installed, nothing outside the profile;
                 Plex HTPC's plex.ini: the line in its [debug] section, the section added if missing
@@ -98,15 +99,16 @@ $run = "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 $approved = "SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved"
 $logFile = Join-Path $work 'autostart.log'
 
-# The places a SYSTEM job sees, pointed at the fakes.
+# The places a SYSTEM job sees, pointed at the fakes (Get-AutostartPlaces: the all-users Startup
+# folder only; the user's is theirs, left to the launcher and the user's passes). -Who user: the
+# user's Startup folder instead, as a per-user job (or setup) sees it.
 function New-FakePlaces([string]$Who = 'SYSTEM') {
     [pscustomobject]@{
         Who      = $Who
         Profile  = $fakeProfile
         Run      = @(New-AutostartRunPlaces 'HKLM' 'HKLM' -Wow) + @(New-AutostartRunPlaces "HKU\$sid" 'HKCU')
-        Startup  = @(
-            @{ Label = 'Startup (all users)'; Dir = $commonStartup; Approved = "HKLM\$approved\StartupFolder"; Root = $null },
-            @{ Label = 'Startup (user)'; Dir = $userStartup; Approved = "HKU\$sid\$approved\StartupFolder"; Root = $fakeProfile })
+        Startup  = if ($Who -eq 'SYSTEM') { @(@{ Label = 'Startup (all users)'; Dir = $commonStartup; Approved = "HKLM\$approved\StartupFolder"; Root = $null }) }
+                   else { @(@{ Label = 'Startup (user)'; Dir = $userStartup; Approved = "HKU\$sid\$approved\StartupFolder"; Root = $fakeProfile }) }
         Tasks    = $true
         Services = $true
         Prefs    = $false
@@ -236,7 +238,7 @@ try {
         # One app's pass (an install job): only that app's entries.
         $did = @(Invoke-AppAutostartGuard -Apps (App 'spotify') -Places (New-FakePlaces) -Context 'install:spotify')
         Check ($null -eq (Get-FakeValue "HKU\$sid\$run" 'Spotify') -and $null -eq (Get-FakeValue "HKU\$sid\$approved\Run" 'Spotify')) "install:spotify: its Run value and its StartupApproved record removed"
-        Check (-not (Test-Path (Join-Path $userStartup 'Spotify.lnk')) -and $null -eq (Get-FakeValue "HKU\$sid\$approved\StartupFolder" 'Spotify.lnk')) '  its Startup shortcut removed, with its record'
+        Check ((Test-Path (Join-Path $userStartup 'Spotify.lnk')) -and [bool](Get-FakeValue "HKU\$sid\$approved\StartupFolder" 'Spotify.lnk')) '  its shortcut in the user''s Startup folder left: not SYSTEM''s to look into (the launcher and the user''s pass clear it)'
         Check ([bool](Get-FakeValue "HKU\$sid\$run" 'MicrosoftEdgeAutoLaunch_8714F0D917266FE3AFB7F8BB98EEBC18') -and [bool](Get-FakeValue "HKU\$sid\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" 'VlcOnce')) '  the other apps'' entries untouched (their own passes)'
         Check (@($did | Where-Object Action -eq 'left').Count -eq 0) '  nothing reported as left alone on one app''s pass'
         Check (-not (Test-Path (Join-Path $spotifyDir 'prefs'))) '  no prefs written as SYSTEM (a user''s folder)'
@@ -251,7 +253,8 @@ try {
         Check ([bool](Get-FakeValue "HKU\$sid\$run" 'HTPC launcher') -and [bool](Get-FakeValue "HKU\$sid\$approved\Run" 'HTPC launcher') -and [bool](Get-FakeValue "HKLM\$run" 'SecurityHealth')) '  HTPC launcher and SecurityHealth kept, with their records'
         Check ([bool](Get-FakeValue "HKU\$sid\$run" 'Tool') -and (Test-Path (Join-Path $userStartup 'Other.lnk')) -and (Test-Path (Join-Path $userStartup 'Notes.lnk')) -and (Test-Path (Join-Path $userStartup 'desktop.ini'))) '  what no app claims kept (Tool, Other.lnk, Notes.lnk, desktop.ini)'
         $left = @($did | Where-Object Action -eq 'left' | ForEach-Object Name)
-        Check (($left -contains 'Tool') -and ($left -contains 'Other.lnk') -and ($left -contains '\SomeoneElse') -and -not ($left -contains 'Notes.lnk') -and -not ($left -contains 'HTPC launcher')) "  ... and logged as left alone, except Windows' own and ours ($($left -join ', '))"
+        Check (($left -contains 'Tool') -and ($left -contains '\SomeoneElse') -and -not ($left -contains 'Notes.lnk') -and -not ($left -contains 'HTPC launcher')) "  ... and logged as left alone, except Windows' own and ours ($($left -join ', '))"
+        Check (-not ($left -contains 'Other.lnk') -and (Test-Path (Join-Path $userStartup 'Spotify.lnk'))) '  the user''s Startup folder not even looked at as SYSTEM'
         $taskState = @{}; foreach ($t in $tasks) { $taskState[$t.Path] = $t.Enabled }
         Check (-not $taskState['\PlexHtpcUpdateTask'] -and -not $taskState['\Vendor\VlcCheck']) '  tasks disabled: a declared one, one running VLC'
         Check ($taskState['\HTPC\Jobs'] -and $taskState['\HTPC watchdog'] -and $taskState['\MicrosoftEdgeUpdateTaskMachineUA{47C29464}'] -and $taskState['\Microsoft\Windows\Defrag\ScheduledDefrag'] -and $taskState['\SomeoneElse']) '  \HTPC\, the watchdog, Edge''s updater, \Microsoft\ and unknown tasks kept'
@@ -265,26 +268,32 @@ try {
         $did = @(Invoke-AppAutostartGuard -Apps $apps -Places (New-FakePlaces) -Context 'reconcile')
         Check (@($did | Where-Object Action -ne 'left').Count -eq 0) 'a second pass finds nothing to do'
 
-        # A junction in the user's profile, planted to make SYSTEM delete elsewhere: not followed.
+        # A junction in the user's profile, planted to make setup (the elevated pass over the
+        # user's places, Root = the profile) delete elsewhere: not followed.
         $target = Join-Path $work 'elsewhere'
         New-Link (Join-Path $target 'Spotify.lnk') (Join-Path $spotifyDir 'Spotify.exe')
         $jProfile = Join-Path $work 'Users\planted'
         $jStartup = Join-Path $jProfile 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
         New-Item -ItemType Directory -Force (Split-Path $jStartup -Parent) | Out-Null
         cmd /c mklink /J "$jStartup" "$target" | Out-Null
-        $places = New-FakePlaces
+        $places = New-FakePlaces 'admin'
         $places.Startup = @(@{ Label = 'Startup (user)'; Dir = $jStartup; Approved = $null; Root = $jProfile })
         [void](Invoke-AppAutostartGuard -Apps $apps -Places $places -Kinds startup)
         Check (Test-Path (Join-Path $target 'Spotify.lnk')) 'a junction for the user''s Startup folder: not followed, nothing deleted through it'
         cmd /c rmdir "$jStartup" | Out-Null
 
-        # The user's own pass (a per-user job): HKCU places only, prefs written.
+        # The user's own pass (a per-user job): HKCU places and the user's Startup folder, prefs written.
         $userPlaces = New-FakePlaces 'user'
         $userPlaces.Run = @(New-AutostartRunPlaces "HKU\$sid" 'HKCU'); $userPlaces.Tasks = $false; $userPlaces.Services = $false; $userPlaces.Prefs = $true
         Set-FakeValue "HKU\$sid\$run" 'Spotify' "`"$spotifyDir\Spotify.exe`" --autostart --minimized"
         [void]$tasks.Add([pscustomobject]@{ Path = '\SpotifyTask'; TaskPath = '\'; TaskName = 'SpotifyTask'; Command = "`"$spotifyDir\Spotify.exe`""; Enabled = $true })
         [void](Invoke-AppAutostartGuard -Apps (App 'spotify') -Places $userPlaces -Context 'install:spotify')
         Check ($null -eq (Get-FakeValue "HKU\$sid\$run" 'Spotify') -and ($tasks | Where-Object Path -eq '\SpotifyTask').Enabled) 'as the user: the Run value removed, tasks left to SYSTEM'
+        Check (-not (Test-Path (Join-Path $userStartup 'Spotify.lnk')) -and $null -eq (Get-FakeValue "HKU\$sid\$approved\StartupFolder" 'Spotify.lnk') -and (Test-Path (Join-Path $userStartup 'Other.lnk'))) '  its shortcut in the user''s Startup folder removed, with its record (Other.lnk kept)'
+        # Run as SYSTEM (in the VM): the real places have no user Startup folder.
+        if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18') {
+            Check (-not @((Get-AutostartPlaces).Startup | Where-Object { $_.Label -eq 'Startup (user)' }).Count) 'as SYSTEM, Get-AutostartPlaces: no user Startup folder'
+        }
         $prefs = if (Test-Path (Join-Path $spotifyDir 'prefs')) { [IO.File]::ReadAllText((Join-Path $spotifyDir 'prefs')) } else { '' }
         Check ($prefs -ceq "app.autostart-configured=true`napp.autostart-mode=`"off`"`n") "  and Spotify's prefs written before its first start ($($prefs -replace "`n", '\n'))"
     }

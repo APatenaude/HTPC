@@ -109,8 +109,9 @@ It runs:
 - **as SYSTEM** at the end of every `install:` and `upgrade:` job (that app) and in `reconcile`
   (every catalog app, at every Windows start): HKLM, the signed-in user's hive (`HKU\<SID>`, the
   user the jobs already resolve for firewall paths; only while it is loaded: a hive is never
-  loaded by hand), both Startup folders (no junction followed in the user's profile), tasks,
-  services. SYSTEM never writes in a user's folders, so no prefs. Log:
+  loaded by hand), the all-users Startup folder, tasks, services. SYSTEM never looks into or
+  writes in a user's folders, so no prefs and not the user's Startup folder: the launcher clears
+  that one as the user (`AutostartGuard.CheckStartupFolder`, with its Run values). Log:
   `C:\ProgramData\HTPC\state\autostart.log`;
 - **as the user** at the end of per-user `install:` / `upgrade:` jobs and `winget-update`: HKCU,
   the user's Startup folder, prefs. Log: `C:\ProgramData\HTPC\logs\autostart.log`;

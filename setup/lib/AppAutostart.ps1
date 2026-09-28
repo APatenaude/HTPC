@@ -25,8 +25,10 @@
 #
 # Where it looks depends on who runs it (Get-AutostartPlaces):
 #   SYSTEM (the \HTPC\Jobs task)  HKLM, the signed-in user's hive (HKU\<SID>, only while loaded:
-#                                 a hive is never loaded by hand), both Startup folders, tasks,
-#                                 services; logs to ProgramData\HTPC\state\autostart.log
+#                                 a hive is never loaded by hand), the all-users Startup folder,
+#                                 tasks, services; logs to ProgramData\HTPC\state\autostart.log.
+#                                 Not the user's Startup folder (theirs to change under SYSTEM's
+#                                 feet): the launcher clears that one (AutostartGuard.cs)
 #   an admin (setup)              HKLM, HKCU, both Startup folders, tasks, services, prefs
 #   the user (per-user jobs)      HKCU, the user's Startup folder, prefs
 #   (both: ProgramData\HTPC\logs\autostart.log)
@@ -240,15 +242,17 @@ function Get-AutostartPlaces {
         if (-not $user) {
             $note = 'nobody signed in: only the machine-wide places'
         } else {
+            # The user's Startup folder is not SYSTEM's to look into: the user can change it at any
+            # moment (a checked folder swapped for a link before the delete), and its shortcuts
+            # would be opened as SYSTEM. The launcher (AutostartGuard.CheckStartupFolder) and the
+            # user-context passes clear it, as the user; SYSTEM keeps to the user's registry.
             $userProfile = $user.Profile
-            $userStartup = Join-Path $user.Profile 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
-            $startup += @{ Label = 'Startup (user)'; Dir = $userStartup; Approved = "HKU\$($user.Sid)\$AutostartApproved\StartupFolder"; Root = $user.Profile }
             if (& $AutostartIO.KeyExists "HKU\$($user.Sid)") { $run += New-AutostartRunPlaces "HKU\$($user.Sid)" 'HKCU' }
             else { $note = "the signed-in user's registry is not loaded: HKCU left to the launcher" }
         }
     } else {
         $run += New-AutostartRunPlaces 'HKCU' 'HKCU'
-        $startup += @{ Label = 'Startup (user)'; Dir = [Environment]::GetFolderPath('Startup'); Approved = "HKCU\$AutostartApproved\StartupFolder"; Root = $null }
+        $startup += @{ Label = 'Startup (user)'; Dir = [Environment]::GetFolderPath('Startup'); Approved = "HKCU\$AutostartApproved\StartupFolder"; Root = $env:USERPROFILE }
     }
     $logDir = Join-Path $env:ProgramData ("HTPC\" + $(if ($isSystem) { 'state' } else { 'logs' }))
     $logDirItem = Get-Item -LiteralPath $logDir -Force -ErrorAction SilentlyContinue

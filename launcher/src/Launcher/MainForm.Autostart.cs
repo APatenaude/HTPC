@@ -1,10 +1,12 @@
 namespace Htpc.Launcher;
 
 /// <summary>
-/// Apps that start by themselves (AutostartGuard, this user's side): HKCU's Run values checked once
-/// the UI is first up, a few seconds after each app ends (Spotify writes its value back while it
-/// runs; Edge its startup boost's) and after the library installs or updates an app; the apps'
-/// autostart.prefs set whenever they are not running. On the thread pool, logged, never in setup.
+/// Apps that start by themselves (AutostartGuard, this user's side): HKCU's Run values and this
+/// user's Startup folder checked once the UI is first up, a few seconds after each app ends
+/// (Spotify writes its value back while it runs; Edge its startup boost's) and after the library
+/// installs or updates an app (machine apps too: the SYSTEM job leaves the user's Startup folder
+/// to this); the apps' autostart.prefs set whenever they are not running. On the thread pool,
+/// logged, never in setup.
 /// </summary>
 sealed partial class MainForm
 {
@@ -20,6 +22,7 @@ sealed partial class MainForm
         void CheckNow(string why, string? prefsFor) => Task.Run(() =>
         {
             guard.Check(why);
+            guard.CheckStartupFolder(why);
             guard.ApplyPrefs(prefsFor, apps.IsRunning);
         });
         CheckNow("launcher start", null);
