@@ -130,8 +130,8 @@ if ($Restore) {
         Write-Host "Watchdog started again ($arguments)"
     }
     # The watchdog starts it 2 s after the dev build ended; the first start takes a few seconds.
-    if (Show-Launcher { Test-Installed $_ } 30) { Write-Host "Installed launcher up. Log: $env:ProgramData\HTPC\logs\launcher.log" }
-    else { Write-Warning "The installed launcher's window did not show within 30 s: see $env:ProgramData\HTPC\logs\watchdog.log" }
+    if (Show-Launcher { Test-Installed $_ } 30) { Write-Host "Installed launcher up. Log: $env:LOCALAPPDATA\HTPC\logs\launcher.log" }
+    else { Write-Warning "The installed launcher's window did not show within 30 s: see $env:LOCALAPPDATA\HTPC\logs\watchdog.log" }
     return
 }
 
@@ -162,5 +162,5 @@ Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Se
 Start-ScheduledTask -TaskName $task
 
 [void](Show-Launcher { $_.Path -eq $exe } 10)
-Write-Host "Launcher started. Log: $env:ProgramData\HTPC\logs\launcher.log"
+Write-Host "Launcher started. Log: $env:LOCALAPPDATA\HTPC\logs\launcher.log"
 if (Test-Path -LiteralPath (Join-Path $installDir "$watchdogName.exe")) { Write-Host 'Back to the installed launcher: Start-Launcher.ps1 -Restore' }

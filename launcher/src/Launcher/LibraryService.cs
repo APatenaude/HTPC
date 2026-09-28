@@ -463,6 +463,17 @@ sealed class LibraryService
         apps.SetTiles(tiles);
     }
 
+    /// <summary>
+    /// The install.firstRun files of every installed catalog app that are missing, as the user, at
+    /// the launcher's start: setup installs apps elevated and never writes in the user's profile
+    /// (a link planted there could send an elevated write anywhere), so it leaves these to this.
+    /// </summary>
+    public void WriteMissingFirstRunFiles()
+    {
+        foreach (var app in apps.Catalog)
+            if (apps.IsInstalled(app.Id)) WriteFirstRunFiles(app.Id);
+    }
+
     void WriteFirstRunFiles(string id)
     {
         foreach (var (file, text) in FirstRunFiles(id))

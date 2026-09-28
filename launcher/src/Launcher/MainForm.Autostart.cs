@@ -16,6 +16,9 @@ sealed partial class MainForm
     void StartAutostartGuard()
     {
         if (autostart is not null || setupMode) return; // each time the UI is ready; this once
+        // What setup (elevated) leaves to the user's side as it never writes the user's profile:
+        // the apps' first-run files here, their Startup shortcuts and prefs below.
+        _ = Task.Run(library.WriteMissingFirstRunFiles);
         try { autostart = AutostartGuard.ForThisUser(options.CatalogPath); }
         catch (Exception e) { Log.Warn($"Autostart: catalog not read ({e.Message}); not checked"); return; }
         var guard = autostart;

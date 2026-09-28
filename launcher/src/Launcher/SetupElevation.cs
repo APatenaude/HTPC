@@ -175,11 +175,41 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// The WebView2 profile: setup's own, so nothing an elevated WebView2 writes ever lands in the
-    /// launcher's, which runs at standard rights every day.
+    /// The WebView2 profile. The elevated setup's: Program Files\HTPC\Setup\webview, admin-only
+    /// (the elevated wizard is its only user), so nothing an elevated WebView2 writes lands in the
+    /// user's profile, where a link they planted could send it anywhere. The launcher's, and a
+    /// setup at standard rights (a dev run): its own in %LOCALAPPDATA%\HTPC, as always.
     /// </summary>
-    public static string WebViewFolder(bool setupMode) =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+    public static string WebViewFolder(bool setupMode, bool elevated) =>
+        setupMode && elevated ? Path.Combine(TrustedDir, "webview")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+
+    /// <summary>
+    /// Why a folder is not safe for an elevated process to rely on, or null when it is: a junction
+    /// or link, an owner other than SYSTEM, Administrators or TrustedInstaller, or write rights
+    /// for anyone else (setup\lib\UpdateCore.ps1's Get-UntrustedReason, for C#).
+    /// </summary>
+    public static string? UntrustedReason(string dir)
+    {
+        string[] trusted = ["S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
+        const FileSystemRights write = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes |
+            FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles |
+            FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+        var info = new DirectoryInfo(dir);
+        if (!info.Exists) return $"{dir} is not there";
+        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) return $"{dir} is a junction or link";
+        var acl = info.GetAccessControl();
+        var owner = acl.GetOwner(typeof(SecurityIdentifier))?.Value;
+        if (owner is null || !trusted.Contains(owner)) return $"{dir} is owned by {owner}";
+        foreach (FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            var sid = rule.IdentityReference.Value;
+            if (rule.AccessControlType != AccessControlType.Allow || trusted.Contains(sid) || sid == "S-1-3-0") continue; // CREATOR OWNER: only what someone creates
+            // 0x40000000 GENERIC_WRITE, 0x10000000 GENERIC_ALL (seen on inherit-only entries)
+            if ((rule.FileSystemRights & write) != 0 || ((int)rule.FileSystemRights & 0x50000000) != 0) return $"{dir} lets {sid} change it";
+        }
+        return null;
+    }
 
     /// <summary>
     /// Who takes over when the wizard is done: the installed launcher, through its watchdog when

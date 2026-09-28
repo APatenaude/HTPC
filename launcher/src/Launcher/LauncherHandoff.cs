@@ -21,6 +21,9 @@ sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[]
 
     public void Save()
     {
+        // Elevated (a dev shell): not in the user's profile, where a link they planted could send
+        // an elevated write anywhere. The next launcher then starts as a first one.
+        if (Environment.IsPrivilegedProcess) { Log.Info($"Handoff not written ({Reason}): elevated"); return; }
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);

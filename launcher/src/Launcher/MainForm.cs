@@ -35,7 +35,9 @@ sealed partial class MainForm : Form
     TextField? lastField;        // the latest text field that had the focus
     readonly TvService tv;
     bool tvChangedItself;   // the TV's own remote put the box to sleep or woke it: leave the TV alone
-    readonly string captureDir = Path.Combine(Path.GetTempPath(), "htpc-launcher");
+    // Elevated (TV Box Setup): admin-only, never the user's %TEMP%.
+    readonly string captureDir = Environment.IsPrivilegedProcess ? Path.Combine(SetupElevation.TrustedDir, "temp", "htpc-launcher")
+        : Path.Combine(Path.GetTempPath(), "htpc-launcher");
     readonly LauncherSettings settings = LauncherSettings.Load();
     Standby standby = null!;   // needs the window handle: created in OnLoad
     int ticks;
@@ -234,7 +236,7 @@ sealed partial class MainForm : Form
     async Task InitWebView()
     {
         // Setup (elevated) has a profile of its own: SetupElevation.cs.
-        var dataDir = SetupElevation.WebViewFolder(options.Setup);
+        var dataDir = SetupElevation.WebViewFolder(options.Setup, Environment.IsPrivilegedProcess);
         // The controller's presses reach the page as web messages, not user gestures: without
         // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
         var env = await CoreWebView2Environment.CreateAsync(null, dataDir,

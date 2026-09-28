@@ -6,7 +6,7 @@ namespace Htpc.Launcher;
 /// <summary>
 /// The hardware video decoding check from Settings › Display (SPEC N5): runs
 /// setup\tools\Test-HwDecode.ps1 -Json in the background and keeps its report in
-/// C:\ProgramData\HTPC\logs\hwdecode-last.json (About shows the last one).
+/// %LOCALAPPDATA%\HTPC\logs\hwdecode-last.json (About shows the last one).
 ///
 /// Driver only (-NoPlayback): it asks the GPU driver which codecs it decodes in 4K. The
 /// playback half needs mpv or ffmpeg, which setup does not install; on a dev box that has one,
@@ -14,9 +14,11 @@ namespace Htpc.Launcher;
 /// </summary>
 sealed class DecodeCheck
 {
-    // In logs\: the one ProgramData\HTPC folder the launcher (standard rights) may write to once
-    // setup's Library step has locked the rest; Save logs to USB copies it with the logs.
+    // With the launcher's own logs (Save logs to USB copies it with them). ProgramData\HTPC\logs
+    // is setup's, admin-write; a report an older launcher left there is still read.
     static readonly string ResultPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "logs", "hwdecode-last.json");
+    static readonly string OldResultPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC", "logs", "hwdecode-last.json");
     static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
 
@@ -36,7 +38,7 @@ sealed class DecodeCheck
     /// <summary>The last report, or null if there is none (or it is unreadable).</summary>
     public static JsonElement? Last()
     {
-        try { return File.Exists(ResultPath) ? Parse(File.ReadAllText(ResultPath)) : null; }
+        try { return new[] { ResultPath, OldResultPath }.FirstOrDefault(File.Exists) is { } path ? Parse(File.ReadAllText(path)) : null; }
         catch (Exception e) { Log.Warn($"Last decode check unreadable: {e.Message}"); return null; }
     }
 

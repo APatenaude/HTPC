@@ -71,6 +71,12 @@ sealed class LauncherSettings
     /// <summary>Standby turned the Wi-Fi radio off (on a cable): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
     public bool WifiOffInStandby { get; set; }
 
+    /// <summary>
+    /// The time of the elevated setup's copy (SetupCopyPath) this user's file last took in; null
+    /// before any. A newer copy is taken in at the launcher's next start.
+    /// </summary>
+    public DateTime? SetupCopyUtc { get; set; }
+
     // (Older files also have "showAppHints", the in-app hint's switch: the hint is gone, and
     // unknown keys are skipped when reading.)
 
@@ -79,11 +85,43 @@ sealed class LauncherSettings
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
     static readonly string BackupPath = FilePath + ".bak";
 
+    /// <summary>
+    /// Where the elevated setup keeps what it changed (the tiles picked, the TV): it never writes
+    /// the user's profile, where a link they planted could send an elevated write anywhere. Admin-
+    /// only, readable by the user; the launcher takes it in at its next start, as the user.
+    /// </summary>
+    static string SetupCopyPath => Path.Combine(SetupElevation.TrustedDir, "settings.json");
+
     // Several threads save (the UI thread on a settings change, the library job thread when a tile
     // is added): one save at a time, and one never sees another half-written file.
     static readonly object Gate = new();
 
+    /// <summary>
+    /// This user's settings.json, or the elevated setup's copy when that is newer than what the
+    /// file last took in (setup ran since): at standard rights it is taken in and saved, as the
+    /// user; elevated (setup run again before the launcher started) it is the one to go on from.
+    /// </summary>
     public static LauncherSettings Load()
+    {
+        var mine = LoadUserFile();
+        try
+        {
+            if (!File.Exists(SetupCopyPath)) return mine;
+            var at = File.GetLastWriteTimeUtc(SetupCopyPath);
+            if (mine.SetupCopyUtc is { } taken && at <= taken) return mine;
+            if (JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(SetupCopyPath), Json) is not { } fromSetup) return mine;
+            fromSetup.SetupCopyUtc = at;
+            if (!Environment.IsPrivilegedProcess)
+            {
+                fromSetup.Save();
+                Log.Info($"Settings: took in what setup chose ({SetupCopyPath}, {at:u})");
+            }
+            return fromSetup;
+        }
+        catch (Exception e) { Log.Warn($"Settings: setup's copy not taken in: {e.Message}"); return mine; }
+    }
+
+    static LauncherSettings LoadUserFile()
     {
         lock (Gate)
         {
@@ -114,6 +152,21 @@ sealed class LauncherSettings
     {
         lock (Gate)
         {
+            // Elevated (TV Box Setup): its own admin-only copy, never the user's file (SetupCopyPath).
+            // A new file of an unguessable name, moved over the old one.
+            if (Environment.IsPrivilegedProcess)
+            {
+                try
+                {
+                    Directory.CreateDirectory(SetupElevation.TrustedDir);
+                    var temp = Path.Combine(SetupElevation.TrustedDir, $"settings.{Guid.NewGuid():N}.tmp");
+                    using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        JsonSerializer.Serialize(stream, this, Json);
+                    File.Move(temp, SetupCopyPath, overwrite: true);
+                }
+                catch (Exception e) { Log.Error("Saving setup's settings", e); }
+                return;
+            }
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);

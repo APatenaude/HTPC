@@ -189,8 +189,18 @@ static class ElevationTests
 
         // WebView2: setup's profile is not the launcher's.
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        Check(SetupElevation.WebViewFolder(false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
-        Check(SetupElevation.WebViewFolder(true) == Path.Combine(local, "HTPC", "setup-webview"), "setup's: a folder of its own");
+        Check(SetupElevation.WebViewFolder(false, false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
+        Check(SetupElevation.WebViewFolder(true, true) == Path.Combine(SetupElevation.TrustedDir, "webview"), "the elevated setup's: admin-only, in Program Files\\HTPC\\Setup, never the user's profile");
+        Check(SetupElevation.WebViewFolder(true, false) == Path.Combine(local, "HTPC", "setup-webview"), "a setup at standard rights (a dev run): its own in the user's profile");
+
+        // The C# trust check (UpdateCore's Get-UntrustedReason): Windows' own folder passes, a
+        // folder this account made in %TEMP% does not (its owner, or its write rights).
+        Check(SetupElevation.UntrustedReason(Environment.SystemDirectory) is null, $"System32: trusted ({SetupElevation.UntrustedReason(Environment.SystemDirectory)})");
+        var mine = Path.Combine(Path.GetTempPath(), $"htpc-trust-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(mine);
+        try { Check(SetupElevation.UntrustedReason(mine) is { } why && (why.Contains("owned by") || why.Contains("lets")), $"a folder of the user's in %TEMP%: not trusted ({SetupElevation.UntrustedReason(mine)})"); }
+        finally { Directory.Delete(mine); }
+        Check(SetupElevation.UntrustedReason(mine) is { } gone && gone.Contains("not there"), "a folder that is not there: not trusted");
 
         // The "needs administrator rights" screen, built but never shown: what it says, laid out
         // on this screen with nothing cut off or overlapping.
