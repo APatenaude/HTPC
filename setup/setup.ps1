@@ -127,16 +127,22 @@ function Get-ArgumentLine {
     $line -join ' '
 }
 
-# True when files this process writes under AppData end up in a packaged app's private copy.
+# True when files this process writes under AppData end up in a packaged app's private copy. The
+# packaged parent (the Claude desktop app) can itself run elevated, so this must still probe when
+# elevated (elevation does not leave that container here); it cannot simply be skipped. The probe
+# file is created new (FileMode.CreateNew): a random name that already exists, or a link a user
+# planted at that name, makes the create fail rather than letting an elevated write follow it
+# somewhere. It is removed straight away.
 function Test-AppDataRedirected {
     $name = "htpc-probe-$([guid]::NewGuid().ToString('N')).tmp"
     $probe = Join-Path $env:LOCALAPPDATA $name
     try {
-        [IO.File]::WriteAllText($probe, 'probe')
+        $stream = [IO.File]::Open($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $bytes = [Text.Encoding]::ASCII.GetBytes('probe'); $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         $packages = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -ErrorAction SilentlyContinue
         [bool]($packages | Where-Object { Test-Path (Join-Path $_.FullName "LocalCache\Local\$name") } | Select-Object -First 1)
     } finally {
-        Remove-Item $probe -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
     }
 }
 
