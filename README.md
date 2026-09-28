@@ -111,9 +111,9 @@ can ship code to every box ([launcher/README.md](launcher/README.md), "Releases"
 
   It takes the launcher off and gives the account the Windows desktop back
   ([setup/README.md](setup/README.md) says what it undoes and what it leaves). It keeps a copy of
-  setup in `Documents\HTPC logs\setup`: run it again from there (`...\setup\setup.ps1 -Uninstall`). Setup cleared the
-  account's password: if the PC goes back to everyday use, set one in Windows' Settings ›
-  Accounts.
+  setup in `Documents\HTPC logs\setup`: run it again from there (`...\setup\setup.ps1 -Uninstall`).
+  **This account has no password (setup removed it). Set one: Ctrl+Alt+Del > Change a password.**
+  Until then Windows still signs it in by itself at every start.
 
 ## If the home screen does not come back
 
