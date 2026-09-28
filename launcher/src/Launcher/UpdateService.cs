@@ -151,7 +151,7 @@ sealed class UpdateService
             var appsTask = CheckAppsAsync();
             try { var l = await launcherTask; lock (gate) saved.Launcher = l; }
             catch (Exception e) { error = e.Message; Log.Warn($"Updates: launcher check: {e.Message}"); }
-            try { var a = await appsTask; lock (gate) { saved.Apps = a; ForgetDoneResults(); } }
+            try { var a = await appsTask; lock (gate) { saved.Apps = a; ForgetResults(failedToo: !quiet); } }
             catch (Exception e) { error ??= e.Message; Log.Warn($"Updates: app check: {e.Message}"); }
         }
         finally
@@ -525,6 +525,14 @@ sealed class UpdateService
             }
             else alerts.Raise(new AlertSpec { Id = "updates-result", Title = $"{(job.Label ?? job.Id).Replace("Updating ", "")} was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
         }
+        else if (job.Token.StartsWith("launcher-update:"))
+        {
+            // Stopped before the restart (a download, a check, never back at Home): this launcher
+            // is still here to say so. A rollback after the restart is told by the launcher it
+            // put back (TellLauncherResult).
+            if (!ok && p.Message != "Cancelled")
+                alerts.Raise(new AlertSpec { Id = "updates-result", Title = "The TV launcher was not updated", Body = p.Message, Glyph = "warn", Tone = AlertTone.Warn, Duration = TimeSpan.FromSeconds(8) });
+        }
         else if (job.Token.StartsWith("windows-"))
         {
             if (job.Token == "windows-install")
@@ -791,10 +799,11 @@ sealed class UpdateService
         catch (Exception) { return null; }
     }
 
-    // After a new check, a "done" from before no longer says anything.
-    void ForgetDoneResults()
+    // After a new check, a "done" from before no longer says anything; after Check now, neither
+    // does a "failed" (the rows show what the check found, ready to be tried again).
+    void ForgetResults(bool failedToo)
     {
-        foreach (var t in results.Where(r => r.Value.Status == "done").Select(r => r.Key).ToList()) results.Remove(t);
+        foreach (var t in results.Where(r => r.Value.Status == "done" || failedToo && r.Value.Status == "failed").Select(r => r.Key).ToList()) results.Remove(t);
     }
 
     /// <summary>Below-normal priority and EcoQoS: a check can run while a video plays.</summary>

@@ -170,9 +170,11 @@ settingsSection('updates', {
 onAction('upd-row', (el, id) => {
   const s = upd.s;
   if (!s) return;
+  // A row whose last try failed can be pressed again; one running or waiting cannot.
+  const busy = (job) => job && job.status !== 'failed';
   if (id === 'launcher') {
     const L = s.launcher;
-    if (!L.update || L.job) return;
+    if (!L.update || busy(L.job)) return;
     ask({
       title: `${L.skipped ? 'Try' : 'Update'} the TV launcher ${L.skipped ? 'again ' : ''}to ${L.latest}?`,
       text: (L.skipped ? `Last time ${L.latest} did not start here and the box went back to ${L.installed}. ` : '') +
@@ -182,7 +184,7 @@ onAction('upd-row', (el, id) => {
     return;
   }
   const a = s.apps.find((x) => x.id === id);
-  if (!a || !a.update || a.job) return;
+  if (!a || !a.update || busy(a.job)) return;
   const open = state.tiles.some((t) => t.id === id && t.running);
   ask({
     title: `Update ${a.name}?`,
