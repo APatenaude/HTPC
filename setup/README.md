@@ -18,7 +18,9 @@ installed, started as the signed-in user, not elevated (launcher/README.md, Setu
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Only Edge,Power
 
 It elevates itself (UAC; started elevated, as TV Box Setup starts it, it just runs), is safe
-to re-run, keeps going when one step fails, and logs to
+to re-run, keeps going when one step fails, runs with Windows' own environment, never the user's
+(PSModulePath reset first of all; `lib\Common.ps1` resets Windows' folders, PATH and TEMP and
+drops the .NET switches for any elevated or SYSTEM script), and logs to
 `C:\ProgramData\HTPC\logs` (`setup-last.json` has the step results). After a USB install the
 answer file runs it with `-Unattended` at the first sign-in.
 

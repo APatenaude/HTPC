@@ -89,12 +89,45 @@ static class ElevationTests
         Check(line is not null && line.Contains("set \"DOTNET_EnableDiagnostics=0\"") && line.Contains("set \"DOTNET_STARTUP_HOOKS=\"") && line.Contains("set \"CORECLR_ENABLE_PROFILING=\"") && line.Contains("set \"COR_ENABLE_PROFILING=\""),
             "... no profiler, startup hook or diagnostics port from the user's environment");
         Check(line is not null && line.Contains($"set \"PSModulePath={SetupElevation.SystemModulePath}\""), "... PowerShell's modules from Windows' and Program Files' folders only");
+        var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        Check(line is not null && line.Contains($"set \"SystemRoot={winDir}\"") && line.Contains($"set \"windir={winDir}\"")
+            && line.Contains($"set \"ProgramFiles={Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)}\"")
+            && line.Contains($"set \"PATH={Environment.SystemDirectory};{winDir};") && line.Contains($"set \"TEMP={pf}\\temp\"") && line.Contains($"mkdir \"{pf}\\temp\""),
+            "... Windows' folders from Windows, PATH Windows' own, TEMP admin-only, until the copy remakes its environment");
+        Check(line is not null && line.Contains("set \"COREHOST_TRACEFILE=\"") && line.Contains("set \"DOTNET_DbgEnableMiniDump=\""), "... no host trace or crash dump written anywhere");
         Check(line is not null && line.Contains($"move /y \"{pf}\\TV Box Setup.exe\" \"{pf}\\TV Box Setup.exe.a1b2c3.old\"") && line.Contains($"copy /b /y \"{odd}\" \"{pf}\\TV Box Setup.exe\" >nul && start \"\" /d \"{pf}\" \"{pf}\\TV Box Setup.exe\" --setup --elevated\""),
             "... the one in use renamed aside, this exe copied, the copy started only if the copy went");
         Check(line is not null && line.IndexOf("copy /b", StringComparison.Ordinal) > line.IndexOf("DOTNET_BUNDLE_EXTRACT_BASE_DIR", StringComparison.Ordinal), "... the variables set before anything starts");
         var again = SetupElevation.Trampoline(pf + @"\TV Box Setup.exe", ["--setup", "--elevated"], pf, "x");
         Check(again is not null && !again.Contains("copy ") && again.Contains($"start \"\" /d \"{pf}\" \"{pf}\\TV Box Setup.exe\" --setup --elevated"), "the Program Files copy itself: started, not copied onto itself");
         Check(SetupElevation.Trampoline(@"C:\Users\u\Downloads\TV%20Box%20Setup.exe", [], pf, "x") is null, "a % in the exe's path: refused (cmd would expand it)");
+
+        // The elevated setup's environment: Windows' own values, nothing of the user's.
+        var machine = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Path"] = @"%SystemRoot%\system32;%SystemRoot%;%TOOLS%\bin",
+            ["TOOLS"] = @"C:\Tools",
+            ["ComSpec"] = @"%SystemRoot%\system32\cmd.exe",
+            ["TEMP"] = @"%SystemRoot%\TEMP",
+            ["USERNAME"] = "SYSTEM",
+            ["PSModulePath"] = @"%ProgramFiles%\WindowsPowerShell\Modules;%SystemRoot%\system32\WindowsPowerShell\v1.0\Modules",
+            ["COMPlus_EnableDiagnostics"] = "1",
+            ["DOTNET_STARTUP_HOOKS"] = @"C:\x.dll",
+            ["Mixed"] = @"%HTPC_TEST_USER_VAR%\y",
+        };
+        Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", @"C:\Users\evil");
+        var env = SetupElevation.CleanEnvironment(machine);
+        Check(env["Path"] == $@"{winDir}\system32;{winDir};C:\Tools\bin", $"PATH: the machine's, expanded with Windows' folder and the machine's own variables ({env["Path"]})");
+        Check(env["ComSpec"] == $@"{winDir}\system32\cmd.exe" && env["Mixed"] == @"%HTPC_TEST_USER_VAR%\y", "... never with one of the user's (left as written)");
+        Check(env["TEMP"] == SetupElevation.TrustedTemp && env["TMP"] == SetupElevation.TrustedTemp, $"TEMP and TMP admin-only ({env["TEMP"]})");
+        Check(env["PSModulePath"] == SetupElevation.SystemModulePath && env["HTPC_SETUP_WIZARD"] == "1", "PSModulePath Windows' own; setup.ps1 told TV Box Setup started it");
+        Check(!env.Keys.Any(k => k.StartsWith("COMPlus_", StringComparison.OrdinalIgnoreCase) || k.StartsWith("DOTNET_", StringComparison.OrdinalIgnoreCase)), "no COMPlus_* or DOTNET_*, the machine's included");
+        Check(env["SystemRoot"] == winDir && env["ProgramFiles"] == Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)
+            && env["ProgramData"] == Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Windows' folders from Windows itself");
+        Check(env["USERNAME"] == Environment.UserName && env["USERPROFILE"] == Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            && env["LOCALAPPDATA"] == Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "the user's basics from their account (not the machine's SYSTEM)");
+        Check(!env.ContainsKey("HTPC_TEST_USER_VAR"), "nothing else of the user's environment");
+        Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", null);
         Check(SetupElevation.Trampoline(@"C:\x\TV Box Setup.exe", [], pf, "x&calc") is null, "a suffix that is not letters and digits: refused");
         var home = SetupElevation.HomeArgs(["--setup", "--dev", "--elevated", "--no-tv", "--home"]);
         Check(home.SequenceEqual(["--dev", "--no-tv", "--home"]), "the home screen: setup's own dropped, --home once: " + string.Join(" | ", home));

@@ -150,7 +150,13 @@ static class Program
         var trusted = SetupElevation.RunsFromTrustedPlace(Environment.ProcessPath, AppContext.BaseDirectory, SetupElevation.TrustedDir);
         var step = SetupElevation.Decide(options.Setup, elevated, trusted, args);
         if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
-        if (options.Setup && elevated) SetupElevation.TidyTrustedDir();
+        if (options.Setup && elevated)
+        {
+            // Windows' own environment for the elevated setup and all it starts, not the user's
+            // (SetupElevation.CleanEnvironment lists it).
+            SetupElevation.ApplyCleanEnvironment();
+            SetupElevation.TidyTrustedDir();
+        }
         // Setup replaces a launcher that is already running (setup run again on a finished box).
         // The watchdog must not start it again meanwhile. Only this session's: setup is elevated.
         if (options.Setup)
