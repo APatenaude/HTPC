@@ -519,7 +519,7 @@ Console.WriteLine("== SleepTimer");
         sessions = new[] { new MediaInfo("MSEdge", "twitch", "Long video", null, MediaStatus.Playing, 15 + i, 7200, 1, now, true) };
         timer.Tick();
     }
-    Check(timer.Active && timer.Describe() is { } d && ((dynamic)d).endsAt == "video" && ((dynamic)d).minutesLeft == 120,
+    Check(timer.Active && object.Equals(((dynamic)timer.Describe()!).endsAt, "video") && ((dynamic)timer.Describe()!).minutesLeft == 120,
         "video mode, clock 3 hours on: still following it, 2 hours left");
     timer.Cancel();
 }
