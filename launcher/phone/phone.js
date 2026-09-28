@@ -126,16 +126,21 @@ function connect() {
   };
 }
 
-// Back from the background (iPhone suspends the page): connect at once.
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !demo && state.conn !== 'pairing') connect(); });
-addEventListener('pageshow', () => { if (!demo && state.conn !== 'pairing') connect(); });
-addEventListener('online', () => { if (!demo && state.conn !== 'pairing') connect(); });
+// Back from the background (iPhone suspends the page): connect at once. Only once boot() has
+// connected (before that, a socket could beat the QR key's /api/pair and leave the phone on the
+// pairing screen, paired but never told); pageshow only when the page comes back from the cache.
+// From the pairing screen, coming back tries once more (a pairing may have finished meanwhile).
+let booted = false;
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !demo && booted) connect(); });
+addEventListener('pageshow', (e) => { if (e.persisted && !demo && booted && state.conn !== 'pairing') connect(); });
+addEventListener('online', () => { if (!demo && booted && state.conn !== 'pairing') connect(); });
 
 function onBox(m) {
   switch (m.t) {
     case 'hello':
       if (m.v !== PROTOCOL) { reloadOnce(); return; }
-      if (!m.paired) { showPairing(); return; }
+      // Not paired: the pairing screen (as it is, when it shows already: a code may be half typed).
+      if (!m.paired) { if (state.conn !== 'pairing') showPairing(); return; }
       hidePairing();
       setConn('open');
       applyState(m.state);
@@ -846,6 +851,7 @@ async function boot() {
     if (res.status === 200) toast('Paired');
   }
   if (location.pathname === '/send') openSend();
+  booted = true;
   connect();
 }
 
