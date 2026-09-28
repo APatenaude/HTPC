@@ -115,12 +115,14 @@ jobs:
             'It does not apply the signed-in user''s settings (HKCU), the phone remote''s HTTPS certificate or any other setup step: for those, run TV Box Setup again (setup/README.md, "What an update applies").'
           ) | Out-File -Append -Encoding utf8 "$env:RUNNER_TEMP\notes.txt"
           $files = @(Get-ChildItem release -File | ForEach-Object { $_.FullName })
-          gh release create $env:TAG @files --verify-tag --title "TV box $($manifest.version)" --notes-file "$env:RUNNER_TEMP\notes.txt"
+          # Not "latest" yet: boxes only look at releases/latest, so none sees it before the check.
+          gh release create $env:TAG @files --verify-tag --latest=false --title "TV box $($manifest.version)" --notes-file "$env:RUNNER_TEMP\notes.txt"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      # What boxes will download, through GitHub's redirects, checked with the box's own code.
-      # A mismatch turns the release back into a draft: boxes never see drafts.
-      - name: Check the release as a box would
+      # What boxes will download, through GitHub's redirects, checked with the box's own code;
+      # only then is it made "latest" (what boxes see). A mismatch deletes the release (the tag
+      # stays, for a run again once fixed): no box ever saw it.
+      - name: Check the release as a box would, then make it latest
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -130,6 +132,8 @@ jobs:
           try {
             & .\launcher\dev\Test-ReleaseAssets.ps1 -Tag $env:TAG -Repo $env:GH_REPO -Expected release
           } catch {
-            gh release edit $env:TAG --draft=true
+            gh release delete $env:TAG --yes
             throw
           }
+          gh release edit $env:TAG --latest
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
