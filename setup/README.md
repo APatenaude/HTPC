@@ -59,8 +59,12 @@ Back to a plain Windows PC (desktop mode, or Ctrl+Shift+Esc > Run new task, then
     powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
 
 It asks for elevation like setup, undoes what the steps can (`lib/Uninstall-Htpc.ps1`), each step
-saying what it did (`+` changed, `=` already so), and can be run again. Its log, and a copy of the
-box's logs (`logs\`, `state\`), go to `Documents\HTPC logs`. Then restart.
+saying what it did (`+` changed, `=` already so). Its log, and a copy of the box's logs
+(`logs\`, `state\`) and of setup itself, go to `Documents\HTPC logs`. Then restart. To run it
+again (it removes `C:\ProgramData\HTPC\setup`, and a second run changes only what the first
+could not), use that copy (the first run prints its path):
+
+    powershell -ExecutionPolicy Bypass -File "C:\Users\<account>\Documents\HTPC logs\setup\setup.ps1" -Uninstall
 
 | Step | Undoes |
 |---|---|
@@ -73,7 +77,7 @@ box's logs (`logs\`, `state\`), go to `Documents\HTPC logs`. Then restart.
 | Firewall | the `HTPC` rule group and the apps' `HTPC block inbound` rules |
 | Certificates | the phone remote's certificates (`O=HTPC TV box`) in the machine's and the user's CA stores |
 | System | the sign-in screen's picture and blur, Windows' default wallpaper, Windows Search and SysMain on again; the computer name is kept (it says so) |
-| Files | the launcher and watchdog ended, `Program Files\HTPC` and `ProgramData\HTPC` removed (the logs copied first), `HKCU\Software\HTPC` and the launcher's unpack folder variable removed |
+| Files | the launcher and watchdog ended (and waited for), `Program Files\HTPC` and `ProgramData\HTPC` removed (the logs and setup copied to `Documents\HTPC logs` first), `HKCU\Software\HTPC` and the launcher's unpack folder variable removed |
 
 Kept: the apps, winget, the HEVC extension, the power settings, the privacy and no-pop-up
 settings, dark mode, Private networks, automatic time zone, the computer name, and

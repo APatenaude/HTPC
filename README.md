@@ -110,7 +110,8 @@ can ship code to every box ([launcher/README.md](launcher/README.md), "Releases"
       powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
 
   It takes the launcher off and gives the account the Windows desktop back
-  ([setup/README.md](setup/README.md) says what it undoes and what it leaves). Setup cleared the
+  ([setup/README.md](setup/README.md) says what it undoes and what it leaves). It keeps a copy of
+  setup in `Documents\HTPC logs\setup`: run it again from there (`...\setup\setup.ps1 -Uninstall`). Setup cleared the
   account's password: if the PC goes back to everyday use, set one in Windows' Settings ›
   Accounts.
 

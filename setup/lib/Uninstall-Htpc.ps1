@@ -16,8 +16,9 @@
 #   Certificates the phone remote's certificates (O=HTPC TV box) from the CA stores
 #   System      the sign-in screen and the desktop back to Windows' look (default wallpaper),
 #               Windows Search and SysMain back on; the computer name kept
-#   Files       the launcher and watchdog ended; a copy of the box's logs in Documents\HTPC logs;
-#               Program Files\HTPC and ProgramData\HTPC removed
+#   Files       the launcher and watchdog ended; a copy of the box's logs, and of this setup (to
+#               run it again), in Documents\HTPC logs; Program Files\HTPC and ProgramData\HTPC
+#               removed
 # Kept (and said so): the apps, winget, the HEVC extension, power settings, the privacy and
 # no-pop-up settings, dark mode, Private networks, automatic time zone, the computer name, and
 # %LOCALAPPDATA%\HTPC (the launcher's settings and the website tiles' Edge profiles, with their
@@ -194,6 +195,16 @@ $UninstallSteps = [ordered]@{
                 Copy-Item -LiteralPath $from -Destination $keep -Recurse -Force
                 Write-Change "$from copied to $keep"
             }
+        }
+        # This setup too, beside the logs: ProgramData\HTPC\setup goes below, and a second run
+        # (after a restart, for what was in use) starts from this copy.
+        $setupFrom = [IO.Path]::GetFullPath((Split-Path $lib -Parent)).TrimEnd('\')
+        $setupCopy = [IO.Path]::GetFullPath((Join-Path $logDir 'setup')).TrimEnd('\')
+        if ($setupFrom -ieq $setupCopy) { Write-Same "setup runs from $setupCopy" }
+        else {
+            if (Test-Path -LiteralPath $setupCopy) { Remove-Item -LiteralPath $setupCopy -Recurse -Force }
+            Copy-Item -LiteralPath $setupFrom -Destination $setupCopy -Recurse -Force
+            Write-Change "setup copied to $setupCopy (to run this again: $setupCopy\setup.ps1 -Uninstall)"
         }
         foreach ($dir in $HtpcProgramFiles, $HtpcData) {
             if (-not (Test-Path -LiteralPath $dir)) { Write-Same "$dir absent"; continue }
