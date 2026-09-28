@@ -68,7 +68,7 @@ sealed partial class MainForm : Form
         apps = new AppManager(options.CatalogPath);
         apps.SetCustom(settings.CustomTiles, settings.TileEdits);   // added websites and programs, tile edits
         if (settings.Tiles is not null) apps.SetTiles(settings.Tiles);
-        apps.RunningChanged += (id, started) => BeginInvoke(() => OnRunningChanged(id, started));
+        apps.RunningChanged += (id, started) => OnUi(() => OnRunningChanged(id, started));
         library = new LibraryService(apps, settings, options.CatalogPath);
         library.Changed += () => OnUi(PushLibraryProgress);
         library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
@@ -80,8 +80,8 @@ sealed partial class MainForm : Form
             closeSoon.Stop();
             if (keyboard.Visible && keyboardAuto) CloseKeyboard("the text field lost the focus");
         };
-        textFields.FocusChanged += (field, pid) => BeginInvoke(() => OnTextField(field, pid));
-        controller.Pressed += (pad, repeat) => BeginInvoke(() => OnPad(pad, repeat));
+        textFields.FocusChanged += (field, pid) => OnUi(() => OnTextField(field, pid));
+        controller.Pressed += (pad, repeat) => OnUi(() => OnPad(pad, repeat));
         var padConnected = false;
         controller.StatusChanged += (connected, _) => OnUi(() =>
         {
