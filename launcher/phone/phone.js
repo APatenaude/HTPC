@@ -156,6 +156,7 @@ function showLost(asleep) {
 // pairing screen, paired but never told); pageshow only when the page comes back from the cache.
 // From the pairing screen, coming back tries once more (a pairing may have finished meanwhile).
 let booted = false;
+let sendAfterHello = !demo && location.pathname === '/send';
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); return; }
   if (demo || !booted) return;
@@ -174,6 +175,8 @@ function onBox(m) {
       if (!m.paired) { if (state.conn !== 'pairing') showPairing(); return; }
       hidePairing();
       setConn('open');
+      // /send (card 2's code): the Send page once this phone may use the box, never over pairing.
+      if (sendAfterHello) { sendAfterHello = false; openSend(); }
       applyState(m.state);
       if (m.ca) { $('ca-fingerprint').textContent = groupFingerprint(m.ca); $('ca-here').hidden = false; }
       if (pendingShare !== undefined) handleShare(m.share || null);
@@ -900,8 +903,8 @@ async function boot() {
     history.replaceState(null, '', location.pathname + (rest.toString() ? '?' + rest : ''));
     const res = await post('/api/pair', { key: oneTimeKey });
     if (res.status === 200) toast('Paired');
+    else toast(res.status === 410 ? 'That code was used already or is too old: scan the one on the TV again' : pairError(res), 'warn');
   }
-  if (location.pathname === '/send') openSend();
   booted = true;
   connect();
 }
