@@ -55,10 +55,9 @@ partial class MainForm
             phoneAlerts = alerts;
             pairing = new PhonePairing(PhonePairing.DefaultPath);
             // HTTPS with the box's own certificates (Android's installed app and Share target, SPEC N9).
-            // Never with administrator rights: keys made so cannot be opened without them, and the
-            // launcher's next ordinary start would make a new pair (phones install the root again).
-            var certificates = Environment.IsPrivilegedProcess ? null : new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
-            if (certificates is null) Log.Info("Phone remote: running with administrator rights, so no HTTPS this time (its keys are the ordinary launcher's)");
+            // Elevated, this launcher has no split token (one that had started again at standard
+            // rights: Rights.cs), so it always runs with these rights and its keys are made with them.
+            var certificates = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
             phones = new PhoneServer(new PhoneHost(this), Path.Combine(AppContext.BaseDirectory, "phone"), pairing, certificates: certificates);
             // Both run inside other work (Standby.Enter, SleepTimer.Tick): nothing may escape.
             standby.Changed += active =>

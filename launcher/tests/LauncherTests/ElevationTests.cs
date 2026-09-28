@@ -21,6 +21,8 @@ static class ElevationTests
         Check = check;
         Console.WriteLine("== Setup elevation: setup mode, and what a start does");
         Decisions();
+        Console.WriteLine("== Rights: setup or not, and the token (split, no split, standard)");
+        RightsTable();
         Console.WriteLine("== Setup elevation: arguments and the command line");
         Arguments();
         Console.WriteLine("== Setup elevation: who takes over after setup");
@@ -70,6 +72,33 @@ static class ElevationTests
             Check(SetupElevation.IsSetupMessage(t), $"setup's message {t}: taken");
         foreach (var t in new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null })
             Check(!SetupElevation.IsSetupMessage(t), $"{t ?? "(none)"}: refused in setup");
+    }
+
+    // Rights.cs: administrator rights never mean "this is setup". Setup mode with them alone uses
+    // setup's admin-only places; the everyday launcher's start depends on how its rights came.
+    static void RightsTable()
+    {
+        const Rights.Token Std = Rights.Token.Standard, Split = Rights.Token.Split, NoSplit = Rights.Token.NoSplit;
+        const Rights.Start Run = Rights.Start.Run, Warned = Rights.Start.RunWithFullRights, Again = Rights.Start.AgainAtStandard, Stop = Rights.Start.Stop;
+        Check(Rights.Decide(true, Split, false) == new Rights.Plan(true, Run), "setup elevated, User Account Control on: TV Box Setup, in its admin-only places");
+        Check(Rights.Decide(true, NoSplit, false) == new Rights.Plan(true, Run), "setup elevated with no split token (UAC off, the built-in Administrator): TV Box Setup too");
+        Check(Rights.Decide(true, Std, false) == new Rights.Plan(false, Run), "setup at standard rights: not TV Box Setup's places (SetupElevation.Decide asks for the rights)");
+        Check(Rights.Decide(false, Std, false) == new Rights.Plan(false, Run), "the launcher at standard rights: runs, in the user's folders");
+        Check(Rights.Decide(false, NoSplit, false) == new Rights.Plan(false, Warned),
+            "the launcher elevated with no split token: runs as usual in the user's folders (handoff, logos, certificates, HTTPS), warned; never setup's places");
+        Check(Rights.Decide(false, Split, false) == new Rights.Plan(false, Again), "the launcher elevated with a split token: starts again at standard rights, before any file work");
+        Check(Rights.Decide(false, Split, true) == new Rights.Plan(false, Stop), "... the copy started for that, still elevated: stops (no loop)");
+        Check(Rights.Decide(false, Std, true) == new Rights.Plan(false, Run) && Rights.Decide(false, NoSplit, true) == new Rights.Plan(false, Warned)
+            && Rights.Decide(true, Split, true) == new Rights.Plan(true, Run), "the copy's flag changes nothing else");
+        var again = Rights.AgainArgs(["--dev", "--ui", @"C:\my ui", Rights.AtStandardFlag, "--tv"]);
+        Check(again.SequenceEqual(["--dev", "--ui", @"C:\my ui", "--tv", Rights.AtStandardFlag]), $"the standard-rights copy: the same arguments, the flag once, last ({string.Join(" | ", again)})");
+
+        // Tests never run Program.Main: the launcher's own places, whatever this process's rights
+        // (an elevated CI runner too). The token as Windows gives it.
+        Check(!Rights.SetupElevated && Rights.Elevation == Std, "no Main here: not TV Box Setup (the launcher's places, elevated or not)");
+        var token = Rights.Read();
+        Check((token == Std) == !Environment.IsPrivilegedProcess && (token == NoSplit) == (Environment.IsPrivilegedProcess && TokenElevationType() == 1),
+            $"this process's token: {token} (elevated {Environment.IsPrivilegedProcess}, TokenElevationType {TokenElevationType()})");
     }
 
     static void Arguments()
@@ -275,11 +304,16 @@ static class ElevationTests
         finally { LocalFree(argv); }
     }
 
-    static bool TokenElevated()
+    static bool TokenElevated() => TokenValue(20 /* TokenElevation */) != 0;
+
+    /// <summary>1 default (no split token), 2 full (elevated, split), 3 limited.</summary>
+    static int TokenElevationType() => TokenValue(18 /* TokenElevationType */);
+
+    static int TokenValue(int infoClass)
     {
         using var me = System.Diagnostics.Process.GetCurrentProcess();
         if (!OpenProcessToken(me.Handle, 0x8 /* TOKEN_QUERY */, out var token)) throw new InvalidOperationException("OpenProcessToken failed");
-        try { return GetTokenInformation(token, 20 /* TokenElevation */, out var elevated, 4, out _) && elevated != 0; }
+        try { return GetTokenInformation(token, infoClass, out var value, 4, out _) ? value : -1; }
         finally { CloseHandle(token); }
     }
 }

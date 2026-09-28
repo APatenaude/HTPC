@@ -612,7 +612,7 @@ Console.WriteLine("== Brightness at start");
 // In a folder of its own (never the box's settings.json).
 Console.WriteLine("== Settings: an unreadable settings.json");
 {
-    LauncherSettings.TestElevated = false;   // the launcher's own (standard-rights) path, also on an elevated CI runner
+    // The launcher's own path, whatever the test's rights (an elevated CI runner too): only TV Box Setup saves elsewhere (Rights.SetupElevated).
     var dir = Path.Combine(Path.GetTempPath(), "htpc-settings-test");
     if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
     var file = Path.Combine(dir, "settings.json");

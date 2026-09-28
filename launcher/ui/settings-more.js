@@ -9,7 +9,8 @@
 //   From the host: {type:'controller.pad', connected, buttons, lt, rt, lx, ly, rx, ry} (while testing)
 //                  {type:'sound.outputs', outputs: [{id, name, isDefault}], canSwitch}
 //                  {type:'display.decode', running, result} (Test-HwDecode.ps1's report, or {error})
-//                  {type:'system.info', launcher, windows, edge, webview, apps: [{id, name, glyph, color, version}], boxName, hardware}
+//                  {type:'system.info', launcher, windows, edge, webview, apps: [{id, name, glyph, color, version}], boxName, hardware,
+//                   fullRights (administrator rights with User Account Control off: About says a UAC-on account is safer)}
 
 const more = {
   pad: null,            // last raw controller state (button test)
@@ -330,6 +331,8 @@ settingsSection('about', {
         fact('Windows', s.windows, true) +
         fact('Hardware', s.hardware) + fact('Hardware video decoding', decodeSummary(decode)) +
       '</div>' +
+      (s.fullRights ? '<p class="snote warn">The launcher runs with administrator rights, and so does every app opened from it: ' +
+        'User Account Control is off, or this is Windows’ built-in Administrator. A TV account with User Account Control on is safer.</p>' : '') +
       '<div class="sbuttons">' +
         '<div class="sbutton" data-nav data-id="about-restart" data-act="restart-launcher">Restart launcher</div>' +
         '<div class="sbutton" data-nav data-id="about-logs" data-act="save-logs">Save logs to USB stick</div>' +

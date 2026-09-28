@@ -9,7 +9,8 @@ namespace Htpc.Launcher;
 /// <summary>
 /// TV Box Setup asks Windows for administrator rights once, as it opens, where it used to ask at
 /// the end of the wizard. Not through a requireAdministrator manifest: the same exe is the
-/// everyday launcher, which never runs elevated. Setup mode started without the rights asks
+/// everyday launcher, which runs at standard rights (Rights.cs: started elevated, it starts again
+/// without them, unless there are none to go to). Setup mode started without the rights asks
 /// for them and ends; declined, a screen says setup needs them (A: try again, B: quit).
 ///
 /// Never elevated where the user can write: this exe is one self-extracting file, and .NET
@@ -336,7 +337,7 @@ static class SetupElevation
     /// </summary>
     public static void ClearSetupWebViews()
     {
-        if (Environment.IsPrivilegedProcess) return;   // never elevated: the user's folder
+        if (Environment.IsPrivilegedProcess) return;   // never with administrator rights: the user's folder
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "setup-webview");
         Task.Run(() =>
         {
