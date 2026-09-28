@@ -40,6 +40,12 @@ answer file runs it with `-Unattended` at the first sign-in.
 | Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `tools/Test-HwDecode.ps1` | hardware decoding report for H.264, HEVC, VP9, AV1 (skipped in a VM) |
 
+**TODO (1.0):** the Drivers step (the drivers Windows Update has for the box's devices, at setup)
+and `setup.ps1 -Uninstall` are not in this branch yet: add the Drivers row above and an
+"Uninstall" section below (what it undoes, what it leaves) when they land. The landing page
+(README.md) already describes `-Uninstall` as
+`powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall`.
+
 `catalog.json` is the one app list for setup and the launcher's library.
 
 ## Installing from the TV (SPEC W5)
@@ -121,8 +127,8 @@ catalog's apps set up and takes it away:
 
 Never touched, whatever the catalog says: ours (`HTPC launcher`, tasks under `\HTPC\` or named
 `HTPC...`, anything in `Program Files\HTPC`), Windows' own (`SecurityHealth`, tasks under
-`\Microsoft\`, programs in the Windows folder), Edge's updater (`\MicrosoftEdgeUpdateTask*`, the
-user's choice) and `CoworkVMService` (the Claude desktop app's, a dev tool). A folder too broad to
+`\Microsoft\`, programs in the Windows folder) and Edge's updater (`\MicrosoftEdgeUpdateTask*`,
+the user's choice). A service is changed only when the catalog names it. A folder too broad to
 mean one app (Program Files itself, AppData itself) is never used, nor a declared name with fewer
 than 4 characters besides `*`. What no catalog app claims is left alone and logged.
 

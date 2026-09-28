@@ -1,133 +1,165 @@
 # TV box: needs, wants and plan
 
-Draft 4 · 26 September 2026 (after review 3) · Design canvas: https://claude.ai/artifact/6kXG7DKA3nVAxW5LGhv1ph
+1.0 · 28 September 2026
 
 One person, one TV, one controller. A launcher of our own replaces the Windows
-desktop, opens six apps full screen, and turns the iPhone into a remote and a
-"send to TV" button.
+desktop, opens its apps full screen, and turns the phone into a remote and a
+"send to TV" button. The decisions made along the way (26 and 27 September 2026, with the
+user) are folded into the items below; what was dropped is listed under "Not now".
 
 ## Setup
 
 | | |
 |---|---|
-| Box | Intel N97 mini PC, 16 GB |
-| System | Windows 11 IoT Enterprise LTSC 2024 (user supplies ISO and license) |
-| TV | Roku TV today (SDR, TV speakers); any TV later via per-TV profiles |
-| Controller | 8BitDo Ultimate 2C on its 2.4 GHz dongle (XInput) |
+| Box | Any x64 PC (never ARM) with an AMD, NVIDIA or Intel GPU, integrated or discrete, that decodes video in hardware. Built and tested on an Intel N97 mini PC, 16 GB, S3 sleep only (docs/MACHINE.md) |
+| System | Windows 11 IoT Enterprise LTSC 2024 (the user supplies the ISO and license), English (en-US), automatic time zone, Windows in dark mode |
+| TV | Any TV on HDMI, at any resolution and scaling. Network control: Roku (tested on the user's TCL Roku TV: SDR, TV speakers); LG, Google / Android TV, Sony, Samsung in beta |
+| Controller | 8BitDo Ultimate 2C on its 2.4 GHz dongle (XInput). The launcher follows one controller; others work in games |
 | Phones | iPhone and Android |
-| Media | Jellyfin server on the network · Stremio with Real-Debrid |
-| Users | One |
+| Media | Jellyfin server on the network · Stremio 5 (beta) with Real-Debrid, no VPN |
+| Users | One user and one setup per box |
 
 ## Needs (day one)
 
 - **N1 Boots straight into the launcher.** No Windows desktop, taskbar, Start menu or popups.
-- **N2 Big app tiles.** Dark tiles with each app's icon in its own color; fully controller-driven.
-- **N3 Apps picked in first-run setup.** The six come pre-ticked: YouTube (VacuumTube), Twitch (twitch.tv in its own Edge app window with extensions), Stremio, Jellyfin Desktop, Moonlight, Edge. Everything else lives in the library.
-- **N4 Home button over any app.** Overlay slides in, apps keep running, X closes one.
-- **N5 Hardware video decoding everywhere**, with a check runnable from Settings.
-- **N6 Sleep and wake.** From the menu and after a configurable idle time (15 min, 30 min, 1 h, 2 h, never; default 30 min); wake with the controller; one switch to Hibernate.
-- **N7 The TV follows the box, whichever TV it is.** Each TV is a profile recognised by its HDMI identity (EDID): control method (Roku ECP, LG webOS, Samsung Tizen, Sony / Google TV / Android TV, HDMI-CEC adapter, or none), input, display settings. Found on the network by name (SSDP/mDNS), not IP, so moving it is fine. TV on + input at box boot/wake, off at sleep; box sleeps when the TV is turned off (polling the TV's power state, same approach as the user's sound-switch script).
-- **N8 Phone remote web app (iPhone and Android), a small companion.** Three tabs: Remote (touchpad/arrows, back, home, options, volume, brightness, sleep button), Type (live typing + paste a link to play), Playing (media controls, volume, sleep timer). No management screens on the phone.
-- **N9 Casting from the phone.** YouTube cast button (VacuumTube), Jellyfin "Play on", Share › TV: iPhone via a Shortcut, Android via the installed web app (Web Share Target; needs HTTPS, so the box's own certificate is installed on the phone once).
-- **N10 Scripted install.** Clean Windows in, finished box out. Nothing updates unless asked.
-- **N11 On-screen keyboard in any app** (browser logins, searches). Pops up automatically when a text/password field gets focus (UI Automation), and a configurable button opens it anytime (default: right-stick press, R3). Numbers row, @, .com, shift, symbols, show password; types through Windows input (SendInput). Auto-popup off in apps with their own keyboard (VacuumTube, Jellyfin, Moonlight); R3 not intercepted in Moonlight.
-- **N12 Global brightness.** One slider dims the whole screen in every app (software dimming layer), reachable from the Home menu, the iPhone remote and Settings › Display.
-- **N13 Buttons per app.** Presets: Controller (pass-through), Mouse, Keyboard. Any button can be remapped per app on the TV to a key, key combination, mouse action, media key or launcher action. Mouse default: A click, B back, X Enter, Y Space, D-pad arrows, LT right-click, RT hold precise pointer, LB/RB tabs, Select Esc, Start F11, R3 keyboard. Website tiles are separate windows, so each has its own map.
-- **N14 Sleep timer.** Countdown set from the Home menu, Power menu, Settings or the phone: 15/30/45 min, 1 h, 1 h 30, 2 h, when the current video ends, off. Shown in the status bar; warning 1 minute before with +15 min.
+  The launcher, through a watchdog, is the shell of the TV account (the per-user Custom User
+  Interface policy; not Shell Launcher, which would loop on a black screen); other accounts
+  keep Explorer. No Windows password: automatic sign-in and nothing locks (a PIN in the
+  launcher if ever wanted). The watchdog restarts the launcher after a crash, a kill or a 60 s
+  hang; after repeated fast exits it restarts the box once, then gives the desktop with a
+  message and tries again later. Desktop mode (Power menu, one confirmation) opens Explorer for
+  maintenance; Back to TV closes it. The sign-in screen and desktop are in the home screen's
+  colour. Catalog apps never start by themselves (the autostart guard: their Run and RunOnce
+  values, Startup shortcuts and tasks, and the services the catalog names), and their own
+  updaters are off where they can be.
+- **N2 Big app tiles.** Dark tiles, 4 per row, with each app's real logo taken from the app
+  itself (a program's own icon, a website's own icon; none ship), and a line icon in the app's
+  colour until there is one; blue focus glow; 24-hour clock. Fully controller-driven. Soft
+  interface sounds made in the page (Settings › Sound: Off, Low, Medium; Low by default).
+- **N3 Apps picked in first-run setup.** Six come pre-ticked: YouTube (VacuumTube), Twitch
+  (twitch.tv in its own Edge app window, for its extensions), Stremio 5, Jellyfin Desktop,
+  Moonlight, and Browser (Edge only, opening on Google, new tabs too). Everything else lives in
+  the library. Every app opens filling the screen. Website tiles are separate Edge app windows,
+  each with its own profile and sign-in and no address bar; links they open in a new window
+  open in another app window. Extensions in every Edge profile, force-installed by policy:
+  uBlock Origin Lite (not full uBlock Origin: Edge ends MV2 support by about April 2027),
+  FrankerFaceZ, Video Speed Controller. Light pages are drawn dark by Edge itself
+  (`--enable-features=WebContentsForceDark`). Google search by policy, with the box marked as
+  MDM-enrolled (fake enrollment keys) so that Edge honours it on a non-domain PC.
+- **N4 Home button over any app.** A tap opens the Home menu over a dimmed capture of the app,
+  which keeps running; its row takes you back, X closes it. A hold (0.5 s everywhere) is the
+  Power menu. In Moonlight a tap goes to the game PC and a hold opens our menu. No hint when an
+  app opens: the Home menu over an app shows what its buttons do. Any change of the volume,
+  from anywhere, shows a small indicator for 2 s (with the output's name when sound moves).
+- **N5 Hardware video decoding everywhere**, whatever the GPU's maker, with a check in
+  Settings › Display that asks the graphics driver (H.264, HEVC, VP9, AV1) and plays no clips.
+  Edge gets the HEVC Video Extensions.
+- **N6 Sleep and wake.** Sleep is a stay-awake standby: from the Power menu, the sleep timer
+  or after an idle time (15 min, 30 min, 1 h, 2 h, never; default 30 min; only real input
+  counts, and "stay awake while video plays" is on by default), it pauses playback and turns
+  the video output and the TV off while the box stays on, so holding Home (0.5 s, with a buzz)
+  wakes everything. The reference box has S3 only and the 8BitDo dongle cannot wake it from S3.
+  Optional real sleep (S3) or hibernate, as the mode or after some hours in standby: woken by
+  the keyboard or the power button (a phone cannot: a web page cannot send Wake-on-LAN).
+  Windows never sleeps on its own. Shut down and Restart ask first ("Shut down the box?",
+  focus on Cancel: the controller cannot turn the box back on).
+- **N7 The TV follows the box, whichever TV it is.** Each TV is a profile keyed by its HDMI
+  identity (EDID); the HDMI input comes from the EDID too (the CEC physical address the TV
+  writes into it), for every brand. Control methods: Roku ECP (our own implementation), LG
+  webOS, Google TV / Android TV, Sony Bravia, Samsung Tizen (on and off only), or none; the
+  non-Roku ones are offered in setup and Settings › TV marked beta, tested only against
+  simulated TVs so far. No HDMI-CEC for now. TVs are found by name on the network (SSDP,
+  mDNS), never bound automatically: the user picks one by name, and pairs where the brand asks
+  (LG and Samsung: "Allow" on the TV; Google TV: a code; Sony: a PIN); a TV is bound only on
+  positive evidence. On with the input at box start and wake; off at sleep and shut down (not
+  restart); the box goes to standby when the TV is turned off (polled every 5 s). Per-TV
+  display settings are not built.
+- **N8 Phone remote web app (iPhone and Android), a small companion** at http://tv.local, port
+  80 for good. A pairing code for new phones (4 digits on the TV). Three tabs: Remote
+  (touchpad or arrows, Back, Home, options, volume, brightness, sleep), Type (live typing,
+  Tab and Shift+Tab), Playing (media controls, volume, sleep timer); Send link on every tab. No
+  app list, no management screens. Back always goes back. Offered by a dismissible card on the
+  home screen, not a setup step. The firewall lets it in from the local subnet on Private
+  networks; every network the box joins is Private.
+- **N9 Casting from the phone.** YouTube's cast button (VacuumTube's own) and Jellyfin's "Play
+  on", while those apps are open. Share › TV: Android through the installed web app (Web Share
+  Target, over HTTPS: the box is its own certificate authority, whose root the phone installs
+  once from a QR code, checking its fingerprint on the TV), iPhone through a Shortcut the user
+  makes once (a key from the phone's Send page). Links open in their site's tile: YouTube
+  videos in VacuumTube, Twitch in the Twitch tile, anything else in the browser.
+- **N10 Scripted install; nothing updates unless asked.** One "TV Box Setup" exe from GitHub
+  releases: the launcher in setup mode, which is also the first-run setup (W4). Windows asks for
+  permission once, as it opens, for its own command processor, which starts setup from the
+  admin-only `Program Files\HTPC\Setup`; setup.ps1's steps then run with no further prompt. A
+  Drivers step installs the drivers Windows Update has for the box's devices (graphics
+  included) once, at setup. `setup.ps1 -Uninstall` gives the account the Windows desktop back.
+  The USB answer file stays for a full wipe-and-install. Updates: Windows manual (from the TV,
+  now or tonight, with a quiet restart after a night's update; no driver swaps; Defender's
+  definitions come with them); Edge and WebView2 automatic; other apps on demand (winget);
+  the launcher from this repository's releases (published from v* tags, unsigned, trusted by
+  the pinned repository, HTTPS and hashes; rolled back automatically). A quiet daily check,
+  installs only when asked, restore points before Update all and Windows updates.
+- **N11 On-screen keyboard in any app** (browser logins, searches). A band at the bottom of
+  the screen. Pops up automatically when a text or password field gets focus (UI Automation),
+  and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
+  symbols, show password, and a row of what a controller lacks (Tab, refresh, zoom, full
+  screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
+  with their own keyboard (VacuumTube, Jellyfin, Moonlight); R3 not intercepted in Moonlight.
+- **N12 Global brightness.** One slider dims the whole screen in every app (a software dimming
+  layer), from the Home menu, the phone remote and Settings › Display; kept across restarts.
+- **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
+  controller map below. Mouse and Keyboard apps can have any button remapped on the TV (only
+  there) to a key, key combination, mouse action, media key or launcher action; YouTube,
+  Jellyfin and Moonlight can only switch preset. Pointer and scroll speeds are global. R3 (the
+  keyboard) can be changed, Home cannot. Website tiles are separate windows, so each has its
+  own map. Start + D-pad is the volume in every app but Moonlight (Up and Down by 2, repeating
+  while held; Left mutes); Start's own action then comes as it is let go, without a direction.
+- **N14 Sleep timer.** A countdown set from the Home menu, the Power menu, Settings or the
+  phone: 15/30/45 min, 1 h, 1 h 30, 2 h, when the current video ends, off. "When this video
+  ends": autoplay moving on counts as the end, so does a 5-minute pause; picked with nothing
+  playing it waits; 3-hour cap. Shown in the status bar; a warning 1 minute before, where Home
+  gives +15 min.
 
 ## Wants
 
-- **W1 Edit tiles on the TV.** Add (installed app or website), move, rename, change icon, remove. Website tiles open in Edge (4K for Netflix and co.).
-- **W2 Status bar.** Clock, date, controller battery, alerts.
-- **W3 Settings on the TV.** Sleep & power, TV, controller, iPhone remote, Wi-Fi, Bluetooth, display, sound, updates, about & Desktop mode.
-- **W4 First-run setup.** Controller check, find TV, HDMI input, pick apps, phone remote.
-- **W5 App library.** Client apps only: media apps (Kodi, VLC, Plex HTPC, Spotify, Feishin, plus the six) and streaming-site tiles (Netflix, Disney+, Prime Video, Crunchyroll, Max…) that open in Edge. Install / add tile / uninstall from the TV. One catalog file drives setup and the library.
+- **W1 Edit tiles on the TV.** Add (an installed app, anything in the Start menu, or a
+  website), move, rename, change icon, remove. Website tiles open in Edge (4K for Netflix and
+  co.).
+- **W2 Status bar and alerts.** Clock, date, controller battery, alert pills. Alerts: an app
+  did not open or closed unexpectedly, no internet, idle sleep in a minute, headphones, updates
+  (home screen only), the phone, the TV not coming on. No controller or battery alerts; only
+  urgent ones over video; acted on with Home, then A in the Home menu.
+- **W3 Settings on the TV.** Sleep & power, TV, Controller (with Button maps), Phone remote,
+  Wi-Fi, Bluetooth, Display, Sound, Updates, About & Desktop mode. Wi-Fi is built in (hidden
+  networks too; location allowed for the launcher, which Windows requires for the list).
+  Bluetooth: headphones, speakers, controllers and keyboards (a keyboard pairs only with a PIN);
+  sound follows headphones; setup installs the adapter's own driver from Windows Update and
+  keeps Windows' generic one when there is none. Sound: one volume level for the box whatever
+  the output.
+- **W4 First-run setup.** Welcome, controller check, Wi-Fi (only without a cable), find the TV,
+  the TV's input, pick apps, install, done. The phone remote is not a step.
+- **W5 App library.** Client apps only, from one catalog file that drives setup and the
+  library: Kodi, VLC, Plex HTPC, Spotify, Feishin (plus the six), and streaming sites that open
+  in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi,
+  Pluto TV, Kick, Crave, CBC Gem). Install and uninstall from the TV (not from the Browser),
+  keeping app data; installs start right away at low priority.
 
 ## Not now
 
-Content rows ("Live now", "Continue watching") · HDR · surround passthrough · AirPlay mirroring · CEC adapter · profiles · Steam/games · Firefox (Edge only by choice) · servers, games and utilities in the library · managing the box from the phone.
+Content rows ("Live now", "Continue watching") · HDR · surround passthrough · AirPlay
+mirroring · HDMI-CEC · per-TV display settings · profiles · Steam and games · Firefox (Edge
+only by choice) · servers, games and utilities in the library · managing the box from the
+phone · waking the box from real sleep with the phone.
 
-## Decisions from the requirements dialog
-
-| Topic | Decision |
-|---|---|
-| Platform | Windows 11 LTSC, custom launcher replaces Explorer as shell |
-| Home screen | Big app tiles, uniform dark |
-| Home button in app | Overlay, app keeps running |
-| Twitch | Website (for extensions) in an Edge app window; no "live now" on the dashboard |
-| Browser | Edge only |
-| Jellyfin | Jellyfin Desktop |
-| Stremio | Debrid, no VPN |
-| Sleep | Sleep + automatic idle, hibernate fallback |
-| TV power | Roku network control (own implementation of the ECP mechanism, not a third-party project) |
-| Volume | Windows volume |
-| Phone remote | Touchpad + arrows, keyboard, media + volume, apps + power + paste link |
-| Settings on TV | Essentials + system |
-| Status bar | Clock + date, controller battery, alerts |
-| Tiles | Edited on the TV |
-| Moonlight Home | Tap to game PC, hold 1 s for our menu (was 2 s; changed 26 Sept 2026) |
-| Idle sleep | Configurable, default 30 min |
-| YouTube links from Share sheet | Open in VacuumTube (fallback: link player; the link player was dropped on 27 September) |
-| TV power on | Whenever the box boots or wakes |
-| Preinstalled apps | Picked in first-run setup, six pre-ticked |
-| Library scope | Media apps + streaming-site tiles (client only) |
-| Brightness | Global software dimming only |
-| On-screen keyboard | Auto on text fields + configurable button, default R3 |
-| TV brands | Roku, LG webOS, Samsung Tizen, Sony / Google TV / Android TV, CEC adapter fallback |
-| Android Share | One-time certificate install from a QR code |
-| Browser-like apps | X Enter, Y Space, D-pad arrows (Mouse preset) |
-| Button map editing | On the TV only |
-| Phone app scope | Companion only: Remote, Type, Playing |
-| Icons | Colored per app on dark tiles |
-| Sleep timer | Countdown you set, with warning |
-| Ad blocking | uBlock Origin Lite in Edge (force-installed by policy); full uBlock Origin not used since Edge ends MV2 support by ~April 2027 |
-| Edge search engine | Google, set by policy; the box is marked as MDM-enrolled (fake MDM enrollment keys) so Edge honours DefaultSearchProvider* on a non-domain PC |
-
-Decisions of 26 September 2026 (building on the box):
-
-| Topic | Decision |
-|---|---|
-| Sleep | Stay-awake standby: Sleep (menu, timer, idle) turns the TV and screen off and pauses playback while the box stays on, so holding Home on the controller (0.5 s) wakes everything. The box has S3 only and the 8BitDo dongle cannot wake from S3. Optional real sleep after some hours; wake from it with the keyboard or power button (phone Wake-on-LAN later, through an iPhone Shortcut: a web page cannot send it) |
-| Windows sign-in | None: no password, automatic sign-in, nothing locks; a PIN in the launcher if ever wanted |
-| Install | One "TV Box Setup" exe from GitHub releases: the launcher's UI in setup mode (pick apps, find the TV, controller check, options), running the setup steps with one admin prompt; it is also the first-run setup. The USB answer file stays for full wipe-and-install |
-| Updates | Windows manual; Edge and WebView2 automatic; other apps on demand (winget); launcher from GitHub releases |
-| Language and time | English (en-US); automatic time zone |
-| Stremio | Stremio 5 (beta) |
-| Test loop | Build on the real box first; a Hyper-V VM checks the clean install |
-
-Decisions of 26 September 2026, evening (with the agents' plans):
-
-| Topic | Decision |
-|---|---|
-| Home button | Hold = 0.5 s everywhere. In Moonlight a tap goes to the game PC, a hold opens our menu |
-| Browser | The Edge tile is called "Browser" and opens on Google (new tabs too). Website tiles are separate app windows with their own sign-in each and no address bar; links they open in a new window open in another app window. Extensions in every Edge profile: uBlock Origin Lite, FrankerFaceZ, Video Speed Controller. Light pages are drawn dark by Edge itself (`--enable-features=WebContentsForceDark`); Dark Reader was dropped on 27 September 2026 because it opened pages asking to be paid for |
-| Look | Windows in dark mode. Launcher icon: accent-blue tile with a TV and a play mark |
-| Library | Kodi, VLC, Plex HTPC, Spotify, Feishin; sites Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi, Pluto TV, Kick, Crave, CBC Gem. Install and uninstall from the TV (not the Browser), keeping app data; "Add tile" also lists everything in the Start menu; line icons + colour; installs run right away at low priority |
-| Buttons | Per-app maps only for Mouse/Keyboard apps; YouTube, Jellyfin and Moonlight can only switch preset. Global pointer/scroll speeds. R3 (keyboard) editable, Home not. Extra keys (Tab, refresh, zoom, full screen, volume) on a row of the on-screen keyboard |
-| Sleep timer | "When this video ends": autoplay moving on counts as the end; a 5-minute pause counts; picked with nothing playing it waits; 3-hour cap. During the 1-minute warning, Home = +15 min |
-| Alerts | App didn't open / closed unexpectedly, no internet, idle-sleep warning, headphones, updates (home screen only), phone, TV not responding (when turning it on fails). No controller or battery alerts. Only urgent ones over video. Act on them with Home, then A in the Home menu. The button hint shows each time an app opens, 4 s (dropped on 27 September) |
-| Phone remote | http://tv.local on port 80 for good (HTTPS only later, for Android Share); pairing code for new phones; Remote, Type (with Tab/Shift+Tab) and Playing tabs; no app list; Back always goes back; links routed by site; added from a dismissible home-screen card on first boot, not a setup step; casting (N9) in a second phase |
-| Network | Every network the box joins is Private. Firewall: per-app answers (no global off switch); Stremio's service blocked; the phone remote and YouTube cast allowed on Private networks from the local subnet |
-| Wi-Fi and Bluetooth | Built into the launcher (full Wi-Fi incl. hidden networks; Bluetooth headphones and controllers; sound follows headphones); location allowed for the launcher; a Wi-Fi step in first-run setup when there's no cable; setup installs the vendor Bluetooth driver for whatever adapter a box has |
-| Shell | The launcher (via a watchdog) replaces Explorer for the TV account, switched at the end of development; desktop mode from the Power menu (one confirmation); crash loop: restart once, then the desktop with a message; a frozen launcher is restarted; Defender exclusion for C:\Program Files\HTPC |
-| TVs | Roku, LG webOS, Google/Android TV, Sony Bravia, Samsung Tizen (on/off only), the non-Roku ones marked beta until tested on a real TV; no CEC for now. The HDMI input is read from the TV's EDID; a TV is bound only on positive evidence. The TV turns off at sleep and shut down (not restart); polled every 5 s for a fast wake. One user and one setup per box. First-run setup keeps its separate install step |
-| Updates | Quiet daily check, installs only when asked; releases published from v* tags on the public repo, unsigned, trusted by pinned repo + HTTPS + hashes (no signing key); automatic rollback; apps' own updaters off; Windows updates from the TV (now or tonight), quiet boot after a night restart; restore points before Update all and Windows updates; Defender definitions stay manual |
-
-Decisions of 27 September 2026 (after the night's merges):
-
-| Topic | Decision |
-|---|---|
-| TVs | LG webOS and Google/Android TV built first (Sony and Samsung later) and offered in setup and Settings › TV marked beta, tested only against simulated TVs so far. A TV is never bound automatically: the user picks it by name. An LG that was factory-reset may show its "allow this device?" prompt once; the user pairs again from Settings › TV |
-| Power menu | Shut down asks first ("Shut down the box?", the focus on Cancel): the controller cannot turn the box back on. Restart asks too ("Restart the box?"): it closes every app |
-| Bluetooth | The box keeps Windows' generic Bluetooth driver when Windows Update has none for its chip (this box's Realtek 0BDA:C821); a keyboard pairs only with a PIN. The launcher follows one controller (the 8BitDo); others work in games |
-| Stremio | Its update notice is off (`--autoupdater-endpoint` pointed nowhere; checked in the VM) |
-| Next | The box gets the new build in a session with the user at the TV (one Windows permission prompt); the shell switch stays for the end of development |
-| Button hint | None when an app opens (the user's choice): the Home menu opened over an app shows what its buttons do |
-| Link player | Dropped (no mpv + yt-dlp player): a link from the phone opens in its site's tile (YouTube videos in VacuumTube, Twitch in the Twitch tile), anything else in the browser. The decoding check (N5) asks the graphics driver only and plays no clips |
+Dropped along the way: the button hint when an app opens (27 September) · the link player,
+mpv + yt-dlp (27 September) · Dark Reader, which opened pages asking to be paid for (27
+September; Edge draws dark pages itself) · a default playback speed for VacuumTube.
 
 ## Controller map
 
-Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power · in Moonlight tap goes to the game PC, hold 0.5 s = menu · R3 = on-screen keyboard (not in Moonlight; configurable).
+Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power (in standby: wake) · in
+Moonlight a tap goes to the game PC, a hold of 0.5 s is our menu · R3 = on-screen keyboard
+(not in Moonlight; configurable) · Start + D-pad = volume (not in Moonlight).
 
 Launcher & menus: D-pad/L stick move · A select · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
 
@@ -155,19 +187,20 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 
 | Risk | Plan |
 |---|---|
-| N97 boxes only get Modern Standby; can self-wake or resume black | Tested: this box has S3 and no Modern Standby; S3 sleep and wake work |
-| Waking from the 8BitDo dongle is unknown | Tested: it cannot wake from S3 (no USB remote wakeup), keyboard can. Answer: stay-awake standby |
+| PCs differ: sleep states, GPUs (AMD, NVIDIA, Intel; integrated or discrete), screens | Standby is the launcher's own, whatever sleep the PC has; the decoding check asks the driver; the Home backdrop is captured on the GPU driving the TV; the launcher follows any resolution, scaling or primary screen; a lost GPU process renews the WebView's browser; the Drivers step brings the box's drivers once |
+| Waking from the 8BitDo dongle | Tested: it cannot wake from S3 (no USB remote wakeup), the keyboard can. Answer: stay-awake standby |
 | Twitch ad blocking is weaker in Edge | Try a week; moving only the Twitch tile to Firefox is small |
 | Mouse mode has a ceiling (Edge, Twitch, Stremio) | Precise pointer on RT; phone touchpad and keyboard |
-| Some apps expect Explorer | Fallback: Explorer running but hidden behind the launcher |
+| Some tasks need Explorer (Windows Settings, packaged apps) | Desktop mode from the Power menu |
 | Two volumes (Windows vs TV remote) | Set TV once and leave it |
-| Roku ECP needs "Control by mobile apps" and "Fast TV start"; PowerOn not in official docs | Setup checks both and tests on/off |
-| Can't run Windows from the build environment | Test list per phase; launcher writes logs |
+| Roku ECP needs "Control by mobile apps" and "Fast TV start"; PowerOn not in official docs | Setup and Settings › TV list both; Wake-on-LAN first |
+| The non-Roku TV drivers were built without those TVs | Marked beta; "No TV control" (the TV's own remote) always works |
+| Testing needs Windows, a TV and a controller | The real box first; a Hyper-V VM for the clean install; TvLab's simulated TVs; the page's self-test and UI audit; the launcher writes logs |
 | LTSC has no Store/winget; Edge 4K web video needs HEVC codec | Setup script installs winget and the codec |
 | Edge ignores search-engine policies on non-managed PCs | Fake MDM enrollment registry keys; side effect: Defender Tamper Protection shows as managed |
 | uBlock Origin Lite is weaker than full uBO, especially on Twitch | Accepted; revisit (e.g. a second browser for Twitch) if ads get through |
-| Launcher crash leaves a blank screen | Watchdog restart; Ctrl+Alt+Del still works |
-| Each TV brand is its own integration; Samsung power-on over network is unreliable | Roku first, other brands when needed, CEC adapter as catch-all |
+| Launcher crash leaves a blank screen | Watchdog restart, then the desktop with a message; Ctrl+Alt+Del and Task Manager still work |
+| Anyone who can publish a release here ships code to every box (no signing key) | Pinned repository, HTTPS, hashes; the owner turns on two-factor sign-in, immutable releases and a v* tag ruleset on GitHub |
 | Android installs web apps / Share targets only over HTTPS | Box's own certificate installed once via QR; remote works in the browser without it |
 | Button maps per app, but website tiles all run in Edge | Each website tile is its own app window with its own map |
 | Auto keyboard pops up when a site focuses a search box on load | B dismisses; off in apps with their own keyboard; can be disabled |
@@ -175,30 +208,54 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 
 ## Architecture
 
-- **Install:** "TV Box Setup" exe (the launcher in setup mode) running the setup steps (winget, apps, policies, power, codecs); optional `autounattend.xml` USB stick for a full wipe-and-install that ends in the same setup.
-- **Launcher:** C# host with a WebView2 web UI; registered as the shell for the TV account. Watchdog restarts it.
-- **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button maps (preset + overrides) applied to the foreground window, emitted via SendInput.
-- **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket + Wake-on-LAN), Samsung Tizen (websocket + WoL), Sony / Google / Android TV (Android TV Remote protocol or Bravia API), HDMI-CEC (libCEC). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
-- **Phone:** launcher serves the remote web app at `http://tv.local`; a pairing code for new phones; HTTPS with the box's own CA only later, for Android's Share target; iOS Shortcut or Android Web Share Target posts links.
-- **App catalog:** one list (winget IDs + website tiles) drives the setup picks and the library.
-- **Keyboard and brightness:** launcher overlay layers above every app.
-- **Updates:** winget for apps, launcher self-update, Windows updates on demand, restore point first.
+- **Install:** "TV Box Setup" exe (the launcher in setup mode) running the setup steps
+  (restore point, winget, apps, codecs, Edge, power, updates, drivers, system, sign-in,
+  launcher, library, phone remote, shell, decoding check); optional `autounattend.xml` USB stick
+  for a full wipe-and-install that ends in the same setup; `setup.ps1 -Uninstall` to go back.
+- **Launcher:** C# (.NET 10, WinForms) host with a WebView2 web UI, drawn at 1920x1080 and
+  scaled to the screen; the shell of the TV account through its watchdog (HtpcWatchdog.exe).
+  Never elevated; machine changes go through the `\HTPC\Jobs` task (SYSTEM), one catalog id at
+  a time.
+- **Controller service:** in the launcher; reads XInput directly (incl. Guide); per-app button
+  maps (preset + overrides) applied to the foreground window, emitted via SendInput.
+- **TV control:** one driver per method: Roku ECP (HTTP :8060), LG webOS (SSAP websocket +
+  Wake-on-LAN), Google / Android TV (Android TV Remote protocol v2), Sony Bravia (REST API),
+  Samsung Tizen (websocket + WoL). TV profiles keyed by EDID; TVs found by name via SSDP/mDNS.
+- **Phone:** the launcher serves the remote web app at `http://tv.local`; a pairing code for
+  new phones; HTTPS with the box's own CA for Android's Share target; the iPhone Shortcut and
+  Android's Share target post links.
+- **App catalog:** one list (winget ids, GitHub releases, website tiles) drives the setup picks,
+  the library and the autostart guard.
+- **Keyboard, brightness, alerts, volume indicator:** launcher layers above every app.
+- **Updates:** winget for apps, the launcher from this repository's releases (swapped at Home
+  or in standby, journaled, rolled back), Windows updates on demand, restore point first.
+- **Checks:** unit test projects, TvLab (the TV drivers against simulated TVs), the page's
+  self-test and its UI audit, which walks every view with the D-pad in a stress state (every
+  new view must be in it), the phone page's layout audit, and the update jobs against a fake
+  GitHub. The test projects, TvLab and the update checks gate every release.
 
 ## Build order
+
+All four phases are built (1.0):
 
 1. **Base install:** USB install, setup script with the app catalog, apps with hardware decoding, decoding check.
 2. **Launcher core:** tiles, Home menu, power menu + sleep timer, controller service with presets, keyboard, brightness, sleep, Roku control.
 3. **Phone:** remote web app for iPhone and Android, Send to TV on both.
 4. **Polish:** settings screens, button map editor, TV profiles + other brands, app library, tile editing, alerts, first-run setup.
 
-## Screens (on the design canvas)
+## Screens
 
-- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Inside an app (button hint) · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · First-run setup (incl. pick your apps)
+- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · Volume indicator · First-run setup (incl. Wi-Fi, the TV and its input, pick your apps)
 - **Settings:** Sleep & power · TV (profiles) · How the box controls a TV · Controller · Button maps · Button map editor · Phone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
-- **Phone:** Remote (touchpad) · Remote (arrows) · Type (+ paste link) · Playing (+ sleep timer) · Send to TV
+- **Phone:** Remote (touchpad) · Remote (arrows) · Type · Playing (+ sleep timer) · Send link · Send to TV from other apps
 
 ## Open questions
 
-1. Look: colored icons, blue focus glow, 4 tiles per row, 24-hour clock.
-2. Can VacuumTube be handed a YouTube link to open? (Verify before build; the fallback was the link player, since dropped.)
-3. Library list: anything to add or drop?
+Closed: the look is as built (colored logos and icons, blue focus glow, 4 tiles per row,
+24-hour clock); the library list is the one in W5.
+
+Still open:
+
+1. Does YouTube play a link VacuumTube is started with? VacuumTube 1.8.2 hands it to YouTube's
+   TV app as the start-up deep link; to be confirmed on the box.
+2. The beta TV brands (LG, Google / Android TV, Sony, Samsung) on real TVs.
