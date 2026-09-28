@@ -92,9 +92,11 @@ sealed class KeyboardForm : Form
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
-        core.SetVirtualHostNameToFolderMapping("launcher.htpc", uiDir, CoreWebView2HostResourceAccessKind.Allow);
+        WebViewGuard.KeepToLauncher(core, "Keyboard"); // its own page only, no new windows
+        core.SetVirtualHostNameToFolderMapping(LauncherOrigin.Host, uiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += (_, e) =>
         {
+            if (!WebViewGuard.FromLauncher(e, "Keyboard")) return;
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
             var m = doc.RootElement.Clone();
             if (m.TryGetProperty("type", out var t) && t.GetString() == "ready")

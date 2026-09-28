@@ -801,6 +801,20 @@ Console.WriteLine("== WebView recovery");
     Check(new WebViewRecovery().OnFailure("UtilityProcessExited", 0).Step == WebViewRecovery.Step.Nothing, "a utility process: nothing");
 }
 
+// ---------------------------------------------------------------- The launcher's own pages
+// Messages are taken, and pages shown, only from https://launcher.htpc/ (WebViewGuard).
+Console.WriteLine("== The launcher's origin");
+{
+    Check(LauncherOrigin.Is("https://launcher.htpc/index.html") && LauncherOrigin.Is("https://LAUNCHER.htpc/keyboard.html#x"), "its pages");
+    Check(!LauncherOrigin.Is("http://launcher.htpc/index.html"), "not over http");
+    Check(!LauncherOrigin.Is("https://launcher.htpc:8443/index.html"), "not on another port");
+    Check(!LauncherOrigin.Is("https://launcher.htpc.evil.example/index.html") && !LauncherOrigin.Is("https://evil.example/launcher.htpc"), "not a look-alike host");
+    Check(!LauncherOrigin.Is("https://user@launcher.htpc/"), "not with user info");
+    Check(!LauncherOrigin.Is("https://capture.htpc/screen-1.jpg") && !LauncherOrigin.Is("file:///C:/ui/index.html") && !LauncherOrigin.Is(null) && !LauncherOrigin.Is("about:blank"), "not the capture host, a file, nothing, about:blank");
+    Check(LauncherOrigin.Describe("https://evil.example/path?token=secret") == "https://evil.example", "the log gets the host only");
+    Check(LauncherOrigin.Describe("file:///C:/Users/x/secret.txt") == "a file", "a file is not named in the log");
+}
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 

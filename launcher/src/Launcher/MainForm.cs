@@ -249,7 +249,8 @@ sealed partial class MainForm : Form
         // Nothing typed in the launcher (a Wi-Fi password) is kept or offered by WebView2.
         core.Settings.IsPasswordAutosaveEnabled = false;
         core.Settings.IsGeneralAutofillEnabled = false;
-        core.SetVirtualHostNameToFolderMapping("launcher.htpc", options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
+        WebViewGuard.KeepToLauncher(core, "Launcher page"); // its own pages only, no new windows
+        core.SetVirtualHostNameToFolderMapping(LauncherOrigin.Host, options.UiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping(AppLogos.Host, logos.Folder, CoreWebView2HostResourceAccessKind.Allow); // MainForm.Logos.cs
         core.WebMessageReceived += OnWebMessage;
@@ -290,6 +291,8 @@ sealed partial class MainForm : Form
 
     void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        // Only from the launcher's own page (WebViewGuard keeps it there anyway).
+        if (!WebViewGuard.FromLauncher(e, "Launcher page")) return;
         // WebView2 swallows exceptions from this handler: log them. Only the message type: the
         // rest can hold what someone typed (a Wi-Fi password, a sign-in).
         try { HandleWebMessage(e); }
