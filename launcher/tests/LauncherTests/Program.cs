@@ -772,6 +772,35 @@ using (var watcher = new TextFieldWatcher())
     Check(watcher.Quiet && watcher.WhenDone().IsCompleted, "turned off while off: still quiet, nothing queued");
 }
 
+// ---------------------------------------------------------------- The WebViews' recovery
+// A page that keeps failing neither reloads in a tight loop nor stays dead; a GPU lost twice
+// means a new browser (software drawing otherwise), whatever the GPU.
+Console.WriteLine("== WebView recovery");
+{
+    const long Min = 60_000;
+    var r = new WebViewRecovery();
+    var steps = Enumerable.Range(0, 6).Select(i => r.OnFailure("RenderProcessExited", 1_000_000 + i * Min)).ToList();
+    Check(steps[0] is { Step: WebViewRecovery.Step.Reload, Delay.TotalSeconds: 0 }, "renderer ended: reloaded at once");
+    Check(steps.Skip(1).Take(4).Select(s => s.Delay.TotalSeconds).SequenceEqual(new double[] { 2, 10, 30, 60 }), "again: reloaded after 2, 10, 30, 60 s");
+    Check(steps[5].Step == WebViewRecovery.Step.Restart, "a sixth time within 10 minutes: restart");
+    Check(r.OnFailure("RenderProcessExited", 1_000_000 + 30 * Min) is { Step: WebViewRecovery.Step.Reload, Delay.TotalSeconds: 0 }, "much later: at once again");
+
+    var h = new WebViewRecovery();
+    Check(h.OnFailure("RenderProcessUnresponsive", 0).Step == WebViewRecovery.Step.Reload, "hung: reloaded");
+    Check(h.OnFailure("RenderProcessUnresponsive", 5_000).Step == WebViewRecovery.Step.Nothing, "the same hang reported again: nothing more");
+    Check(h.OnFailure("RenderProcessUnresponsive", 2 * Min).Step == WebViewRecovery.Step.Restart, "hung again within 5 minutes of the reload: restart");
+    Check(h.OnFailure("RenderProcessUnresponsive", 20 * Min).Step == WebViewRecovery.Step.Reload, "a hang long after: reloaded");
+
+    var g = new WebViewRecovery();
+    Check(g.OnFailure("GpuProcessExited", 0).Step == WebViewRecovery.Step.Nothing, "GPU process lost once: Chromium carries on");
+    Check(g.OnFailure("GpuProcessExited", 90 * Min).Step == WebViewRecovery.Step.Nothing, "once more, 90 minutes later: still carries on");
+    Check(g.OnFailure("GpuProcessExited", 100 * Min).Step == WebViewRecovery.Step.NewBrowser, "twice within an hour: a new browser");
+    Check(g.OnFailure("GpuProcessExited", 101 * Min).Step == WebViewRecovery.Step.Nothing, "counted afresh after that");
+
+    Check(new WebViewRecovery().OnFailure("BrowserProcessExited", 0).Step == WebViewRecovery.Step.Restart, "browser ended: restart");
+    Check(new WebViewRecovery().OnFailure("UtilityProcessExited", 0).Step == WebViewRecovery.Step.Nothing, "a utility process: nothing");
+}
+
 Console.WriteLine($"{passes} passed, {failures} failed");
 return failures == 0 ? 0 : 1;
 

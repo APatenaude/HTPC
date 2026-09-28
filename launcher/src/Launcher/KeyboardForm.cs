@@ -26,9 +26,14 @@ sealed class KeyboardForm : Form
     WebView2 web = new() { Dock = DockStyle.Fill };   // replaced by ReleaseWebView
     bool ready;
     object? pending;   // an "open" posted before the page was ready
+    object? opened;    // the last "open", posted again after a reload while the keyboard shows
+    readonly WebViewRecovery recovery = new();
 
     /// <summary>A message from the keyboard page (type, text, key). Raised on the UI thread.</summary>
     public event Action<JsonElement>? Message;
+
+    /// <summary>The keyboard's page keeps failing (WebViewRecovery: restart): why. UI thread.</summary>
+    public event Action<string>? Broken;
 
     public KeyboardForm()
     {
@@ -100,7 +105,27 @@ sealed class KeyboardForm : Form
             }
             Message?.Invoke(m);
         };
+        // Its own renderer only: the GPU and browser processes are the launcher's too, handled there.
+        core.ProcessFailed += (_, args) =>
+        {
+            if (args.ProcessFailedKind is not (CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive
+                or CoreWebView2ProcessFailedKind.FrameRenderProcessExited)) return;
+            var d = recovery.OnFailure(args.ProcessFailedKind.ToString(), Environment.TickCount64);
+            Log.Error($"Keyboard: WebView2 process failed: {args.ProcessFailedKind} ({args.Reason}, exit code {args.ExitCode}): {d.Why}");
+            if (d.Step == WebViewRecovery.Step.Restart) Broken?.Invoke(d.Why);
+            else if (d.Step == WebViewRecovery.Step.Reload) _ = Reload(core, d.Delay);
+        };
         core.Navigate("https://launcher.htpc/keyboard.html");
+    }
+
+    async Task Reload(CoreWebView2 core, TimeSpan delay)
+    {
+        if (delay > TimeSpan.Zero) await Task.Delay(delay);
+        if (!ReferenceEquals(web.CoreWebView2, core)) return; // released meanwhile (a new runtime)
+        ready = false;
+        pending = Visible ? opened : null; // the page, back, shows what was open
+        try { core.Reload(); }
+        catch (Exception e) { Log.Error("Reloading the keyboard", e); }
     }
 
     public void Post(object message)
@@ -113,6 +138,7 @@ sealed class KeyboardForm : Form
     {
         Bounds = Band(Screen.PrimaryScreen!.Bounds);
         var open = new { type = "open", field, password };
+        opened = open;
         if (ready) Post(open); else pending = open;
         if (!Visible) Show();
     }

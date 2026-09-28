@@ -74,6 +74,7 @@ sealed partial class MainForm : Form
         library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
+        keyboard.Broken += why => ExitForRestart($"the on-screen keyboard: {why}");
         closeSoon.Tick += (_, _) =>
         {
             closeSoon.Stop();
@@ -236,16 +237,37 @@ sealed partial class MainForm : Form
         core.SetVirtualHostNameToFolderMapping("capture.htpc", captureDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping(AppLogos.Host, logos.Folder, CoreWebView2HostResourceAccessKind.Allow); // MainForm.Logos.cs
         core.WebMessageReceived += OnWebMessage;
-        core.ProcessFailed += (_, args) =>
-        {
-            Log.Error($"WebView2 process failed: {args.ProcessFailedKind}");
-            if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited) core.Reload();
-            else if (args.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited) ExitForRestart("the WebView2 browser process ended");
-        };
+        core.ProcessFailed += (_, args) => OnProcessFailed(core, args);
         core.Navigate(setupMode ? "https://launcher.htpc/setup.html" : "https://launcher.htpc/index.html");
         Log.Info($"UI from {options.UiDir}, WebView2 {env.BrowserVersionString}");
         try { await keyboard.Init(env, options.UiDir); }
         catch (Exception e) { Log.Error("On-screen keyboard failed to start", e); }
+    }
+
+    readonly WebViewRecovery pageRecovery = new();
+
+    // A WebView2 process failed (WebViewRecovery decides: reload, a new browser, a restart).
+    // The GPU and browser processes are the keyboard's too: they are handled here only.
+    void OnProcessFailed(CoreWebView2 core, CoreWebView2ProcessFailedEventArgs args)
+    {
+        var d = pageRecovery.OnFailure(args.ProcessFailedKind.ToString(), Environment.TickCount64);
+        Log.Error($"WebView2 process failed: {args.ProcessFailedKind} ({args.Reason}, exit code {args.ExitCode}" +
+            $"{(string.IsNullOrEmpty(args.ProcessDescription) ? "" : $", {args.ProcessDescription}")}): {d.Why}");
+        switch (d.Step)
+        {
+            case WebViewRecovery.Step.Reload: _ = ReloadPage(core, d.Delay); break;
+            case WebViewRecovery.Step.NewBrowser: _ = RecreateWebViews("the GPU process was lost"); break;
+            case WebViewRecovery.Step.Restart: ExitForRestart($"the launcher's page: {d.Why}"); break;
+        }
+    }
+
+    async Task ReloadPage(CoreWebView2 core, TimeSpan delay)
+    {
+        if (delay > TimeSpan.Zero) await Task.Delay(delay);
+        if (!ReferenceEquals(web.CoreWebView2, core)) return; // the WebViews were made again meanwhile
+        uiReady = false; // the page says "ready" again once loaded, and gets everything then
+        try { core.Reload(); }
+        catch (Exception e) { Log.Error("Reloading the launcher's page", e); }
     }
 
     // --- Messages from the UI ----------------------------------------------------------------
