@@ -43,6 +43,8 @@ $HealthyWait = [TimeSpan]::FromMinutes(3)
 $ExitWait = [TimeSpan]::FromSeconds(20)
 # How long "ready" waits for the launcher to be at Home or in standby (the task's own limit is 4 h).
 $LeaveWait = [TimeSpan]::FromHours(3)
+# Free space left over after an update's download, its copies and the unpacked setup.
+$UpdateMinFree = 500MB
 
 # Where everything is. Tests pass their own roots (made admin-only first).
 function Get-LauncherPaths {
@@ -520,6 +522,13 @@ function Save-LauncherRelease($Source, $Paths, $Journal, [Version]$Installed, [s
     }
     $files = @($manifest.files | Where-Object { @($Paths.Slots.Role) -contains $_.role })
     [long]$totalBytes = ($files | Measure-Object -Property size -Sum).Sum
+    # Room for the download, its copies beside the files in use and the unpacked setup (three
+    # times its size), and 500 MB to spare: a full disk is found before anything is written.
+    $free = (New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($Stage))).AvailableFreeSpace
+    $need = 3 * $totalBytes + $UpdateMinFree
+    if ($free -lt $need) {
+        throw (New-UpdateError 'refused' ("Not enough free disk space for version {0}: {1:N0} MB free, {2:N0} MB needed" -f $Version, ($free / 1MB), ($need / 1MB)))
+    }
     [long]$doneBytes = 0
     foreach ($f in $files) {
         $out = Join-Path $Stage $f.name
@@ -582,6 +591,9 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
     $result = Wait-LauncherHealthy $Paths $Journal.to $Wait
     if ($result -eq 'healthy') {
         Save-LauncherJournal $Paths $Journal 'done' "Updated to $($Journal.to)"
+        # A failed version kept by an earlier rollback (.bad) is no use once one works: only the
+        # previous one (.prev) stays, for a rollback.
+        foreach ($slot in $Paths.Slots) { try { Remove-TrustedItem (Get-SlotNames $slot).Bad $slot.Root } catch { } }
         Update-MachineSettings $Paths
         Write-UpdateProgress 'done' 100 "The launcher is now version $($Journal.to)"
         return

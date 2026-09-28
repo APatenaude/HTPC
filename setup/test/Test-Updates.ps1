@@ -15,7 +15,8 @@
                 yet, a lying Content-Length, a longer stream, 429 short and long, 403 with and
                 without GitHub's rate-limit headers, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
-                first roll back), not newer, no watchdog, a bad download, never back at Home
+                first roll back; the next update that works removes the .bad copies), not
+                newer, no watchdog, not enough free space, a bad download, never back at Home
                 (an app in front: it gives up; nothing touched, nothing stopped)
       Faults    the job ended hard after each journal step, then reconcile, started the way the
                 box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
@@ -434,6 +435,13 @@ try {
             Check ($j.step -eq 'rolledback' -and (Get-ExeVersion $root) -eq '0.1.0') "$label rolls back ($($j.message))"
             Check (Wait-For { Get-Running $root '0.1.0' } 20) "  and 0.1.0 runs again"
             Check ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left'
+            if ($case.mode -eq 'crash') {
+                # Kept only until an update works.
+                Publish-FakeRelease '0.2.0' 'healthy'
+                $r = Invoke-FakeJob $root $update
+                $bad = @(Get-ChildItem (Join-Path $root 'PF\HTPC\Launcher'), (Join-Path $root 'PD\HTPC') -Filter '*.bad*' -ErrorAction SilentlyContinue)
+                Check ((Get-Journal $root).step -eq 'done' -and $bad.Count -eq 0) "  the next update that works removes the .bad copies ($r, $($bad.Count) left)"
+            }
             Remove-FakeBox $root
         }
 
@@ -456,6 +464,9 @@ try {
         Check ((Get-ExeVersion $root) -eq '0.1.0' -and "$before" -eq "$after" -and (Get-Leftovers $root).Count -eq 0) '  the running launcher was never stopped, nothing left'
         $r = Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.1.0 -Source $src -Paths $paths'
         Check ($r -like 'refused*not newer*') "the same version again: refused ($r)"
+        Publish-FakeRelease '0.2.0' 'healthy'
+        $r = Invoke-FakeJob $root "`$UpdateMinFree = 1PB; $update"
+        Check ($r -like 'refused*free disk space*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0' -and (Get-Leftovers $root).Count -eq 0) "not enough free space: refused before the download, nothing left ($r)"
         New-Item -ItemType File -Force (Join-Path $root 'stop-watchdog') | Out-Null
         [void](Wait-For { -not (Get-CimInstance Win32_Process -Filter "Name = 'HtpcWatchdog.exe'" | Where-Object { $_.ExecutablePath -like "$root*" }) } 10)
         Publish-FakeRelease '0.2.0' 'healthy'

@@ -626,6 +626,37 @@ sealed class UpdateService
         catch (Exception e) { Log.Warn($"Updates: reading the launcher journal: {e.Message}"); }
     }
 
+    /// <summary>
+    /// After a healthy start: what other launcher versions unpacked in
+    /// %LOCALAPPDATA%\HTPC\bundle\&lt;exe name&gt;\ (DOTNET_BUNDLE_EXTRACT_BASE_DIR, about 200 MB each:
+    /// the one before an update, or the one a rollback left), all but this one's. Each folder is
+    /// renamed first: that fails while a program still runs from it, which then keeps it whole.
+    /// </summary>
+    public static void RemoveOtherBundles()
+    {
+        try
+        {
+            var mine = Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory));
+            var app = Path.GetDirectoryName(mine);
+            var bundles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "bundle");
+            // A dev build (not unpacked), or unpacked somewhere else: nothing of ours to tidy.
+            if (app is null || !app.StartsWith(bundles + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return;
+            foreach (var dir in Directory.EnumerateDirectories(app))
+            {
+                if (string.Equals(Path.TrimEndingDirectorySeparator(dir), mine, StringComparison.OrdinalIgnoreCase)) continue;
+                var aside = dir.EndsWith(".old", StringComparison.OrdinalIgnoreCase) ? dir : dir + ".old";
+                try
+                {
+                    if (aside != dir) Directory.Move(dir, aside);
+                    Directory.Delete(aside, recursive: true);
+                    Log.Info($"Updates: removed {dir} (another version's unpacked files)");
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Info($"Updates: {dir} is in use or locked; left ({e.Message})"); }
+            }
+        }
+        catch (Exception e) { Log.Warn($"Updates: tidying other versions' unpacked files: {e.Message}"); }
+    }
+
     // install.selfUpdate.userDirs (VacuumTube's %LOCALAPPDATA%\vacuumtube-updater): deleted as the
     // user; the SYSTEM jobs never touch a user's folders.
     void CleanUserLeftovers()

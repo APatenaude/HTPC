@@ -134,6 +134,8 @@ sealed partial class MainForm
         {
             healthySignal = new EventWaitHandle(true, EventResetMode.ManualReset, $@"Local\HtpcHealthy_{Program.Version}_{Environment.ProcessId}");
             Log.Info($"Launcher {Program.Version} healthy (UI ready, controller thread running)");
+            // Healthy: the other versions' unpacked files can go (a minute on, the start settled).
+            _ = Task.Delay(TimeSpan.FromMinutes(1)).ContinueWith(_ => UpdateService.RemoveOtherBundles(), TaskScheduler.Default);
         }
         catch (Exception e) { Log.Warn($"Healthy signal: {e.Message}"); }
     }
