@@ -147,27 +147,29 @@ an update from the previous release, and `setup.ps1 -Uninstall` run as the TV us
 
 ## 8. Where 1.0 stands (28 September 2026)
 
-Done: the nine-part 1.0 review (network security, privileges, host correctness, long-run
-resilience, setup and clean install, update pipeline, TV UI, phone app, readiness) and all its
-fixes, merged; Test-All green on the box except Test-Updates (needs admin).
+Done:
+- the nine-part 1.0 review (network security, privileges, host correctness, long-run
+  resilience, setup and clean install, update pipeline, TV UI, phone app, readiness) and all its
+  fixes, merged and on GitHub;
+- Test-All green on the box. Test-Updates needs admin; in the VM: 172/173, one test-timing case,
+  since loosened.
+- Two VM runs. The second was clean end to end: the permission prompt, the wizard, Install,
+  folder ownership, the \HTPC\Jobs task, a restart into the launcher, and `-Uninstall` twice as
+  the TV user. Report: `.claude/vm-report-1.0.md` on the old machine (not in git).
+- GitHub: pushes work; the "Release tags" ruleset protects `refs/tags/v*` from deletion and moves.
 
 Left, in order:
 
-1. The VM found a blocker: the elevated TV Box Setup cannot start its web view, because WebView2
-   runs its browser at the user's rights and cannot write the admin-only profile folder
-   (`SetupElevation.cs` `WebViewFolder`). Fix in progress: a user-writable profile folder the
-   elevated host never trusts. Also from that run: setup should bring the launcher back if it ends
-   early, and three test-script bugs.
-2. Test-All, then a second VM run: full install, restart, `-Uninstall` as the TV user, the
-   admin-only tests.
-3. GitHub: sign in and push (the branch is far ahead of origin); turn on two-factor sign-in,
-   immutable releases and a `v*` tag ruleset (Settings › Rules); optionally a release
-   environment reviewer and a `main` default branch.
-4. `New-Release.ps1 -Version 1.0.0`, push the tag, watch the workflow.
-5. On the owner's box (on 0.1.1): install 1.0 with TV Box Setup rather than Settings › Updates,
+1. `New-Release.ps1 -Version 1.0.0`, push the tag, watch the workflow (it runs the tests too).
+2. Then turn on immutable releases (Settings › General › Releases, or
+   `gh api -X PUT repos/APatenaude/HTPC/immutable-releases`), and check the next release's
+   workflow still creates, checks and marks it latest. It was left until after 1.0 so the first
+   real release does not also test that setting. The owner confirms two-factor sign-in on the
+   account.
+3. On the owner's box (on 0.1.1): install 1.0 with TV Box Setup rather than Settings › Updates,
    because 0.1.1's own update code does that update and the new setup steps (Drivers, the phone
    certificate in the machine store, the sign-in colour) come only from setup. Restart after.
-6. On real phones: QR pairing moves to tv.local only for this box; the iPhone Home Screen app's
+4. On real phones: QR pairing moves to tv.local only for this box; the iPhone Home Screen app's
    pairing text; quick reconnect after 15 s in the background; no zoom on the copy fields; Send
    link while disconnected keeps the link; the "went to sleep" cover in Sleep/Hibernate mode.
    Android: pairing over HTTPS again (new secure cookie), the Share target end to end, `/send`

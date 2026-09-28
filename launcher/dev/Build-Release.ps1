@@ -29,6 +29,7 @@
     Release notes (the tag's message in the workflow); short, shown on the TV.
 .PARAMETER MinimumFrom
     The oldest launcher that may update to this release by itself (older ones: run setup again).
+    Default: Directory.Build.props' UpdateMinimumFrom, else 0.1.0.
 .PARAMETER Watchdog
     HtpcWatchdog.exe to ship as well (role "watchdog"). By default the one this build makes
     (Publish-Setup puts it beside the exe); it must carry the same version.
@@ -37,7 +38,7 @@ param(
     [string]$Out,
     [string]$Tag,
     [string]$NotesFile,
-    [string]$MinimumFrom = '0.1.0',
+    [string]$MinimumFrom,
     [string]$Watchdog
 )
 
@@ -53,7 +54,13 @@ $version = [string]($props.Project.PropertyGroup | ForEach-Object { $_.Version }
 if (-not (ConvertTo-SemVer $version)) { throw "Directory.Build.props: '$version' is not major.minor.patch" }
 if ($Tag -and $Tag -cne "v$version") { throw "Tag $Tag does not match the version in Directory.Build.props ($version)" }
 if (-not $Tag) { $Tag = "v$version" }
+if (-not $MinimumFrom) {
+    $MinimumFrom = [string]($props.Project.PropertyGroup | ForEach-Object { $_.UpdateMinimumFrom } | Where-Object { $_ } | Select-Object -First 1)
+    if (-not $MinimumFrom) { $MinimumFrom = '0.1.0' }
+}
 if (-not (ConvertTo-SemVer $MinimumFrom)) { throw "MinimumFrom '$MinimumFrom' is not major.minor.patch" }
+if ((ConvertTo-SemVer $MinimumFrom) -gt (ConvertTo-SemVer $version)) { throw "MinimumFrom $MinimumFrom is newer than the release ($version)" }
+Write-Host "Boxes from $MinimumFrom on update by themselves; older ones are told to run setup again"
 $notes = if ($NotesFile) { (Get-Content -LiteralPath $NotesFile -Raw -Encoding UTF8).Trim() } else { '' }
 Write-Host "Release $Tag"
 
