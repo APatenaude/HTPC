@@ -33,6 +33,7 @@ param([switch]$Check)
 if (-not $Check) { Assert-Admin }
 
 $tried = @{}      # instance ids already looked up on Windows Update
+$served = @{}     # instance id -> the driver installed for it
 $reboot = $false
 for ($pass = 1; $pass -le 2; $pass++) {
     $targets = @(Get-DriverTargets | Where-Object { -not $tried.ContainsKey($_.InstanceId) })
@@ -44,7 +45,7 @@ for ($pass = 1; $pass -le 2; $pass++) {
     foreach ($t in $targets) { Write-Host "    $($t.Name) ($(if ($t.Class) { $t.Class } else { 'no class' })): $($t.Why); $($t.InstanceId)" }
     if ($pass -eq 1) { Assert-Internet 'installing their drivers from Windows Update' }
 
-    $drivers = Find-WindowsUpdateDrivers
+    $drivers = @(Find-WindowsUpdateDrivers)
     $picks = @{}   # update id -> the update
     foreach ($t in $targets) {
         $tried[$t.InstanceId] = $true
@@ -58,6 +59,7 @@ for ($pass = 1; $pass -le 2; $pass++) {
 
     $result = Install-WindowsUpdateDrivers @($picks.Keys)
     foreach ($title in $result.Installed) { Write-Change "driver installed: $title" }
+    foreach ($t in $targets) { $pick = Select-DeviceDriver $t $drivers; if ($pick -and $result.Installed -contains $pick.title) { $served[$t.InstanceId] = $pick.title } }
     foreach ($title in $result.Failed) { Write-Attention "driver not installed: $title" }
     if ($result.RebootRequired) { $reboot = $true }
     if (-not $result.Installed.Count) { break }
@@ -76,9 +78,10 @@ foreach ($t in $left) {
     $onScreen = $t.Display -and (-not $shown.Count -or @($shown | Where-Object { $t.Ids -contains $_ }).Count)
     if ($onScreen -and -not $reboot -and -not (Test-VirtualMachine)) { $failing += $t; continue }
     $maker = Get-DeviceVendor $t.Ids
-    Write-Attention "$($t.Name): $($t.Why); Windows Update has no driver for it$(if ($maker) { " (made by $maker)" })"
+    $how = if ($served.ContainsKey($t.InstanceId)) { "its driver ($($served[$t.InstanceId])) takes over after a restart" } else { "Windows Update has no driver for it$(if ($maker) { " (made by $maker)" })" }
+    Write-Attention "$($t.Name): $($t.Why); $how"
 }
 if ($failing.Count) {
     $names = ($failing | ForEach-Object { $maker = Get-DeviceVendor $_.Ids; "$(if ($maker) { "$maker graphics" } else { 'graphics chip' }) $(@($_.Ids)[0])" }) -join '; '
-    throw "Windows Update has no graphics driver for this box ($names), which stays on the Microsoft Basic Display Adapter: no hardware video decoding. Install the maker's driver from its website, then run setup again."
+    throw "The graphics chip showing the desktop ($names) has no driver of its own (Windows Update had none, or it did not install): it stays on the Microsoft Basic Display Adapter, with no hardware video decoding. Install the maker's driver from its website, then run setup again."
 }

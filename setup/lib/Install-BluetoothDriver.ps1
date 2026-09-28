@@ -44,7 +44,7 @@ Write-Host "  Bluetooth adapter on the generic driver; hardware IDs: $(($targets
 
 # Windows Update, drivers only (lib\DriverUpdate.ps1: asked in a child process that is ended if
 # it stops answering).
-try { $drivers = Find-WindowsUpdateDrivers }
+try { $drivers = @(Find-WindowsUpdateDrivers) }
 catch { Write-Attention $_.Exception.Message; return }
 
 $match = @($targets | ForEach-Object { Select-DeviceDriver $_ $drivers 'Bluetooth' } | Where-Object { $_ } |

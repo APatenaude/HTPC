@@ -122,6 +122,7 @@ function Invoke-DriverChild([string]$Mode, [string[]]$UpdateIds) {
     $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'WuaChild.ps1')`" -Mode $Mode -Out `"$out`""
     if ($UpdateIds) { $arguments += " -Ids $($UpdateIds -join ',')" }
     $child = Start-Process (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    $null = $child.Handle   # held now, or Windows PowerShell loses the exit code
 
     $lastLine = [DateTime]::UtcNow
     $limit = $DriverSearchLimit

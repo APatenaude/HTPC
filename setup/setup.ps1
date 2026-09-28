@@ -6,10 +6,11 @@
 .DESCRIPTION
     Steps, in order:
       RestorePoint  System Restore on for C: and a restore point before any change
-      Winget        winget from its GitHub release (LTSC has no Store)
+      Winget        winget from its GitHub release when missing (LTSC has no Store)
       Apps          the apps picked in catalog.json (or -Apps)
       Codecs        HEVC Video Extensions (for Edge)
-      Edge          Google search, uBlock Origin Lite, no first-run or promotions
+      Edge          Google search, the extensions (uBlock Origin Lite, FrankerFaceZ, Video Speed
+                    Controller), no first-run, promotions or password saving
       Power         never sleeps on its own (the launcher's standby), wake sources
       Drivers       the makers' drivers from Windows Update for devices without one (graphics
                     still on the Microsoft Basic Display Adapter, HDMI audio, chipset...)
