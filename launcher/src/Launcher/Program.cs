@@ -1,3 +1,8 @@
+// Every Windows DLL this program imports by name (user32, xinput1_4, wlanapi, d3d11, powrprof,
+// userenv, dwmapi...) comes from System32 only, never from the exe's folder (the setup exe may sit
+// in Downloads) or wherever .NET unpacked it: see Program.Main for the rest of the process.
+[assembly: System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+
 namespace Htpc.Launcher;
 
 /// <summary>
@@ -91,9 +96,18 @@ static class Program
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetDefaultDllDirectories(uint flags);
+    const uint LoadLibrarySearchSystem32 = 0x800;   // LOAD_LIBRARY_SEARCH_SYSTEM32
+
     [STAThread]
     static void Main(string[] args)
     {
+        // Before anything loads a DLL by name: from System32 only, for the whole process (Windows'
+        // own components and drivers too), not the exe's folder, the current one or PATH. What .NET
+        // itself loads (WebView2Loader.dll, the runtime's own) it loads by its full path from where
+        // it unpacked, so that is unchanged; the drivers' DLLs are loaded by their full paths too.
+        SetDefaultDllDirectories(LoadLibrarySearchSystem32);
         // --version: prints the version and ends, before anything else (no window, no single-instance
         // lock, and above all not setup mode's "replace the running launcher": the release build
         // runs "TV-Box-Setup.exe --version" to check what it built).
