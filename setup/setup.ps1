@@ -25,7 +25,9 @@
     Needs admin: started without it, setup asks for elevation (UAC). Started from a process
     whose AppData writes are redirected (the Claude desktop app), it first relaunches itself
     through a one-shot scheduled task, because installers started from there would install
-    into that app's private copy of AppData.
+    into that app's private copy of AppData. TV Box Setup asks for elevation itself, once, as
+    it opens, and starts this script already elevated and outside any package: it runs the
+    steps straight away (no prompt, no relaunch task).
 
     Log: C:\ProgramData\HTPC\logs\setup-<time>.log; step results: setup-last.json; while it
     runs, setup-progress.json (the setup exe shows it).

@@ -4,8 +4,8 @@ namespace Htpc.Launcher;
 
 /// <summary>
 /// First-run setup while setup.ps1 installs: installers open windows of their own, over the
-/// wizard. The wizard stays on top (TopMost: the installers run elevated, and a normal program
-/// cannot take the foreground back from those) and is brought forward when something else gets
+/// wizard. The wizard stays on top (TopMost: Windows does not let a program simply take the
+/// foreground back from a window that took it) and is brought forward when something else gets
 /// in front, except Windows' permission prompt (consent.exe). The controller keeps working either
 /// way: the launcher reads it itself, whichever window has the keyboard.
 ///

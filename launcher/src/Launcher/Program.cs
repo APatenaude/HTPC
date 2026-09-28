@@ -3,7 +3,9 @@ namespace Htpc.Launcher;
 /// <summary>
 /// Command line: --dev (dev tools, F5 reload), --windowed, --ui DIR, --catalog FILE,
 /// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV),
-/// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"),
+/// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"; it
+/// runs elevated, see SetupElevation.cs), --elevated (the copy setup started with administrator
+/// rights), --home (not setup even so: the home screen after setup when no launcher was installed),
 /// --version (prints the version and ends; see Program.Main),
 /// --restarted (started again by the watchdog: the TV is left as it is) with
 /// --restart-reason=WHY (why the watchdog started it again, for the log: Watchdog.cs lists them),
@@ -25,7 +27,7 @@ sealed record Options(bool Dev, bool Windowed, string UiDir, string CatalogPath,
             Value("--ui", Path.Combine(baseDir, "ui")),
             Value("--catalog", FindCatalog(baseDir)),
             args.Contains("--no-tv"),
-            args.Contains("--setup") || Path.GetFileName(Environment.ProcessPath ?? "").Contains("setup", StringComparison.OrdinalIgnoreCase),
+            SetupElevation.IsSetupMode(args, Environment.ProcessPath),
             args.Contains("--restarted"),
             args.FirstOrDefault(a => a.StartsWith("--restart-reason=", StringComparison.Ordinal))?["--restart-reason=".Length..],
             args.Contains("--tv"));
@@ -105,18 +107,24 @@ static class Program
         // Back to TV with a launcher running: it is told, this copy is not needed. Without one,
         // this becomes the launcher (and closes the desktop once its UI is up).
         if (options.BackToTv && !options.Setup && DesktopMode.SignalRunningLauncher()) return;
+        // Setup runs elevated, asked for once as it opens (SetupElevation.cs): without the rights
+        // this copy starts an elevated one and ends, or shows that setup needs them.
+        var elevated = Environment.IsPrivilegedProcess;
+        var step = SetupElevation.Decide(options.Setup, elevated, args);
+        if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
         // Setup replaces a launcher that is already running (setup run again on a finished box).
-        // The watchdog must not start it again meanwhile.
+        // The watchdog must not start it again meanwhile. Only this session's: setup is elevated.
         if (options.Setup)
         {
             WatchdogPause.Set(TimeSpan.FromMinutes(15));
-            var self = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
-            foreach (var other in System.Diagnostics.Process.GetProcessesByName("HtpcLauncher").Concat(System.Diagnostics.Process.GetProcessesByName(self)))
-                if (other.Id != Environment.ProcessId) { try { other.Kill(); other.WaitForExit(3000); } catch (Exception) { } }
+            using var me = System.Diagnostics.Process.GetCurrentProcess();
+            foreach (var other in System.Diagnostics.Process.GetProcessesByName("HtpcLauncher").Concat(System.Diagnostics.Process.GetProcessesByName(me.ProcessName)))
+                using (other)
+                    if (other.Id != Environment.ProcessId && other.SessionId == me.SessionId) { try { other.Kill(); other.WaitForExit(3000); } catch (Exception) { } }
         }
         // One launcher at a time. A new one waits a moment for the one handing over to it (the
-        // setup exe starting the installed launcher as it closes).
-        using var single = new Mutex(true, @"Local\HtpcLauncher", out var first);
+        // setup exe starting the installed launcher as it closes). Setup's names the user too.
+        using var single = SetupElevation.SingleInstance(@"Local\HtpcLauncher", elevated, out var first);
         if (!first)
         {
             try { if (!single.WaitOne(5000)) return; }

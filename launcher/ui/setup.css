@@ -36,7 +36,6 @@
 }
 .su-chip.done { background: #16302A; color: #7FD1AE; }
 .su-note { font-size: 24px; color: var(--muted); }
-.su-note.warn { color: var(--warn); }
 
 /* TV */
 .su-two { display: flex; gap: 72px; }

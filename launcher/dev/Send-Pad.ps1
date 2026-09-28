@@ -25,7 +25,7 @@ param(
     [ValidateRange(0, 255)][int]$LT, [ValidateRange(0, 255)][int]$RT,
     [int]$HoldMs = 120,
     [switch]$Release,
-    [string]$Process = 'HtpcLauncher'   # 'TV Box Setup' for the setup exe
+    [string]$Process = 'HtpcLauncher'   # 'TV Box Setup' for the setup exe (elevated: run this elevated too, or Windows drops the message)
 )
 
 $ErrorActionPreference = 'Stop'

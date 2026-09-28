@@ -45,6 +45,14 @@ sealed class DesktopMode
 
     static bool IsShellSession() => Watchdogs().Any(p => Native.ProcessInfo(p.Id).CommandLine?.Contains("--shell") ?? false);
 
+    /// <summary>A watchdog runs in this session (it starts the launcher once setup lets go).</summary>
+    public static bool WatchdogRunning()
+    {
+        var running = Watchdogs();
+        foreach (var p in running) p.Dispose();
+        return running.Count > 0;
+    }
+
     static List<Process> Watchdogs()
     {
         var session = Process.GetCurrentProcess().SessionId;

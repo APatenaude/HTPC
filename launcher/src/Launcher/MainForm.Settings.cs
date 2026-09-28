@@ -148,8 +148,9 @@ sealed partial class MainForm
     }
 
     /// <summary>
-    /// About › Run setup again: this program in setup mode (it replaces this launcher). The
-    /// Windows permission prompt it asks for needs a keyboard or mouse.
+    /// About › Run setup again: this program in setup mode (it replaces this launcher). It asks
+    /// Windows for administrator rights as it opens (SetupElevation.cs), a prompt that needs a
+    /// keyboard or mouse; declined and quit, the watchdog brings this launcher back.
     /// </summary>
     void RunSetupAgain()
     {
