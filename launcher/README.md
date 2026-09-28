@@ -320,6 +320,13 @@ redirect chain and every file with the box's own code.
 
 ## Build and run on the box
 
+A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, build, checks), then
+[docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md).
+
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1             # everything: build, tests, UI audit, phone page
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Merge-Branch.ps1 -Ref <branch> -Message "Merge ..." -Test
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screenshots.ps1 -Shots @(@{ Url = '...'; Out = '...' })
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Compare-Screenshots.ps1 -A before.png -B after.png
     powershell -ExecutionPolicy Bypass -File launcher\dev\Start-Launcher.ps1 -Dev
     powershell -ExecutionPolicy Bypass -File launcher\dev\Start-Launcher.ps1 -Restore  # back to the installed launcher
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screen.ps1
