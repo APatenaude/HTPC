@@ -212,8 +212,13 @@ sealed class LibraryService
             try { (ok, message) = stop ? (false, "Cancelled") : job.BoxJob ? RunBoxJob(job) : RunJob(job); }
             catch (Exception e) { Log.Error($"Library job {job.Token}", e); ok = false; message = "Something went wrong"; }
             lock (gate) { current = null; SavePending(); }
-            if (ok && !job.BoxJob) AfterSuccess(job);
-            Finished?.Invoke(job, ok, message);
+            // Nothing after the job may end this thread: an exception here ends the launcher.
+            try
+            {
+                if (ok && !job.BoxJob) AfterSuccess(job);
+                Finished?.Invoke(job, ok, message);
+            }
+            catch (Exception e) { Log.Error($"Library job {job.Token}: after it ran", e); }
             Changed?.Invoke();
         }
     }
@@ -438,28 +443,24 @@ sealed class LibraryService
 
     void AfterSuccess(LibraryJob job)
     {
-        var app = apps.Get(job.Id);
-        if (app is null) return;
-        if (job.Action == "install")
-        {
-            // VLC and friends: settings written before first run, as the user (SYSTEM installed it).
-            WriteFirstRunFiles(job.Id);
-            if (job.AddToHome && settings.Tiles is not null && !settings.Tiles.Contains(job.Id))
-            {
-                settings.Tiles.Add(job.Id);
-                settings.Save();
-                apps.SetTiles(settings.Tiles);
-            }
-        }
-        else if (job.Action == "uninstall")
-        {
-            // Take it off the home row; the catalog entry stays, so it can be re-added later.
-            if (settings.Tiles is not null && settings.Tiles.Remove(job.Id))
-            {
-                settings.Save();
-                apps.SetTiles(settings.Tiles);
-            }
-        }
+        // VLC and friends: settings written before first run, as the user (SYSTEM installed it).
+        if (job.Action == "install" && apps.Get(job.Id) is not null) WriteFirstRunFiles(job.Id);
+    }
+
+    /// <summary>
+    /// A job that succeeded, on the UI thread (MainForm.OnJobFinished): the home row gains the
+    /// app installed with "add to home", and loses the one uninstalled (its catalog entry stays,
+    /// so it can be added again). There, not on the job's thread: the UI thread edits the same
+    /// list (tile order, added and removed tiles), and one changed from two threads could lose a
+    /// tile or throw.
+    /// </summary>
+    public void UpdateTiles(LibraryJob job)
+    {
+        if (job.BoxJob || apps.Get(job.Id) is null || settings.Tiles is not { } tiles) return;
+        if (job.Action == "install" && job.AddToHome && !tiles.Contains(job.Id)) tiles.Add(job.Id);
+        else if (!(job.Action == "uninstall" && tiles.Remove(job.Id))) return; // nothing changed
+        settings.Save();
+        apps.SetTiles(tiles);
     }
 
     void WriteFirstRunFiles(string id)

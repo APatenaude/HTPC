@@ -23,17 +23,30 @@
     Validate the token and print what it would do, without installing anything (for tests).
 .PARAMETER Catalog
     Only with -DryRun: read this catalog instead of the trusted one in Program Files (for tests).
+.PARAMETER JobsDir
+    The verb scripts' folder: jobs\ beside lib\ (the default), or its .prev or .new copy when the
+    task's bootstrap (Start-Job.ps1) runs the runner that began an unfinished launcher update.
 #>
 [CmdletBinding()]
 param(
     [AllowEmptyString()][string]$Job = '',
     [switch]$DryRun,
-    [string]$Catalog
+    [string]$Catalog,
+    [string]$JobsDir
 )
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot                       # ...\HTPC\Launcher\lib
 $root = Split-Path $here -Parent            # ...\HTPC\Launcher
+# Only jobs\ beside this lib\ or a copy a launcher update made of it: never a folder of the
+# caller's choosing (the task's token could carry this parameter in).
+$jobsHome = Join-Path $root 'jobs'
+if (-not $JobsDir) { $JobsDir = $jobsHome }
+if (@($jobsHome, "$jobsHome.prev", "$jobsHome.new") -notcontains [IO.Path]::GetFullPath($JobsDir).TrimEnd('\')) {
+    throw "Refused: '$JobsDir' is not this runner's jobs folder"
+}
+# The verb scripts load the other lib\ scripts from here (this runner's own lib\).
+$JobLib = $here
 . "$here\Common.ps1"
 . "$here\AppCore.ps1"
 . "$here\Job-Common.ps1"
@@ -51,7 +64,7 @@ if ($Job -cnotmatch '\A(?<verb>[a-z][a-z-]{1,29})(?::(?<arg>[A-Za-z0-9][A-Za-z0-
 $verb = $Matches['verb']
 $arg = $Matches['arg']
 
-$verbScript = Join-Path $root "jobs\$verb.ps1"
+$verbScript = Join-Path $JobsDir "$verb.ps1"
 if (-not (Test-Path -LiteralPath $verbScript)) { throw "Refused: no job handler for '$verb'" }
 
 if ($DryRun) {
@@ -82,3 +95,5 @@ try {
 } finally {
     if ($temp -and (Test-Path $temp)) { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
 }
+# Said plainly: the bootstrap passes this on, and a verb's last program may have left another.
+exit 0

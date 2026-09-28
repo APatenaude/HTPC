@@ -36,6 +36,7 @@ sealed class FakeHost : IPhoneHost
     public bool ShowPairingCode(string code) { if (Asleep) return false; Code = code; Shown++; return true; }
     public void HidePairingCode(bool paired) { Code = null; Events.Enqueue($"hide paired={paired}"); }
     public void PhonesChanged() { }
+    public void ShortcutKeyMade(string phoneName) => Events.Enqueue("shortcut " + phoneName);
     public (byte[] Data, string ContentType)? Artwork() => Art;
     public void OpenShared(string url) => Events.Enqueue("shared " + url);
 }
@@ -243,7 +244,7 @@ static partial class Program
         Check(!reloaded.RequireCode && reloaded.Find(ok.Token)?.Name == "iPhone" && reloaded.Phones.Count == 2, "kept in the file");
         var text = File.ReadAllText(file);
         Check(!text.Contains(ok.Token!) && !text.Contains(k1.Token!), "the file holds hashes, not tokens");
-        Check(reloaded.Forget(reloaded.Find(ok.Token)!.Id) && reloaded.Find(ok.Token) is null, "forget");
+        Check(reloaded.Forget(reloaded.Find(ok.Token)!.Id).Count == 1 && reloaded.Find(ok.Token) is null, "forget");
         File.Delete(file);
     }
 
@@ -408,6 +409,13 @@ static partial class Program
         var artRequest = new HttpRequestMessage(HttpMethod.Get, "/art");
         artRequest.Headers.Add("Cookie", cookie);
         Check((await http.SendAsync(artRequest)).StatusCode == HttpStatusCode.OK, "art with the cookie 200");
+        // "Show a code" by mistake: the phone's Cancel takes it off the TV at once.
+        now += PhonePairing.Cooldown;
+        await Post("/api/pair/start", "{}", origin);
+        var shownCode = host.Code;
+        Check((await Post("/api/pair/cancel", "{}", null)).StatusCode == HttpStatusCode.Forbidden && host.Code == shownCode, "cancel without Origin: 403, the code stays");
+        Check((await Post("/api/pair/cancel", "{}", origin)).StatusCode == HttpStatusCode.NoContent && shownCode is not null && host.Code is null,
+            "the phone's Cancel takes the code off the TV");
 
         // WebSocket.
         server.SetState(new { volume = 5 });
@@ -420,6 +428,10 @@ static partial class Program
         var (ws, _) = await Ws(port, origin, cookie);
         hello = await Receive(ws!);
         Check(hello?.GetProperty("paired").GetBoolean() == true && hello?.GetProperty("state").GetProperty("volume").GetInt32() == 5, "paired phone: hello with state");
+        await SendText(ws!, "{\"t\":\"ping\"}");
+        JsonElement? pong = null;
+        for (var i = 0; i < 5 && pong?.GetProperty("t").GetString() != "pong"; i++) pong = await Receive(ws!);
+        Check(pong?.GetProperty("t").GetString() == "pong", "the box answers the phone's ping (the phone notices a dead connection)");
         // Its heartbeat, as the page sends it, for the rest of the tests (else the server drops it after 15 s).
         using var stopPings = new CancellationTokenSource();
         var pings = Task.Run(async () =>
@@ -462,6 +474,10 @@ static partial class Program
         var key = pairing.NewKey();
         Check((await Post("/api/pair", $"{{\"key\":\"{key}\"}}", origin)).StatusCode == HttpStatusCode.OK
             && (int)(await Post("/api/pair", $"{{\"key\":\"{key}\"}}", origin)).StatusCode == 410, "QR key pairs once");
+        var phonesBefore = pairing.Phones.Count;
+        var rescan = await Post("/api/pair", $"{{\"key\":\"{pairing.NewKey()}\"}}", origin, cookie);
+        Check(rescan.StatusCode == HttpStatusCode.OK && !rescan.Headers.Contains("Set-Cookie") && pairing.Phones.Count == phonesBefore,
+            "a paired phone scanning a QR code again stays the phone it is (no new entry, no new cookie)");
         pairing.RequireCode = false;
         var (open, _) = await Ws(port, origin, null);
         Check(open is not null && (await Receive(open))?.GetProperty("paired").GetBoolean() == true, "codes off: a phone without a cookie connects");
@@ -469,8 +485,7 @@ static partial class Program
         server.DisconnectUnpaired();
         Check(open is not null && await Receive(open, 2000) is null && ws!.State == WebSocketState.Open, "codes on again: the code-less phone is dropped, the paired one stays");
         var id = pairing.Find(cookie.Split('=', 2)[1])!.Id;
-        pairing.Forget(id);
-        server.Disconnect(id);
+        server.Disconnect(pairing.Forget(id));
         // Other messages (a state push, a heartbeat answer) may come first on a busy machine: up to "bye".
         string? last = null;
         for (var i = 0; i < 10 && last != "bye"; i++)

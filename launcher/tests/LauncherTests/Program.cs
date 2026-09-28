@@ -397,6 +397,20 @@ Console.WriteLine("== VideoEndDetector");
     Check(ad.All(l => !l), "an ad then the video (15 s, then 600 s, a length settling by a second): not live");
 }
 
+// ---------------------------------------------------------------- Media calls, a frozen player
+// Standby's pause, the idle check and the phone must go on without a player that never answers.
+Console.WriteLine("== Media calls: a player that never answers");
+{
+    var never = new TaskCompletionSource<bool>().Task.AsAsyncOperation();
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    string? error = null;
+    try { MediaWatcher.Timed(never, "a frozen player").GetAwaiter().GetResult(); }
+    catch (TimeoutException e) { error = e.Message; }
+    Check(error?.Contains("a frozen player") == true, $"no answer: a TimeoutException that names the call ({error})");
+    Check(clock.Elapsed < MediaWatcher.CallTimeout + TimeSpan.FromSeconds(2), $"given up after the timeout, not later ({clock.ElapsedMilliseconds} ms)");
+    Check(MediaWatcher.Timed(Task.FromResult(true).AsAsyncOperation(), "a player").GetAwaiter().GetResult(), "an answer comes through");
+}
+
 // ---------------------------------------------------------------- SleepTimer
 Console.WriteLine("== SleepTimer");
 {
@@ -685,6 +699,9 @@ AutostartTests.Run((ok, what) => Check(ok, what));
 // ---------------------------------------------------------------- Setup asks for administrator rights as it opens (ElevationTests.cs)
 ElevationTests.Run((ok, what) => Check(ok, what));
 
+// ---------------------------------------------------------------- The update checks' rules (UpdateRulesTests.cs)
+UpdateRulesTests.Run((ok, what) => Check(ok, what));
+
 // ---------------------------------------------------------------- The Home menu's backdrop
 // ScreenCapture's own part: sizes, scaling (the GPU halves a 4K screen; this is what 2560 wide
 // and the GDI fallback get) and the JPEG. The screen itself is not captured here.
@@ -756,6 +773,64 @@ using (var watcher = new TextFieldWatcher())
     Check(watcher.WhenDone().IsCompleted, "quiet: nothing to wait for");
     watcher.Enabled = false;
     Check(watcher.Quiet && watcher.WhenDone().IsCompleted, "turned off while off: still quiet, nothing queued");
+}
+
+// ---------------------------------------------------------------- The WebViews' recovery
+// A page that keeps failing neither reloads in a tight loop nor stays dead; a GPU lost twice
+// means a new browser (software drawing otherwise), whatever the GPU.
+Console.WriteLine("== WebView recovery");
+{
+    const long Min = 60_000;
+    var r = new WebViewRecovery();
+    var steps = Enumerable.Range(0, 6).Select(i => r.OnFailure("RenderProcessExited", 1_000_000 + i * Min)).ToList();
+    Check(steps[0] is { Step: WebViewRecovery.Step.Reload, Delay.TotalSeconds: 0 }, "renderer ended: reloaded at once");
+    Check(steps.Skip(1).Take(4).Select(s => s.Delay.TotalSeconds).SequenceEqual(new double[] { 2, 10, 30, 60 }), "again: reloaded after 2, 10, 30, 60 s");
+    Check(steps[5].Step == WebViewRecovery.Step.Restart, "a sixth time within 10 minutes: restart");
+    Check(r.OnFailure("RenderProcessExited", 1_000_000 + 30 * Min) is { Step: WebViewRecovery.Step.Reload, Delay.TotalSeconds: 0 }, "much later: at once again");
+
+    var h = new WebViewRecovery();
+    Check(h.OnFailure("RenderProcessUnresponsive", 0).Step == WebViewRecovery.Step.Reload, "hung: reloaded");
+    Check(h.OnFailure("RenderProcessUnresponsive", 5_000).Step == WebViewRecovery.Step.Nothing, "the same hang reported again: nothing more");
+    Check(h.OnFailure("RenderProcessUnresponsive", 2 * Min).Step == WebViewRecovery.Step.Restart, "hung again within 5 minutes of the reload: restart");
+    Check(h.OnFailure("RenderProcessUnresponsive", 20 * Min).Step == WebViewRecovery.Step.Reload, "a hang long after: reloaded");
+
+    var g = new WebViewRecovery();
+    Check(g.OnFailure("GpuProcessExited", 0).Step == WebViewRecovery.Step.Nothing, "GPU process lost once: Chromium carries on");
+    Check(g.OnFailure("GpuProcessExited", 90 * Min).Step == WebViewRecovery.Step.Nothing, "once more, 90 minutes later: still carries on");
+    Check(g.OnFailure("GpuProcessExited", 100 * Min).Step == WebViewRecovery.Step.NewBrowser, "twice within an hour: a new browser");
+    Check(g.OnFailure("GpuProcessExited", 101 * Min).Step == WebViewRecovery.Step.Nothing, "counted afresh after that");
+
+    Check(new WebViewRecovery().OnFailure("BrowserProcessExited", 0).Step == WebViewRecovery.Step.Restart, "browser ended: restart");
+    Check(new WebViewRecovery().OnFailure("UtilityProcessExited", 0).Step == WebViewRecovery.Step.Nothing, "a utility process: nothing");
+}
+
+// ---------------------------------------------------------------- The launcher's own pages
+// Messages are taken, and pages shown, only from https://launcher.htpc/ (WebViewGuard).
+Console.WriteLine("== The launcher's origin");
+{
+    Check(LauncherOrigin.Is("https://launcher.htpc/index.html") && LauncherOrigin.Is("https://LAUNCHER.htpc/keyboard.html#x"), "its pages");
+    Check(!LauncherOrigin.Is("http://launcher.htpc/index.html"), "not over http");
+    Check(!LauncherOrigin.Is("https://launcher.htpc:8443/index.html"), "not on another port");
+    Check(!LauncherOrigin.Is("https://launcher.htpc.evil.example/index.html") && !LauncherOrigin.Is("https://evil.example/launcher.htpc"), "not a look-alike host");
+    Check(!LauncherOrigin.Is("https://user@launcher.htpc/"), "not with user info");
+    Check(!LauncherOrigin.Is("https://capture.htpc/screen-1.jpg") && !LauncherOrigin.Is("file:///C:/ui/index.html") && !LauncherOrigin.Is(null) && !LauncherOrigin.Is("about:blank"), "not the capture host, a file, nothing, about:blank");
+    Check(LauncherOrigin.Describe("https://evil.example/path?token=secret") == "https://evil.example", "the log gets the host only");
+    Check(LauncherOrigin.Describe("file:///C:/Users/x/secret.txt") == "a file", "a file is not named in the log");
+}
+
+// ---------------------------------------------------------------- The soak line
+// One line an hour: the launcher's weight and its WebView2 processes', for leaks over weeks.
+Console.WriteLine("== Soak line");
+{
+    const long MB = 1024 * 1024;
+    var line = SoakLog.Line(new ProcessStats(150 * MB, 1200, 60, 80),
+        new List<(string, ProcessStats?)> { ("browser", new(80 * MB, 900, 10, 20)), ("renderer", new(200 * MB, 300, -1, -1)), ("renderer", new(110 * MB, 250, -1, -1)), ("gpu", null) },
+        TimeSpan.FromHours(50), TimeSpan.FromDays(9));
+    Check(line.StartsWith("Soak: launcher 150 MB private, 1200 handles, 60 GDI, 80 USER objects;"), line);
+    Check(line.Contains("WebView2 4 processes: 390 MB private, 1450 handles, 10 GDI, 20 USER objects (browser 80 MB, 2 renderer 310 MB)"), "WebView2: the known ones summed, by kind: " + line);
+    Check(line.EndsWith("; up 2 d 2 h (the box 9 d 0 h)"), "uptimes: " + line);
+    Check(ProcessStats.Of(Environment.ProcessId) is { PrivateBytes: > 0, Handles: > 0, Gdi: >= 0, User: >= 0 }, "this process's own numbers read");
+    Check(SoakLog.Line(null, [], TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(7)) == "Soak: launcher ?; up 5 min (the box 7 min)", "nothing known: still one line");
 }
 
 Console.WriteLine($"{passes} passed, {failures} failed");

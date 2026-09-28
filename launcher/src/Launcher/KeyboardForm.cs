@@ -26,9 +26,14 @@ sealed class KeyboardForm : Form
     WebView2 web = new() { Dock = DockStyle.Fill };   // replaced by ReleaseWebView
     bool ready;
     object? pending;   // an "open" posted before the page was ready
+    object? opened;    // the last "open", posted again after a reload while the keyboard shows
+    readonly WebViewRecovery recovery = new();
 
     /// <summary>A message from the keyboard page (type, text, key). Raised on the UI thread.</summary>
     public event Action<JsonElement>? Message;
+
+    /// <summary>The keyboard's page keeps failing (WebViewRecovery: restart): why. UI thread.</summary>
+    public event Action<string>? Broken;
 
     public KeyboardForm()
     {
@@ -87,9 +92,11 @@ sealed class KeyboardForm : Form
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
-        core.SetVirtualHostNameToFolderMapping("launcher.htpc", uiDir, CoreWebView2HostResourceAccessKind.Allow);
+        WebViewGuard.KeepToLauncher(core, "Keyboard"); // its own page only, no new windows
+        core.SetVirtualHostNameToFolderMapping(LauncherOrigin.Host, uiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += (_, e) =>
         {
+            if (!WebViewGuard.FromLauncher(e, "Keyboard")) return;
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
             var m = doc.RootElement.Clone();
             if (m.TryGetProperty("type", out var t) && t.GetString() == "ready")
@@ -100,7 +107,27 @@ sealed class KeyboardForm : Form
             }
             Message?.Invoke(m);
         };
+        // Its own renderer only: the GPU and browser processes are the launcher's too, handled there.
+        core.ProcessFailed += (_, args) =>
+        {
+            if (args.ProcessFailedKind is not (CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive
+                or CoreWebView2ProcessFailedKind.FrameRenderProcessExited)) return;
+            var d = recovery.OnFailure(args.ProcessFailedKind.ToString(), Environment.TickCount64);
+            Log.Error($"Keyboard: WebView2 process failed: {args.ProcessFailedKind} ({args.Reason}, exit code {args.ExitCode}): {d.Why}");
+            if (d.Step == WebViewRecovery.Step.Restart) Broken?.Invoke(d.Why);
+            else if (d.Step == WebViewRecovery.Step.Reload) _ = Reload(core, d.Delay);
+        };
         core.Navigate("https://launcher.htpc/keyboard.html");
+    }
+
+    async Task Reload(CoreWebView2 core, TimeSpan delay)
+    {
+        if (delay > TimeSpan.Zero) await Task.Delay(delay);
+        if (!ReferenceEquals(web.CoreWebView2, core)) return; // released meanwhile (a new runtime)
+        ready = false;
+        pending = Visible ? opened : null; // the page, back, shows what was open
+        try { core.Reload(); }
+        catch (Exception e) { Log.Error("Reloading the keyboard", e); }
     }
 
     public void Post(object message)
@@ -113,8 +140,22 @@ sealed class KeyboardForm : Form
     {
         Bounds = Band(Screen.PrimaryScreen!.Bounds);
         var open = new { type = "open", field, password };
+        opened = open;
         if (ready) Post(open); else pending = open;
         if (!Visible) Show();
+    }
+
+    /// <summary>The primary screen changed (MainForm.Screen.cs): the band moves to the new one.</summary>
+    public void FitScreen()
+    {
+        if (Visible) Bounds = Band(Screen.PrimaryScreen!.Bounds);
+    }
+
+    // WinForms moves it to the rectangle Windows suggests for the new DPI: the band's instead.
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        FitScreen();
     }
 
     /// <summary>Its place on a screen: the bottom band, the screen's whole width.</summary>

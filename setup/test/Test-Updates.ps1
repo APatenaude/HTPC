@@ -10,12 +10,19 @@
     fake launchers and a fake watchdog (small C# programs built with the .NET Framework's csc),
     and a fake GitHub on http://127.0.0.1 (Serve-FakeRelease.ps1).
       Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs)
-      Download  pinned redirects: another host, another scheme, more than 5 hops, a lying
-                Content-Length, a longer stream, 429 short and long, 404, a wrong SHA-256
+      Download  pinned redirects: another host, another scheme, more than 5 hops, another
+                repository's path (a renamed one: "moved", also for releases/latest), no release
+                yet, a lying Content-Length, a longer stream, 429 short and long, 403 with and
+                without GitHub's rate-limit headers, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
-                first roll back), not newer, no watchdog, a bad download (nothing touched)
-      Faults    the job ended hard after each journal step, then reconcile: the old launcher or
-                the new one, never half of each, and the launcher running is the one on disk
+                first roll back; the next update that works removes the .bad copies), not
+                newer, no watchdog, not enough free space, a bad download, never back at Home
+                (an app in front: it gives up; nothing touched, nothing stopped)
+      Faults    the job ended hard after each journal step, then reconcile, started the way the
+                box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
+                the update, even with lib\ or jobs\ gone): the old launcher or the new one, never
+                half of each, and the launcher running is the one on disk; and a rollback cut
+                short before or between its slots: the reconcile finishes it
       Planting  a junction for the staging folder, a user-owned .new file, a Users write entry
                 on state\: all refused (run it as SYSTEM in the VM too: -Only Planting)
       Wua       the Windows Update child faked: a hang is ended in time, the count leaves out
@@ -66,8 +73,10 @@ function Build-Fake([string]$Name, [string]$Source) {
     $out
 }
 
-# A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once) or hang (never
-# signals). It leaves with 75 when the job says "ready" (the progress file, written after it started).
+# A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once), hang (never
+# signals) or busy (healthy, but an app stays in front). When the job says "ready" (the progress
+# file, written after it started) it says it is at Home (Local\HtpcLeaving_<v>_<pid>; busy never
+# does); when the job says "leave" it exits with 75.
 function Get-FakeLauncher([string]$Version, [string]$Mode) {
     Build-Fake "launcher-$Version-$Mode.exe" @"
 using System; using System.IO; using System.Threading; using System.Reflection; using System.Diagnostics;
@@ -77,13 +86,21 @@ class P { static int Main() {
   if ("$Mode" == "crash") { Thread.Sleep(300); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
   var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
-  EventWaitHandle ev = null;
-  if ("$Mode" == "healthy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + Process.GetCurrentProcess().Id);
+  var me = Process.GetCurrentProcess().Id;
+  EventWaitHandle ev = null, leaving = null;
+  if ("$Mode" == "healthy" || "$Mode" == "busy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + me);
   for (var i = 0; i < 3000; i++) {
-    try { if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started && File.ReadAllText(progress).Contains("\"phase\":\"ready\"")) return 75; } catch (Exception) { }
+    try {
+      if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started) {
+        var text = File.ReadAllText(progress);
+        if (text.Contains("\"phase\":\"leave\"")) return 75;
+        if (text.Contains("\"phase\":\"ready\"") && leaving == null && "$Mode" != "busy")
+          leaving = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcLeaving_$($Version)_" + me);
+      }
+    } catch (Exception) { }
     Thread.Sleep(200);
   }
-  GC.KeepAlive(ev); return 0; } }
+  GC.KeepAlive(ev); GC.KeepAlive(leaving); return 0; } }
 "@
 }
 
@@ -134,23 +151,28 @@ function New-SetupCopy([string]$To, [string]$Version, [switch]$BrokenRunner) {
         Copy-Item -LiteralPath $f.FullName $dest
     }
     [IO.File]::WriteAllText((Join-Path $To 'VERSION'), "$Version`n")
+    # Which release a lib\ or jobs\ folder came from (the Faults section checks the bootstrap
+    # never pairs one release's lib\ with the other's jobs\).
+    foreach ($part in 'lib', 'jobs') { [IO.File]::WriteAllText((Join-Path $To "$part\test-version.txt"), $Version) }
     if ($BrokenRunner) { Add-Content (Join-Path $To 'lib\Invoke-AppJob.ps1') "`n}{ broken" }
 }
 
-# A box: Program Files\HTPC\Launcher with launcher 0.1.0, the watchdog and the job runner, and
-# ProgramData\HTPC with the kept setup. The watchdog is started (it starts the launcher).
-function New-FakeBox([string]$Name) {
+# A box: Program Files\HTPC\Launcher with launcher 0.1.0 (healthy, or busy: an app always in
+# front), the watchdog and the job runner, and ProgramData\HTPC with the kept setup. The watchdog
+# is started (it starts the launcher).
+function New-FakeBox([string]$Name, [string]$Mode = 'healthy') {
     $root = Join-Path $work $Name
     New-AdminFolder $root
     $dir = Join-Path $root 'PF\HTPC\Launcher'
     New-Item -ItemType Directory -Force $dir, (Join-Path $root 'PD\HTPC') | Out-Null
-    Copy-Item (Get-FakeLauncher '0.1.0' 'healthy') (Join-Path $dir 'HtpcLauncher.exe')
+    Copy-Item (Get-FakeLauncher '0.1.0' $Mode) (Join-Path $dir 'HtpcLauncher.exe')
     Copy-Item (Get-FakeWatchdog) (Join-Path $dir 'HtpcWatchdog.exe')
     $setup = Join-Path $root 'PD\HTPC\setup'
     New-SetupCopy $setup '0.1.0'
     Copy-Item (Join-Path $setup 'lib') (Join-Path $dir 'lib') -Recurse
     Copy-Item (Join-Path $setup 'jobs') (Join-Path $dir 'jobs') -Recurse
     Copy-Item (Join-Path $setup 'catalog.json') $dir
+    Copy-Item (Join-Path $setup 'lib\Start-Job.ps1') $dir
     Start-Process (Join-Path $dir 'HtpcWatchdog.exe') | Out-Null
     [void](Wait-For { Get-Running $root '0.1.0' } 20)
     $root
@@ -192,7 +214,7 @@ function Start-FakeGitHub {
     [void](Wait-For { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', $port); $c.Close(); $true } catch { $false } } 15)
 }
 function Set-Scenario([string]$Name) { [IO.File]::WriteAllText((Join-Path $serverRoot 'scenario'), $Name) }
-$source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
+$source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 
 # Release v<Version> on the fake GitHub: the launcher in the given mode, setup.zip, update.json.
 function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switch]$BrokenRunner, [switch]$WrongHash) {
@@ -217,16 +239,19 @@ function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switc
     [IO.File]::WriteAllText((Join-Path $dir 'update.json'), ($m | ConvertTo-Json -Depth 4))
 }
 
-# Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would.
-function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt) {
+# Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would:
+# with the fake box's own lib\ (what its task runs), or the one its bootstrap picked (-Lib).
+function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [string]$Lib) {
+    if (-not $Lib) { $Lib = Join-Path $Root 'PF\HTPC\Launcher\lib' }
     $script = Join-Path $work "job-$PID.ps1"
     @"
-. '$lib\UpdateCore.ps1'
-. '$lib\LauncherUpdate.ps1'
+. '$Lib\UpdateCore.ps1'
+. '$Lib\LauncherUpdate.ps1'
 `$UpdateProgressFile = '$Root\PD\HTPC\state\test-progress.json'
 `$HealthyWait = [TimeSpan]::FromSeconds(25)
+`$LeaveWait = [TimeSpan]::FromSeconds(10)
 `$UpdateFaultAt = $(if ($FaultAt) { "'$FaultAt'" } else { '$null' })
-`$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
+`$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 `$paths = Get-LauncherPaths -InstallRoot '$Root\PF\HTPC' -DataRoot '$Root\PD\HTPC'
 try { $Action; 'RESULT ok' } catch { "RESULT `$(Get-UpdateErrorKind `$_): `$(`$_.Exception.Message)" }
 "@ | Set-Content -LiteralPath $script -Encoding ASCII
@@ -246,9 +271,24 @@ function Get-Leftovers([string]$Root) {
 }
 
 # The runner's own dry run (it refuses a bad token with an error on stderr: not this script's).
-function Test-Token([string]$Token) {
+function Test-Token([string]$Token, [string[]]$More) {
     $ErrorActionPreference = 'Continue'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Invoke-AppJob.ps1" -Job $Token -DryRun 2>&1 | Out-Null
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Invoke-AppJob.ps1" -Job $Token -DryRun @More 2>&1 | Out-Null
+}
+
+# The runner a fake box's task would start now (its Start-Job.ps1 -Resolve): its lib\ and jobs\,
+# the release each came from (test-version.txt), and whether both are there whole.
+function Resolve-FakeRunner([string]$Root) {
+    $ErrorActionPreference = 'Continue'
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\PF\HTPC\Launcher\Start-Job.ps1" -Resolve -DataRoot "$Root\PD\HTPC" 2>&1 | Out-String
+    $found = @{}
+    foreach ($line in $out -split "`r?`n") { if ($line -match '^(lib|jobs)=(.+)$') { $found[$Matches[1]] = $Matches[2].Trim() } }
+    $from = { param($dir) $f = if ($dir) { Join-Path $dir 'test-version.txt' }; if ($f -and (Test-Path -LiteralPath $f)) { ([IO.File]::ReadAllText($f)).Trim() } else { '?' } }
+    [pscustomobject]@{
+        Lib = $found['lib']; Jobs = $found['jobs']
+        LibFrom = & $from $found['lib']; JobsFrom = & $from $found['jobs']
+        Whole = [bool]($found['lib'] -and $found['jobs'] -and (Test-Path -LiteralPath (Join-Path $found['lib'] 'Invoke-AppJob.ps1')) -and (Test-Path -LiteralPath (Join-Path $found['jobs'] 'reconcile.ps1')))
+    }
 }
 # --- Run -----------------------------------------------------------------------------------------------
 
@@ -274,6 +314,20 @@ try {
             try { [void](ConvertFrom-ReleaseManifest $bad.text $bad.tag) } catch { $refused = (Kind $_) -eq 'refused' }
             Check $refused "update.json refused: $($bad.why)"
         }
+        # The box's own source: github.com first, then any *.githubusercontent.com (HTTPS, 443).
+        $hops = @(
+            @{ url = 'https://github.com/APatenaude/HTPC/releases/download/v1.0.0/update.json'; redirect = $false; ok = $true }
+            @{ url = 'https://release-assets.githubusercontent.com/github-production-release-asset/1'; redirect = $false; ok = $false }
+            @{ url = 'https://release-assets.githubusercontent.com/github-production-release-asset/1'; redirect = $true; ok = $true }
+            @{ url = 'https://new-name.githubusercontent.com/x'; redirect = $true; ok = $true }
+            @{ url = 'https://evilgithubusercontent.com/x'; redirect = $true; ok = $false }
+            @{ url = 'https://x.githubusercontent.com.example.net/x'; redirect = $true; ok = $false }
+            @{ url = 'http://release-assets.githubusercontent.com/x'; redirect = $true; ok = $false }
+            @{ url = 'https://release-assets.githubusercontent.com:8443/x'; redirect = $true; ok = $false }
+            @{ url = 'https://user@release-assets.githubusercontent.com/x'; redirect = $true; ok = $false })
+        foreach ($h in $hops) {
+            Check ((Test-AllowedUrl $PinnedSource ([Uri]$h.url) -Redirect:$h.redirect) -eq $h.ok) "$(if ($h.ok) { 'allowed' } else { 'refused' })$(if ($h.redirect) { ' after a redirect' } else { ' first' }): $($h.url)"
+        }
         foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update') {
             Test-Token $t
             Check ($LASTEXITCODE -eq 0) "job token accepted: $t"
@@ -282,6 +336,31 @@ try {
             Test-Token $t
             Check ($LASTEXITCODE -ne 0) "job token refused: $t"
         }
+        # A token that carries parameters in: the verb scripts only ever come from jobs\ (or the
+        # .prev/.new copies an update makes), the journal is only read from ProgramData.
+        Test-Token 'reconcile' @('-JobsDir', $env:TEMP)
+        Check ($LASTEXITCODE -ne 0) 'the runner refuses a jobs folder of the caller''s choosing'
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Start-Job.ps1" -Job reconcile -DataRoot $env:TEMP 2>&1 | Out-Null }
+        Check ($LASTEXITCODE -ne 0) 'the bootstrap refuses -DataRoot without -Resolve'
+
+        # What an update applies of setup: each machine step once per change of its script (the
+        # steps faked: nothing on this machine changes), a failed one again next time.
+        $box = Join-Path $work 'machine'
+        New-AdminFolder $box
+        $mp = Get-LauncherPaths -InstallRoot "$box\PF\HTPC" -DataRoot "$box\PD\HTPC"
+        New-Item -ItemType Directory -Force (Join-Path $mp.LauncherDir 'lib'), $mp.StateRoot | Out-Null
+        foreach ($s in $MachineSteps.Values) { Copy-Item (Join-Path $lib $s) (Join-Path $mp.LauncherDir "lib\$s") }
+        $ran = New-Object Collections.ArrayList
+        $fake = { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)) }
+        Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-EdgePolicy.ps1,Set-SystemPolicy.ps1') "an update applies the machine part of the Edge and System steps ($($ran -join ','))"
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check ($ran.Count -eq 0) '  not again while their scripts stay the same'
+        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-EdgePolicy.ps1') '# changed'
+        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-SystemPolicy.ps1') '# changed'
+        $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*') { throw 'failed' } }
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
     }
 
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) { Start-FakeGitHub }
@@ -309,6 +388,14 @@ try {
         Check ((& $try 'ratelimit') -eq 'ok') '429 with a short Retry-After: waits once, then downloads'
         Check ((& $try 'ratelimitlong') -eq 'ratelimited') '429 with a long Retry-After: "try again later"'
         Check ((& $try 'notfound') -eq 'notfound') '404: not found'
+        Check ((& $try 'forbidden') -eq 'failed') '403 without the rate-limit headers: a refusal, not "try again later"'
+        Check ((& $try 'forbiddenlimit') -eq 'ratelimited') '403 with X-RateLimit-Remaining: 0: "try again later"'
+        Check ((& $try 'moved') -eq 'moved') 'a redirect to another repository''s path on the pinned host: "moved", not followed'
+        foreach ($case in @(@{ s = 'norelease'; want = 'none' }, @{ s = 'movedlatest'; want = 'moved' })) {
+            Set-Scenario $case.s
+            $got = try { $t = Get-LatestTag $source; if ($null -eq $t) { 'none' } else { $t } } catch { Kind $_ }
+            Check ($got -eq $case.want) "releases/latest ($($case.s)): $($case.want) ($got)"
+        }
         Set-Scenario 'normal'
         Remove-Item $out -ErrorAction SilentlyContinue
         $wrong = try { Save-ReleaseAsset -Source $source -Tag 'v0.2.0' -Name $f.name -Size $f.size -Sha256 ('0' * 64) -OutFile $out; 'ok' } catch { Kind $_ }
@@ -322,6 +409,8 @@ try {
 
         Publish-FakeRelease '0.2.0' 'healthy'
         $root = New-FakeBox 'swap-ok'
+        $bootstrap = Join-Path $root 'PF\HTPC\Launcher\Start-Job.ps1'
+        Add-Content -LiteralPath $bootstrap '# an older copy of the bootstrap'
         $r = Invoke-FakeJob $root $update
         $j = Get-Journal $root
         Check ($r -eq 'ok' -and $j.step -eq 'done') "healthy 0.2.0: done ($r, $($j.step))"
@@ -331,6 +420,10 @@ try {
         Check ((Get-Leftovers $root).Count -eq 0) 'no .new left'
         $r = Invoke-FakeJob $root 'Invoke-LauncherRollback -Paths $paths'
         Check ($r -eq 'ok' -and (Get-Journal $root).step -eq 'rolledback' -and (Wait-For { Get-Running $root '0.1.0' } 20)) "rollback on request: back on 0.1.0 ($r)"
+        # Its reconcile (no update under way) brought the task's bootstrap in line with lib\.
+        Check ((Get-FileHash $bootstrap).Hash -eq (Get-FileHash (Join-Path $root 'PF\HTPC\Launcher\lib\Start-Job.ps1')).Hash) "the task's bootstrap is lib\'s copy again"
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrap -Job reconcile -DryRun 2>&1 | Out-Null }
+        Check ($LASTEXITCODE -eq 0) '  and a dry run through it reaches the runner'
         Remove-FakeBox $root
 
         foreach ($case in @(@{ mode = 'crash' }, @{ mode = 'hang' }, @{ mode = 'healthy'; broken = $true })) {
@@ -342,8 +435,25 @@ try {
             Check ($j.step -eq 'rolledback' -and (Get-ExeVersion $root) -eq '0.1.0') "$label rolls back ($($j.message))"
             Check (Wait-For { Get-Running $root '0.1.0' } 20) "  and 0.1.0 runs again"
             Check ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left'
+            if ($case.mode -eq 'crash') {
+                # Kept only until an update works.
+                Publish-FakeRelease '0.2.0' 'healthy'
+                $r = Invoke-FakeJob $root $update
+                $bad = @(Get-ChildItem (Join-Path $root 'PF\HTPC\Launcher'), (Join-Path $root 'PD\HTPC') -Filter '*.bad*' -ErrorAction SilentlyContinue)
+                Check ((Get-Journal $root).step -eq 'done' -and $bad.Count -eq 0) "  the next update that works removes the .bad copies ($r, $($bad.Count) left)"
+            }
             Remove-FakeBox $root
         }
+
+        # An app in front the whole time: the download goes ahead, the swap never does.
+        Publish-FakeRelease '0.2.0' 'healthy'
+        $root = New-FakeBox 'swap-busy' 'busy'
+        $before = @(Get-Running $root | ForEach-Object ProcessId)
+        $r = Invoke-FakeJob $root $update
+        $after = @(Get-Running $root | ForEach-Object ProcessId)
+        Check ($r -like 'timeout*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0') "never back at Home: the update gives up, nothing moved ($r)"
+        Check ($before.Count -eq 1 -and "$before" -eq "$after" -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause')) -and (Get-Leftovers $root).Count -eq 0) '  the launcher was never stopped, the watchdog never paused, nothing left'
+        Remove-FakeBox $root
 
         Publish-FakeRelease '0.2.0' 'healthy' -WrongHash
         $root = New-FakeBox 'swap-badhash'
@@ -354,6 +464,9 @@ try {
         Check ((Get-ExeVersion $root) -eq '0.1.0' -and "$before" -eq "$after" -and (Get-Leftovers $root).Count -eq 0) '  the running launcher was never stopped, nothing left'
         $r = Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.1.0 -Source $src -Paths $paths'
         Check ($r -like 'refused*not newer*') "the same version again: refused ($r)"
+        Publish-FakeRelease '0.2.0' 'healthy'
+        $r = Invoke-FakeJob $root "`$UpdateMinFree = 1PB; $update"
+        Check ($r -like 'refused*free disk space*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0' -and (Get-Leftovers $root).Count -eq 0) "not enough free space: refused before the download, nothing left ($r)"
         New-Item -ItemType File -Force (Join-Path $root 'stop-watchdog') | Out-Null
         [void](Wait-For { -not (Get-CimInstance Win32_Process -Filter "Name = 'HtpcWatchdog.exe'" | Where-Object { $_.ExecutablePath -like "$root*" }) } 10)
         Publish-FakeRelease '0.2.0' 'healthy'
@@ -371,15 +484,46 @@ try {
         foreach ($step in $steps) {
             $root = New-FakeBox "fault-$($step -replace '[:.]', '_')"
             [void](Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths' $step)
-            $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths'
+            # The power back: the task starts the box's bootstrap, which must find a whole runner
+            # (lib\ may be gone, or new beside the old jobs\), the one that began the update; the
+            # reconcile runs from there, not from this repository.
+            $pick = Resolve-FakeRunner $root
+            Check ($pick.Whole -and $pick.LibFrom -eq '0.1.0' -and $pick.JobsFrom -eq '0.1.0') "after '$step': the task's bootstrap finds the whole runner that began the update (lib $($pick.LibFrom), jobs $($pick.JobsFrom))"
+            $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths' -Lib $pick.Lib
             $j = Get-Journal $root
             $v = Get-ExeVersion $root
             $consistent = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
             $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
             $sameSetup = ($v -eq '0.1.0' -and $kept -eq '0.1.0') -or ($v -eq '0.2.0' -and $kept -eq '0.2.0')
             $runs = Wait-For { Get-Running $root $v } 25
+            $next = Resolve-FakeRunner $root
             Check ($consistent -and $sameSetup -and $runs -and (Get-Leftovers $root).Count -eq 0) "after '$step': $v on disk and running, journal $($j.step), setup $kept ($r)"
+            Check ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"
             Remove-FakeBox $root
+        }
+
+        # A rollback cut short (the new launcher crashes, then a power cut before or between the
+        # slots it puts back; or a rollback asked for, cut the same way): the reconcile finishes
+        # it, leaving what it put back already as it is.
+        $cases = @(
+            @{ release = 'crash'; action = 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths'; faults = @('rollingback', 'restored-launcher', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') }
+            @{ release = 'healthy'; action = 'Invoke-LauncherRollback -Paths $paths'; faults = @('restored-setup:lib') })
+        foreach ($case in $cases) {
+            Publish-FakeRelease '0.2.0' $case.release
+            foreach ($step in $case.faults) {
+                $root = New-FakeBox "fault-rb-$($case.release)-$($step -replace '[:.]', '_')"
+                if ($case.release -eq 'healthy') { [void](Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths') }
+                [void](Invoke-FakeJob $root $case.action $step)
+                $cut = (Get-Journal $root).step
+                $pick = Resolve-FakeRunner $root
+                $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths' -Lib $pick.Lib
+                $j = Get-Journal $root
+                $v = Get-ExeVersion $root
+                $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
+                $runs = Wait-For { Get-Running $root '0.1.0' } 25
+                Check ($cut -eq 'rollingback' -and $pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $runs -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($case.release)) cut after '$step' ($cut): finished, 0.1.0 on disk and running, setup $kept ($r; $($j.message))"
+                Remove-FakeBox $root
+            }
         }
     }
 

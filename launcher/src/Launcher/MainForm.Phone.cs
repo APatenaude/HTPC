@@ -172,9 +172,9 @@ partial class MainForm
     {
         // In standby only Home, the power button and Wake do anything (they wake the box): the
         // phone shows "asleep" over its controls, and nothing else should change unseen.
-        // A link shared from another app (Android's Share target) is the exception: sharing to the TV
-        // turns it on (the design's "Send to TV").
-        if (standby.Active && command is not (KeyCommand or PowerCommand or OpenCommand { Shared: true })) return;
+        // A link (Send link, or shared from another app) is the exception: sending one to the TV
+        // turns it on (the design's "Send to TV"), as the Share target and the Shortcut do.
+        if (standby.Active && command is not (KeyCommand or PowerCommand or OpenCommand)) return;
         switch (command)
         {
             case KeyCommand k: PhoneKeyPress(k.Key); break;
@@ -201,7 +201,7 @@ partial class MainForm
                 break;
             case PowerCommand: standby.Wake("phone"); break;
             case OpenCommand o:
-                if (o.Shared && standby.Active) standby.Wake("shared link");
+                if (standby.Active) standby.Wake(o.Shared ? "shared link" : "phone link");
                 _ = PhoneOpen(phone, o.Url);
                 break;
         }
@@ -345,7 +345,8 @@ partial class MainForm
 
     async Task OpenPhoneLink(PhoneClient? phone, string url)
     {
-        var target = PhoneLinks.Route(url);
+        // A link as typed or pasted ("www.youtube.com/...", or "Watch this https://youtu.be/...").
+        var target = PhoneLinks.Route(url) ?? PhoneLinks.Route(PhoneLinks.FindLink(url));
         if (target is null)
         {
             Tell(phone, new { t = "toast", text = "That isn’t a web link the TV can open", kind = "warn" });
@@ -448,7 +449,7 @@ partial class MainForm
         {
             case "phone.info": PostPhoneInfo(qr: true); CheckPhoneReach(); break;
             case "phone.forget":
-                if (Str("id") is { } id && pairing?.Forget(id) == true) phones?.Disconnect(id);
+                if (Str("id") is { } id && pairing?.Forget(id) is { Count: > 0 } gone) phones?.Disconnect(gone);
                 PostPhoneInfo(qr: false);
                 break;
             case "phone.requireCode":
@@ -492,7 +493,7 @@ partial class MainForm
                 reach = phoneReach,
                 unpaired = phones.Clients.Count(c => c.Phone is null),
                 phones = pairing.Phones.OrderByDescending(p => p.LastSeen)
-                    .Select(p => new { id = p.Id, name = p.Name, connected = connected.Contains(p.Id), lastSeen = Unix(p.LastSeen), shortcut = p.Shortcut }),
+                    .Select(p => new { id = p.Id, name = p.Name, connected = connected.Contains(p.Id), lastSeen = Unix(p.LastSeen), shortcut = p.Shortcut, owner = p.Owner }),
             },
         });
     }
@@ -549,6 +550,9 @@ partial class MainForm
         return new
         {
             standby = standby.Active,
+            // What sleeping means here (the phone's Sleep sheet and "can't reach" say what wakes it):
+            // standby (the screen off, the box awake), sleep or hibernate (only the box's power button).
+            sleepMode = settings.SleepMode, deepSleepHours = settings.SleepAfterStandbyHours,
             volume = phoneSound.Volume,
             muted = phoneSound.Muted,
             brightness,
@@ -580,6 +584,10 @@ partial class MainForm
         public void OnDisconnected(PhoneClient phone) => form.OnUi(() => { form.ReleasePhoneDrag(); form.WatchMediaForPhones(); });
         public void HidePairingCode(bool paired) => form.OnUi(() => form.HidePairCode(paired));
         public void PhonesChanged() => form.OnUi(() => { form.PostPhoneInfo(qr: false); form.PushState(); });
+        public void ShortcutKeyMade(string phoneName) => form.OnUi(() => form.phoneAlerts.Raise(new AlertSpec
+        {
+            Id = "phone-shortcut", Title = "Shortcut key made", Body = $"{phoneName}: its Shortcut can now send links to the TV", Glyph = "share", Duration = TimeSpan.FromSeconds(8),
+        }));
         public void OpenShared(string url) => form.OnUi(() =>
         {
             if (form.standby.Active) form.standby.Wake("shared link"); // sharing to the TV turns it on

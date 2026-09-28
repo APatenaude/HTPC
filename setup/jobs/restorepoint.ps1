@@ -5,7 +5,7 @@ param([string]$Arg)
 
 if (-not $script:IsSystem) { throw 'restorepoint runs only through the elevated task' }
 if ($Arg) { throw 'Refused: restorepoint takes no argument' }
-. "$PSScriptRoot\..\lib\UpdateCore.ps1"
+. "$JobLib\UpdateCore.ps1"
 Enter-UpdateJob
 
 Write-UpdateProgress 'restorepoint' 10 'Saving a restore point'

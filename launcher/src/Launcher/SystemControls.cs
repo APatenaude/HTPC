@@ -119,6 +119,19 @@ sealed class Dimmer : Form
     /// <summary>The brightness a start applies: the one set last (kept in settings), clamped as SetBrightness does, at least FloorAtStart.</summary>
     public static int StartLevel(int saved) => Math.Max(Math.Clamp(saved, Darkest, 100), FloorAtStart);
 
+    /// <summary>The primary screen changed (MainForm.Screen.cs): the layer covers the new one.</summary>
+    public void FitScreen()
+    {
+        if (Visible) Bounds = Screen.PrimaryScreen!.Bounds;
+    }
+
+    // WinForms moves it to the rectangle Windows suggests for the new DPI: the screen's instead.
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        FitScreen();
+    }
+
     /// <summary>100 = no dimming; 10 = darkest allowed (never fully black).</summary>
     public void SetBrightness(int percent)
     {

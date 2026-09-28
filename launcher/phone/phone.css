@@ -38,6 +38,7 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--body); }
+html { touch-action: manipulation; } /* no double-tap zoom anywhere (the touchpad sets its own: none) */
 body { overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 button, input { font: inherit; color: inherit; }
 button { border: 0; background: var(--button); cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
@@ -73,6 +74,8 @@ h1, h2 { margin: 0; font-family: var(--display); font-weight: 600; }
 
 /* Tabs' content ----------------------------------------------------------------------------- */
 main { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* A cover (asleep, can't reach) covers the whole area: the tab under it does not scroll. */
+main:has(> .cover:not([hidden])) { overflow: hidden; }
 .tab { display: flex; flex-direction: column; min-height: 100%; padding-bottom: 16px; }
 /* Remote fits the screen: the touchpad (or D-pad) gives way first. */
 #tab-remote { height: 100%; min-height: 0; }
@@ -193,7 +196,7 @@ button.primary.pressed, button.primary:active { background: #B5D8FF; }
 .steps { margin: 12px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
 .steps b { color: var(--text); }
 .copy-row { display: flex; gap: 8px; margin-top: 6px; }
-.copy-row input { flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--button); color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.copy-row input { flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--button); color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; } /* 16 px: iOS zooms into smaller fields */
 .copy-row button { height: 44px; padding: 0 14px; border-radius: 12px; font-size: 14px; }
 .small-button, a.button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 6px; padding: 0 16px; border-radius: 12px; font-size: 15px; text-decoration: none; }
 .send .note { margin: 12px 0 0; }

@@ -1,6 +1,6 @@
 # A release of the TV box (launcher\dev\New-Release.ps1 makes the tag):
-#   push of a tag v<major.minor.patch>  build, publish a GitHub release, then download it again
-#                                       the way a box does and check every file
+#   push of a tag v<major.minor.patch>  test, build, publish a GitHub release, then download it
+#                                       again the way a box does and check every file
 #   run by hand (workflow_dispatch)     a dry run: the files are kept as a workflow artifact only
 #
 # The box trusts whatever is published here (no signing key, the user's choice): see
@@ -43,6 +43,26 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Nothing is published unless every check passes: the launcher's console tests, the TV
+      # bench and the update jobs against fakes (Test-Updates.ps1 needs an administrator: the
+      # runner is one). Each exits 0 only when all its checks passed.
+      - name: Tests
+        shell: powershell
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: |
+          $failed = @()
+          $projects = @(Get-ChildItem launcher\tests -Directory | ForEach-Object { $_.FullName }) + @((Resolve-Path launcher\dev\TvLab).Path)
+          foreach ($project in $projects) {
+            Write-Host "== $project"
+            dotnet run -c Release --project $project
+            if ($LASTEXITCODE -ne 0) { $failed += (Split-Path $project -Leaf) }
+          }
+          Write-Host '== setup\test\Test-Updates.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File setup\test\Test-Updates.ps1
+          if ($LASTEXITCODE -ne 0) { $failed += 'Test-Updates' }
+          if ($failed) { throw "Failed: $($failed -join ', ')" }
+
       - name: Build
         shell: powershell
         env:
@@ -61,6 +81,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    # The build job runs the tests first: a failed check publishes nothing.
     needs: build
     # Only a pushed tag publishes; a run by hand is a dry run, even on a tag.
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -86,13 +107,22 @@ jobs:
         run: |
           $manifest = Get-Content release\update.json -Raw | ConvertFrom-Json
           $manifest.notes | Out-File -Encoding utf8 "$env:RUNNER_TEMP\notes.txt"
+          # What an update from the TV applies and what it leaves to setup (setup/README.md).
+          @(
+            '',
+            '---',
+            'Updating from the TV (Settings > Updates) replaces the launcher, the watchdog, the job runner, the app catalog and the kept setup scripts, and applies again the machine part of the Edge and System setup steps when their scripts changed (the Edge policies, the HKLM system settings, the sign-in screen).',
+            'It does not apply the signed-in user''s settings (HKCU), the phone remote''s HTTPS certificate or any other setup step: for those, run TV Box Setup again (setup/README.md, "What an update applies").'
+          ) | Out-File -Append -Encoding utf8 "$env:RUNNER_TEMP\notes.txt"
           $files = @(Get-ChildItem release -File | ForEach-Object { $_.FullName })
-          gh release create $env:TAG @files --verify-tag --title "TV box $($manifest.version)" --notes-file "$env:RUNNER_TEMP\notes.txt"
+          # Not "latest" yet: boxes only look at releases/latest, so none sees it before the check.
+          gh release create $env:TAG @files --verify-tag --latest=false --title "TV box $($manifest.version)" --notes-file "$env:RUNNER_TEMP\notes.txt"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      # What boxes will download, through GitHub's redirects, checked with the box's own code.
-      # A mismatch turns the release back into a draft: boxes never see drafts.
-      - name: Check the release as a box would
+      # What boxes will download, through GitHub's redirects, checked with the box's own code;
+      # only then is it made "latest" (what boxes see). A mismatch deletes the release (the tag
+      # stays, for a run again once fixed): no box ever saw it.
+      - name: Check the release as a box would, then make it latest
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,6 +132,8 @@ jobs:
           try {
             & .\launcher\dev\Test-ReleaseAssets.ps1 -Tag $env:TAG -Repo $env:GH_REPO -Expected release
           } catch {
-            gh release edit $env:TAG --draft=true
+            gh release delete $env:TAG --yes
             throw
           }
+          gh release edit $env:TAG --latest
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

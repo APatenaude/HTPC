@@ -162,6 +162,8 @@ New-Item -ItemType Directory -Force $jobDir | Out-Null
 # its release's lib\ as a whole (lib\LauncherUpdate.ps1), so both keep the same set.
 Copy-Item (Join-Path $from 'lib\*.ps1') $jobLib -Force
 if (Test-Path (Join-Path $from 'jobs')) { Copy-Item (Join-Path $from 'jobs\*') $jobDir -Force }
+# What the task runs (lib\Start-Job.ps1 says why it sits outside lib\ and jobs\).
+Copy-Item (Join-Path $from 'lib\Start-Job.ps1') (Join-Path $installDir 'Start-Job.ps1') -Force
 Copy-Item (Join-Path $from 'catalog.json') (Join-Path $installDir 'catalog.json') -Force
 Write-Change "job runner and trusted catalog in $installDir"
 

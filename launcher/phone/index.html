@@ -128,8 +128,8 @@
     </div>
     <div class="cover" id="lost" hidden>
       <span data-icon="tv" data-size="48" data-weight="1.75" aria-hidden="true"></span>
-      <h2>Can’t reach the TV box</h2>
-      <p>Is it on, and this phone on the same Wi-Fi? If the TV box has a new address on your network, scan the code in Settings › Phone remote on the TV again.</p>
+      <h2 id="lost-title">Can’t reach the TV box</h2>
+      <p id="lost-text">Is it on, and this phone on the same Wi-Fi? If the TV box has a new address on your network, scan the code in Settings › Phone remote on the TV again.</p>
       <button type="button" class="primary wide" id="retry">Try again</button>
     </div>
   </main>
@@ -151,9 +151,10 @@
         <input id="pair-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="one-time-code" enterkeyhint="done">
       </label>
       <button type="submit" class="primary wide">Pair</button>
+      <button type="button" class="wide" id="pair-cancel">Cancel</button>
     </form>
     <p class="pair-error" id="pair-error" role="alert"></p>
-    <p class="note">Or scan the code in Settings › Phone remote on the TV.</p>
+    <p class="note" id="pair-note">Or scan the code in Settings › Phone remote on the TV.</p>
   </div>
 
   <div class="send" id="send" role="dialog" aria-modal="true" aria-labelledby="send-title" hidden>
@@ -190,7 +191,7 @@
   </div>
 
   <div class="sheet-wrap" id="linksheet" hidden>
-    <form class="sheet linksheet" id="linkbar" action="#" role="dialog" aria-modal="true" aria-labelledby="linkbar-title">
+    <form class="sheet linksheet" id="linkbar" action="#" novalidate role="dialog" aria-modal="true" aria-labelledby="linkbar-title">
       <span class="grabber" aria-hidden="true"></span>
       <h2 id="linkbar-title">Send a link to the TV</h2>
       <div class="linkbar-row">

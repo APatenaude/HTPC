@@ -10,9 +10,10 @@ namespace Htpc.Launcher;
 ///   - the "healthy" signal a launcher update waits for: once the UI said ready and the
 ///     controller thread runs, the event Local\HtpcHealthy_&lt;version&gt;_&lt;pid&gt; exists (the SYSTEM
 ///     job opens it through Session\&lt;n&gt;\; nothing is written anywhere);
-///   - leaving for an update (exit code 75, which the watchdog does not count as a crash) and
-///     restarting the box for Windows updates, with a handoff so the next launcher starts
-///     quietly (no TV on, back to standby);
+///   - leaving for an update: at Home or in standby only, "Restarting..." and the event
+///     Local\HtpcLeaving_&lt;version&gt;_&lt;pid&gt; the job waits for, then, told to leave, exit code 75
+///     (which the watchdog does not count as a crash); and restarting the box for Windows
+///     updates. Both with a handoff so the next launcher starts quietly (no TV on, back to standby);
 ///   - a newer WebView2 runtime: in standby, the WebViews (this window and the keyboard,
 ///     one environment) are closed and opened again on it, without a restart.
 /// </summary>
@@ -20,6 +21,8 @@ sealed partial class MainForm
 {
     UpdateService? updates;
     EventWaitHandle? healthySignal;
+    EventWaitHandle? leavingSignal;   // "at Home, restarting": the launcher update may stop this launcher
+    string? leavingFor;
     LauncherHandoff? startHandoff;
     CoreWebView2Environment? watchedEnvironment;
     bool webViewUpdatePending;
@@ -56,7 +59,7 @@ sealed partial class MainForm
         updates = new UpdateService(library, alerts, options.CatalogPath, scripts)
         {
             // Called from the lane's thread and timers: asked on the UI thread.
-            AtHomeOrStandby = () => OnUiThread(() => standby.Active || (LauncherActive && !keyboard.Visible && apps.ForegroundApp() is null)),
+            TryLeave = version => OnUiThread(() => ConfirmLeave(version)),
             InStandby = () => OnUiThread(() => standby.Active),
             OpenUpdates = () => BeginInvoke(() => { Post(new { type = "show", view = "settings" }); Reveal(); }),
         };
@@ -68,7 +71,8 @@ sealed partial class MainForm
             posting = true;
             BeginInvoke(() => { posting = false; if (!leaving) Post(updates.Describe(apps.All)); });
         };
-        updates.LauncherReady += version => BeginInvoke(() => LeaveForUpdate(version));
+        updates.LauncherLeave += () => BeginInvoke(() => LeaveForUpdate());
+        updates.LauncherStay += () => BeginInvoke(() => StayAfterUpdate());
         updates.RestartBox += quiet => BeginInvoke(() => RestartForUpdates(quiet));
         standby.Changed += active =>
         {
@@ -130,6 +134,8 @@ sealed partial class MainForm
         {
             healthySignal = new EventWaitHandle(true, EventResetMode.ManualReset, $@"Local\HtpcHealthy_{Program.Version}_{Environment.ProcessId}");
             Log.Info($"Launcher {Program.Version} healthy (UI ready, controller thread running)");
+            // Healthy: the other versions' unpacked files can go (a minute on, the start settled).
+            _ = Task.Delay(TimeSpan.FromMinutes(1)).ContinueWith(_ => UpdateService.RemoveOtherBundles(), TaskScheduler.Default);
         }
         catch (Exception e) { Log.Warn($"Healthy signal: {e.Message}"); }
     }
@@ -137,16 +143,44 @@ sealed partial class MainForm
     // --- Leaving for an update ---------------------------------------------------------------------
 
     /// <summary>
-    /// The update job has the new launcher next to this one: say so, leave a handoff, and exit
-    /// with 75 (a planned exit the watchdog does not count). The job swaps the files once this
-    /// process is gone and lifts the watchdog's pause; the watchdog starts the new launcher.
+    /// The update job has the new launcher next to this one ("ready"): only at Home or in standby
+    /// (never with an app in front), show "Restarting..." (nothing else can be opened from it) and
+    /// create the event the job waits for. True when done (or done already).
     /// </summary>
-    void LeaveForUpdate(string version)
+    bool ConfirmLeave(string version)
+    {
+        if (leaving || leavingSignal is not null) return true;
+        if (!(standby.Active || (LauncherActive && !keyboard.Visible && apps.ForegroundApp() is null))) return false;
+        try { leavingSignal = new EventWaitHandle(true, EventResetMode.ManualReset, $@"Local\HtpcLeaving_{Program.Version}_{Environment.ProcessId}"); }
+        catch (Exception e) { Log.Warn($"Leaving signal: {e.Message}"); return false; }
+        leavingFor = version;
+        Log.Info($"At Home for launcher {version}: the update job may restart this launcher");
+        if (!standby.Active) Post(new { type = "updates.restarting", version });
+        return true;
+    }
+
+    /// <summary>The update ended without "leave" (stopped, or gave up waiting): back to Home.</summary>
+    void StayAfterUpdate()
+    {
+        if (leaving) return;
+        leavingSignal?.Dispose();
+        leavingSignal = null;
+        Log.Info($"The launcher update to {leavingFor} ended without restarting this launcher");
+        leavingFor = null;
+        if (!standby.Active) Post(new { type = "updates.stay" });
+    }
+
+    /// <summary>
+    /// The job paused the watchdog ("leave"): leave a handoff, and exit with 75 (a planned exit
+    /// the watchdog does not count). The job swaps the files once this process is gone and lifts
+    /// the watchdog's pause; the watchdog starts the new launcher.
+    /// </summary>
+    void LeaveForUpdate()
     {
         if (leaving) return;
         leaving = true;
-        Log.Info($"Leaving for launcher {version}");
-        if (!standby.Active) Post(new { type = "updates.restarting", version });
+        Log.Info($"Leaving for launcher {leavingFor}");
+        if (!standby.Active && leavingSignal is null) Post(new { type = "updates.restarting", version = leavingFor ?? "" });
         new LauncherHandoff("launcher-update", standby.Active, QuietBoot: false, EfficiencyPids(), DateTime.UtcNow, Program.Version).Save();
         _ = Task.Delay(standby.Active ? 100 : 1200).ContinueWith(_ => BeginInvoke(() =>
         {
@@ -211,32 +245,14 @@ sealed partial class MainForm
         });
     }
 
+    // The WebViews closed and opened again on a new browser process (MainForm.Shell.cs
+    // RecreateWebViews): it waits for the old browser to end, tries again, and else exits for
+    // the watchdog, so a failure never leaves an empty window (a black TV the watchdog thinks fine).
     async Task RefreshWebViewsSoon()
     {
         await Task.Delay(TimeSpan.FromSeconds(10));   // standby settles (display off, apps paused) first
         if (!standby.Active || refreshingWebViews || !webViewUpdatePending) return;
-        refreshingWebViews = true;
-        try
-        {
-            var env = web.CoreWebView2?.Environment;
-            var gone = new TaskCompletionSource();
-            if (env is not null) env.BrowserProcessExited += (_, _) => gone.TrySetResult();
-            Log.Info("Closing the WebViews for the new WebView2 runtime");
-            uiReady = false;
-            keyboard.ReleaseWebView();
-            Controls.Remove(web);
-            web.Dispose();
-            web = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
-            Controls.Add(web);
-            // Every WebView of the environment closed: its browser processes end, then the new
-            // environment can start on the newer runtime.
-            if (env is not null && await Task.WhenAny(gone.Task, Task.Delay(TimeSpan.FromSeconds(30))) != gone.Task)
-                Log.Warn("WebView2 processes did not end within 30 s; starting again anyway");
-            webViewUpdatePending = false;
-            await InitWebView();
-            Log.Info($"WebViews back on WebView2 {web.CoreWebView2?.Environment.BrowserVersionString}");
-        }
-        catch (Exception e) { Log.Error("Moving to the new WebView2 runtime", e); }
-        finally { refreshingWebViews = false; }
+        webViewUpdatePending = false;
+        await RecreateWebViews("a runtime update");
     }
 }

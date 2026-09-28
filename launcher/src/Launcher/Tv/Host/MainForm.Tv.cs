@@ -12,7 +12,7 @@ sealed partial class MainForm
     {
         var service = new TvService(new TvParts(
             settings.Tvs, settings.Save, TvDrivers.Create(TvNet.Instance), TvNet.Instance, SystemTvClock.Instance,
-            new TvFiles(), Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, a => BeginInvoke(a), () => setupMode)))
+            new TvFiles(), Edid.Current, new TvAlerts(() => alerts, OpenTvSettings, OnUi, () => setupMode)))
         {
             HandsOff = options.NoTv,
             InSetup = options.Setup,
@@ -21,8 +21,8 @@ sealed partial class MainForm
             // Real input only (a button, a key, the phone): the launcher up on screen is no one.
             LastUserInput = () => standby is null ? controller.LastInput : standby.LastUserInput(),
         };
-        service.Changed += () => BeginInvoke(PostTv);
-        service.TvStateChanged += (on, showingBox) => BeginInvoke(() => OnTvState(on, showingBox));
+        service.Changed += () => OnUi(PostTv);
+        service.TvStateChanged += (on, showingBox) => OnUi(() => OnTvState(on, showingBox));
         return service;
     }
 
@@ -40,7 +40,9 @@ sealed partial class MainForm
     void OpenTvSettings()
     {
         if (setupMode) return;
-        Post(new { type = "tv.open" });
+        // "show" (not "tv.open"): over an app the page is blank, and only "show" brings it back
+        // (the section's TV search starts once it is on screen).
+        Post(new { type = "show", view = "settings", section = "tv" });
         Reveal();
     }
 
@@ -80,7 +82,7 @@ sealed partial class MainForm
                 _ = Task.Run(async () =>
                 {
                     var ok = await tv.Test();
-                    BeginInvoke(() => Post(new { type = "toast", text = ok ? "The TV went off and came back" : "The TV did not respond", kind = ok ? "info" : "warn" }));
+                    OnUi(() => Post(new { type = "toast", text = ok ? "The TV went off and came back" : "The TV did not respond", kind = ok ? "info" : "warn" }));
                 });
                 break;
             default: Log.Warn($"TV message {type} not handled"); break;
