@@ -13,7 +13,11 @@ sealed partial class MainForm
     readonly AlertsForm overlay = new();   // what the alerts paint on, over apps
     readonly VolumeOsd volumeOsd = new();  // the volume indicator, over everything
     readonly VolumeWatch volumeWatch = new();
+    bool volumeAfterStandby;
     SleepTimer sleepTimer = null!;
+
+    /// <summary>The default output looked at (and its volume watched), on the audio thread.</summary>
+    void PollVolume() => audio.Background("watch", volumeWatch.Poll, "Watching the volume");
 
     void InitTimer()
     {
@@ -26,8 +30,23 @@ sealed partial class MainForm
         volumeWatch.Changed += (level, output) => OnUiQueued(() => ShowVolume(level, output));
         // The level someone sets is kept; an output that becomes the default gets it.
         volumeWatch.Changed += (level, output) => { if (output is null) OnUiQueued(() => RememberVolume(level)); };
+        volumeWatch.Changed += (level, _) => audio.Seen(level);
+        // The Home menu's slider follows a level read on the audio thread (after a switch of output).
+        audio.Changed += () => OnUiQueued(() => { if (Visible) PushState(); });
         volumeWatch.Arrived = KeepVolume;
-        clock.Tick += (_, _) => { if (!setupMode && standby is { Active: false }) volumeWatch.Poll(); };
+        // Core Audio is only ever called off the UI thread (AudioVolume): it can hang while an
+        // output comes or goes, and the launcher would freeze with it. Each second the level is
+        // read again and the default output looked at, on the audio thread; not in standby.
+        clock.Tick += (_, _) =>
+        {
+            if (standby is { Active: true }) { volumeAfterStandby = true; return; }
+            audio.Refresh();
+            if (setupMode || standby is null) return;
+            // Back from standby: the output is watched afresh (the TV's may have gone and come back
+            // meanwhile under the same id, its old watch dead).
+            if (volumeAfterStandby) { volumeAfterStandby = false; volumeWatch.Renew(); }
+            PollVolume();
+        };
         controller.Chord += (command, repeat) => OnUiQueued(() => OnChord(command, repeat));
         sleepTimer = new SleepTimer(() => media.Sessions, on => media.Want("timer", on));
         sleepTimer.Changed += () =>
@@ -105,8 +124,9 @@ sealed partial class MainForm
                 audio.Muted = !(audio.Muted ?? false);
                 break;
         }
-        // At once, without waiting for Windows' call back (VolumeWatch), which shows the same.
-        if (CoreAudio.TryLevel(null) is { } level) ShowVolume(level, null);
+        // At once, without waiting for Windows' call back (VolumeWatch), which shows the same: the
+        // level just asked for (AudioVolume applies it on its own thread).
+        if (audio.Level is { } level) ShowVolume(level, null);
         // The launcher's slider, when it is up (hidden behind an app, the next Home brings the
         // state): Start + D-pad repeats about nine times a second.
         if (Visible) PushState();
@@ -144,6 +164,7 @@ sealed partial class MainForm
     /// handshake (a boot), a switch. It gets the level last set on the box when Windows has it at
     /// another (the user, 27 Sept 2026: "volume doesn't seem to persist"). Logged. A switch made
     /// by the launcher carried that level already (AudioOutputs, SoundSwitcher): nothing to do.
+    /// On the audio thread (VolumeWatch.Poll through PollVolume), never the UI thread.
     /// </summary>
     void KeepVolume(string id)
     {
@@ -151,6 +172,7 @@ sealed partial class MainForm
         try
         {
             CoreAudio.SetVolume(id, wanted);
+            audio.Refresh();
             Log.Info($"Volume: {wanted} on {AudioOutputs.NameOf(id) ?? id}, the level set last (Windows had it at {now.Volume})");
         }
         catch (Exception e) { Log.Warn($"Volume: {wanted} on {id}: {e.Message}"); }

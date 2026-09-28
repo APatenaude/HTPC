@@ -653,23 +653,43 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     On(ApartmentState.STA, () => held = new OtherEnumeratorClass());
     int before;
     lock (Log.Lines) before = Log.Lines.Count;
-    var audio = new AudioVolume();
+    var audio = new AudioVolume();   // reads on a thread of its own, from the start
     int? volume = null, again = null;
     SoundLevel? level = null;
     List<AudioOutputs.Output> outputs = new();
     List<AudioEndpoint> endpoints = new();
-    On(ApartmentState.STA, () => volume = audio.Get());
     On(ApartmentState.MTA, () => outputs = AudioOutputs.List());
+    SpinWait.SpinUntil(() => audio.Level is not null, outputs.Count > 0 ? 5000 : 500);
+    On(ApartmentState.STA, () => volume = audio.Get());
     On(ApartmentState.MTA, () => endpoints = AudioEndpoints.List());
     On(ApartmentState.STA, () => level = CoreAudio.TryLevel(null));
-    On(ApartmentState.MTA, () => again = audio.Get());
+    On(ApartmentState.MTA, () => again = CoreAudio.TryLevel(null)?.Volume);
     GC.KeepAlive(held);
     List<string> casts;
     lock (Log.Lines) casts = Log.Lines.Skip(before).Where(l => l.Contains("cast", StringComparison.OrdinalIgnoreCase)).ToList();
     Console.WriteLine($"  {outputs.Count} outputs, volume {volume?.ToString() ?? "none"}, level {level?.ToString() ?? "none"}");
     Check(casts.Count == 0, "no cast failures with another wrapper of the enumerator alive: " + string.Join(" | ", casts));
     var hasAudio = outputs.Count > 0;
-    Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread");
+    Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread, and on the audio thread");
+
+    // The audio thread held up (Core Audio hanging while an output comes or goes): nothing waits
+    // for it, the level stays as last read, and the work queued meanwhile runs once it answers.
+    using (var hold = new ManualResetEventSlim())
+    {
+        var ran = 0;
+        audio.Background("test-hold", () => hold.Wait(10_000), "Test");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        audio.Refresh();
+        audio.Refresh();
+        audio.Background("test-after", () => Interlocked.Increment(ref ran), "Test");
+        audio.Background("test-after", () => Interlocked.Increment(ref ran), "Test");
+        var shown = audio.Get();
+        Check(clock.ElapsedMilliseconds < 200 && shown == volume, $"audio thread held: reads and queuing return at once ({clock.ElapsedMilliseconds} ms), the level as last read");
+        hold.Set();
+        SpinWait.SpinUntil(() => Volatile.Read(ref ran) > 0, 3000);
+        Thread.Sleep(100);
+        Check(ran == 1, $"... then the work queued runs, the newest of a kind once ({ran})");
+    }
     Check(!hasAudio || outputs.Count(o => o.IsDefault) == 1, "one default output");
     Check(!hasAudio || endpoints.Where(e => e.IsDefault).All(e => e.Level == level), "the listed default output's level is the default's level");
 
@@ -681,12 +701,16 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     {
         watch.Changed += (_, _) => Interlocked.Increment(ref changes);
         watch.Arrived = id => arrived.Add(id); // the launcher's KeepVolume sets the level here; this only counts
-        On(ApartmentState.STA, () => { watch.Poll(); watch.Poll(); });
+        On(ApartmentState.MTA, () => { watch.Poll(); watch.Poll(); });
+        Check(!hasAudio || (arrived.Count == 1 && arrived[0] == CoreAudio.DefaultId()), $"volume watch: the default output 'arrives' once, at the first look ({arrived.Count})");
+        // After standby, or an output coming or going: the same output watched afresh, no indicator.
+        watch.Renew();
+        On(ApartmentState.MTA, () => { watch.Poll(); watch.Poll(); });
+        Check(!hasAudio || arrived.Count == 2, $"volume watch: renewed on the same output, once ({arrived.Count})");
     }
     int watchBefore;
-    lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume"));
-    Check(changes == 0 && watchBefore == 0, $"volume watch: starts and stops quietly ({changes} changes)");
-    Check(!hasAudio || (arrived.Count == 1 && arrived[0] == CoreAudio.DefaultId()), $"volume watch: the default output 'arrives' once, at the first look ({arrived.Count})");
+    lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume") || l.Contains("Watching the sound outputs"));
+    Check(changes == 0 && watchBefore == 0, $"volume watch: starts, renews and stops quietly ({changes} changes)");
     Check(!hasAudio || CoreAudio.DefaultId() == outputs.First(o => o.IsDefault).Id, "the default output's id");
 }
 

@@ -5,6 +5,14 @@ namespace Htpc.Launcher;
 /// <summary>
 /// Windows' volume and mute on the default output (Core Audio: CoreAudio, AudioOutputs.cs, which
 /// also says what the volume is when the output changes).
+///
+/// Core Audio can block: around an HDMI output coming and going, Windows' AudioEndpointBuilder
+/// has been known to hang, and every call waits with it. The caller never waits here: reads give
+/// the default output's level as last read on a thread of its own (Refresh, every second from
+/// the launcher's clock, and the volume watch's news through Seen); changes are queued to that
+/// thread, the newest of each kind kept, and show in the level at once. Other Core Audio work
+/// that must not hold the UI thread goes there too (Background: the volume watch's look at the
+/// default output). A call taking over 5 s is logged, and again when it comes back.
 /// </summary>
 sealed class AudioVolume
 {
@@ -17,22 +25,39 @@ sealed class AudioVolume
         Log.Warn(message);
     }
 
-    /// <summary>0 to 100, or null when there is no audio device.</summary>
-    public int? Get()
+    const int SlowMs = 5000;
+    readonly object gate = new();
+    readonly List<string> order = new();                         // queued work, oldest first
+    readonly Dictionary<string, Action> pending = new();         // by kind: the newest of each
+    readonly SemaphoreSlim queued = new(0);
+    SoundLevel? level;                                           // as last read or set; null: none (yet)
+    long busySince;                                              // tick count the call running began; 0: idle
+    string? busyWith;
+    bool slowLogged;
+
+    public AudioVolume()
     {
-        try { return CoreAudio.Level(null).Volume; }
-        catch (Exception e) { Warn($"Reading volume: {e.Message}"); return null; }
+        new Thread(Run) { IsBackground = true, Name = "Core Audio" }.Start();
+        Refresh();
     }
+
+    /// <summary>The default output's level as last known; null with no audio device, or before the first read.</summary>
+    public SoundLevel? Level { get { lock (gate) return level; } }
+
+    /// <summary>0 to 100, or null when there is no audio device (as last read).</summary>
+    public int? Get() => Level?.Volume;
 
     public void Set(int percent)
     {
-        try { CoreAudio.SetVolume(null, percent); }
-        catch (Exception e) { Warn($"Setting volume: {e.Message}"); }
+        percent = Math.Clamp(percent, 0, 100);
+        lock (gate) if (level is { } l) level = l with { Volume = percent };
+        Background("volume", () => CoreAudio.SetVolume(null, percent), "Setting volume", readAfter: true);
     }
 
     /// <summary>
     /// Up or down by a step (the controller's and keyboard's volume buttons, 5; Start + D-pad,
-    /// 2: no Windows flyout); the new level.
+    /// 2: no Windows flyout); the new level. From the level as last known: a step while the one
+    /// before is still queued goes on from it.
     /// </summary>
     public int? Step(int delta)
     {
@@ -41,6 +66,109 @@ sealed class AudioVolume
         Set(level);
         if (delta > 0 && Muted == true) Muted = false; // turning it up means hearing it
         return level;
+    }
+
+    /// <summary>The level Windows says it is now (the volume watch's call back).</summary>
+    public void Seen(SoundLevel now)
+    {
+        lock (gate) if (!pending.ContainsKey("volume") && !pending.ContainsKey("mute")) level = now;
+    }
+
+    /// <summary>Reads the default output's level again, on the audio thread.</summary>
+    public void Refresh() => Background("read", () =>
+    {
+        SoundLevel? now;
+        try { now = CoreAudio.Level(null); }
+        catch (Exception e)
+        {
+            // Read every second: logged when the sound output goes, not at each read.
+            if (readOk != false) Log.Warn($"Reading volume: {e.Message} (no sound output?)");
+            readOk = false;
+            now = null;
+        }
+        if (now is not null)
+        {
+            if (readOk == false) Log.Info($"Volume readable again: {now}");
+            readOk = true;
+        }
+        // A change still queued stands: it is what the level will be.
+        bool changed;
+        lock (gate)
+        {
+            changed = level != now && !pending.ContainsKey("volume") && !pending.ContainsKey("mute");
+            if (changed) level = now;
+        }
+        if (changed) Changed?.Invoke();
+    }, "Reading volume");
+
+    /// <summary>A read found the level other than known (another output, a change from elsewhere). The audio thread.</summary>
+    public event Action? Changed;
+
+    bool? readOk; // audio thread only; null before the first read
+
+    /// <summary>
+    /// Core Audio work on the audio thread, never on the caller's: the newest queued of a kind
+    /// replaces the one before (a hung call does not pile work up behind it).
+    /// </summary>
+    public void Background(string kind, Action work, string what, bool readAfter = false)
+    {
+        CheckSlow();
+        lock (gate)
+        {
+            if (!pending.ContainsKey(kind)) { order.Add(kind); queued.Release(); }
+            pending[kind] = () =>
+            {
+                try { work(); }
+                catch (Exception e) { Warn($"{what}: {e.Message}"); }
+                if (readAfter) Refresh();
+            };
+        }
+    }
+
+    void Run()
+    {
+        while (true)
+        {
+            queued.Wait();
+            string kind;
+            Action work;
+            lock (gate)
+            {
+                kind = order[0];
+                order.RemoveAt(0);
+                work = pending[kind];
+                pending.Remove(kind);
+                busyWith = kind;
+                busySince = Environment.TickCount64;
+            }
+            work();
+            long took;
+            bool logged;
+            lock (gate)
+            {
+                took = Environment.TickCount64 - busySince;
+                busySince = 0;
+                logged = slowLogged;
+                slowLogged = false;
+            }
+            if (logged) Log.Info($"Core Audio answered again ({kind}, after {took / 1000} s)");
+        }
+    }
+
+    // Called with each new piece of work (every second, with the clock): a call running for
+    // over 5 s is logged once; the launcher meanwhile shows the level as last known.
+    void CheckSlow()
+    {
+        string? kind;
+        long since;
+        lock (gate)
+        {
+            if (busySince == 0 || slowLogged || Environment.TickCount64 - busySince < SlowMs) return;
+            slowLogged = true;
+            kind = busyWith;
+            since = Environment.TickCount64 - busySince;
+        }
+        Log.Warn($"Core Audio has not answered for {since / 1000} s ({kind}): the volume shows as last read until it does");
     }
 
     /// <summary>The level a step leads to, kept to multiples of the step (47 up by 5: 50).</summary>
@@ -52,18 +180,15 @@ sealed class AudioVolume
         return level;
     }
 
-    /// <summary>Muted or not; null when there is no audio device.</summary>
+    /// <summary>Muted or not; null when there is no audio device (as last read).</summary>
     public bool? Muted
     {
-        get
-        {
-            try { return CoreAudio.Level(null).Muted; }
-            catch (Exception e) { Warn($"Reading mute: {e.Message}"); return null; }
-        }
+        get => Level?.Muted;
         set
         {
-            try { CoreAudio.SetMute(null, value ?? false); }
-            catch (Exception e) { Warn($"Setting mute: {e.Message}"); }
+            var muted = value ?? false;
+            lock (gate) if (level is { } l) level = l with { Muted = muted };
+            Background("mute", () => CoreAudio.SetMute(null, muted), "Setting mute", readAfter: true);
         }
     }
 }
