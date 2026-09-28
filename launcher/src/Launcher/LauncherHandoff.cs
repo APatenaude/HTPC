@@ -21,9 +21,11 @@ sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[]
 
     public void Save()
     {
-        // Elevated (a dev shell): not in the user's profile, where a link they planted could send
-        // an elevated write anywhere. The next launcher then starts as a first one.
-        if (Environment.IsPrivilegedProcess) { Log.Info($"Handoff not written ({Reason}): elevated"); return; }
+        // Only the everyday launcher writes and takes it (Rights.cs): at standard rights, or
+        // elevated with no split token, whose folders are its own either way (one with a split
+        // token starts again at standard rights before any of this). Never TV Box Setup, which
+        // writes nothing in the user's profile.
+        if (Rights.SetupElevated) { Log.Info($"Handoff not written ({Reason}): TV Box Setup"); return; }
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
@@ -36,9 +38,11 @@ sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[]
     /// <summary>
     /// The handoff left for this launcher, if one is recent enough: 15 minutes for a launcher
     /// update, 6 hours for a restart (installing updates at boot can take long). Deleted either way.
+    /// The everyday launcher only (MainForm: never in setup mode), as Save.
     /// </summary>
     public static LauncherHandoff? TakeAtStart()
     {
+        if (Rights.SetupElevated) return null;
         try
         {
             if (!File.Exists(FilePath)) return null;
