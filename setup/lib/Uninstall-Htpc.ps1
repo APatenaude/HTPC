@@ -87,6 +87,25 @@ function Remove-Tree([string]$Path) {
     }
 }
 
+# Copies a folder and everything in it without ever following a reparse point: Windows PowerShell
+# 5.1's Copy-Item -Recurse enters a junction and copies what it leads to. The uninstall copies
+# state\, logs\ and setup with administrator rights into the staging folder it then hands to the
+# user, and a link planted there before setup locked them (renamed *.untrusted-* since, by
+# Register-AppInstaller) would have had it read any folder for them. Links and items set aside
+# are left out, and so is a file that cannot be read (best effort per file). Returns what was left
+# out, for the caller to say.
+function Copy-Tree([string]$From, [string]$To) {
+    $item = Get-Item -LiteralPath $From -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Name -match '\.untrusted-\d{14}$') { return $From }
+    if ($item.PSIsContainer) {
+        [void][IO.Directory]::CreateDirectory($To)
+        foreach ($child in @(Get-ChildItem -LiteralPath $From -Force -ErrorAction SilentlyContinue)) { Copy-Tree $child.FullName (Join-Path $To $child.Name) }
+    } else {
+        try { [IO.File]::Copy($From, $To, $true) } catch { return "$From ($($_.Exception.GetBaseException().Message))" }
+    }
+}
+
 # An admin-only folder the uninstall writes its log and kept copies to, before handing them to the
 # user (Publish-UninstallLogs). Outside the HTPC trees the Files step removes, and outside the
 # user's writable Documents where an elevated write could be sent through a planted link. Under
@@ -330,8 +349,9 @@ $UninstallSteps = [ordered]@{
             $from = Join-Path $HtpcData $sub
             if (Test-Path -LiteralPath $from) {
                 New-Item -ItemType Directory -Force $keep | Out-Null
-                Copy-Item -LiteralPath $from -Destination $keep -Recurse -Force
+                $left = @(Copy-Tree $from (Join-Path $keep $sub))   # never through a link
                 Write-Change "$from copied to $keep"
+                foreach ($l in $left) { Write-Attention "left out of that copy (a link, set aside by setup, or unreadable): $l" }
             }
         }
         # This setup too, beside the logs (in the admin-only staging folder; Publish-UninstallLogs
@@ -343,8 +363,9 @@ $UninstallSteps = [ordered]@{
         if ($setupFrom -ieq $setupCopy) { Write-Same "setup runs from $setupCopy" }
         else {
             if (Test-Path -LiteralPath $setupCopy) { Remove-Tree $setupCopy }   # never through a link
-            Copy-Item -LiteralPath $setupFrom -Destination $setupCopy -Recurse -Force
+            $left = @(Copy-Tree $setupFrom $setupCopy)   # never through a link
             Write-Change "setup copied for the user (to run this again: `"$userSetup\setup.ps1`" -Uninstall)"
+            foreach ($l in $left) { Write-Attention "left out of that copy (a link, set aside by setup, or unreadable): $l" }
         }
         # Reparse-safe delete: ProgramData\HTPC holds the user-writable tv\ and user\, where a
         # junction could otherwise send an elevated recursive delete to its target (Remove-Tree

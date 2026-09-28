@@ -300,7 +300,9 @@ if ($Uninstall) {
         Remove-Tree $logDir
         Write-Host "Logs and a copy of setup are in: $delivered"
     } else {
-        Write-Host "Logs are kept (administrators only) in: $logDir"
+        # Not handed over: kept where they are (Users can read it: the hand-off task needs that).
+        Write-Host "Logs and a copy of setup are kept in: $logDir (they could not be copied to Documents\HTPC logs)"
+        Write-Host "To run this again: `"$logDir\setup\setup.ps1`" -Uninstall"
     }
 }
 

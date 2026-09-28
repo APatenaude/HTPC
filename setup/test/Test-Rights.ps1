@@ -8,7 +8,8 @@
     Everything happens under %TEMP%\htpc-rightstest with fake trees; nothing real is installed,
     deleted or elevated. Sections:
       Walker    Remove-Tree removes tv\ and user\ and their contents, but a junction planted inside
-                them is removed as a link, its target left alone (Uninstall-Htpc.ps1).
+                them is removed as a link, its target left alone; Copy-Tree copies such a tree
+                without going through a junction or taking what setup set aside (Uninstall-Htpc.ps1).
       Acl       Set-DirSecurityNoReparse sets an ACL on a real folder and refuses a junction
                 (UpdateCore.ps1). With admin: Register-AppInstaller.ps1 -LockOnly replaces a junction
                 planted where tv\ should be with a real folder, leaving the link's target untouched.
@@ -49,7 +50,7 @@ function Section([string]$name) { (-not $Only) -or ($Only -contains $name) }
 function New-Junction([string]$Link, [string]$Target) { cmd /c mklink /J "$Link" "$Target" | Out-Null }
 
 . (Join-Path $lib 'UpdateCore.ps1')        # Set-DirSecurityNoReparse
-. (Join-Path $lib 'Uninstall-Htpc.ps1')    # Remove-Tree
+. (Join-Path $lib 'Uninstall-Htpc.ps1')    # Remove-Tree, Copy-Tree
 
 try {
     if (Section 'Walker') {
@@ -65,6 +66,17 @@ try {
         $ro = Join-Path $data 'state\ro.txt'; [IO.File]::WriteAllText($ro, 'x'); (Get-Item -LiteralPath $ro).Attributes = 'ReadOnly'
         New-Junction (Join-Path $data 'tv\evil') $outside
         New-Junction (Join-Path $data 'user\evil2') $outside
+        # Set aside by setup's lock (Register-AppInstaller): a link and a file, renamed *.untrusted-*.
+        New-Junction (Join-Path $data 'state\link.untrusted-20260101000000') $outside
+        [IO.File]::WriteAllText((Join-Path $data 'logs\old.log.untrusted-20260101000000'), 'x')
+        [IO.File]::WriteAllText((Join-Path $data 'logs\launcher.log'), 'x')
+
+        # Copy-Tree (the uninstall's copy of logs\, state\ and setup): never through a link.
+        $copy = Join-Path $root 'copy'
+        $left = @(Copy-Tree $data $copy)
+        Check ((Test-Path -LiteralPath (Join-Path $copy 'tv\cache.dat')) -and (Test-Path -LiteralPath (Join-Path $copy 'user\progress.json')) -and (Test-Path -LiteralPath (Join-Path $copy 'logs\launcher.log')) -and (Test-Path -LiteralPath (Join-Path $copy 'state\ro.txt'))) 'Copy-Tree copies the files, a read-only one included'
+        Check (-not @(Get-ChildItem -LiteralPath $copy -Recurse -Force | Where-Object { $_.Name -eq 'sentinel.txt' -or $_.Name -like '*.untrusted-*' -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) }).Count) 'Copy-Tree: nothing through the junctions, no link and nothing set aside in the copy'
+        Check ($left.Count -eq 4) "Copy-Tree says what it left out: the 2 junctions and the 2 items set aside ($($left.Count): $($left -join '; '))"
 
         Remove-Tree $data
         Check (-not (Test-Path -LiteralPath $data)) 'ProgramData\HTPC (with tv\, user\, a read-only file) removed'
