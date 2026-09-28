@@ -1,12 +1,12 @@
 # autounattend
 
-Clean install side of Phase 1: a Windows install that asks nothing and ends in `setup.ps1`.
+Clean install side of Phase 1: a Windows install that asks nothing and ends in TV Box Setup (the wizard, which runs `setup.ps1`).
 
 | File | Does |
 |---|---|
 | `autounattend.template.xml` | Answer file with placeholders (password, image, product key). Never holds a secret |
-| `New-InstallMedia.ps1` | Fills the template, checks it, writes it with the setup scripts onto a USB stick or an answer ISO |
-| `Start-HtpcSetup.cmd` | First-logon bootstrap on the media: copies `htpc\setup` to `C:\ProgramData\HTPC\setup`, runs `setup.ps1 -Unattended` |
+| `New-InstallMedia.ps1` | Fills the template, checks it, writes it with the setup scripts and the setup exe (`-LauncherExe`, by default `launcher\dist\TV Box Setup.exe`) onto a USB stick or an answer ISO |
+| `Start-HtpcSetup.cmd` | First-logon bootstrap on the media: copies `htpc\setup` to `C:\ProgramData\HTPC\setup` and the setup exe to `C:\ProgramData\HTPC`, runs `setup.ps1 -Unattended -Only AutoLogon,Power`, then opens the wizard (`../lib/Start-SetupWizard.ps1`); without the exe, `setup.ps1 -Unattended` (no launcher) |
 | `../test/New-TestVM.ps1` | Hyper-V test VM with the Windows ISO and the answer ISO |
 | `../test/Start-TestVM.ps1` | Starts it and presses a key for "Press any key to boot from CD or DVD" |
 | `../test/Get-VMScreenshot.ps1` | PNG of the VM's screen, to follow the install without a console |
@@ -24,10 +24,15 @@ None of them needs admin (the VM scripts need membership in Hyper-V Administrato
 - Signs in automatically for the first 3 logons; `setup.ps1` then makes that permanent.
 - No Dynamic Update during setup, no automatic device encryption (BitLocker).
 - First logon: finds the drive holding `htpc\setup\setup.ps1`, runs `htpc\Start-HtpcSetup.cmd`
-  from it. Log: `C:\ProgramData\HTPC\logs\bootstrap.log`, then setup.ps1's own logs next to it.
+  from it: the box keeps signing in by itself and stays awake (`setup.ps1 -Only AutoLogon,Power`),
+  and TV Box Setup opens, as when it is downloaded: controller, Wi-Fi (no cable), TV, apps, then
+  the rest of setup, launcher included. It opens again at each sign-in (the task `HTPC setup
+  wizard`, elevated with no prompt) until setup has installed the launcher; the stick can come out
+  once it shows. Log: `C:\ProgramData\HTPC\logs\bootstrap.log`, then setup.ps1's own logs next to it.
 
-Media layout: `<root>\autounattend.xml`, `<root>\htpc\Start-HtpcSetup.cmd`, `<root>\htpc\setup\...`
-(the repo's `setup` folder without `test` and `autounattend`).
+Media layout: `<root>\autounattend.xml`, `<root>\htpc\Start-HtpcSetup.cmd`, `<root>\htpc\TV Box Setup.exe`,
+`<root>\htpc\setup\...` (the repo's `setup` folder as the setup exe carries it: without `dev`,
+`test`, `autounattend` and the decoding test's clips).
 
 No password by default: the box is open (SPEC decision, 26 Sept 2026). With `-AskPassword` or
 `-Password` **the media holds that password** (base64 of UTF-16LE password + "Password", as
@@ -46,8 +51,11 @@ unattend expects; encoded, not encrypted); keep such a stick private. Either way
    It reads the image list from the stick's `install.wim`/`.esd` (IoT Enterprise LTSC first,
    then Enterprise LTSC) and adds its files next to the Windows files. `-AskPassword` asks for an
    account password instead of none. Options: `-ImageIndex N`, `-ProductKey XXXXX-...`
-   (the key then also picks the edition on multi-edition media). Run again after changing `setup`.
-3. Boot the box from the stick, press a key at "Press any key to boot from CD or DVD", walk away.
+   (the key then also picks the edition on multi-edition media), `-LauncherExe <TV-Box-Setup.exe>`
+   (a release's, instead of `launcher\dist`: build that with `launcher\dev\Publish-Setup.ps1`).
+   Run again after changing `setup` or the launcher.
+3. Boot the box from the stick, press a key at "Press any key to boot from CD or DVD", walk away;
+   come back to TV Box Setup on the TV (controller or keyboard).
 
 ## Test VM
 

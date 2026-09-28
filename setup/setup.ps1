@@ -24,7 +24,7 @@
       DecodeCheck   does the GPU driving the TV decode the video formats in 4K (the driver's
                     word: tools\Test-HwDecode.ps1 -NoPlayback; skipped in a VM)
     Safe to re-run: every step checks before it changes anything. A failed step is reported
-    and the others still run.
+    and the others still run; a step that does not apply is reported as "skipped: <why>".
 
     Needs admin: started without it, setup asks for elevation (UAC). Started from a process
     whose AppData writes are redirected (the Claude desktop app), it first relaunches itself
@@ -43,9 +43,11 @@
 .PARAMETER Apps
     Catalog ids to install instead of the default picks.
 .PARAMETER LauncherExe
-    The launcher to install (the setup exe passes itself). Without it the Launcher step skips.
+    The launcher to install (the setup exe passes itself). Without it the Launcher step, and so
+    the Shell step, are reported as skipped.
 .PARAMETER Unattended
-    First sign-in after a USB install: no prompts, window closes by itself.
+    No prompts, window closes by itself (the USB install's first sign-in: autounattend\
+    Start-HtpcSetup.cmd, which then opens the setup exe from the media).
 .PARAMETER NoPause
     Close the window at the end without waiting for Enter.
 
@@ -84,7 +86,7 @@ $Steps = [ordered]@{
     System       = { & "$lib\Set-SystemPolicy.ps1" }
     AutoLogon    = { & "$lib\Set-AutoLogon.ps1" }
     Launcher     = {
-        if (-not $LauncherExe) { Write-Same 'no launcher given (-LauncherExe); skipped'; return }
+        if (-not $LauncherExe) { Write-Skipped 'no launcher given (-LauncherExe)'; return }
         & "$lib\Install-Launcher.ps1" -Exe $LauncherExe -SetupDir $PSScriptRoot
     }
     Library      = { & "$lib\Register-AppInstaller.ps1" }
@@ -181,14 +183,19 @@ $results = [ordered]@{}
 foreach ($name in $planned) {
     Write-Host "`n== $name"
     Save-Progress $name
+    $global:HtpcStepSkipped = $null   # set by Write-Skipped (Common.ps1)
     try {
         & $Steps[$name]
-        $results[$name] = 'OK'
+        $results[$name] = if ($global:HtpcStepSkipped) { "skipped: $global:HtpcStepSkipped" } else { 'OK' }
     } catch {
         Write-Attention $_.Exception.Message
         $results[$name] = "FAILED: $($_.Exception.Message)"
     }
 }
+
+# After a USB install the wizard opens at each sign-in (lib\Start-SetupWizard.ps1) until the
+# launcher is in; from then on the home screen starts instead.
+if ($results['Launcher'] -eq 'OK') { Unregister-ScheduledTask -TaskName 'HTPC setup wizard' -Confirm:$false -ErrorAction SilentlyContinue }
 
 $restart = @()
 $activeName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName').ComputerName
@@ -208,4 +215,4 @@ Save-Progress '' $true
 Stop-Transcript | Out-Null
 
 if (-not $Unattended -and -not $NoPause) { Read-Host 'Press Enter to close' | Out-Null }
-if (@($results.Values | Where-Object { $_ -ne 'OK' }).Count) { exit 1 }
+if (@($results.Values | Where-Object { $_ -ne 'OK' -and $_ -notlike 'skipped*' }).Count) { exit 1 }

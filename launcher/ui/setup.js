@@ -62,6 +62,9 @@ function steps() {
 
 function index() { return Math.max(0, steps().indexOf(state.step)); }
 
+/** A setup.ps1 result "skipped: <why>" (not OK, not a failure). */
+const skipped = (v) => /^skipped/.test(String(v || ''));
+
 // ---- Rendering ----------------------------------------------------------------------------
 
 function button(id, label, primary, off) {
@@ -122,9 +125,10 @@ function views() {
     const results = (p && p.results) || {};
     const rows = list.map((name) => {
       const r = results[name];
-      const cls = r === 'OK' ? 'ok' : r ? 'failed' : name === p.running ? 'running' : '';
-      const mark = r === 'OK' ? icon('check', 32, 2.5) : r ? icon('warn', 30, 2) : name === p.running ? '<span class="su-spin"></span>' : '<span class="su-pending"></span>';
-      const label = name === 'Apps' ? `Apps (${state.picked.size})` : (STEP_NAMES[name] || name);
+      // "skipped: <why>": the step did not apply here (no launcher given, a virtual machine).
+      const cls = r === 'OK' ? 'ok' : skipped(r) ? 'skipped' : r ? 'failed' : name === p.running ? 'running' : '';
+      const mark = r === 'OK' ? icon('check', 32, 2.5) : skipped(r) ? icon('info', 30, 2) : r ? icon('warn', 30, 2) : name === p.running ? '<span class="su-spin"></span>' : '<span class="su-pending"></span>';
+      const label = (name === 'Apps' ? `Apps (${state.picked.size})` : (STEP_NAMES[name] || name)) + (skipped(r) ? ' (skipped)' : '');
       return `<div class="su-step ${cls}"><span class="su-icon">${mark}</span>${esc(label)}</div>`;
     }).join('');
     return {
@@ -135,7 +139,8 @@ function views() {
   }
   // done
   const r = state.result || { results: {}, restartNeeded: [] };
-  const failed = Object.entries(r.results || {}).filter(([, v]) => v !== 'OK');
+  const failed = Object.entries(r.results || {}).filter(([, v]) => v !== 'OK' && !skipped(v));
+  const skips = Object.entries(r.results || {}).filter(([, v]) => skipped(v));
   const lines = [];
   if (BUTTONS.every(([b]) => state.pressed.has(b))) lines.push(['ok', 'Controller works']);
   const tv = state.tv, p = tv.profile;
@@ -146,6 +151,7 @@ function views() {
   } else lines.push(['warn', 'TV control: set it up later in Settings › TV']);
   lines.push(['ok', `${state.picked.size} apps on the home screen`]);
   for (const [name, v] of failed) lines.push(['warn', `${STEP_NAMES[name] || name}: ${String(v).replace(/^FAILED: /, '')}`]);
+  for (const [name, v] of skips) lines.push(['warn', `${STEP_NAMES[name] || name}: skipped, ${String(v).replace(/^skipped: /, '')}`]);
   const restart = r.restartNeeded && r.restartNeeded.length;
   if (restart) lines.push(['warn', r.restartNeeded.includes('shell')
     ? 'Restart the box once to finish: from then on it starts straight into this home screen'

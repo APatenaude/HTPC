@@ -17,8 +17,10 @@ installed, started as the signed-in user, not elevated (launcher/README.md, Setu
 
 It elevates itself (UAC; started elevated, as TV Box Setup starts it, it just runs), is safe
 to re-run, keeps going when one step fails, and logs to
-`C:\ProgramData\HTPC\logs` (`setup-last.json` has the step results). After a USB install the
-answer file runs it with `-Unattended` at the first sign-in.
+`C:\ProgramData\HTPC\logs` (`setup-last.json` has the step results: OK, `FAILED: <why>`, or
+`skipped: <why>` for a step that does not apply here). After a USB install the first sign-in runs
+it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the media
+(`autounattend/README.md`).
 
 | Step | Script | Does |
 |---|---|---|

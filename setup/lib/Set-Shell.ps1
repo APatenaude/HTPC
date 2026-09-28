@@ -92,7 +92,7 @@ if ($Undo) {
 
 # Never a shell that is not there: that would be a black screen at the next sign-in.
 if (-not ((Test-Path $launcher) -and (Test-Path $watchdog))) {
-    Write-Attention 'launcher or watchdog not installed (Launcher step): Explorer stays the shell'
+    Write-Skipped 'launcher or watchdog not installed (Launcher step): Explorer stays the shell'
     return
 }
 

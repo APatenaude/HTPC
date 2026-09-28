@@ -20,7 +20,8 @@
                  turns on automatic time zone), no automatic device encryption (BitLocker)
     oobeSystem   en-US; every OOBE page skipped; local account "user" in Administrators;
                  AutoLogon for the first 3 logons (setup.ps1 makes it permanent);
-                 first logon runs htpc\Start-HtpcSetup.cmd from the install media
+                 first logon runs htpc\Start-HtpcSetup.cmd from the install media, which opens
+                 the setup exe (the wizard)
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <settings pass="windowsPE">
@@ -127,7 +128,10 @@
       <UserLocale>en-US</UserLocale>
     </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <!-- Setup keeps this password in Winlogon DefaultPassword; setup.ps1 moves it to an LSA secret. -->
+      <!--
+        Setup keeps this password in Winlogon DefaultPassword for these first logons; setup.ps1's
+        AutoLogon step then clears the account's password and signs in with none, for good.
+      -->
       <AutoLogon>
         <Enabled>true</Enabled>
         <LogonCount>3</LogonCount>
@@ -141,8 +145,9 @@
         Runs once, elevated, at the first logon: finds the ready drive that holds
         htpc\setup\setup.ps1 (DriveInfo.IsReady avoids "no disk" prompts on empty card readers)
         and runs htpc\Start-HtpcSetup.cmd from it. That script copies htpc\setup to
-        C:\ProgramData\HTPC\setup, runs setup.ps1 -Unattended and logs to
-        C:\ProgramData\HTPC\logs\bootstrap.log.
+        C:\ProgramData\HTPC\setup, keeps the box signing in and awake (setup.ps1 -Unattended
+        -Only AutoLogon,Power), opens htpc\TV Box Setup.exe (the wizard, which runs the rest of
+        setup) and logs to C:\ProgramData\HTPC\logs\bootstrap.log.
       -->
       <FirstLogonCommands>
         <SynchronousCommand wcm:action="add">

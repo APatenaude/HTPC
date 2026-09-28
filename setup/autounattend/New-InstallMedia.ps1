@@ -8,7 +8,11 @@
     Fills autounattend.template.xml (next to this script), checks the result, and writes:
         <root>\autounattend.xml            the answer file (Setup looks for it at the root of every drive)
         <root>\htpc\Start-HtpcSetup.cmd    first-logon bootstrap, run by FirstLogonCommands
-        <root>\htpc\setup\...              this repo's setup folder, without setup\test and setup\autounattend
+        <root>\htpc\TV Box Setup.exe       the setup exe (-LauncherExe): the first logon opens it,
+                                           and the wizard goes on from there (TV, apps, install)
+        <root>\htpc\setup\...              this repo's setup folder as the setup exe carries it:
+                                           without dev\, test\, autounattend\ and the decoding
+                                           test's clips
 
     Targets:
       -UsbDrive E:      a stick that already holds the Windows install files (Rufus, the Media
@@ -39,7 +43,7 @@
     -TestPassword and with a one-space password (ISO read back and checked); -UsbDrive against a
     substituted drive holding a fake multi-image WIM header (edition pick, -ImageIndex,
     -ProductKey); the FirstLogonCommands line run against a stub setup.ps1. Not yet tested: a real
-    USB stick, and an actual install (Setup itself has not read this answer file yet).
+    USB stick; the setup exe on the media (27 Sept 2026) not yet in the VM.
 
 .PARAMETER UsbDrive
     Drive letter of the Windows install stick, such as E: (not the system drive).
@@ -63,6 +67,11 @@
 
 .PARAMETER ImageIndex
     Image to install from sources\install.wim (see Image above).
+
+.PARAMETER LauncherExe
+    The setup exe to put on the media: by default launcher\dist\TV Box Setup.exe
+    (launcher\dev\Publish-Setup.ps1 builds it), or a release's TV-Box-Setup.exe. Without one the
+    first logon could only run setup.ps1 unattended, which installs no launcher: the script stops.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File setup\autounattend\New-InstallMedia.ps1 -UsbDrive E:
@@ -90,7 +99,9 @@ param(
     [string]$ProductKey,
 
     [ValidateRange(1, 99)]
-    [int]$ImageIndex
+    [int]$ImageIndex,
+
+    [string]$LauncherExe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,6 +113,10 @@ $templatePath = Join-Path $PSScriptRoot 'autounattend.template.xml'
 $bootstrapPath = Join-Path $PSScriptRoot 'Start-HtpcSetup.cmd'
 $unattendNs = 'urn:schemas-microsoft-com:unattend'
 $accountName = 'user'
+# Not as the parameter's default: Windows PowerShell leaves $PSScriptRoot empty there under -File.
+if (-not $LauncherExe) { $LauncherExe = Join-Path $repoRoot 'launcher\dist\TV Box Setup.exe' }
+# The name it has on the media: "setup" in it opens the wizard (SetupElevation.IsSetupMode).
+$launcherName = 'TV Box Setup.exe'
 
 # ---------------------------------------------------------------------------------------------
 # Helpers
@@ -321,9 +336,13 @@ function Copy-HtpcFiles([string]$Root) {
     $dest = Join-Path $htpc 'setup'
     New-Item -ItemType Directory -Force $dest | Out-Null
     Copy-Item -LiteralPath $bootstrapPath -Destination $htpc
+    Copy-Item -LiteralPath $LauncherExe -Destination (Join-Path $htpc $launcherName)
+    # The parts the setup exe carries too (Launcher.csproj): no dev tools, tests or clips.
     Get-ChildItem -LiteralPath $setupDir -Force |
-        Where-Object { $_.Name -notin 'test', 'autounattend' } |
+        Where-Object { $_.Name -notin 'dev', 'test', 'autounattend' } |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force }
+    $clips = Join-Path $dest 'tools\hwdecode-clips'
+    if (Test-Path -LiteralPath $clips) { Remove-Item -LiteralPath $clips -Recurse -Force }
     if (-not (Test-Path -LiteralPath (Join-Path $dest 'setup.ps1'))) {
         Write-Warning "setup\setup.ps1 is not in the repo yet; the first logon will stop at 'no drive holds htpc\setup\setup.ps1'."
     }
@@ -388,6 +407,10 @@ function Test-InsideRepo([string]$Path) {
 foreach ($file in $templatePath, $bootstrapPath) {
     if (-not (Test-Path -LiteralPath $file)) { throw "Missing $file" }
 }
+if (-not (Test-Path -LiteralPath $LauncherExe -PathType Leaf)) {
+    throw "No setup exe at ${LauncherExe}: build it (launcher\dev\Publish-Setup.ps1) or pass -LauncherExe <TV-Box-Setup.exe>. Without it the box would get no launcher."
+}
+Write-Host "Setup exe: $LauncherExe ($([math]::Round((Get-Item -LiteralPath $LauncherExe).Length / 1MB)) MB, version $((Get-Item -LiteralPath $LauncherExe).VersionInfo.ProductVersion))"
 if (@($TestPassword.IsPresent, [bool]$Password, $AskPassword.IsPresent) -eq $true | Select-Object -Skip 1) {
     throw 'Use only one of -TestPassword, -Password and -AskPassword.'
 }
