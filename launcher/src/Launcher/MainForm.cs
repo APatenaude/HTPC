@@ -140,12 +140,18 @@ sealed partial class MainForm : Form
     }
 
     // Back from a real sleep or hibernate (the keyboard, the power button, the phone's
-    // Wake-on-LAN): the TV comes on with the box, and idle counts from now, not from before the sleep.
+    // Wake-on-LAN; Windows says Resume only for those, not for a wake timer): the TV comes on
+    // with the box, and idle counts from now, not from before the sleep. Slept from standby (its
+    // hours were up), the box wakes from that too (SPEC: keyboard or power button): left in
+    // standby, the page the sleep brought back ("show home") stayed on screen with the display
+    // on for good, the controller's taps swallowed and the keyboard driving the page.
     void OnResumed()
     {
         Log.Info("Resumed");
-        standby?.Resumed();
-        _ = tv.TurnOn();
+        if (standby is null) { _ = tv.TurnOn(); return; }
+        standby.Resumed();
+        if (standby.Active) standby.Wake("resumed"); // the TV comes on with it (OnStandbyChanged)
+        else _ = tv.TurnOn();
     }
 
     // The TV turned off with its own remote: the box sleeps too. Turned back on showing the
