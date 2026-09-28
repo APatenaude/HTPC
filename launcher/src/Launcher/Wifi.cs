@@ -471,19 +471,21 @@ sealed class WifiService : IDisposable
 
 /// <summary>
 /// Location permission for the launcher (Windows 11 24H2: Wi-Fi lists need it). Read from the
-/// consent store; the Allow button sets the user's own switches (no admin rights needed), not
-/// the device-wide one, which setup turns on.
+/// consent store; the Allow button sets the user's own switches (no admin rights needed). The
+/// device-wide one (location off for the whole box) needs them: setup's System step turns it on,
+/// and the first-run wizard, elevated, turns it on with the Allow button (its Wi-Fi step comes
+/// before setup runs).
 /// </summary>
 static class LocationConsent
 {
     const string Store = @"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location";
 
-    /// <summary>"ok", "denied" (the user's switches: the Allow button can fix it) or "device" (location services off for the whole box).</summary>
+    /// <summary>"ok", "denied" (the Allow button can fix it) or "device" (location off for the whole box, this process not elevated).</summary>
     public static string State()
     {
         try
         {
-            if (Value(Registry.LocalMachine, Store) == "Deny") return "device";
+            if (Value(Registry.LocalMachine, Store) == "Deny") return Environment.IsPrivilegedProcess ? "denied" : "device";
             if (Value(Registry.CurrentUser, Store) == "Deny" || Value(Registry.CurrentUser, Store + @"\NonPackaged") == "Deny"
                 || Value(Registry.CurrentUser, Store + @"\NonPackaged\" + ExeKey()) == "Deny")
                 return "denied";
@@ -492,17 +494,22 @@ static class LocationConsent
         return "ok";
     }
 
-    /// <summary>Allows location for desktop apps and this launcher, for this user.</summary>
+    /// <summary>Allows location for desktop apps and this launcher, for this user; elevated (the setup wizard), for the whole box too.</summary>
     public static bool Allow()
     {
         try
         {
+            if (Environment.IsPrivilegedProcess)
+            {
+                using var machine = Registry.LocalMachine.CreateSubKey(Store);
+                machine.SetValue("Value", "Allow", RegistryValueKind.String);
+            }
             foreach (var path in new[] { Store, Store + @"\NonPackaged", Store + @"\NonPackaged\" + ExeKey() })
             {
                 using var key = Registry.CurrentUser.CreateSubKey(path);
                 key.SetValue("Value", "Allow", RegistryValueKind.String);
             }
-            Log.Info("Location allowed for desktop apps (this user)");
+            Log.Info($"Location allowed for desktop apps (this user{(Environment.IsPrivilegedProcess ? " and the whole box" : "")})");
             return true;
         }
         catch (Exception e) { Log.Warn($"Allowing location: {e.Message}"); return false; }

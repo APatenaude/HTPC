@@ -58,7 +58,7 @@ const WifiUI = (() => {
     if (st.location === 'denied') {
       h += row('wifi-allow', 'warn', 'Allow location to see networks', 'Windows shows Wi-Fi networks only to apps allowed to know the location.', '<div class="value link">Allow</div>', 'warn');
     } else if (st.location === 'device') {
-      h += row('wifi-location-off', 'warn', 'Location is off for this box', 'Windows lists Wi-Fi networks only with location on. Run setup again (Settings › About).', '', 'warn');
+      h += row('wifi-location-off', 'warn', 'Location is off for this box', 'Windows lists Wi-Fi networks only with location on. Use a network cable, or turn location on in Windows’ privacy settings (setup turns it on too).', '', 'warn');
     }
     if (st.current) {
       h += row('wifi-current', 'wifi', st.current.ssid, `<span class="ok">Connected · ${esc(st.current.words)}</span>`, '', 'current');
