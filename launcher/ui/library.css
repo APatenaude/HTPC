@@ -54,16 +54,16 @@
 /* Library cards */
 .lc-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; }
 .lc-app {
-  display: flex; flex-direction: column; gap: 10px; height: 184px; padding: 22px 24px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 10px; height: 200px; padding: 22px 24px; box-sizing: border-box;
   border: 0; border-radius: 22px; background: var(--panel); color: var(--text); text-align: left; cursor: pointer;
 }
 .lc-app.focused { background: var(--tile-focus); }
 .lc-top { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .lc-name { min-width: 0; font-family: var(--display); font-weight: 600; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* long names: one line */
 .lc-name.grow { flex-grow: 1; }
-.lc-desc { font-size: 19px; line-height: 1.35; max-height: 2.7em; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.lc-desc { font-size: 22px; line-height: 1.35; max-height: 2.7em; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .lc-app .lc-status { margin-top: auto; }   /* at the bottom of the card, however long the description */
-.lc-status { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 700; }
+.lc-status { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; }
 /* Installing (or waiting to): a dashed blue edge (as its home tile), the app's icon dimmed, a
    spinner and a bar along the bottom. Did not install: a dashed amber edge. */
 .lc-app { position: relative; overflow: hidden; }
@@ -187,6 +187,9 @@
 .il-pct { color: var(--text-2); }
 .il-bar { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
 .il-fill { height: 12px; border-radius: 6px; background: var(--accent); transition: width 0.3s ease; }
+.il-fill.going { animation: going 1.4s ease-in-out infinite; }   /* no percentage: the bar breathes */
+.il-phase.warn { color: var(--warn); }
+.il-phase.ok { color: #7FD1AE; }
 .il-note { font-size: 22px; color: var(--muted); }
 
 /* A home tile for an app being installed (library.js onTiles): dashed blue edge, its icon
@@ -194,7 +197,7 @@
 .tile.pending { background: transparent; border: 2px dashed var(--accent); }
 .tile.pending .pglyph { display: flex; opacity: 0.4; }
 .tile.pending .name { color: var(--text-2); }
-.tile .pbadge { position: absolute; top: 20px; left: 24px; display: flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 700; color: var(--accent); }
+.tile .pbadge { position: absolute; top: 20px; left: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; color: var(--accent); }
 .tile .pbar { position: absolute; left: 28px; right: 28px; bottom: 22px; height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
 .tile.pending.failed { border-color: var(--warn); }
 .tile.pending.failed .pbadge { color: var(--warn); }
@@ -211,6 +214,6 @@
 }
 .tile.moving::after {
   content: 'Moving'; position: absolute; top: 20px; left: 24px; padding: 4px 12px; border-radius: 12px;
-  background: var(--accent); color: var(--bg); font-size: 20px; font-weight: 700;
+  background: var(--accent); color: var(--bg); font-size: 22px; font-weight: 700;
 }
 .tiles:has(.tile.moving) > :not(.moving) { opacity: 0.45; }

@@ -48,7 +48,8 @@
   // ---- Home hooks (app.js calls these) -----------------------------------------------------
 
   onAction('addtile', openAddTile);
-  onAction('tile-options', (node, id) => { lib.target = id; go('tileopts'); });
+  // Always on its first item, never where the last one's focus was left (Remove, after one).
+  onAction('tile-options', (node, id) => { lib.target = id; state.memory.tileopts = null; go('tileopts'); });
   onAction('tile-move', (node, button) => moveButton(button));
 
   function moveButton(button) {
@@ -111,14 +112,15 @@
       const t = targetTile();
       if (!t) { back(); return; }
       const rows = [['opt-move', 'move', 'Move'], ['opt-rename', 'pencil', 'Rename'], ['opt-icon', 'image', 'Change icon']];
-      el('tileopts').innerHTML =
+      // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time.
+      patchHtml(el('tileopts'),
         '<aside class="to-panel">' +
           `<div class="to-head">${appIcon(t, 40)}<span class="to-name">${esc(t.name)}</span></div>` +
           rows.map(([act, glyph, label]) => `<button class="to-item" data-nav data-id="${act}" data-act="${act}">${icon(glyph, 32, 2)}${label}</button>`).join('') +
           '<div class="to-sep"></div>' +
           `<button class="to-item danger" data-nav data-id="opt-remove" data-act="opt-remove">${icon('trash', 32, 2)}Remove from home</button>` +
         '</aside>' +
-        `<footer class="hints">${hints([['A', 'Select'], ['B', 'Close']])}</footer>`;
+        `<footer class="hints">${hints([['A', 'Select'], ['B', 'Close']])}</footer>`);
     },
     layout() { placeByTile(el('tileopts').querySelector('.to-panel'), lib.target); },
   });
@@ -166,7 +168,8 @@
     render() {
       const t = targetTile();
       if (!t) { back(); return; }
-      el('rename').innerHTML =
+      // In place: a key typed changes the name and its count, not the 41 keys under it.
+      patchHtml(el('rename'),
         '<main class="lib-center"><div class="rn-wrap">' +
           '<div class="rn-field">' +
             '<span class="rn-label">Name</span>' +
@@ -175,7 +178,7 @@
           '</div>' +
           `<div class="kbi">${keyboardHtml('rename')}</div>` +
         '</div></main>' +
-        `<footer class="hints">${hints([['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Save'], ['B', 'Cancel']])}</footer>`;
+        `<footer class="hints">${hints([['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Save'], ['B', 'Cancel']])}</footer>`);
     },
     press(button) {
       if (button === 'x') { lib.draft = lib.draft.slice(0, -1); render(); return true; }
@@ -202,7 +205,7 @@
       const logoChoice = t.logoUrl
         ? `<div class="ci-logo"><button class="ci-glyph wide${onLogo ? ' on' : ''}" data-nav data-id="g-logo" data-act="glyph" data-arg="logo">` +
             `${appIcon({ ...t, logo: t.logoUrl }, 40)}Logo</button></div>` : '';
-      el('changeicon').innerHTML =
+      patchHtml(el('changeicon'),
         '<main class="lib-center"><div class="ci-wrap">' +
           `<div class="ci-preview">${appIcon(t, 80)}<span class="ci-name">${esc(t.name)}</span></div>` + logoChoice +
           '<div class="ci-glyphs">' + ICONS.map((g) =>
@@ -210,12 +213,23 @@
           '<div class="ci-colors">' + COLORS.map((c) =>
             `<button class="ci-color${!onLogo && c.toUpperCase() === String(t.color).toUpperCase() ? ' on' : ''}" data-nav data-id="c-${c}" data-act="color" data-arg="${c}"><span style="background:${c}"></span></button>`).join('') + '</div>' +
         '</div></main>' +
-        `<footer class="hints">${hints([['A', 'Choose'], ['B', 'Done']])}</footer>`;
+        `<footer class="hints">${hints([['A', 'Choose'], ['B', 'Done']])}</footer>`);
     },
   });
 
-  onAction('glyph', (node, glyph) => { send({ type: 'tile.icon', id: lib.target, glyph }); render(); });
-  onAction('color', (node, color) => { send({ type: 'tile.icon', id: lib.target, color }); render(); });
+  // The choice shows as picked at once (the host's tiles confirm it a moment later).
+  onAction('glyph', (node, glyph) => {
+    const t = targetTile();
+    if (t) { if (glyph === 'logo') t.logo = t.logoUrl; else { t.glyph = glyph; t.logo = null; } }
+    send({ type: 'tile.icon', id: lib.target, glyph });
+    render();
+  });
+  onAction('color', (node, color) => {
+    const t = targetTile();
+    if (t) { t.color = color; t.logo = null; }
+    send({ type: 'tile.icon', id: lib.target, color });
+    render();
+  });
 
   // ---- Add tile: Library / On this box / Website -------------------------------------------
 
@@ -227,11 +241,7 @@
       const tabs = [['library', 'Library'], ['onbox', 'On this box'], ['website', 'Website']].map(([id, label]) =>
         `<div class="at-tab${id === lib.tab ? ' on' : ''}">${label}<span class="at-underline"></span></div>`).join('');
       const body = lib.tab === 'library' ? libraryTabHtml() : lib.tab === 'onbox' ? onboxTabHtml() : websiteTabHtml();
-      const hintList = lib.tab === 'website'
-        ? [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Add tile'], ['LB', 'Tabs'], ['B', 'Back']]
-        : lib.tab === 'library'
-          ? [['A', 'Install or add'], ['X', 'Uninstall'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']]
-          : [['A', 'Add to home'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
+      const hintList = tabHints(null);
       // The same tab again (install progress, a logo, the catalog after an add): its cards are
       // updated in place (patchHtml), their logos not loaded again, the list's scroll and the
       // focus left be. Another tab is drawn afresh.
@@ -243,10 +253,13 @@
         `<footer class="hints">${hints(hintList)}</footer>`;
       el('addtile').dataset.tab = lib.tab;
     },
-    // The tab's list scrolls to the focus, with room for its ring, above the hints.
+    // The tab's list scrolls to the focus, with room for its ring, above the hints; the hints
+    // say what A and X do there.
     focused(node) {
       const main = node.closest('.at-main');
       if (main) { scrollIntoBox(node, main, 40); listEdges(main); }
+      const bar = el('addtile').querySelector('footer.hints');
+      if (bar) patchHtml(bar, hints(tabHints(node)));
     },
     press(button, node) {
       if (button === 'lb') { switchTab(-1); return true; }
@@ -261,6 +274,22 @@
     },
   });
 
+  // The hints for the focused card or row: A only where it does something, X Uninstall only on
+  // an installed app that can be uninstalled (not a site, not an app to install).
+  function tabHints(node) {
+    const tabs = [['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
+    if (lib.tab === 'website') return [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Add tile'], ...tabs];
+    if (lib.tab === 'onbox') {
+      const add = !node || node.dataset.act === 'addprog' && !node.classList.contains('on-home');
+      return [...(add ? [['A', 'Add to home']] : []), ...tabs];
+    }
+    const card = node && node.dataset.arg ? findCard(node.dataset.arg) : null;
+    if (!card) return [['A', 'Install or add'], ...tabs];
+    const a = card.state === 'install' ? (lib.failed.has(card.id) ? 'Try again' : 'Install') : card.state === 'installed' || card.state === 'add' ? 'Add tile' : null;
+    const x = node.dataset.uninstall === '1' && (card.state === 'installed' || card.state === 'home');
+    return [...(a ? [['A', a]] : []), ...(x ? [['X', 'Uninstall']] : []), ...tabs];
+  }
+
   function openAddTile() {
     lib.tab = 'library';
     lib.website = { name: '', url: '', field: 'url' };
@@ -272,7 +301,7 @@
     if (!TABS.includes(tab) || tab === lib.tab) return;
     lib.tab = tab;
     if (tab === 'library') send({ type: 'library.list' });
-    if (tab === 'onbox') send({ type: 'library.startMenu' });
+    if (tab === 'onbox') { hostAsked('programs', 15000); send({ type: 'library.startMenu' }); }
     render();
     const first = el('addtile').querySelector('.at-main [data-nav]');
     if (first) setFocus(first);
@@ -323,7 +352,7 @@
   }
 
   function onboxTabHtml() {
-    if (!lib.programs.length) return '<p class="at-empty">Reading what’s installed…</p>';
+    if (!lib.programs.length) return `<p class="at-empty">${hostWaitText('programs', 'Reading what’s installed…', 'The list of programs didn’t come. Switch tabs (LB, RB) to try once more.', 15000)}</p>`;
     const rows = lib.programs.map((p) => {
       if (!p.launchable)
         return `<button class="ob-row muted" data-nav data-id="ob-${esc(p.name)}" data-act="prognote" data-note="${esc(p.note || '')}">` +
@@ -371,7 +400,13 @@
     else if (which === 'space' && f === 'name') lib.website[f] = (lib.website[f] + ' ').slice(0, 24);
     render();
   }
-  function saveWebsite() { send({ type: 'library.addWebsite', name: lib.website.name, url: lib.website.url }); }
+  // Adding shows on its key ("Adding…") until the host answers; 15 s without an answer says so.
+  function saveWebsite() {
+    if (lib.adding) return;
+    lib.adding = setTimeout(() => { lib.adding = null; toast('No answer about the website. Try once more.', 'warn'); if (state.view === 'addtile') render(); }, 15000);
+    send({ type: 'library.addWebsite', name: lib.website.name, url: lib.website.url });
+    render();
+  }
 
   onAction('field', (node, id) => { lib.website.field = id; render(); });
   onAction('key', (node, ch) => typeText(ch));
@@ -423,34 +458,62 @@
 
   addView('installing', {
     overlay: true,
-    demo() { demoData(); lib.install = lib.catalog.apps.find((c) => c.state === 'install'); lib.installing = false; },
+    // #installing: the choice; #installing/running, /waiting, /done, /failed: after A.
+    demo(arg) {
+      demoData();
+      lib.install = lib.catalog.apps.find((c) => c.state === (arg === 'running' || arg === 'waiting' ? 'installing' : arg === 'done' ? 'installed' : 'install'));
+      lib.installing = !!arg;
+      lib.installHome = true;
+      if (arg === 'waiting') lib.progress = { current: { id: 'vlc', action: 'install', phase: 'install' }, pending: [{ id: 'spotify', action: 'install' }] };
+      if (arg === 'failed') lib.failed.add(lib.install.id);
+    },
+    // Updated in place (patchHtml): the host sends the progress twice a second, and a dialog
+    // drawn afresh each time played its entrance again (a flicker) and lost its focus.
     render() {
-      const c = lib.install;
-      if (!c) { back(); return; }
-      const p = lib.progress.current && lib.progress.current.id === c.id ? lib.progress.current : null;
-      let action;
+      if (!lib.install) { back(); return; }
+      const c = findCard(lib.install.id) || lib.install;
+      let action, hintList = [['A', 'Select'], ['B', 'Cancel']];
       if (!lib.installing) {
         action = '<div class="il-buttons">' +
           '<button class="il-primary" data-nav data-id="il-home" data-act="installBtn" data-arg="home">Install and add to home</button>' +
           '<button class="il-secondary" data-nav data-id="il-only" data-act="installBtn" data-arg="only">Install only</button></div>';
       } else {
-        const pct = p && p.phase === 'download' ? p.percent : null;
-        const phase = p && p.phase === 'download' ? 'Downloading' : 'Installing';
+        const st = installState(c);
+        const bar = st.bar ? `<div class="il-bar"><div class="il-fill${st.pct === null ? ' going' : ''}" style="width:${st.pct !== null ? st.pct : 100}%"></div></div>` : '';
         action = '<div class="il-progress">' +
-          `<div class="il-prow"><span class="il-phase">${phase}</span>${pct !== null ? `<span class="il-pct">${pct}%</span>` : ''}</div>` +
-          `<div class="il-bar"><div class="il-fill" style="width:${pct !== null ? pct : 100}%${pct === null ? ';opacity:.5' : ''}"></div></div>` +
-          '<span class="il-note">Keep using the TV. The tile appears when it’s done.</span></div>';
+          `<div class="il-prow"><span class="il-phase${st.cls ? ' ' + st.cls : ''}">${esc(st.label)}</span>${st.pct !== null ? `<span class="il-pct">${st.pct}%</span>` : ''}</div>` +
+          bar + `<span class="il-note">${esc(st.note)}</span></div>` +
+          (st.failed ? '<div class="il-buttons"><button class="il-primary" data-nav data-id="il-retry" data-act="installBtn" data-arg="retry">Try again</button></div>' : '');
+        hintList = st.failed ? [['A', 'Try again'], ['B', 'Back to library']] : [['B', 'Back to library']];
       }
-      el('installing').innerHTML =
+      patchHtml(el('installing'),
         '<div class="il-dialog">' +
           '<div class="il-head">' +
             `<span class="il-icon">${appIcon({ ...c, color: '' }, 72, 1.5)}</span>` +
             `<div class="il-text"><span class="il-name">${esc(c.name)}</span><span class="il-desc">${esc(c.desc || '')}</span></div>` +
           '</div>' + action +
         '</div>' +
-        `<footer class="hints">${hints(lib.installing ? [['B', 'Back to library']] : [['A', 'Select'], ['B', 'Cancel']])}</footer>`;
+        `<footer class="hints">${hints(hintList)}</footer>`);
     },
   });
+
+  // What the dialog says once A has started the install: running (downloading, installing),
+  // waiting behind another app, just out of the queue (the catalog that follows says how it
+  // went: starting still), done, or not installed.
+  function installState(c) {
+    const p = lib.progress.current && lib.progress.current.id === c.id ? lib.progress.current : null;
+    const note = 'Keep using the TV. The tile appears when it’s done.';
+    if (p) {
+      const pct = p.phase === 'download' && p.percent != null ? p.percent : null;
+      return { label: p.phase === 'download' ? 'Downloading' : 'Installing', pct, bar: true, note };
+    }
+    if (lib.failed.has(c.id) && !lib.queued.has(c.id))
+      return { label: 'Didn’t install', cls: 'warn', pct: null, failed: true, note: 'Check the network, then try again.' };
+    if (lib.queued.has(c.id)) return { label: 'Waiting', pct: null, bar: true, note: 'Another app is installing first. Keep using the TV.' };
+    if (c.state === 'installed' || c.state === 'home')
+      return { label: 'Done', cls: 'ok', pct: null, note: lib.installHome ? 'Its tile is on the home screen.' : 'Add its tile from the library any time.' };
+    return { label: 'Installing', pct: null, bar: true, note };
+  }
 
   function openInstall(card) {
     if (!state.libraryAvailable) { toast('Installing from the TV isn’t set up yet. Run setup once more.', 'warn'); return; }
@@ -460,8 +523,9 @@
   }
   onAction('installBtn', (node, arg) => {
     if (!lib.install) return;
+    if (arg !== 'retry') lib.installHome = arg === 'home';   // Try again: as asked the first time
     lib.installing = true;
-    installApp(lib.install.id, arg === 'home');
+    installApp(lib.install.id, lib.installHome);
     render();
   });
 
@@ -520,6 +584,7 @@
         break;
       }
       case 'library.programs':
+        hostAnswered('programs');
         lib.programs = msg.list || [];
         if (state.view === 'addtile' && lib.tab === 'onbox') { render(); focusBodyIfNeeded(); }
         break;
@@ -535,6 +600,8 @@
         break;
       }
       case 'library.websiteResult':
+        clearTimeout(lib.adding);
+        lib.adding = null;
         if (msg.ok) { toast(`Added ${msg.name}`); reset('home'); }
         else toast(msg.error || 'That address did not work', 'warn');
         break;
@@ -566,7 +633,7 @@
       (mode === 'website' ? '<button class="kbi-key wide" data-nav data-id="website-dotcom" data-act="dotcom">.com</button>' : '') +
       `<button class="kbi-key space" data-nav data-id="${mode}-space" data-act="${spaceAct}" aria-label="Space"></button>` +
       `<button class="kbi-key" data-nav data-id="${mode}-del" data-act="${delAct}" aria-label="Delete">${icon('backspace', 30, 2)}</button>` +
-      `<button class="kbi-key primary" data-nav data-id="${mode}-done" data-act="${doneAct}">${mode === 'rename' ? 'Save' : 'Add'}</button>` +
+      `<button class="kbi-key primary" data-nav data-id="${mode}-done" data-act="${doneAct}">${mode === 'rename' ? 'Save' : lib.adding ? 'Adding…' : 'Add'}</button>` +
       '</div>';
     return rows + bottom;
   }

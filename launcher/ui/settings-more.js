@@ -113,7 +113,7 @@ function testCard() {
 
 function batteryLine() {
   if (!state.controller) return ['Not connected. Press Home on the controller to wake it.', null];
-  if (state.battery === 'wired') return ['Connected. Its dongle does not report the battery.', null];
+  if (state.battery === 'wired') return ['Connected. It doesn’t report its battery.', null];
   const level = { full: 100, medium: 60, low: 25, empty: 5 }[state.battery];
   return level === undefined ? ['Connected', null] : [`Connected · battery ${state.battery}`, level];
 }
@@ -175,12 +175,13 @@ hostMessage('controller.pad', (m) => {
     if (!more.bHeldSince) more.bHeldSince = Date.now();
     else if (Date.now() - more.bHeldSince > 1000) { setTesting(false); return; }
   } else more.bHeldSince = 0;
-  // Only the test card changes, 30 times a second: no full render.
+  // Only the test card changes, 30 times a second: no full render, and in place (patchNode): a
+  // card drawn afresh each time drew its focus ring in again, 30 times a second.
   const card = document.querySelector('#settings .scard.test');
   if (!card) return;
-  const focused = card.classList.contains('focused');
-  card.outerHTML = testCard();
-  if (focused) document.querySelector('#settings .scard.test').classList.add('focused');
+  const t = document.createElement('template');
+  t.innerHTML = testCard();
+  patchNode(card, t.content.firstChild);
 });
 
 // ---- Sound -----------------------------------------------------------------------------------
@@ -204,7 +205,7 @@ settingsSection('sound', {
       `<div class="srow"${nav ? ' data-nav data-id="snd-output" data-output data-edit' : ''}>` +
       `<div class="text"><span class="label">Output</span><span class="caption">${esc(caption)}</span></div>${value}</div>`;
     let output;
-    if (!a) output = row('Looking…', '');
+    if (!a) output = row(hostWaitText('sound', 'Looking…', 'Windows didn’t list the sound outputs. Open Sound again to try once more.'), '');
     else if (!outputs.length) output = row('No sound output found', '');
     else if (a.canSwitch && outputs.length > 1) {
       output = row('Where the sound goes: the TV, a soundbar, Bluetooth headphones',
@@ -227,7 +228,7 @@ settingsSection('sound', {
     }
     return false;
   },
-  shown() { send({ type: 'sound.outputs' }); },
+  shown() { hostAsked('sound'); send({ type: 'sound.outputs' }); },
   demo() {
     more.audio = { canSwitch: true, outputs: [{ id: '1', name: 'TCL TV (HDMI)', isDefault: true }, { id: '2', name: 'Soundbar', isDefault: false }] };
     state.volume = 62;
@@ -235,7 +236,7 @@ settingsSection('sound', {
 });
 
 onAction('test-sound', () => send({ type: 'sound.test' }));
-hostMessage('sound.outputs', (m) => { more.audio = m; if (state.view === 'settings') render(); });
+hostMessage('sound.outputs', (m) => { hostAnswered('sound'); more.audio = m; if (state.view === 'settings') render(); });
 
 // ---- Display (brightness, the decode check, SPEC N5 and N12) ----------------------------------
 

@@ -342,6 +342,7 @@ sealed partial class MainForm : Form
                 ApplySettings();
                 break;
             case "launch": Open(Str("id")!); break;
+            case "launchDismissed": launchDismissed.Add(Str("id")!); break; // Home or B on "Opening X"
             case "switchTo": case "resume": SwitchTo(Str("id")!); break;
             case "close": apps.Close(Str("id")!); break;
             case "power": Power(Str("action")!); break;
@@ -696,8 +697,13 @@ sealed partial class MainForm : Form
 
     // --- Apps and the Home menu ----------------------------------------------------------------
 
+    // Apps whose "Opening X" the user took away (Home or B) before their window came: it opens
+    // behind the launcher instead of over the menu or home screen now in front.
+    readonly HashSet<string> launchDismissed = new();
+
     void Open(string id)
     {
+        launchDismissed.Remove(id);
         apps.Adopt(id); // already open without our knowing: switch to it, no second copy
         if (apps.IsRunning(id)) { SwitchTo(id); return; }
         var name = apps.Get(id)?.Name ?? id;
@@ -723,6 +729,12 @@ sealed partial class MainForm : Form
             if (!apps.IsRunning(id)) { AppDidntOpen(id, $"{name} didn’t open", "It closed while starting.", retry: true); return; }
             var window = apps.MainWindow(id);
             if (window == IntPtr.Zero) continue;
+            if (launchDismissed.Remove(id))
+            {
+                Post(new { type = "opened", id, ok = true });
+                Log.Info($"{id} window up after {waited + 250} ms: left behind the launcher (Home or B while it opened)");
+                return;
+            }
             var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
             var how = Native.ForceForeground(window);
             StepAside(id);
@@ -737,7 +749,12 @@ sealed partial class MainForm : Form
     {
         if (id == DesktopMode.Id) { ShowDesktop(); return; } // B in the menu opened over the desktop
         var window = apps.MainWindow(id);
-        if (window == IntPtr.Zero) { Post(new { type = "toast", text = "That app is no longer open", kind = "warn" }); return; }
+        if (window == IntPtr.Zero)
+        {
+            Post(new { type = "toast", text = "That app is no longer open", kind = "warn" });
+            Post(new { type = "opened", id, ok = false }); // a tile's "Opening X" (Open: running) goes
+            return;
+        }
         // Back to the app (B or its row in the Home menu): one change on screen, the app raised
         // and activated over the launcher. Its window is not otherwise touched (FillScreen only
         // when it does not fill the screen already), and the launcher hides behind it later.

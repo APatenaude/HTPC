@@ -101,22 +101,22 @@
 .brow.fixed .bdoes { color: var(--muted); }
 .bkey {
   display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 40px; box-sizing: border-box; flex-shrink: 0;
-  border-radius: 20px; background: var(--track); box-shadow: inset 0 0 0 1px var(--key-edge); font-family: var(--display); font-weight: 700; font-size: 18px;
+  border-radius: 20px; background: var(--track); box-shadow: inset 0 0 0 1px var(--key-edge); font-family: var(--display); font-weight: 700; font-size: 22px;
 }
 .bkey.wide { padding: 0 14px; }
 .bdoes { flex-grow: 1; font-size: 23px; color: #D9D8D4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bdot { width: 10px; height: 10px; flex-shrink: 0; border-radius: 5px; background: var(--warn); }
 .baside {
-  width: 520px; flex-shrink: 0; align-self: stretch; margin-bottom: 24px; box-sizing: border-box; padding: 32px; border-radius: 28px;
+  width: 560px; flex-shrink: 0; align-self: stretch; margin-bottom: 24px; box-sizing: border-box; padding: 32px; border-radius: 28px;
   background: var(--row); box-shadow: inset 0 0 0 1px var(--track); display: flex; flex-direction: column; gap: 16px; min-height: 0;
 }
 .btitle { font-family: var(--display); font-weight: 600; font-size: 30px; }
 /* The picker's categories, LB and RB at their ends */
 .bcats { display: flex; align-items: center; gap: 2px; }
-.bcats .key { flex-shrink: 0; min-width: 0; height: 36px; padding: 0 10px; font-size: 16px; }
+.bcats .key { flex-shrink: 0; min-width: 0; height: 40px; padding: 0 8px; font-size: 22px; }
 .bcats .key:first-child { margin-right: 4px; }
 .bcats .key:last-child { margin-left: 4px; }
-.bcat { flex: 1; text-align: center; padding: 8px 4px; border-radius: 16px; font-size: 18px; color: var(--muted); white-space: nowrap; }
+.bcat { flex: 1 1 auto; text-align: center; padding: 8px 4px; border-radius: 16px; font-size: 22px; color: var(--muted); white-space: nowrap; }
 .bcat.on { background: var(--track); color: #FFFFFF; font-weight: 700; }
 /* Lists that scroll (the picker, the presets, Button maps): room inside for the focus ring, and
    their ends fade where there is more (buttons.js keepInView) */
@@ -132,20 +132,21 @@
 .bitem.tall { padding: 14px 16px; }
 .bitem.tall .grow { display: flex; flex-direction: column; gap: 4px; }
 .bitem.tall b { font-size: 24px; }
-.bitem.tall small { font-size: 19px; line-height: 1.35; color: var(--muted); }
+.bitem.tall small { font-size: 22px; line-height: 1.35; color: var(--muted); }
 /* What the focused button does (before A opens its choice) */
 .bnow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 0 22px;
   border-radius: 18px; background: var(--tile-focus); box-shadow: inset 0 0 0 2px var(--track); }
 .bnow-value { font-size: 28px; font-weight: 700; }
-.bnow-cat { flex-shrink: 0; padding: 4px 12px; border-radius: 12px; background: var(--track); font-size: 18px; color: var(--text-2); }
+.bnow-cat { flex-shrink: 0; padding: 4px 12px; border-radius: 12px; background: var(--track); font-size: 22px; color: var(--text-2); }
 .bitem.on { background: var(--tile-focus); box-shadow: inset 0 0 0 2px var(--accent); }
 .bitem.focused { background: var(--tile-focus); box-shadow: 0 0 0 4px var(--accent) !important; }
 .bcheck { display: flex; color: var(--ok); }
 .bmods { display: flex; gap: 8px; }
 .bmod { flex: 1; display: flex; align-items: center; justify-content: center; height: 52px; border-radius: 14px; background: var(--chip); font-size: 22px; font-weight: 700; color: var(--text-2); }
 .bmod.on { background: var(--accent); color: var(--bg); }
-.bkeys { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; overflow: hidden auto; scrollbar-width: none; padding: 4px; margin: -4px; }
-.bk { display: flex; align-items: center; justify-content: center; height: 46px; border-radius: 12px; background: var(--chip); font-size: 18px; font-weight: 700; white-space: nowrap; }
+/* Room inside for the picked key's 8 px ring (row colour, then accent), the grid where it was. */
+.bkeys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
+.bk { display: flex; align-items: center; justify-content: center; height: 48px; border-radius: 12px; background: var(--chip); font-size: 22px; font-weight: 700; white-space: nowrap; }
 .bk.on { background: var(--accent); color: var(--bg); }
 .bk.focused, .bmod.focused, .buse.focused { box-shadow: 0 0 0 4px var(--accent) !important; }
 /* In the accent colour itself (picked, Use it): the ring set apart from it */

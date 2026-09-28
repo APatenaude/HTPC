@@ -79,7 +79,7 @@ function updRunningApps(s) {
 function renderUpdatesSection() {
   const s = upd.s;
   let html = '<header><h1>Updates</h1><p>Nothing updates by itself. You decide when.</p></header>';
-  if (!s) return html + '<p class="caption">Reading what is installed…</p>';
+  if (!s) return html + `<p class="caption">${hostWaitText('updates', 'Reading what is installed…', 'The list of what is installed didn’t come. Open Updates again to try once more.')}</p>`;
 
   const list = [];
   const L = s.launcher;
@@ -88,7 +88,8 @@ function renderUpdatesSection() {
     L.update && L.notes ? `<span class="notes">${esc(L.notes)}</span>` : ''));
   for (const a of s.apps) list.push(updRow(a.id, a.id === 'winget' ? 'download' : a.glyph, a.id === 'winget' ? '#B3B5BC' : a.color, a.name, updVersions(a), a));
   const self = (id, glyph, color, name, version) =>
-    `<div class="srow upd-row" data-nav data-id="upd-${id}"><span class="glyph" style="color:${color}">${icon(glyph, 34)}</span>` +
+    // data-noa: A does nothing here (no A in the hints, no select sound).
+    `<div class="srow upd-row" data-nav data-id="upd-${id}" data-noa><span class="glyph" style="color:${color}">${icon(glyph, 34)}</span>` +
     `<div class="text"><span class="label">${esc(name)}</span><span class="caption">${esc(version || '')}</span></div>` +
     `<span class="upd-status quiet">${icon('restart', 26, 2)}Updates itself</span></div>`;
   if (s.builtIn.edge) list.push(self('edge', 'globe', '#3CCB9A', 'Microsoft Edge', s.builtIn.edge));
@@ -159,7 +160,7 @@ function updWindowsCard(w) {
 
 settingsSection('updates', {
   render: renderUpdatesSection,
-  shown() { send({ type: 'updates.get' }); },
+  shown() { hostAsked('updates'); send({ type: 'updates.get' }); },
   // Two columns: left and right move between the list and the cards (app.js's settingsPress, as
   // in every section); left from the list goes to the section list.
   demo() { updDemo(); },
@@ -227,6 +228,7 @@ onAction('upd-tonight-cancel', () => send({ type: 'updates.tonightCancel' }));
 
 hostMessage('updates.', (m) => {
   if (m.type === 'updates.state') {
+    hostAnswered('updates');
     upd.s = m;
     if (state.view === 'settings' && state.section === 'updates') render();
   } else if (m.type === 'updates.restarting') {
@@ -252,8 +254,8 @@ addView('updrestart', {
 
 // ---- Demo data (a plain browser) -------------------------------------------------------------
 
-function updDemo() {
-  const kind = new URLSearchParams(location.search).get('upd') || 'ready';
+function updDemo(kindArg) {
+  const kind = kindArg || new URLSearchParams(location.search).get('upd') || 'ready';
   const hour = 3600000;
   const app = (id, name, glyph, color, installed, available, update, job) => ({ id, name, glyph, color, installed, available, update, job: job || null });
   const s = {

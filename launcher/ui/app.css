@@ -33,6 +33,10 @@
 }
 
 html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; cursor: none; user-select: none; }
+/* Over an app, app.js puts its frame on html too (beyond the stage on a screen not 16:9); body
+   is see-through then. Blank (the launcher behind an app, standby): dark, as the stage. */
+html.over-app body { background: transparent; }
+html:has(#stage.blank) { background: var(--bg) !important; }
 
 #stage {
   position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
@@ -120,8 +124,17 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .tile .badge { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
 .tile .badge::before { content: ''; width: 12px; height: 12px; border-radius: 6px; background: var(--accent); }
 
-/* Focus ring shared by everything that can be selected */
-.focused { box-shadow: 0 0 0 4px var(--accent), 0 28px 64px rgba(0, 0, 0, 0.6) !important; }
+/* Focus ring shared by everything that can be selected: the ring alone, a spread with no blur,
+   cheap to grow in at 4K. The soft shadow of a tile or a card lifting is a pseudo-element faded
+   in (opacity, the compositor's), not a 64 px blur animated as a box-shadow on the two elements
+   of every move (it was redrawn each frame). inset -2px: over the tile's border. */
+.focused { box-shadow: 0 0 0 4px var(--accent) !important; }
+.tile, .card { position: relative; }
+.tile::before, .card::before {
+  content: ''; position: absolute; inset: -2px; z-index: -1; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 0.15s ease;
+}
+.tile.focused::before, .card.focused::before { opacity: 1; }
 .tile.focused, .card.focused { background: var(--tile-focus); border-color: var(--tile-focus); color: #FFFFFF; transform: scale(1.05); }
 .round.focused, .row.focused, .quick.focused { background: var(--tile-focus); color: #FFFFFF; }
 .opt.focused { transform: scale(1.04); }
@@ -276,7 +289,8 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 .dialog .button.focused { background: var(--tile-focus); }
 
 /* Opening an app: shown until its window is up */
-#opening { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 36px; background: var(--bg); }
+/* Above the views, stacked ones too (app.js render gives those a z-index by opening order). */
+#opening { position: absolute; inset: 0; z-index: 20; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 36px; background: var(--bg); }
 /* Fades in only if the app is slow, so a quick app does not flash it. */
 #opening.on { display: flex; animation: opening-in 0.25s ease-out 0.35s both; }
 @keyframes opening-in { from { opacity: 0; } to { opacity: 1; } }
@@ -286,7 +300,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
 @keyframes pulse { 50% { transform: scale(0.92); opacity: 0.7; } }
 
 /* Alerts: top right, never over the middle of a video */
-#toasts { position: absolute; top: 48px; right: 48px; display: flex; flex-direction: column; gap: 16px; align-items: flex-end; }
+#toasts { position: absolute; z-index: 30; top: 48px; right: 48px; display: flex; flex-direction: column; gap: 16px; align-items: flex-end; }
 .toast {
   display: flex; align-items: center; gap: 16px; max-width: 720px; padding: 22px 28px; border-radius: 24px;
   background: #1D2025; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); font-size: 26px; animation: toast-in 0.2s ease-out;

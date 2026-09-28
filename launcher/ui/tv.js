@@ -152,7 +152,7 @@ const TvUi = {
   statusLine(tv) {
     const p = tv.profile;
     const s = tv.status;
-    if (tv.handsOff) return { kind: 'warn', text: 'Hands off (--no-tv): the TV is watched but sent nothing.' };
+    if (tv.handsOff) return { kind: 'warn', text: 'TV control is off on this box for now: it watches the TV but sends it nothing.' };
     if (s === 'ok') return { kind: 'ok', text: 'Connected. Found by name, so a move or a new network address is fine.' };
     if (s === 'locked') return { kind: 'warn', text: 'This TV blocks control: on the TV, Settings › System › Advanced system settings › Control by mobile apps, set Network access to Enabled.' };
     if (s === 'missing') return { kind: 'warn', text: `${p.name} is not answering on the network. Is it plugged in and connected? Find it again below.` };
@@ -186,6 +186,13 @@ const TvUi = {
       case 'twins': return { ...base, status: 'unbound', profile: null, profiles: [],
         found: [{ ...roku, picked: false, detected: false }, { ...roku, id: 'roku:X00000000002', name: 'Bedroom TV', input: 3, picked: false, detected: false }] };
       case 'unbound': return { ...base, status: 'unbound', profile: null, profiles: [], found: [{ ...roku, picked: false }] };
+      // Two TVs and every brand: the method dialog's list is taller than the screen (it scrolls).
+      case 'crowd': return { ...base, status: 'unbound', profile: null, profiles: [],
+        methods: [methods[0], lg,
+          { id: 'bravia', label: 'Sony Bravia', brand: 'Sony', beta: true, how: 'Over your network. Type the PIN the TV shows, once.', checklist: [], detected: false },
+          { id: 'androidtv', label: 'Google TV / Android TV', brand: 'Google TV', beta: true, how: 'Over your network. Type the code the TV shows, once.', checklist: [], detected: false },
+          { id: 'samsung', label: 'Samsung (Tizen)', brand: 'Samsung', beta: true, how: 'Over your network. Say yes to the prompt on the TV once.', checklist: [], detected: false }],
+        found: [{ ...roku, picked: false, detected: false }, { ...roku, id: 'roku:X00000000002', name: 'Bedroom TV', input: 3, picked: false, detected: false }] };
       case 'lg': return { ...base, screen: 'LG TV SSCR2', status: 'unbound', profile: null, profiles: [], methods: [methods[0], lg].map((m) => ({ ...m, detected: m.id === 'webos' })),
         found: [{ id: 'webos:1a2b', method: 'webos', label: 'LG (webOS)', beta: true, name: 'LG OLED65C4', model: 'OLED65C4PUA', locked: false, on: true, power: 'on', input: 1, detected: true, picked: false }] };
       case 'paused': return { ...base, status: 'paused', caps: { ...caps, test: false }, profile: { ...profile, paused: 'Living room tv says it shows HDMI 3, not the box (HDMI 1)' } };
@@ -271,7 +278,7 @@ if (typeof settingsSection === 'function') (() => {
     if (hint && (!p || p.method !== hint)) right += TvUi.checklistHtml(tv, hint, 'tv-side inline');
     right += `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` +
       '<div class="sbuttons">' +
-        (tv.caps.test && p ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: off and on</div>' : '') +
+        (tv.caps.test && p ? '<div class="sbutton" data-nav data-id="tv-test" data-act="tv-test">Test: turn the TV off and back on</div>' : '') +
         '<div class="sbutton" data-nav data-id="tv-refresh" data-act="tv-refresh">Find it again</div>' +
       '</div>';
     return '<header><h1>TV</h1><p>The box recognises which TV it’s plugged into and uses that TV’s settings.</p></header>' +
@@ -313,16 +320,21 @@ if (typeof settingsSection === 'function') (() => {
     render() {
       const tv = state.tv;
       const found = TvUi.foundRows(tv, 'tv-mrow');
-      // The TVs and brands scroll inside the dialog (to the focus) when there are many.
-      $('tvmethod').innerHTML = '<div class="tv-dialog">' +
+      // The TVs and brands scroll inside the dialog (to the focus) when there are many. Updated
+      // in place (patchHtml): the TV search pushes a new list every few seconds, and a dialog
+      // drawn afresh popped in again each time, its list back at the top.
+      patchHtml($('tvmethod'), '<div class="tv-dialog">' +
         `<h2>How should the box control ${esc((tv.profile && tv.profile.name) || tv.screen || 'this TV')}?</h2>` +
         `<p>${found ? 'Pick your TV. Detected: it says it shows this box’s input.' : 'No TV found on the network yet. Pick your TV’s brand to see what to turn on, or skip TV control.'}</p>` +
         '<div class="tv-list">' +
           (found ? `<span class="tv-label">TVs on your network</span>${found}<span class="tv-label">Not listed?</span>` : '') +
           TvUi.methodRows(tv, 'tv-mrow', hint) + '</div>' +
-        `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Choose'], ['B', 'Cancel']])}</div></div>`;
+        `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Choose'], ['B', 'Cancel']])}</div></div>`);
     },
     focus: (list) => list.find((e) => e.classList.contains('picked')) || list[0],
+    // The list's ends fade where there is more (app.js scrolls it to the focus).
+    focused(node) { const l = node.closest('.tv-list'); if (l) { scrollIntoBox(node, l, 16); listEdges(l); } },
+    layout() { const l = $('tvmethod').querySelector('.tv-list'); if (l) listEdges(l); },
     demo() { state.tv = TvUi.demo(new URLSearchParams(location.hash.split('?')[1] || '').get('demo') || 'lg'); },
   });
 
@@ -354,6 +366,8 @@ if (typeof settingsSection === 'function') (() => {
 
   hostMessage('tv.', (msg) => {
     if (msg.type === 'tv.state') {
+      // The same state again (each round of the TV search sends it): nothing to draw.
+      if (JSON.stringify(msg.tv) === JSON.stringify(state.tv)) return;
       state.tv = msg.tv;
       if (state.view === 'settings' || state.view === 'tvmethod') window.render();
     } else if (msg.type === 'tv.open') {

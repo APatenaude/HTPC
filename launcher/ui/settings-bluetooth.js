@@ -16,7 +16,7 @@ function btRow(id, glyph, label, caption, right, extra) {
 }
 
 function btHtml() {
-  let h = '<header><h1>Bluetooth</h1><p>For headphones and controllers. The 8BitDo uses its own dongle, not Bluetooth.</p></header>';
+  let h = '<header><h1>Bluetooth</h1><p>For headphones, speakers, controllers and keyboards. A controller with its own USB receiver doesn’t need it.</p></header>';
   const s = bt.st;
   if (!s) return h + '<p class="wifi-note">Looking for Bluetooth…</p>';
   if (!s.adapter) return h + '<p class="wifi-note">This box has no Bluetooth.</p>';
@@ -32,7 +32,8 @@ function btHtml() {
   if (!on) return h;
   h += '<div class="wifi-scroll">';
   if (s.paired.length) h += '<span class="section">Paired</span>';
-  h += s.paired.map((d, i) => btRow('bt-paired:' + i, BT_GLYPH[d.kind] || 'bluetooth', d.name,
+  // Rows by device, not place: the host sorts the lists again, and the focus stays on its device.
+  h += s.paired.map((d) => btRow('bt-paired:' + esc(d.id), BT_GLYPH[d.kind] || 'bluetooth', d.name,
     d.connected ? `<span class="ok">Connected${d.soundHere ? ' · sound plays here' : ''}</span>` : 'Not connected')).join('');
   if (bt.pairing) {
     h += btRow('bt-pairing', 'bluetooth', `Pairing ${bt.pairing.name}…`, 'Keep it in pairing mode', '', 'current');
@@ -41,7 +42,7 @@ function btHtml() {
   } else {
     h += '<span class="section">Nearby · looking for devices</span>';
     h += s.nearby.length
-      ? s.nearby.map((d, i) => btRow('bt-near:' + i, BT_GLYPH[d.kind] || 'bluetooth', d.name, '', '<span class="caption">A to pair</span>')).join('')
+      ? s.nearby.map((d) => btRow('bt-near:' + esc(d.id), BT_GLYPH[d.kind] || 'bluetooth', d.name, '', '<span class="caption">A to pair</span>')).join('')
       : '<p class="wifi-note">Put the device in pairing mode (often: hold its power or Bluetooth button until a light flashes).</p>';
     h += btRow('bt-stop', 'close', 'Stop looking', '', '');
   }
@@ -68,14 +69,14 @@ settingsSection('bluetooth', {
       if (id === 'bt-stop') { btScan(false); return true; }
       if (id === 'bt-cancel') { bt.pin = null; btChanged('bt-new'); return true; }
       if (id.startsWith('bt-near:')) {
-        const d = s.nearby[Number(id.slice(8))];
+        const d = s.nearby.find((x) => x.id === id.slice(8));
         if (d) { bt.pairing = { id: d.id, name: d.name }; send({ type: 'bt.pair', id: d.id }); btChanged('bt-pairing'); }
         return true;
       }
       return id.startsWith('bt-');
     }
     if (button === 'x' && id.startsWith('bt-paired:')) {
-      const d = s.paired[Number(id.slice(10))];
+      const d = s.paired.find((x) => x.id === id.slice(10));
       if (d) ask({ title: `Remove ${d.name}?`, text: 'To use it again it has to be paired again.', yes: 'Remove', onYes: () => send({ type: 'bt.forget', id: d.id }) });
       return true;
     }
@@ -105,6 +106,6 @@ hostMessage('bt.', (msg) => {
   else if (msg.type === 'bt.result') {
     if (bt.pairing && msg.id === bt.pairing.id) { bt.pairing = null; bt.pin = null; bt.scanning = false; send({ type: 'bt.scan', on: false }); }
     toast(msg.text, msg.ok ? 'info' : 'warn');
-    btChanged(msg.ok ? 'bt-paired:0' : 'bt-new');
+    btChanged(msg.ok ? 'bt-paired:' + msg.id : 'bt-new');
   }
 });

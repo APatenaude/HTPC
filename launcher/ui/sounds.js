@@ -202,7 +202,7 @@ function soundsLook() {
     view: state.view, depth: state.stack.length, el, id: el ? el.dataset.id : null,
     // A value stepped, a toggle flipped, a tile moved: the focused element itself changed.
     sig: el ? el.style.order + '|' + el.innerHTML : '',
-    editing, act: el ? el.dataset.act : null, toggle: toggle ? toggle.classList.contains('on') : null,
+    editing, act: el ? el.dataset.act : null, noA: !!el && el.dataset.noa !== undefined, toggle: toggle ? toggle.classList.contains('on') : null,
     opening: $('opening').classList.contains('on'),
     // B or Home from here goes back to the app the menu was opened over (the host hides the launcher).
     leaving: state.view !== 'home' && !state.stack.length && !!state.current,
@@ -219,7 +219,7 @@ function soundFor(button, was, now) {
     case 'up': case 'down': case 'left': case 'right': return changed ? 'move' : 'bump';
     case 'lb': case 'rb': return changed ? 'move' : null;
     case 'a':
-      if (!was.el) return null;
+      if (!was.el || (was.noA && !changed)) return null;   // a row that does nothing (data-noa)
       if (was.act === 'launch' || was.act === 'switch') return 'open';
       if (was.act === 'cancel' || was.act === 'confirm-close') return 'close';
       if (was.toggle !== null && now.id === was.id && now.toggle !== null && now.toggle !== was.toggle) return now.toggle ? 'on' : 'off';
@@ -270,9 +270,10 @@ addEventListener('visibilitychange', () => {
   sounds.pendingOpen = 0;
 });
 
-// An alert's card arriving (notices.js adds an element for each new card).
+// An alert's card arriving (notices.js adds an element for each new card); not the page's own
+// short messages (toast(): "Moved", "Searching for TVs…"), which follow a press that had its sound.
 new MutationObserver((changes) => {
-  if (changes.some((c) => c.addedNodes.length)) soundsDo('notice');
+  if (changes.some((c) => [...c.addedNodes].some((n) => !(n.dataset && String(n.dataset.key).startsWith('own:'))))) soundsDo('notice');
 }).observe($('toasts'), { childList: true });
 
 // ---- Settings › Sound ----------------------------------------------------------------------------

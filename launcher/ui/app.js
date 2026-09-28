@@ -84,7 +84,9 @@ function batteryText() {
 function renderStatus() {
   const now = new Date();
   const low = state.battery === 'low' || state.battery === 'empty';
-  $('status').innerHTML =
+  // In place (patchHtml): each minute and each host push redraw it, and the Settings and Power
+  // buttons drawn afresh lost their ring and drew it in again.
+  patchHtml($('status'),
     `<div class="clock"><span class="time">${timeText(now)}</span><span class="date">${esc(dateText(now))}</span></div>` +
     '<div class="pills">' +
       (state.timer ? `<div class="pill timer">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
@@ -92,7 +94,7 @@ function renderStatus() {
       `<div class="pill"${low ? ' style="color: var(--warn)"' : ''}>${icon('controller', 32)}<b>${esc(batteryText())}</b></div>` +
       `<div class="round" data-nav data-id="settings" data-act="settings" aria-label="Settings">${icon('sliders', 28, 2)}</div>` +
       `<div class="round" data-nav data-id="power" data-act="power" aria-label="Power">${icon('power', 28, 2)}</div>` +
-    '</div>';
+    '</div>');
 }
 
 // Tiles are updated in place, by id: a change on one tile (an app closing, a rename) redraws
@@ -165,10 +167,13 @@ function updateHomeHints() {
     $('home-hints').innerHTML = hints([['D-pad', 'Move it'], ['A', 'Drop it here'], ['B', 'Cancel']]);
     return;
   }
-  const f = $('home').querySelector('.tile.focused');
+  const f = $('home').querySelector('[data-nav].focused');
   const isAdd = f && f.dataset.act === 'addtile';
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
-  const list = f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
+  // Not a tile: the Settings and Power buttons of the top bar, the phone card's "Not now".
+  const other = f && !f.classList.contains('tile') ? ({ settings: 'Settings', power: 'Power', 'phone-card-hide': 'Not now' })[f.dataset.act] || 'Select' : null;
+  const list = other ? [['A', other], ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
     : isAdd ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
   $('home-hints').innerHTML = hints(list);
@@ -207,14 +212,28 @@ function renderMenu() {
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
     '</div></div>' +
-    `<footer class="hints">${hints([['A', 'Select'], ['X', 'Close app'], ['B', 'Back']])}</footer>`);
+    `<footer class="hints">${hints(menuHints($('menu').querySelector('[data-nav].focused')))}</footer>`);
   // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that
   // showed for a few seconds when an app opened).
   if ($('menu-app')) patchHtml($('menu-app'), typeof menuAppCard === 'function' ? menuAppCard() : '');
 }
 
+// The Home menu's hints follow the focus: X only where it does something (an alert's row: it
+// dismisses it; an open app's row, or the app the menu is over: it closes it), left/right on a
+// slider (A does nothing there).
+function menuHints(el) {
+  const list = [el && el.dataset.slider ? ['←→', 'Change'] : ['A', 'Select']];
+  if (el && el.dataset.alert) list.push(['X', 'Dismiss']);
+  else {
+    const id = (el && el.dataset.close) || state.current;
+    if (id && state.tiles.some((t) => t.id === id && t.running)) list.push(['X', 'Close app']);
+  }
+  list.push(['B', 'Back']);
+  return list;
+}
+
 const POWER = [
-  { id: 'sleep', glyph: 'moon', label: 'Sleep', caption: 'Press Home on the controller to wake' },
+  { id: 'sleep', glyph: 'moon', label: 'Sleep', caption: 'Hold Home on the controller to wake' },
   { id: 'timer', glyph: 'timer', label: 'Sleep timer', caption: 'Count down, then sleep' },
   { id: 'restart', glyph: 'restart', label: 'Restart', caption: '' },
   { id: 'shutdown', glyph: 'power', label: 'Shut down', caption: '' },
@@ -225,11 +244,12 @@ const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close
 
 function renderPower() {
   POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
-  $('power-cards').innerHTML = POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
+  // In place, as the other screens a host push or the clock redraws (patchHtml).
+  patchHtml($('power-cards'), POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
-      `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join('');
-  $('power-note').innerHTML = '';
-  $('power-hints').innerHTML = hints([['A', 'Select'], ['B', 'Cancel']]);
+      `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join(''));
+  patchHtml($('power-note'), '');
+  patchHtml($('power-hints'), hints([['A', 'Select'], ['B', 'Cancel']]));
 }
 
 const TIMER = [
@@ -239,15 +259,15 @@ const TIMER = [
 ];
 
 function renderTimer() {
-  $('timer-icon').innerHTML = icon('timer', 56);
+  patchHtml($('timer-icon'), icon('timer', 56));
   const picked = state.timer ? state.timer.label : null;
-  $('timer-grid').innerHTML = TIMER.map((o, i) =>
+  patchHtml($('timer-grid'), TIMER.map((o, i) =>
     `<div class="opt${o.label === picked ? ' picked' : ''}" data-nav data-id="t${i}" data-act="timer" data-arg="${i}">` +
-      `<span class="label${o.small ? ' small' : ''}">${o.label}</span><span class="sub">${o.sub || ''}</span></div>`).join('');
+      `<span class="label${o.small ? ' small' : ''}">${o.label}</span><span class="sub">${o.sub || ''}</span></div>`).join(''));
   const status = $('timer-status');
-  status.innerHTML = icon('moon', 28) + esc(state.timer ? `${timerText()}. It shows in the top bar.` : 'No timer set');
+  patchHtml(status, icon('moon', 28) + esc(state.timer ? `${timerText()}. It shows in the top bar.` : 'No timer set'));
   status.classList.toggle('on', !!state.timer);
-  $('timer-hints').innerHTML = hints([['A', 'Set'], ['B', 'Back']]);
+  patchHtml($('timer-hints'), hints([['A', 'Set'], ['B', 'Back']]));
 }
 
 const SECTIONS = [
@@ -268,11 +288,11 @@ const CHOICES = {
 
 // What each sleep mode means, shown under the choice and on the Power screen.
 const SLEEP_MODES = {
-  standby: { caption: 'The video output and the TV go off; the box stays on (a few watts). Tap Home on the controller to wake it.',
-             wake: 'Tap Home on the controller to wake' },
-  sleep: { caption: 'Windows sleep (S3), about 1 W. The controller and the phone can’t wake it: use the power button or the keyboard.',
+  standby: { caption: 'The video output and the TV go off; the box stays on, using little power. Hold Home on the controller to wake it.',
+             wake: 'Hold Home on the controller to wake' },
+  sleep: { caption: 'Windows sleep: less power still. The controller and the phone may not wake it: use the power button or the keyboard.',
            wake: 'Wake with the power button or the keyboard' },
-  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. Wake with the power button or the keyboard.',
+  hibernate: { caption: 'Windows hibernate: almost no power, slower to come back. The controller and the phone can’t wake it: use the power button.',
                wake: 'Wake with the power button' }
 };
 
@@ -304,7 +324,7 @@ function renderSleepSection() {
           '<div class="seg">' + availableModes().map(([v, l]) => `<span${v === p.sleepMode ? ' class="on"' : ''}>${l}</span>`).join('') + '</div>')
       : '') +
     (p.sleepMode === 'standby' && state.power.sleep
-      ? settingRow('sleepAfterStandbyHours', 'Then Windows sleep', 'After this long with the screen off, the box goes into Windows sleep (about 1 W; the controller can’t wake it from there)',
+      ? settingRow('sleepAfterStandbyHours', 'Then Windows sleep', 'After this long with the screen off, the box goes into Windows sleep (the controller may not wake it from there)',
           stepper('sleepAfterStandbyHours'))
       : '') +
     settingRow('idleMinutes', 'Sleep after', 'When nothing plays and nobody touches the controller', stepper('idleMinutes')) +
@@ -407,47 +427,74 @@ function changeSetting(key, step) {
 
 function renderConfirm() {
   const c = state.confirm;
-  $('confirm-box').innerHTML =
+  patchHtml($('confirm-box'),
     `<h2>Close ${esc(c.name)}?</h2><p>It stops, and anything playing in it ends.</p>` +
     '<div class="buttons">' +
       `<div class="button" data-nav data-id="confirm-close" data-act="confirm-close">Close</div>` +
       '<div class="button" data-nav data-id="confirm-cancel" data-act="cancel">Cancel</div>' +
     '</div>' +
-    `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`;
+    `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div>`);
 }
 
+// The views under the one shown, nearest first: an overlay (a confirmation, a dialog) sits over
+// the view it was opened from, which stays visible under it; over another overlay (a question
+// over the TV method dialog over Settings), the whole chain down to the first full view does.
+function underViews() {
+  const isOver = (v) => v === 'confirm' || !!(EXT.views[v] && EXT.views[v].overlay);
+  const list = [];
+  for (let v = state.view, i = state.stack.length - 1; isOver(v) && i >= 0; i--) { v = state.stack[i]; list.push(v); }
+  return list;
+}
+
+let renderedView = null, pageBackdrop = '';
 function render() {
   const keep = state.memory[state.view];
-  // A confirmation sits over the view it was opened from, which stays visible under it.
-  const over = state.view === 'confirm' || (EXT.views[state.view] && EXT.views[state.view].overlay);
-  const under = over ? state.stack[state.stack.length - 1] : null;
+  // Where the focus is: if its element goes (a network, a device, a TV no longer found), the one
+  // now nearest its place takes it (restoreFocus), not the view's first element.
+  const was = renderedView === state.view ? focusedEl() : null;
+  const wasAt = was && { id: was.dataset.id, rect: was.getBoundingClientRect(), section: !!was.dataset.section, el: was };
+  const unders = underViews();
   if (state.view !== 'settings') editing = null;
   renderStatus();
   renderTiles();
   for (const f of EXT.home) f();
-  if (state.view === 'menu' || under === 'menu') renderMenu();
+  if (state.view === 'menu' || unders.includes('menu')) renderMenu();
   if (state.view === 'power') renderPower();
   if (state.view === 'timer') renderTimer();
   if (state.view === 'confirm') renderConfirm();
-  if (state.view === 'settings' || under === 'settings') renderSettings();
-  for (const v of [state.view, under]) if (EXT.views[v]) EXT.views[v].render();
-  sectionHooks();
+  if (state.view === 'settings' || unders.includes('settings')) renderSettings();
+  for (const v of [state.view, ...unders]) if (EXT.views[v]) EXT.views[v].render();
+  sectionHooks(unders);
   const home = $('home'), wasBehind = home.classList.contains('behind');
+  const chain = [...unders].reverse().concat(state.view);   // bottom to top
   for (const v of ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views)]) {
-    $(v).classList.toggle('on', v === state.view || v === under);
-    $(v).classList.toggle('under', v === under);   // its hints hide: one hint bar, the overlay's
+    const at = chain.indexOf(v);
+    $(v).classList.toggle('on', at >= 0);
+    $(v).classList.toggle('under', at >= 0 && v !== state.view);   // its hints hide: one hint bar, the top one's
+    // Stacked in the order they were opened, whatever their order in the page.
+    const z = at >= 0 && chain.length > 1 ? String(at + 1) : '';
+    if ($(v).style.zIndex !== z) $(v).style.zIndex = z;
   }
   // Over an app the captured screen shows behind; over the home screen, home shows dimmed.
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
   $('backdrop').style.backgroundImage = overApp ? `url("${state.backdrop}")` : '';
+  // Beyond the stage (a screen that is not 16:9: 16:10, ultrawide) the app's frame fills the rest
+  // of the screen too, dimmed the same, lined up with the stage's (both cover the same frame).
+  const page = overApp ? `linear-gradient(rgba(13, 14, 17, 0.45), rgba(13, 14, 17, 0.45)), center / cover no-repeat url("${state.backdrop}")` : '';
+  if (pageBackdrop !== page) {
+    pageBackdrop = page;
+    document.documentElement.style.background = page;
+    document.documentElement.classList.toggle('over-app', !!page);
+  }
   home.classList.toggle('behind', state.view !== 'home' && !overApp);
   // Home back from under an overlay (a confirmation, Tile options, the menu) was on screen all
   // along: it must not play its entrance again, a flash of the whole screen.
   if (!home.classList.contains('on')) home.classList.remove('stay');
   else if (wasBehind && !home.classList.contains('behind')) home.classList.add('stay');
-  for (const v of [state.view, under]) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
-  restoreFocus(keep);
+  for (const v of chain) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
+  renderedView = state.view;
+  restoreFocus(keep, wasAt);
 }
 
 // ---- Focus and spatial navigation ---------------------------------------------------------
@@ -471,6 +518,7 @@ function setFocus(el, chosen = true) {
     return;
   }
   if (state.view === 'settings') settingsFocused(el);
+  if (state.view === 'menu') { const bar = $('menu-panel').querySelector('footer.hints'); if (bar) patchHtml(bar, hints(menuHints(el))); }
   const view = EXT.views[state.view];
   if (view && view.focused) view.focused(el);
   // Anything in a box that scrolls (a list, a panel, a dialog's list) comes into view, ring and
@@ -480,15 +528,40 @@ function setFocus(el, chosen = true) {
   noticeAvoid(el);   // the alerts' cards move off it (notices.js)
 }
 
-function restoreFocus(id) {
+// prev: { id, rect, section, el } of the element focused before this render, in the same view
+// (render), else null. Not chosen (the view's first pick), it stays where it is all the same
+// (an alert's row arriving above it does not take the focus from under the user), but on the
+// home screen, whose first pick waits for the tiles. Taken away by the render: its new element
+// if there is one (the same TV, the list sorted again), else the one nearest its place.
+function restoreFocus(id, prev) {
   const list = items();
   const kept = list.find((e) => e.dataset.id === id) || list.find((e) => e.dataset.id === state.memory[state.view]);
   if (kept) { setFocus(kept); return; }
+  // A memory set to null asks for the view's first pick again (a question opening on Cancel, a
+  // new list in the button editor): then neither.
+  const gone = prev && !prev.el.isConnected && state.memory[state.view] !== null ? prev : null;
+  if (prev && state.memory[state.view] !== null && (gone || state.view !== 'home')) {
+    const same = list.find((e) => e.dataset.id === prev.id);
+    if (same) { setFocus(same, false); return; }
+  }
+  if (gone) {
+    const r = gone.rect, cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let best = null, bestD = Infinity;
+    for (const e of list) {
+      if (!!e.dataset.section !== gone.section) continue;   // Settings: in the same column
+      const q = e.getBoundingClientRect();
+      const d = Math.abs(q.left + q.width / 2 - cx) + 2 * Math.abs(q.top + q.height / 2 - cy);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (best) { setFocus(best); return; }
+  }
   const view = EXT.views[state.view];
   setFocus((view && view.focus ? view.focus(list) : null) ||
     (state.view === 'home' ? list.find((e) => e.classList.contains('tile')) : null) ||
     // Settings opens on the section list, on the section last shown (A or right goes into it).
     (state.view === 'settings' ? list.find((e) => e.dataset.section === state.section) : null) ||
+    // A confirmation opens on Cancel: one press of A never closes an app by mistake.
+    (state.view === 'confirm' ? list.find((e) => e.dataset.id === 'confirm-cancel') : null) ||
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
@@ -619,6 +692,7 @@ function settingsFocused(el) {
 function settingsHints(el) {
   if (el.dataset.section) return [['A', 'Open'], ['B', 'Back']];
   if (editing === el.dataset.id) return [['←→', 'Change'], ['A', 'Done']];
+  if (el.dataset.noa !== undefined) return [['B', 'Sections']];   // a row A does nothing on
   const what = el.dataset.edit !== undefined ? 'Change' : el.querySelector('.toggle') ? 'On / off' : 'Select';
   return [['A', what], ['B', 'Sections']];
 }
@@ -695,10 +769,12 @@ function hostMessage(type, fn) { EXT.host[type] = fn; }
 // is blank: the launcher gone behind an app, or standby, where Settings › TV left open searched
 // for TVs every 10 s all night).
 let sectionInView = null;
-function sectionHooks() {
-  // The TV method dialog over Settings is still the TV section (its list keeps refreshing).
+function sectionHooks(unders = []) {
+  // A dialog or a question over Settings (the TV method dialog, "Forget this TV?") leaves the
+  // section in view: its list keeps refreshing, and nothing stops and starts again under it.
+  // A blank stage (the launcher behind an app, or in standby) has no section in view.
   const onScreen = !$('stage').classList.contains('blank');
-  const now = onScreen && (state.view === 'settings' || state.view === 'tvmethod') ? state.section : null;
+  const now = onScreen && (state.view === 'settings' || unders.includes('settings')) ? state.section : null;
   if (now === sectionInView) return;
   const was = EXT.sections[sectionInView];
   sectionInView = now;
@@ -715,13 +791,14 @@ addView('ask', {
   overlay: true,
   render() {
     const q = asking || {};
-    $('ask').innerHTML = '<div class="dialog">' +
+    // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time.
+    patchHtml($('ask'), '<div class="dialog">' +
       `<h2>${esc(q.title || '')}</h2>${q.text ? `<p>${esc(q.text)}</p>` : ''}` +
       '<div class="buttons">' +
         `<div class="button" data-nav data-id="ask-yes" data-act="ask-yes">${esc(q.yes || 'OK')}</div>` +
         '<div class="button" data-nav data-id="ask-no" data-act="cancel">Cancel</div>' +
       '</div>' +
-      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`;
+      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`);
   },
   focus: (list) => list.find((e) => e.dataset.id === 'ask-no'),
 });
@@ -754,13 +831,33 @@ function demoRoute(hash) {
 function go(view) { state.stack.push(state.view); state.view = view; render(); }
 function reset(view) { state.stack = []; state.view = view; render(); }
 
+// "Opening X" covers the page until the host says the app's window is up ('opened', also when
+// it did not open). Home or B take it away at once (press), and it never stays past 40 s (the
+// host gives up at 30 s, with an alert).
+let opening = null;   // { id, timer }
 function showOpening(t) {
   const el = $('opening');
   el.innerHTML = `<span class="logo">${appIcon(t, 160, 1.5)}</span>` +
     `<span class="name">Opening ${esc(t.name)}</span><span class="sub">Home comes back here anytime</span>`;
   el.classList.add('on');
+  if (opening) clearTimeout(opening.timer);
+  opening = { id: t.id, timer: setTimeout(hideOpening, 40000) };
 }
-function hideOpening() { $('opening').classList.remove('on'); }
+function hideOpening() {
+  $('opening').classList.remove('on');
+  if (opening) clearTimeout(opening.timer);
+  opening = null;
+}
+
+// Asking the host for something a screen waits on ("Looking…"): never an endless wait. After ms
+// without an answer the screen is drawn again and says so (hostWaitText's late text).
+const hostWaits = {};
+function hostAsked(key, ms = 10000) {
+  hostWaits[key] = Date.now();
+  setTimeout(() => { if (hostWaits[key] && Date.now() - hostWaits[key] >= ms) render(); }, ms + 50);
+}
+function hostAnswered(key) { delete hostWaits[key]; }
+function hostWaitText(key, text, late, ms = 10000) { return hostWaits[key] && Date.now() - hostWaits[key] >= ms ? late : text; }
 
 // A short message from the page, drawn with the alerts (notices.js).
 function toast(text, kind) { if (text) noticeOwn(text, kind); }
@@ -834,6 +931,14 @@ function back() {
 function press(button) {
   timePress(button);
   if (typeof soundsHear === 'function') soundsHear(button);   // interface sounds (sounds.js): what this press does picks one
+  // "Opening X" is up: nothing under it takes a press. Home or B take it away (the host then
+  // leaves the app behind the launcher when its window comes); Home goes on to the menu.
+  if (opening) {
+    if (button !== 'home' && button !== 'homeHold' && button !== 'b') return;
+    send({ type: 'launchDismissed', id: opening.id });
+    hideOpening();
+    if (button === 'b') return;
+  }
   const el = focusedEl();
   // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
   if (state.moving && EXT.actions['tile-move'] && EXT.actions['tile-move'](el, button)) return;
@@ -871,7 +976,7 @@ function press(button) {
       else if (state.view === 'menu') id = (el && el.dataset.close) || state.current;
       else break;
       const t = id && state.tiles.find((x) => x.id === id && x.running);
-      if (t) { state.confirm = { id: t.id, name: t.name }; go('confirm'); }
+      if (t) { state.confirm = { id: t.id, name: t.name }; state.memory.confirm = null; go('confirm'); }
       break;
     }
     case 'home':
@@ -933,7 +1038,7 @@ function onHost(msg) {
       render();
       break;
     case 'tiles': state.tiles = msg.tiles; render(); break;
-    case 'blank': $('stage').classList.add('blank'); sectionHooks(); break;   // the section in view is left
+    case 'blank': $('stage').classList.add('blank'); sectionHooks(underViews()); break;   // the section in view is left
     case 'opened':
       hideOpening();
       if (!msg.ok && msg.text) toast(msg.text, 'warn'); // failures come as alerts now
@@ -968,7 +1073,7 @@ function onHost(msg) {
         if (msg.backdrop) stage.style.transition = 'none';
         stage.classList.remove('blank');
         if (msg.backdrop) { void stage.offsetWidth; stage.style.transition = ''; }
-        sectionHooks();   // a Settings section back on screen is shown again
+        sectionHooks(underViews());   // a Settings section back on screen is shown again
       };
       if (!msg.backdrop) { view(); unblank(); if (msg.ack) ackShown(asked, 0); break; }
       // Shown once its backdrop is decoded, so it does not flash the home screen first. The view
