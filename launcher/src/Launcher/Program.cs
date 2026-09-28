@@ -133,10 +133,14 @@ static class Program
         if (args.Contains("--phone-certificates-create"))
         {
             Rights.Set(setupElevated: false, token);
-            if (token == Rights.Token.Split) { Log.Warn("Phone remote: --phone-certificates-create refused with administrator rights (the launcher runs without them)"); Environment.ExitCode = 3; return; }
-            var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
-            try { Environment.ExitCode = certs.MakeAuthorities() ? 0 : 1; }
-            catch (Exception e) { Log.Error("Phone remote: --phone-certificates-create", e); Environment.ExitCode = 1; }
+            if (token == Rights.Token.Split) { Log.Warn("Phone remote: --phone-certificates-create refused with administrator rights (the launcher runs without them)"); Environment.ExitCode = 3; }
+            else
+            {
+                var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
+                try { Environment.ExitCode = certs.MakeAuthorities() ? 0 : 1; }
+                catch (Exception e) { Log.Error("Phone remote: --phone-certificates-create", e); Environment.ExitCode = 1; }
+            }
+            Log.Flush();
             return;
         }
         // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
@@ -150,6 +154,7 @@ static class Program
             var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
             try { Environment.ExitCode = !certs.LoadExisting() ? 2 : certs.PlaceIntermediateInMachineStore() ? 0 : 1; }
             catch (Exception e) { Log.Error("Phone remote: --phone-certificates", e); Environment.ExitCode = 1; }
+            Log.Flush();
             return;
         }
         var options = Options.Parse(args);
@@ -161,12 +166,14 @@ static class Program
         {
             Log.Info($"Launcher started with administrator rights ({string.Join(' ', args)}): starting it again at standard rights");
             if (!Rights.StartAgainAtStandard(args)) Environment.ExitCode = 1;
+            Log.Flush();
             return;
         }
         if (plan.Start == Rights.Start.Stop)
         {
             Log.Error("Launcher started again at standard rights, but it still has administrator rights: stopped (no loop)");
             Environment.ExitCode = 1;
+            Log.Flush();
             return;
         }
         // Back to TV with a launcher running: it is told, this copy is not needed. Without one,
@@ -184,7 +191,7 @@ static class Program
             // Setup sets up the account it runs as: only the one signed in here. A standard account
             // whose prompt an administrator approved would get the administrator's account set up
             // (its autologon, its shell), so that is refused before anything else.
-            if (!SetupElevation.RunsAsSessionUser()) return;
+            if (!SetupElevation.RunsAsSessionUser()) { Log.Flush(); return; }
             // Windows' own environment for the elevated setup and all it starts, not the user's
             // (SetupElevation.CleanEnvironment lists it).
             SetupElevation.ApplyCleanEnvironment();
