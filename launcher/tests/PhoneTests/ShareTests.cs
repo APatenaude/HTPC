@@ -155,7 +155,14 @@ static partial class Program
         certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
             "after a restart: the same root, intermediate and certificate, none made");
-        var moved = IPAddress.Parse("192.168.1.33");
+        // Setup's step (--phone-certificates) only loads the launcher's pair; it never makes keys.
+        var keysBefore = store.Names.OrderBy(n => n).ToList();
+        var setupView = new PhoneCertificates(folder, store, testName, () => now);
+        Check(setupView.LoadExisting() && setupView.Intermediate!.Thumbprint == inter.Thumbprint && store.Names.OrderBy(n => n).SequenceEqual(keysBefore),
+            "setup's step loads the launcher's pair as it is, and makes no key");
+        var emptyFolder = TempFolder();
+        Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && !Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any(),
+            "before the launcher's first start there is nothing to load, and nothing is made");        var moved = IPAddress.Parse("192.168.1.33");
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "the box got a new address: new certificate");
         Check(certs.Current!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateIPAddresses().SequenceEqual(new[] { moved })
             && Chain(root, certs.Intermediate!, certs.Current!) == X509ChainStatusFlags.NoError && certs.Authority!.Thumbprint == root.Thumbprint,

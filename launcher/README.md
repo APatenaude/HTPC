@@ -114,8 +114,11 @@ second QR code in Settings › Phone remote, which opens /send and pairs):
   intermediate only from the machine's "Intermediate Certification Authorities" store; one only in
   the user's store is not seen before the user signs in again. The launcher runs without
   administrator rights, so setup's Phone remote step runs `HtpcLauncher --phone-certificates`
-  (elevated): the CA made or loaded in the user's key store, the intermediate's public certificate
-  put in the machine's store. Without it the launcher logs a warning (run TV Box Setup again). Root and intermediate end together after 10 years: then the box
+  (elevated): the intermediate's public certificate put in the machine's store. Only the launcher,
+  without those rights, makes the CA: a key made with them cannot be opened without them (the
+  launcher then made a new pair, and phones had to install the root again), so an elevated launcher
+  runs without HTTPS, and on a first setup the step finds nothing yet. Until the step has run the
+  launcher logs a warning (run TV Box Setup again). Root and intermediate end together after 10 years: then the box
   makes a new pair and each phone installs the new root once more. At every start the launcher
   removes this box's older intermediates from those stores (matched by the subject's CN and O,
   in either order; the current one kept; logged). The user's store also lists the machine's entries;

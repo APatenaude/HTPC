@@ -105,14 +105,14 @@ static class Program
             return;
         }
         // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
-        // phone remote's CA made (or loaded) in this user's key store, and its intermediate put in the
-        // machine's CA store, where Windows finds it to send with the HTTPS certificate. Ends; exit
-        // code 0 when it is there.
+        // phone remote's intermediate (made by the launcher, which runs without them) put in the
+        // machine's CA store, where Windows finds it to send with the HTTPS certificate. Nothing is
+        // made here. Ends; exit code 0 when it is there, 2 when the launcher has not made it yet.
         if (args.Contains("--phone-certificates"))
         {
             var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
-            certs.Ensure(PhoneCertificates.LocalNames(), PhoneNetwork.LocalAddresses());
-            Environment.ExitCode = certs.PlaceIntermediateInMachineStore() ? 0 : 1;
+            try { Environment.ExitCode = !certs.LoadExisting() ? 2 : certs.PlaceIntermediateInMachineStore() ? 0 : 1; }
+            catch (Exception e) { Log.Error("Phone remote: --phone-certificates", e); Environment.ExitCode = 1; }
             return;
         }        var options = Options.Parse(args);
         // Back to TV with a launcher running: it is told, this copy is not needed. Without one,

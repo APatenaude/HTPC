@@ -302,6 +302,28 @@ sealed class PhoneCertificates
     }
 
     /// <summary>
+    /// Setup (with administrator rights): the launcher's pair as it is, never made here. A key
+    /// made with administrator rights cannot be opened without them (the launcher would make a
+    /// new pair, and phones install the root again), so only the launcher, without them, makes it.
+    /// False when there is none yet (the launcher's first start makes it).
+    /// </summary>
+    public bool LoadExisting()
+    {
+        lock (gate)
+        {
+            string rootFile = Path.Combine(folder, "root.cer"), interFile = Path.Combine(folder, "intermediate.cer");
+            if (!File.Exists(rootFile) || !File.Exists(interFile)) return false;
+            using var key = keys.Open(IntermediateKeyName);
+            if (key is null) return false;
+            var r = X509CertificateLoader.LoadCertificateFromFile(rootFile);
+            var i = X509CertificateLoader.LoadCertificateFromFile(interFile);
+            if (!i.GetECDsaPublicKey()!.ExportSubjectPublicKeyInfo().SequenceEqual(key.ExportSubjectPublicKeyInfo()) || i.Issuer != r.Subject) return false;
+            (root, intermediate) = (r, i);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// With administrator rights (setup): the intermediate (its public certificate only; the key
     /// stays where it is) in the machine's CA store, this box's older ones out. True when it is there.
     /// </summary>
