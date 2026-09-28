@@ -46,8 +46,10 @@ sealed class UpdatesSaved
 ///     only when asked). What it finds shows as a pill on the home screen, never over a video.
 ///   - Installing only when asked: an app's Update, Update all (a restore point first, then the
 ///     apps, then the launcher last), Windows updates now or tonight.
-///   - The launcher's own update is swapped in only at Home or in standby, never with an app in
-///     front, and needs the watchdog (which starts the new launcher).
+///   - The launcher's own update downloads at once (low priority) and is swapped in only at Home
+///     or in standby, never with an app in front: at "ready" the job waits until this launcher
+///     says it is (TryLeave), and only then pauses the watchdog and says "leave". It needs the
+///     watchdog (which starts the new launcher).
 ///   - Everything that installs runs in the one job lane, at low priority, so a video can keep
 ///     playing (LibraryService, the box's one job lane: library installs and updates alike).
 /// Trust: the launcher only reads here; the SYSTEM job (setup\lib\LauncherUpdate.ps1) downloads
@@ -60,6 +62,7 @@ sealed class UpdateService
     static readonly string HtpcData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
     static readonly string WindowsFile = Path.Combine(HtpcData, "state", "windows-updates.json");
     static readonly string JournalFile = Path.Combine(HtpcData, "state", "launcher-update.json");
+    static readonly string MachineProgressFile = Path.Combine(HtpcData, "state", "library-progress.json");
     static readonly string SavedFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "updates.json");
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
@@ -74,16 +77,24 @@ sealed class UpdateService
     readonly Dictionary<string, (string Status, string Message)> results = new();   // token -> last result
     readonly HashSet<string> batch = new();       // tokens of the running "Update all"
     System.Threading.Timer? standbyCheck;
+    System.Threading.Timer? homeWatch;   // the launcher update is at "ready": looking for Home or standby
+    bool leaveSaid;                      // TryLeave said yes: "Restarting..." shows, the job was told
     bool checking;
     bool tonightRunning;
 
-    /// <summary>True at Home (the launcher in front, no app) or in standby: when the launcher may be swapped.</summary>
-    public Func<bool> AtHomeOrStandby { get; set; } = () => false;
+    /// <summary>
+    /// The launcher update has its files ready: when at Home (the launcher in front, no app) or in
+    /// standby, show "Restarting..." and tell the job (Local\HtpcLeaving_&lt;version&gt;_&lt;pid&gt;); true
+    /// then. False, and nothing shown, anywhere else. Called about once a second, any thread.
+    /// </summary>
+    public Func<string, bool> TryLeave { get; set; } = _ => false;
     public Func<bool> InStandby { get; set; } = () => false;
     /// <summary>Something changed that Settings › Updates shows. Any thread.</summary>
     public event Action? Changed;
-    /// <summary>The launcher update is ready to swap: show "Restarting..." and exit with code 75. Any thread.</summary>
-    public event Action<string>? LauncherReady;
+    /// <summary>The job paused the watchdog ("leave"): exit with code 75 now. Any thread.</summary>
+    public event Action? LauncherLeave;
+    /// <summary>The update ended after TryLeave said yes, without "leave": back to Home. Any thread.</summary>
+    public event Action? LauncherStay;
     /// <summary>Restart the box for Windows updates; true = quietly (at night, TV stays off). Any thread.</summary>
     public event Action<bool>? RestartBox;
     /// <summary>Open Settings › Updates (the pill's action).</summary>
@@ -312,7 +323,10 @@ sealed class UpdateService
         return lane.EnqueueBoxJob(job, out var error) ? null : error;
     }
 
-    /// <summary>The launcher itself: needs the watchdog, swaps only at Home or in standby.</summary>
+    /// <summary>
+    /// The launcher itself: needs the watchdog. It downloads at once; the swap waits for Home or
+    /// standby inside the job ("ready", TryLeave).
+    /// </summary>
     public string? UpdateLauncher()
     {
         LauncherRelease? r;
@@ -322,7 +336,7 @@ sealed class UpdateService
             return $"Version {r.Version} needs setup to run again";
         if (Process.GetProcessesByName("HtpcWatchdog").Length == 0)
             return "Updating the launcher needs the watchdog. Run setup again.";
-        return QueueBox("launcher-update", r.Version, $"Updating the TV launcher to {r.Version}", waitUntil: AtHomeOrStandby);
+        return QueueBox("launcher-update", r.Version, $"Updating the TV launcher to {r.Version}");
     }
 
     /// <summary>Update all: a restore point (checked) first, then every app, then the launcher, last.</summary>
@@ -393,15 +407,60 @@ sealed class UpdateService
 
     void OnProgress(LibraryJob job, JobProgress p)
     {
-        // The SYSTEM job has the new launcher ready: this launcher leaves now (exit code 75).
-        if (job.BoxJob && job.Action == "launcher-update" && p.Phase == "ready")
-            LauncherReady?.Invoke(job.Id);
+        if (!job.BoxJob || job.Action != "launcher-update") return;
+        // The SYSTEM job has the new launcher ready: at Home or in standby, this launcher says so.
+        if (p.Phase == "ready") WatchForHome(job.Id);
+        // It paused the watchdog: this launcher leaves now (exit code 75).
+        else if (p.Phase == "leave") LauncherLeave?.Invoke();
+    }
+
+    // Once a second until TryLeave says yes (the job waits for that, 3 hours at most). A launcher
+    // started again meanwhile does not follow that job: it gives up after its wait, nothing moved.
+    void WatchForHome(string version)
+    {
+        lock (gate)
+        {
+            if (homeWatch is not null || leaveSaid) return;
+            Log.Info($"Updates: launcher {version} is ready; waiting for Home or standby");
+            // Made under the lock: its first tick waits for the field to be set.
+            homeWatch = new System.Threading.Timer(_ =>
+            {
+                lock (gate) if (homeWatch is null || leaveSaid) return;
+                bool yes;
+                try { yes = TryLeave(version); }
+                catch (Exception e) { Log.Warn($"Updates: TryLeave: {e.Message}"); yes = false; }
+                if (!yes) return;
+                var ended = false;
+                lock (gate)
+                {
+                    if (homeWatch is { } watch) { leaveSaid = true; watch.Dispose(); homeWatch = null; }
+                    else ended = true;   // the job ended while TryLeave ran
+                }
+                if (ended) LauncherStay?.Invoke();
+            }, null, TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(1));
+        }
+    }
+
+    // The launcher update ended (a stop, a timeout) while this launcher is still here: no more
+    // watching, and "Restarting..." goes if it showed.
+    void StopWatchingForHome()
+    {
+        bool said;
+        lock (gate)
+        {
+            homeWatch?.Dispose();
+            homeWatch = null;
+            said = leaveSaid;
+            leaveSaid = false;
+        }
+        if (said) LauncherStay?.Invoke();
     }
 
     void OnFinished(LibraryJob job, bool ok, string message)
     {
         var p = new { Message = message };
         lock (gate) results[job.Token] = (ok ? "done" : "failed", message);
+        if (job.BoxJob && job.Action == "launcher-update") StopWatchingForHome();
         if (job.Token == "restorepoint" && !ok)
         {
             // No restore point, no "Update all": the rest of it is dropped.
@@ -581,7 +640,9 @@ sealed class UpdateService
         {
             if (current?.Token == token)
             {
-                var waitingForHome = current.WaitUntil is not null && progress?.Phase is null or "start";
+                // The launcher's update at "ready": downloaded, waiting for Home or standby.
+                var waitingForHome = (current.WaitUntil is not null && progress?.Phase is null or "start")
+                    || (current.Action == "launcher-update" && progress?.Phase == "ready");
                 return new
                 {
                     status = waitingForHome ? "waiting" : "running",

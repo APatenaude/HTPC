@@ -13,7 +13,8 @@
       Download  pinned redirects: another host, another scheme, more than 5 hops, a lying
                 Content-Length, a longer stream, 429 short and long, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
-                first roll back), not newer, no watchdog, a bad download (nothing touched)
+                first roll back), not newer, no watchdog, a bad download, never back at Home
+                (an app in front: it gives up; nothing touched, nothing stopped)
       Faults    the job ended hard after each journal step, then reconcile, started the way the
                 box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
                 the update, even with lib\ or jobs\ gone): the old launcher or the new one, never
@@ -68,8 +69,10 @@ function Build-Fake([string]$Name, [string]$Source) {
     $out
 }
 
-# A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once) or hang (never
-# signals). It leaves with 75 when the job says "ready" (the progress file, written after it started).
+# A launcher: healthy (signals Local\HtpcHealthy_<v>_<pid>), crash (ends at once), hang (never
+# signals) or busy (healthy, but an app stays in front). When the job says "ready" (the progress
+# file, written after it started) it says it is at Home (Local\HtpcLeaving_<v>_<pid>; busy never
+# does); when the job says "leave" it exits with 75.
 function Get-FakeLauncher([string]$Version, [string]$Mode) {
     Build-Fake "launcher-$Version-$Mode.exe" @"
 using System; using System.IO; using System.Threading; using System.Reflection; using System.Diagnostics;
@@ -79,13 +82,21 @@ class P { static int Main() {
   if ("$Mode" == "crash") { Thread.Sleep(300); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
   var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
-  EventWaitHandle ev = null;
-  if ("$Mode" == "healthy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + Process.GetCurrentProcess().Id);
+  var me = Process.GetCurrentProcess().Id;
+  EventWaitHandle ev = null, leaving = null;
+  if ("$Mode" == "healthy" || "$Mode" == "busy") ev = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcHealthy_$($Version)_" + me);
   for (var i = 0; i < 3000; i++) {
-    try { if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started && File.ReadAllText(progress).Contains("\"phase\":\"ready\"")) return 75; } catch (Exception) { }
+    try {
+      if (File.Exists(progress) && File.GetLastWriteTimeUtc(progress) > started) {
+        var text = File.ReadAllText(progress);
+        if (text.Contains("\"phase\":\"leave\"")) return 75;
+        if (text.Contains("\"phase\":\"ready\"") && leaving == null && "$Mode" != "busy")
+          leaving = new EventWaitHandle(true, EventResetMode.ManualReset, "Local\\HtpcLeaving_$($Version)_" + me);
+      }
+    } catch (Exception) { }
     Thread.Sleep(200);
   }
-  GC.KeepAlive(ev); return 0; } }
+  GC.KeepAlive(ev); GC.KeepAlive(leaving); return 0; } }
 "@
 }
 
@@ -142,14 +153,15 @@ function New-SetupCopy([string]$To, [string]$Version, [switch]$BrokenRunner) {
     if ($BrokenRunner) { Add-Content (Join-Path $To 'lib\Invoke-AppJob.ps1') "`n}{ broken" }
 }
 
-# A box: Program Files\HTPC\Launcher with launcher 0.1.0, the watchdog and the job runner, and
-# ProgramData\HTPC with the kept setup. The watchdog is started (it starts the launcher).
-function New-FakeBox([string]$Name) {
+# A box: Program Files\HTPC\Launcher with launcher 0.1.0 (healthy, or busy: an app always in
+# front), the watchdog and the job runner, and ProgramData\HTPC with the kept setup. The watchdog
+# is started (it starts the launcher).
+function New-FakeBox([string]$Name, [string]$Mode = 'healthy') {
     $root = Join-Path $work $Name
     New-AdminFolder $root
     $dir = Join-Path $root 'PF\HTPC\Launcher'
     New-Item -ItemType Directory -Force $dir, (Join-Path $root 'PD\HTPC') | Out-Null
-    Copy-Item (Get-FakeLauncher '0.1.0' 'healthy') (Join-Path $dir 'HtpcLauncher.exe')
+    Copy-Item (Get-FakeLauncher '0.1.0' $Mode) (Join-Path $dir 'HtpcLauncher.exe')
     Copy-Item (Get-FakeWatchdog) (Join-Path $dir 'HtpcWatchdog.exe')
     $setup = Join-Path $root 'PD\HTPC\setup'
     New-SetupCopy $setup '0.1.0'
@@ -233,6 +245,7 @@ function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [strin
 . '$Lib\LauncherUpdate.ps1'
 `$UpdateProgressFile = '$Root\PD\HTPC\state\test-progress.json'
 `$HealthyWait = [TimeSpan]::FromSeconds(25)
+`$LeaveWait = [TimeSpan]::FromSeconds(10)
 `$UpdateFaultAt = $(if ($FaultAt) { "'$FaultAt'" } else { '$null' })
 `$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
 `$paths = Get-LauncherPaths -InstallRoot '$Root\PF\HTPC' -DataRoot '$Root\PD\HTPC'
@@ -379,6 +392,16 @@ try {
             Check ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left'
             Remove-FakeBox $root
         }
+
+        # An app in front the whole time: the download goes ahead, the swap never does.
+        Publish-FakeRelease '0.2.0' 'healthy'
+        $root = New-FakeBox 'swap-busy' 'busy'
+        $before = @(Get-Running $root | ForEach-Object ProcessId)
+        $r = Invoke-FakeJob $root $update
+        $after = @(Get-Running $root | ForEach-Object ProcessId)
+        Check ($r -like 'timeout*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0') "never back at Home: the update gives up, nothing moved ($r)"
+        Check ($before.Count -eq 1 -and "$before" -eq "$after" -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause')) -and (Get-Leftovers $root).Count -eq 0) '  the launcher was never stopped, the watchdog never paused, nothing left'
+        Remove-FakeBox $root
 
         Publish-FakeRelease '0.2.0' 'healthy' -WrongHash
         $root = New-FakeBox 'swap-badhash'

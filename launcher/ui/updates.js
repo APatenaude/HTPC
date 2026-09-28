@@ -8,6 +8,7 @@
 //                  updates.windowsScan  updates.windowsCancel  updates.windowsInstall {when: now|tonight}
 //                  updates.restart {when: now|tonight}  updates.tonightCancel
 //   From the host: updates.state (UpdateService.Describe)  updates.restarting {version}
+//                  updates.stay (the launcher update stopped before its restart)
 //
 // Demo (a plain browser): index.html#settings/updates, and ?upd=<state> for the other states
 // (uptodate, checking, running, failed, winfound, winscan, wininstall, winrestart, wintonight,
@@ -171,7 +172,7 @@ onAction('upd-row', (el, id) => {
     if (!L.update || L.job) return;
     ask({
       title: `Update the TV launcher to ${L.latest}?`,
-      text: 'The launcher restarts by itself; open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
+      text: 'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
       yes: 'Update', onYes: () => send({ type: 'updates.app', id: 'launcher' }),
     });
     return;
@@ -224,7 +225,10 @@ hostMessage('updates.', (m) => {
     if (state.view === 'settings' && state.section === 'updates') render();
   } else if (m.type === 'updates.restarting') {
     upd.restarting = m.version;
-    go('updrestart');
+    if (state.view !== 'updrestart') go('updrestart');
+  } else if (m.type === 'updates.stay') {
+    // The update stopped before the restart: back where "Restarting" was shown from.
+    if (state.view === 'updrestart') back();
   }
 });
 

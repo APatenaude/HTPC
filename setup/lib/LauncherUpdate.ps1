@@ -21,8 +21,12 @@
 #   download   update.json and the files it lists from github.com/APatenaude/HTPC, release
 #              v<x.y.z> (never "latest": the version asked for), size and SHA-256 checked
 #   staged     the new files copied next to the old ones (HtpcLauncher.new.exe, lib.new...)
-#   ready      the watchdog paused (state\watchdog-pause); the launcher sees "ready", shows
-#              "Restarting..." and exits with code 75; after 20 s it is ended
+#   ready      the launcher sees "ready" and waits until it is at Home or in standby (never
+#              with an app in front: the download ran meanwhile, over a video if need be); then
+#              it shows "Restarting..." and says so (the event Local\HtpcLeaving_<version>_<pid>).
+#              Only then is the watchdog paused (state\watchdog-pause) and the launcher told to
+#              "leave": it exits with code 75 (after 20 s it is ended). Not at Home within 3
+#              hours: the update stops there (aborted), nothing moved, nothing stopped
 #   swapping   per file: current -> .prev, .new -> current (MoveFileEx, write-through)
 #   swapped    the pause lifted: the watchdog starts the new launcher (SYSTEM never starts it)
 #   verifying  the new launcher must say it is healthy (UI ready, controller thread running)
@@ -35,6 +39,8 @@
 $LauncherJournalSchema = 1
 $HealthyWait = [TimeSpan]::FromMinutes(3)
 $ExitWait = [TimeSpan]::FromSeconds(20)
+# How long "ready" waits for the launcher to be at Home or in standby (the task's own limit is 4 h).
+$LeaveWait = [TimeSpan]::FromHours(3)
 
 # Where everything is. Tests pass their own roots (made admin-only first).
 function Get-LauncherPaths {
@@ -138,8 +144,14 @@ function Get-LauncherProcesses($Paths) {
 # The launcher's "I'm healthy" signal: a named event in its own session, which this job (in
 # session 0) opens through the Session\<n>\ prefix. Nothing is read from a folder the user can
 # write to.
-function Test-LauncherHealthy([string]$Version, $Process) {
-    $name = "Session\$($Process.SessionId)\HtpcHealthy_$($Version)_$($Process.ProcessId)"
+function Test-LauncherHealthy([string]$Version, $Process) { Test-LauncherEvent 'HtpcHealthy' $Version $Process }
+
+# The launcher's "at Home or in standby, restarting": it has seen "ready", nothing is in front,
+# and it shows "Restarting..." until it is told to leave. The same kind of event, same rules.
+function Test-LauncherLeaving([string]$Version, $Process) { Test-LauncherEvent 'HtpcLeaving' $Version $Process }
+
+function Test-LauncherEvent([string]$Prefix, [string]$Version, $Process) {
+    $name = "Session\$($Process.SessionId)\$($Prefix)_$($Version)_$($Process.ProcessId)"
     try {
         $e = [Threading.EventWaitHandle]::OpenExisting($name)
         $e.Dispose()
@@ -147,7 +159,37 @@ function Test-LauncherHealthy([string]$Version, $Process) {
     } catch { $false }
 }
 
-# Waits for the launcher(s) to end after "ready" (they exit with code 75); ends them after 20 s.
+# After "ready": until every launcher running from the install folder says it is leaving (or
+# none has run for 5 s: nobody is signed in, or the watchdog is between two starts), at most
+# $Wait. "ready" is said again every minute meanwhile (the launcher's lane takes a job that says
+# nothing for 10 minutes for stuck). $false when the wait ran out.
+function Wait-LauncherLeaving($Paths, [string]$Version, [TimeSpan]$Wait = $LeaveWait) {
+    $deadline = [DateTime]::UtcNow.Add($Wait)
+    $said = [DateTime]::UtcNow
+    $noneSince = $null
+    while ($true) {
+        $running = @(Get-LauncherProcesses $Paths)
+        if ($running.Count -eq 0) {
+            if (-not $noneSince) { $noneSince = [DateTime]::UtcNow }
+            if (([DateTime]::UtcNow - $noneSince).TotalSeconds -ge 5) { Write-Host '  no launcher running: nothing to wait for'; return $true }
+        } else {
+            $noneSince = $null
+            if (@($running | Where-Object { -not (Test-LauncherLeaving $Version $_) }).Count -eq 0) {
+                Write-Host "  the launcher (pid $(@($running.ProcessId) -join ', ')) is at Home or in standby"
+                return $true
+            }
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { return $false }
+        if (([DateTime]::UtcNow - $said).TotalSeconds -ge 60) {
+            $said = [DateTime]::UtcNow
+            Write-UpdateProgress 'ready' 90 'Waits until you are back at Home'
+        }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+# Waits for the launcher(s) to end after "leave" (they exit with code 75); ends them after 20 s
+# (they said they were at Home or in standby).
 function Wait-LauncherExit($Paths) {
     $deadline = [DateTime]::UtcNow.Add($ExitWait)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -358,10 +400,15 @@ function Invoke-LauncherUpdate {
         Save-LauncherRelease $Source $Paths $journal $installed $stage
         Save-LauncherJournal $Paths $journal 'staged'
 
-        # The launcher exits (code 75) when it sees "ready"; the watchdog waits meanwhile.
-        Set-WatchdogPause $Paths
+        # Never with an app in front: the launcher says when it is at Home or in standby. Only
+        # then is the watchdog paused and the launcher told to leave (it exits with code 75).
         Save-LauncherJournal $Paths $journal 'ready'
-        Write-UpdateProgress 'ready' 90 'Restarting the launcher'
+        Write-UpdateProgress 'ready' 90 'Waits until you are back at Home'
+        if (-not (Wait-LauncherLeaving $Paths $journal.from)) {
+            throw (New-UpdateError 'timeout' "The TV was not back at Home within $([int]$LeaveWait.TotalHours) hours; update the launcher again later")
+        }
+        Set-WatchdogPause $Paths
+        Write-UpdateProgress 'leave' 92 'Restarting the launcher'
         Wait-LauncherExit $Paths
     } catch {
         $problem = $_

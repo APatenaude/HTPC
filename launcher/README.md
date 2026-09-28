@@ -198,10 +198,13 @@ Settings › Updates (`ui/updates.*`, `src/Launcher/UpdateService.cs`, `MainForm
   restore point first, then the apps, the launcher last); Windows updates now or "Tonight"
   (02:00 to 05:00 while in standby, then a quiet restart: the TV stays off and the box comes
   back in standby). Defender's definitions come with the Windows updates and are not counted.
-- **The launcher's own update** (`setup/lib/LauncherUpdate.ps1`, run as SYSTEM): only at Home or
-  in standby, never with an app in front, and only with the watchdog running (it starts the new
-  launcher). The job downloads release v<x.y.z> itself, checks it, pauses the watchdog, and says
-  "ready"; the launcher shows "Restarting…", leaves a handoff (`%LOCALAPPDATA%\HTPC\handoff.json`:
+- **The launcher's own update** (`setup/lib/LauncherUpdate.ps1`, run as SYSTEM): swapped only at
+  Home or in standby, never with an app in front, and only with the watchdog running (it starts
+  the new launcher). The job downloads release v<x.y.z> itself at once (low priority, a video can
+  keep playing), checks it, and says "ready"; the launcher waits until it is at Home or in
+  standby, shows "Restarting…" and says so (the event `Local\HtpcLeaving_<version>_<pid>`); only
+  then does the job pause the watchdog and say "leave" (not at Home within 3 hours: it gives up,
+  nothing moved or stopped). The launcher leaves a handoff (`%LOCALAPPDATA%\HTPC\handoff.json`:
   back to standby, no TV on) and exits with code 75; the job swaps the files (journaled, with
   write-through renames) and waits up to 3 minutes for the new launcher to say it is healthy
   (the event `Local\HtpcHealthy_<version>_<pid>`, once its UI is ready and the controller thread
