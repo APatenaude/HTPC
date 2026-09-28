@@ -11,6 +11,11 @@ user can write runs elevated; declined, it says setup needs administrator rights
 quit), asks the questions (controller check, TV, apps), then
 runs setup.ps1 with no further prompt, shows its progress, and hands over to the launcher it
 installed, started as the signed-in user, not elevated (launcher/README.md, SetupElevation.cs).
+Where it writes: as administrator, `Program Files\HTPC` (the setup copy, its log, temp files and
+settings in `Setup\`; the launcher) and `ProgramData\HTPC` (locked first), never the user's
+profile, except the WebView2 profile its browser makes itself at the user's rights
+(`%LOCALAPPDATA%\HTPC\setup-webview\run-*`); before the prompt, the first copy (not elevated, the
+user's own process: accepted as it is) writes its two lines to `%LOCALAPPDATA%\HTPC\logs\launcher.log`.
 
 ## setup.ps1
 
