@@ -37,6 +37,9 @@ const PHONE_REACH = {
   public: ['This network is set to Public', 'The remote only answers on a Private network. Run TV Box Setup again, or make this network Private in Windows.'],
 };
 
+// HTTPS runs, but Windows may send its certificate without the intermediate (made after setup ran).
+const PHONE_CHAIN = ['Run TV Box Setup again for Android’s Share','The box made a new HTTPS certificate. Setup lets Windows send it whole, so Android can check it.'];
+
 function renderPhoneSection() {
   const p = state.phoneSettings;
   askPhoneInfo(false);
@@ -57,7 +60,7 @@ function renderPhoneSection() {
             `<span class="phone-fingerprint">${esc(fingerprintLines(p.fingerprint))}</span>`
           : ', once HTTPS runs (it isn’t: the launcher log says why).</span>') + '</div></div>' +
     '</div>';
-  const problem = !p.listening ? ['The remote isn’t running', 'Another program has its port. The launcher log says which ports it tried.'] : PHONE_REACH[p.reach];
+  const problem = !p.listening ? ['The remote isn’t running', 'Another program has its port. The launcher log says which ports it tried.'] : PHONE_REACH[p.reach] || (p.chainMissing ? PHONE_CHAIN : null);
   if (problem) {
     body += `<div class="srow phone-warn"><div class="text"><span class="label">${esc(problem[0])}</span>` +
       `<span class="caption">${esc(problem[1])}</span></div></div>`;
@@ -169,7 +172,7 @@ settingsSection('phone', {
     for (let i = 1; i <= Number(q.get('keys') || 0); i++) more.push({ id: `k${i}`, name: `iPhone Shortcut ${i}`, connected: false, lastSeen: Date.now() - i * 86400000, shortcut: true });
     if (more.length) state.memory.settings = `phone-${more[more.length - 1].id}`;
     EXT.host['phone.settings']({ type: 'phone.settings', phone: {
-      listening: true, address: 'tv.local', ip: '192.168.1.20', requireCode: true, reach: 'ok', unpaired: 0, secure: true,
+      listening: true, address: 'tv.local', ip: '192.168.1.20', requireCode: true, reach: 'ok', unpaired: 0, secure: true, chainMissing: q.get('chain') === 'missing',
       fingerprint: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8',
       qr: 'http://192.168.1.20/?k=Qm9vc3RlZC1kZW1vLWtleQ',
       sendQr: 'http://192.168.1.20/send?k=U2VuZC1kZW1vLWtleS1vbmx5',

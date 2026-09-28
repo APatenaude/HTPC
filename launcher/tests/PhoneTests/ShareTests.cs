@@ -155,6 +155,16 @@ static partial class Program
         certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
             "after a restart: the same root, intermediate and certificate, none made");
+        // Setup, as the user (--phone-certificates-create): the pair only, made once.
+        var madeFolder = TempFolder();
+        var madeKeys = new MemoryKeyStore();
+        var maker = new PhoneCertificates(madeFolder, madeKeys, testName, () => now);
+        Check(maker.MakeAuthorities() && madeKeys.Names.SequenceEqual(new[] { PhoneCertificates.IntermediateKeyName })
+            && File.Exists(Path.Combine(madeFolder, "intermediate.cer")) && !File.Exists(Path.Combine(madeFolder, "server.cer")) && maker.Context is null,
+            "setup's create step makes the pair only (no server certificate, no handshake)");
+        var again = new PhoneCertificates(madeFolder, madeKeys, testName, () => now);
+        Check(again.MakeAuthorities() && again.Intermediate!.Thumbprint == maker.Intermediate!.Thumbprint, "run again, it keeps the pair it made");
+        PhoneCertificates.RemoveIntermediates(testName, inter.Thumbprint);
         // Setup's step (--phone-certificates) only loads the launcher's pair; it never makes keys.
         var keysBefore = store.Names.OrderBy(n => n).ToList();
         var setupView = new PhoneCertificates(folder, store, testName, () => now);

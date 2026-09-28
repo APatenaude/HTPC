@@ -486,6 +486,8 @@ partial class MainForm
                 secure = phones.SecurePort != 0,
                 // The root's fingerprint: Android shows the installed one; they must match (card 2).
                 fingerprint = phones.Fingerprint,
+                // A certificate made after setup (a first start, a new pair): HTTPS may go without its intermediate.
+                chainMissing = phones.IntermediateMissing,
                 requireCode = pairing.RequireCode,
                 reach = phoneReach,
                 unpaired = phones.Clients.Count(c => c.Phone is null),

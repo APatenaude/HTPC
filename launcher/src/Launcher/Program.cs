@@ -6,8 +6,8 @@ namespace Htpc.Launcher;
 /// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"; it
 /// runs elevated, see SetupElevation.cs), --elevated (the copy setup started with administrator
 /// rights), --home (not setup even so: the home screen after setup when no launcher was installed),
-/// --version (prints the version and ends; see Program.Main), --phone-certificates (setup: the phone
-/// remote's intermediate certificate in the machine's store; ends),
+/// --version (prints the version and ends; see Program.Main), --phone-certificates-create (setup, as the user: the phone
+/// remote's CA made; ends), --phone-certificates (setup, elevated: its intermediate certificate in the machine's store; ends),
 /// --restarted (started again by the watchdog: the TV is left as it is) with
 /// --restart-reason=WHY (why the watchdog started it again, for the log: Watchdog.cs lists them),
 /// --tv (Back to TV: the desktop shortcut; tells a running launcher, or starts one).
@@ -104,7 +104,18 @@ static class Program
             Console.Out.Flush();
             return;
         }
-        // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
+        // --phone-certificates-create: TV Box Setup's Phone remote step runs this first, through a
+        // one-shot task as the signed-in user WITHOUT administrator rights (keys made with them
+        // cannot be opened without them): the phone remote's CA made if there is none. Ends; exit
+        // code 0 when there is one, 3 when started with administrator rights (refused).
+        if (args.Contains("--phone-certificates-create"))
+        {
+            if (Environment.IsPrivilegedProcess) { Log.Warn("Phone remote: --phone-certificates-create refused with administrator rights"); Environment.ExitCode = 3; return; }
+            var certs = new PhoneCertificates(PhoneCertificates.DefaultFolder, new CngKeyStore(), PhoneCertificates.BoxName);
+            try { Environment.ExitCode = certs.MakeAuthorities() ? 0 : 1; }
+            catch (Exception e) { Log.Error("Phone remote: --phone-certificates-create", e); Environment.ExitCode = 1; }
+            return;
+        }        // --phone-certificates: TV Box Setup's Phone remote step, with its administrator rights: the
         // phone remote's intermediate (made by the launcher, which runs without them) put in the
         // machine's CA store, where Windows finds it to send with the HTTPS certificate. Nothing is
         // made here. Ends; exit code 0 when it is there, 2 when the launcher has not made it yet.

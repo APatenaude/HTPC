@@ -187,6 +187,9 @@ sealed class PhoneServer
     /// <summary>The root's SHA-256 fingerprint ("AB:CD:..."), for the TV to show (null without HTTPS).</summary>
     public string? Fingerprint => SecurePort != 0 ? certificates?.Fingerprint : null;
 
+    /// <summary>HTTPS runs but Windows may send its certificate without the intermediate (not in the machine's store): Settings says to run TV Box Setup again.</summary>
+    public bool IntermediateMissing => SecurePort != 0 && certificates is { IntermediateInMachineStore: false };
+
     /// <param name="root">The web app's folder (launcher\phone next to the exe).</param>
     /// <param name="bindTo">Tests: listen on this address only. Null: every address.</param>
     /// <param name="certificates">HTTPS; null: HTTP only.</param>

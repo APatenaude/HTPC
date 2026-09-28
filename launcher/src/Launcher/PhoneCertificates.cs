@@ -302,6 +302,24 @@ sealed class PhoneCertificates
     }
 
     /// <summary>
+    /// Setup, as the signed-in user without administrator rights (a one-shot task): the pair made
+    /// when there is none (or it no longer serves), loaded otherwise. No server certificate, no
+    /// handshake. True when there is one.
+    /// </summary>
+    public bool MakeAuthorities()
+    {
+        lock (gate)
+        {
+            var dns = LocalNames().Select(n => n.ToLowerInvariant().TrimEnd('.')).Where(n => n.EndsWith(".local")).Distinct().ToList();
+            if (root is null || intermediate is null)
+            {
+                LoadOrCreateAuthorities(dns);
+                ForgetOld();
+            }
+            return intermediate is not null;
+        }
+    }
+    /// <summary>
     /// Setup (with administrator rights): the launcher's pair as it is, never made here. A key
     /// made with administrator rights cannot be opened without them (the launcher would make a
     /// new pair, and phones install the root again), so only the launcher, without them, makes it.
