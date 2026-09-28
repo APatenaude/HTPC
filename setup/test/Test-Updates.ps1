@@ -5,8 +5,9 @@
     no GitHub, no Windows Update, no restore point, nothing installed on the machine.
 
 .DESCRIPTION
-    Run from an elevated console (the test folders get admin-only permissions, as on the box).
-    Everything happens under %TEMP%\htpc-updtest: a fake Program Files\HTPC and ProgramData\HTPC,
+    Run from an elevated console (the test folders get admin-only permissions, as on the box),
+    from a copy of the repository with setup\ and launcher\src\Watchdog\Watchdog.cs (Core compiles
+    the real watchdog). Everything happens under %TEMP%\htpc-updtest: a fake Program Files\HTPC and ProgramData\HTPC,
     fake launchers and a fake watchdog (small C# programs built with the .NET Framework's csc),
     and a fake GitHub on http://127.0.0.1 (Serve-FakeRelease.ps1).
       Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs), the
@@ -144,7 +145,9 @@ class W {
     var running = child != null;
     foreach (var p in Process.GetProcessesByName("HtpcLauncher")) { try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) running = true; } catch (Exception) { } }
     if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(exe); } catch (Exception) { } }
-    Thread.Sleep(100);
+    // Waits on the launcher itself, so its exit is judged at once (as the real watchdog waits on
+    // its mutex): a sleep could miss a rollback's short pause on a loaded box.
+    if (child != null) child.WaitForExit(100); else Thread.Sleep(100);
   } } }
 '@
 }
