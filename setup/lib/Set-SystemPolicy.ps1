@@ -14,6 +14,7 @@
     - Location allowed for desktop apps and the launcher (its Wi-Fi list needs it since 24H2).
     - Automatic time zone (Windows location services; the Wi-Fi adapter locates the box
       from nearby networks even while it uses Ethernet); computer name TV (tv.local).
+    - The sign-in ("Welcome") screen and the desktop in the home screen's colour, #0D0E11.
     User-level settings apply to the account running setup (the box has one user).
 
 .PARAMETER ComputerName
@@ -102,6 +103,51 @@ foreach ($key in $consent, "$consent\NonPackaged", "$consent\NonPackaged\$($laun
     Set-RegValue $key 'Value' 'Allow' 'String'
 }
 Write-Host "  Time zone now: $((Get-TimeZone).Id) (updates itself when Windows locates the box)"
+
+# The home screen's colour (launcher/ui/app.css --bg) wherever Windows shows something before
+# the launcher draws (the user, 27 Sept 2026): the "Welcome" screen of the autologon shows the
+# lock-screen image, so that becomes a solid picture of it, without the blur; the desktop colour
+# shows behind the launcher at start (it is the shell) and in Desktop mode. The boot logo stays
+# black; the "Welcome" text and user tile stay (hiding them needs IoT Custom Logon).
+Write-Host '  Sign-in screen and desktop: the home screen colour'
+$bg = @{ R = 13; G = 14; B = 17 }
+$picture = Join-Path $env:ProgramData 'HTPC\sign-in-background.png'
+Add-Type -AssemblyName System.Drawing
+$bitmap = New-Object System.Drawing.Bitmap 1920, 1080
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.Clear([System.Drawing.Color]::FromArgb($bg.R, $bg.G, $bg.B))
+$graphics.Dispose()
+$fresh = Join-Path $env:TEMP 'htpc-sign-in-background.png'
+$bitmap.Save($fresh, [System.Drawing.Imaging.ImageFormat]::Png)
+$bitmap.Dispose()
+$same = (Test-Path $picture) -and ((Get-FileHash $picture).Hash -eq (Get-FileHash $fresh).Hash)
+if ($same) { Write-Same $picture; Remove-Item $fresh }
+else {
+    New-Item -ItemType Directory -Force (Split-Path $picture) | Out-Null
+    Move-Item $fresh $picture -Force
+    Write-Change "$picture (solid #0D0E11)"
+}
+Set-RegValue "$policies\Personalization" 'LockScreenImage' $picture 'String'
+$csp = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP'
+Set-RegValue $csp 'LockScreenImagePath' $picture 'String'
+Set-RegValue $csp 'LockScreenImageUrl' $picture 'String'
+Set-RegValue $csp 'LockScreenImageStatus' 1
+Set-RegValue "$policies\System" 'DisableAcrylicBackgroundOnLogon' 1
+# That policy would show the accent colour (blue) instead of the picture.
+Remove-RegValue "$policies\System" 'DisableLogonBackgroundImage'
+$rgb = "$($bg.R) $($bg.G) $($bg.B)"
+Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'Background' $rgb 'String'
+Set-RegValue 'Registry::HKEY_USERS\.DEFAULT\Control Panel\Colors' 'Background' $rgb 'String'
+Set-RegValue 'HKCU:\Control Panel\Colors' 'Background' $rgb 'String'
+Set-RegValue 'HKCU:\Control Panel\Desktop' 'WallPaper' '' 'String'
+Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers' 'BackgroundType' 1
+# Now, not at the next sign-in: no wallpaper, and the desktop colour (COLOR_DESKTOP = 1).
+Add-Type -Namespace HtpcSetup -Name Desktop -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SystemParametersInfo(uint action, uint param, string value, uint flags);
+[DllImport("user32.dll")] public static extern bool SetSysColors(int count, int[] elements, int[] colors);
+'@
+[void][HtpcSetup.Desktop]::SystemParametersInfo(0x14, 0, '', 3) # SPI_SETDESKWALLPAPER, update and broadcast
+[void][HtpcSetup.Desktop]::SetSysColors(1, @(1), @(($bg.B -shl 16) -bor ($bg.G -shl 8) -bor $bg.R))
 
 # Every network the box joins later (Wi-Fi from the TV) becomes Private too: a task run as
 # SYSTEM when Windows connects to a network (NetworkProfile event 10000). A fixed command, no
