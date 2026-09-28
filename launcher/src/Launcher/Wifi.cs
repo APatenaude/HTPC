@@ -442,6 +442,14 @@ sealed class WifiService : IDisposable
         && !n.Description.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase)
         && !n.Description.Contains("Kernel Debug", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>The cable is up and carries the internet, and the Wi-Fi is joined to no network (standby may switch its radio off).</summary>
+    public static bool CableOnly()
+    {
+        if (Wired() is not { Up: true, CarriesInternet: true }) return false;
+        try { return !NetworkInterface.GetAllNetworkInterfaces().Any(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 && n.OperationalStatus == OperationalStatus.Up); }
+        catch (Exception) { return false; }
+    }
+
     /// <summary>Whether Windows' internet connection is this box's Wi-Fi.</summary>
     public static bool WifiCarriesInternet()
     {

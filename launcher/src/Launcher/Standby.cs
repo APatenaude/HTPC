@@ -68,6 +68,9 @@ sealed class LauncherSettings
     /// </summary>
     public int? Volume { get; set; }
 
+    /// <summary>Standby turned the Wi-Fi radio off (on a cable): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
+    public bool WifiOffInStandby { get; set; }
+
     // (Older files also have "showAppHints", the in-app hint's switch: the hint is gone, and
     // unknown keys are skipped when reading.)
 
@@ -154,6 +157,13 @@ sealed class LauncherSettings
 }
 
 /// <summary>
+/// What standby needs of the Wi-Fi (WifiService, set by MainForm.Wifi.cs): the radio's state
+/// ("on", "off", "disabled", "none"), switching it, and whether the box is on its cable with the
+/// Wi-Fi joined to nothing.
+/// </summary>
+sealed record StandbyRadio(Func<Task<string>> State, Func<bool, Task<bool>> Switch, Func<bool> CableOnly);
+
+/// <summary>
 /// Sleep, in the mode chosen in Settings. Screen off (standby) is the default (decision of
 /// 26 Sept 2026): this box has only S3 sleep and the 8BitDo dongle cannot wake it from S3, so
 /// standby pauses playback and turns the video output off while the box stays on; holding Home
@@ -162,6 +172,14 @@ sealed class LauncherSettings
 ///
 /// No low-power plan any more: capping the CPU (20%, one core) saved nothing measurable and
 /// froze the box for 5-7 s on the first Home press after a quiet spell (26 Sept 2026 log).
+///
+/// About 6 W at the wall in standby (the user, 27 Sept 2026). The cores are not the cost (0.5 W
+/// of a 5.2 W processor package, the box awake that evening; 3.3 W in standby on 26 Sept): the
+/// rest of the chip stays out of its deep idle states, likely kept up by the devices around it,
+/// the controller's dongle among them (its USB polling is what lets Home wake the box at once;
+/// S3 cannot: every interface of the dongle reports "deepest wake: S0", no USB remote wakeup).
+/// What standby can switch off without touching that wake is done here: the Wi-Fi radio on a
+/// cable (below). The rest needs a wall meter (launcher\dev\Measure-StandbyPower.ps1).
 /// </summary>
 sealed class Standby
 {
@@ -253,6 +271,45 @@ sealed class Standby
         // No XInput power-off here: the 8BitDo ignores it (it switches itself off after 15 idle
         // minutes) and it was a suspect in missed wake presses.
         since = DateTime.Now;
+        await WifiOff();
+    }
+
+    /// <summary>The Wi-Fi radio, for standby (MainForm.Wifi.cs sets it); null: left alone.</summary>
+    public StandbyRadio? Wifi { get; set; }
+
+    /// <summary>
+    /// Standby on a cable: the Wi-Fi radio goes off, back on at wake. Joined to no network it
+    /// still scans for one every minute or so, and nothing needs it in standby. Only when the cable
+    /// is up and carries the internet and the Wi-Fi is joined to nothing (a phone may reach the box
+    /// through a joined Wi-Fi, and Wake-on-LAN too). Kept in settings, so a launcher that ended in
+    /// standby turns it back on at its next start (WifiBack).
+    /// </summary>
+    async Task WifiOff()
+    {
+        try
+        {
+            if (Wifi is not { } wifi || settings.WifiOffInStandby || !await Task.Run(wifi.CableOnly) || await wifi.State() != "on" || !Active) return;
+            if (!await wifi.Switch(false)) return;
+            settings.WifiOffInStandby = true;
+            settings.Save();
+            Log.Info("Standby: Wi-Fi radio off (on the cable, the Wi-Fi joined to nothing)");
+            if (!Active) await WifiBack("woken meanwhile");
+        }
+        catch (Exception e) { Log.Warn($"Standby: Wi-Fi radio: {e.Message}"); }
+    }
+
+    /// <summary>The Wi-Fi radio back on, if standby turned it off (at wake, or a start after a launcher that ended in standby).</summary>
+    public async Task WifiBack(string why)
+    {
+        try
+        {
+            if (!settings.WifiOffInStandby || Wifi is not { } wifi) return;
+            settings.WifiOffInStandby = false;
+            settings.Save();
+            var on = await wifi.Switch(true);
+            Log.Info($"Wi-Fi radio back on ({why}){(on ? "" : ": Windows refused")}");
+        }
+        catch (Exception e) { Log.Warn($"Wi-Fi radio back on: {e.Message}"); }
     }
 
     /// <summary>What this PC supports, read from Windows (GetPwrCapabilities).</summary>
@@ -282,6 +339,7 @@ sealed class Standby
         var screenMs = clock.ElapsedMilliseconds;
         Changed?.Invoke(false);
         Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
+        _ = WifiBack("wake"); // after the screen: nothing of the wake waits for it
     }
 
     /// <summary>

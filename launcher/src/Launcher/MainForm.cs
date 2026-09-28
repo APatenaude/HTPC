@@ -117,6 +117,7 @@ sealed partial class MainForm : Form
         apps.Adopt(); // apps left open by a previous launcher
         standby = new Standby(controller, settings, media);
         standby.Changed += OnStandbyChanged;
+        InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
         standby.GoingDown += () =>
         {
             Post(new { type = "show", view = "home" });
