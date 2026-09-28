@@ -1,5 +1,5 @@
 # The launcher's self-update, run as SYSTEM by the \HTPC\Jobs task (jobs\launcher-update.ps1,
-# launcher-rollback.ps1, reconcile.ps1 through lib\Invoke-AppJob.ps1):
+# launcher-rollback.ps1, reconcile.ps1 through Start-Job.ps1 and lib\Invoke-AppJob.ps1):
 #     launcher-update:<x.y.z>   download, check, swap in, watch the new launcher start
 #     launcher-rollback         back to the previous launcher (kept as HtpcLauncher.prev.exe)
 #     reconcile                 finish or undo whatever a power cut or a kill interrupted
@@ -12,6 +12,9 @@
 #   Program Files\HTPC\Launcher\lib, jobs, catalog.json   the job runner and the trusted catalog,
 #   ProgramData\HTPC\setup                                 and the kept setup scripts, all from
 #                                                          setup.zip (role "setup")
+# Not swapped: Program Files\HTPC\Launcher\Start-Job.ps1, what the task runs. It finds a whole
+# runner whatever step a power cut stopped at (the one that began an unfinished update), and is
+# brought in line with lib\'s copy, in one rename, once no update is under way (Sync-JobBootstrap).
 #
 # The swap, in the order a power cut can interrupt it (each step journaled first, in
 # state\launcher-update.json, which only SYSTEM and Administrators can change):
@@ -51,6 +54,7 @@ function Get-LauncherPaths {
         StateRoot   = $stateRoot
         LauncherDir = $launcherDir
         Exe         = Join-Path $launcherDir 'HtpcLauncher.exe'
+        Bootstrap   = Join-Path $launcherDir 'Start-Job.ps1'
         Journal     = Join-Path $stateRoot 'launcher-update.json'
         Pause       = Join-Path $stateRoot 'watchdog-pause'
         Staging     = Join-Path $stateRoot 'staging'
@@ -256,6 +260,62 @@ function Test-NewJobRunner($Paths) {
     $out = & { $ErrorActionPreference = 'Continue'; & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -Job reconcile -DryRun 2>&1 | Out-String }
     if ($LASTEXITCODE -ne 0) { return "the job runner's dry run failed: $($out.Trim())" }
     $null
+}
+
+# The task's bootstrap (Start-Job.ps1, beside lib\), brought in line with lib\'s copy once no
+# update is under way: the copy must parse and find a runner (-Resolve) before it replaces the
+# one in use, in one rename. Left as it is on any problem (the one in use still works). On the
+# box, a task set up before the bootstrap existed (0.1.1) is pointed at it.
+function Sync-JobBootstrap($Paths) {
+    $source = Join-Path $Paths.LauncherDir 'lib\Start-Job.ps1'
+    $next = Join-Path $Paths.LauncherDir 'Start-Job.next.ps1'
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return }
+    try {
+        Assert-TrustedPath $source $Paths.InstallRoot
+        $inUse = Test-Path -LiteralPath $Paths.Bootstrap -PathType Leaf
+        if (-not $inUse -or (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $Paths.Bootstrap -Algorithm SHA256).Hash) {
+            Remove-TrustedItem $next $Paths.InstallRoot
+            Copy-Item -LiteralPath $source $next
+            Assert-TrustedPath $next $Paths.InstallRoot
+            $tokens = $null; $errors = $null
+            [void][Management.Automation.Language.Parser]::ParseFile($next, [ref]$tokens, [ref]$errors)
+            if ($errors) { throw "lib\Start-Job.ps1 does not parse: $($errors[0].Message)" }
+            $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $out = & { $ErrorActionPreference = 'Continue'; & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $next -Resolve -DataRoot $Paths.DataRoot 2>&1 | Out-String }
+            if ($LASTEXITCODE -ne 0) { throw "lib\Start-Job.ps1 finds no runner: $($out.Trim())" }
+            Sync-FileTree $next
+            Move-WriteThrough $next $Paths.Bootstrap -Replace
+            Write-Host "  the task's bootstrap (Start-Job.ps1) is lib\'s copy again"
+        }
+    } catch {
+        Remove-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
+        Write-Host "  the task's bootstrap is left as it is: $($_.Exception.Message)"
+        return
+    }
+    $onBox = [string]::Equals($Paths.InstallRoot.TrimEnd('\'), (Join-Path $env:ProgramFiles 'HTPC'), [StringComparison]::OrdinalIgnoreCase)
+    if ($onBox -and [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18') { Update-JobsTaskAction $Paths }
+}
+
+# A \HTPC\Jobs task registered before the bootstrap (it starts lib\Invoke-AppJob.ps1 itself)
+# starts Start-Job.ps1 instead: the same line Register-AppInstaller writes, the task's security
+# (the TV user may run it) kept. Any other action is left alone.
+function Update-JobsTaskAction($Paths) {
+    try {
+        $task = Get-ScheduledTask -TaskPath '\HTPC\' -TaskName 'Jobs' -ErrorAction Stop
+        $old = "$($task.Actions[0].Arguments)"
+        if ($old -notlike "*`"$($Paths.LauncherDir)\lib\Invoke-AppJob.ps1`"*") { return }
+        $argument = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $Paths.Bootstrap + '" -Job "$(Arg0)"'
+        $service = New-Object -ComObject Schedule.Service
+        $service.Connect()
+        $sddl = $service.GetFolder('\HTPC').GetTask('Jobs').GetSecurityDescriptor(4)   # DACL
+        $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        Set-ScheduledTask -TaskPath '\HTPC\' -TaskName 'Jobs' -Action (New-ScheduledTaskAction -Execute $powershell -Argument $argument) | Out-Null
+        $registered = $service.GetFolder('\HTPC').GetTask('Jobs')
+        if ($registered.GetSecurityDescriptor(4) -ne $sddl) { $registered.SetSecurityDescriptor($sddl, 0) }
+        Write-Host '  the \HTPC\Jobs task now starts Start-Job.ps1'
+    } catch {
+        Write-Host "  the \HTPC\Jobs task still starts the runner itself: $($_.Exception.Message)"
+    }
 }
 
 # The slots an update touched, from the journal's keys.
@@ -545,6 +605,7 @@ function Invoke-LauncherReconcile {
     $journal = Read-LauncherJournal $Paths
     if (-not $journal -or $journal.step -in 'done', 'rolledback', 'aborted', 'superseded', '') {
         Clear-WatchdogPause $Paths -OnlyStale
+        Sync-JobBootstrap $Paths
         return
     }
     # A journal of another job still running (the launcher's own update waiting on it) is its own:

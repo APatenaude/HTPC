@@ -14,8 +14,10 @@
                 Content-Length, a longer stream, 429 short and long, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
                 first roll back), not newer, no watchdog, a bad download (nothing touched)
-      Faults    the job ended hard after each journal step, then reconcile: the old launcher or
-                the new one, never half of each, and the launcher running is the one on disk
+      Faults    the job ended hard after each journal step, then reconcile, started the way the
+                box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
+                the update, even with lib\ or jobs\ gone): the old launcher or the new one, never
+                half of each, and the launcher running is the one on disk
       Planting  a junction for the staging folder, a user-owned .new file, a Users write entry
                 on state\: all refused (run it as SYSTEM in the VM too: -Only Planting)
       Wua       the Windows Update child faked: a hang is ended in time, the count leaves out
@@ -134,6 +136,9 @@ function New-SetupCopy([string]$To, [string]$Version, [switch]$BrokenRunner) {
         Copy-Item -LiteralPath $f.FullName $dest
     }
     [IO.File]::WriteAllText((Join-Path $To 'VERSION'), "$Version`n")
+    # Which release a lib\ or jobs\ folder came from (the Faults section checks the bootstrap
+    # never pairs one release's lib\ with the other's jobs\).
+    foreach ($part in 'lib', 'jobs') { [IO.File]::WriteAllText((Join-Path $To "$part\test-version.txt"), $Version) }
     if ($BrokenRunner) { Add-Content (Join-Path $To 'lib\Invoke-AppJob.ps1') "`n}{ broken" }
 }
 
@@ -151,6 +156,7 @@ function New-FakeBox([string]$Name) {
     Copy-Item (Join-Path $setup 'lib') (Join-Path $dir 'lib') -Recurse
     Copy-Item (Join-Path $setup 'jobs') (Join-Path $dir 'jobs') -Recurse
     Copy-Item (Join-Path $setup 'catalog.json') $dir
+    Copy-Item (Join-Path $setup 'lib\Start-Job.ps1') $dir
     Start-Process (Join-Path $dir 'HtpcWatchdog.exe') | Out-Null
     [void](Wait-For { Get-Running $root '0.1.0' } 20)
     $root
@@ -217,12 +223,14 @@ function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switc
     [IO.File]::WriteAllText((Join-Path $dir 'update.json'), ($m | ConvertTo-Json -Depth 4))
 }
 
-# Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would.
-function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt) {
+# Runs a launcher job in its own PowerShell (so a fault can end it hard), as the box's job would:
+# with the fake box's own lib\ (what its task runs), or the one its bootstrap picked (-Lib).
+function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [string]$Lib) {
+    if (-not $Lib) { $Lib = Join-Path $Root 'PF\HTPC\Launcher\lib' }
     $script = Join-Path $work "job-$PID.ps1"
     @"
-. '$lib\UpdateCore.ps1'
-. '$lib\LauncherUpdate.ps1'
+. '$Lib\UpdateCore.ps1'
+. '$Lib\LauncherUpdate.ps1'
 `$UpdateProgressFile = '$Root\PD\HTPC\state\test-progress.json'
 `$HealthyWait = [TimeSpan]::FromSeconds(25)
 `$UpdateFaultAt = $(if ($FaultAt) { "'$FaultAt'" } else { '$null' })
@@ -246,9 +254,24 @@ function Get-Leftovers([string]$Root) {
 }
 
 # The runner's own dry run (it refuses a bad token with an error on stderr: not this script's).
-function Test-Token([string]$Token) {
+function Test-Token([string]$Token, [string[]]$More) {
     $ErrorActionPreference = 'Continue'
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Invoke-AppJob.ps1" -Job $Token -DryRun 2>&1 | Out-Null
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Invoke-AppJob.ps1" -Job $Token -DryRun @More 2>&1 | Out-Null
+}
+
+# The runner a fake box's task would start now (its Start-Job.ps1 -Resolve): its lib\ and jobs\,
+# the release each came from (test-version.txt), and whether both are there whole.
+function Resolve-FakeRunner([string]$Root) {
+    $ErrorActionPreference = 'Continue'
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\PF\HTPC\Launcher\Start-Job.ps1" -Resolve -DataRoot "$Root\PD\HTPC" 2>&1 | Out-String
+    $found = @{}
+    foreach ($line in $out -split "`r?`n") { if ($line -match '^(lib|jobs)=(.+)$') { $found[$Matches[1]] = $Matches[2].Trim() } }
+    $from = { param($dir) $f = if ($dir) { Join-Path $dir 'test-version.txt' }; if ($f -and (Test-Path -LiteralPath $f)) { ([IO.File]::ReadAllText($f)).Trim() } else { '?' } }
+    [pscustomobject]@{
+        Lib = $found['lib']; Jobs = $found['jobs']
+        LibFrom = & $from $found['lib']; JobsFrom = & $from $found['jobs']
+        Whole = [bool]($found['lib'] -and $found['jobs'] -and (Test-Path -LiteralPath (Join-Path $found['lib'] 'Invoke-AppJob.ps1')) -and (Test-Path -LiteralPath (Join-Path $found['jobs'] 'reconcile.ps1')))
+    }
 }
 # --- Run -----------------------------------------------------------------------------------------------
 
@@ -282,6 +305,12 @@ try {
             Test-Token $t
             Check ($LASTEXITCODE -ne 0) "job token refused: $t"
         }
+        # A token that carries parameters in: the verb scripts only ever come from jobs\ (or the
+        # .prev/.new copies an update makes), the journal is only read from ProgramData.
+        Test-Token 'reconcile' @('-JobsDir', $env:TEMP)
+        Check ($LASTEXITCODE -ne 0) 'the runner refuses a jobs folder of the caller''s choosing'
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$lib\Start-Job.ps1" -Job reconcile -DataRoot $env:TEMP 2>&1 | Out-Null }
+        Check ($LASTEXITCODE -ne 0) 'the bootstrap refuses -DataRoot without -Resolve'
     }
 
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) { Start-FakeGitHub }
@@ -322,6 +351,8 @@ try {
 
         Publish-FakeRelease '0.2.0' 'healthy'
         $root = New-FakeBox 'swap-ok'
+        $bootstrap = Join-Path $root 'PF\HTPC\Launcher\Start-Job.ps1'
+        Add-Content -LiteralPath $bootstrap '# an older copy of the bootstrap'
         $r = Invoke-FakeJob $root $update
         $j = Get-Journal $root
         Check ($r -eq 'ok' -and $j.step -eq 'done') "healthy 0.2.0: done ($r, $($j.step))"
@@ -331,6 +362,10 @@ try {
         Check ((Get-Leftovers $root).Count -eq 0) 'no .new left'
         $r = Invoke-FakeJob $root 'Invoke-LauncherRollback -Paths $paths'
         Check ($r -eq 'ok' -and (Get-Journal $root).step -eq 'rolledback' -and (Wait-For { Get-Running $root '0.1.0' } 20)) "rollback on request: back on 0.1.0 ($r)"
+        # Its reconcile (no update under way) brought the task's bootstrap in line with lib\.
+        Check ((Get-FileHash $bootstrap).Hash -eq (Get-FileHash (Join-Path $root 'PF\HTPC\Launcher\lib\Start-Job.ps1')).Hash) "the task's bootstrap is lib\'s copy again"
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrap -Job reconcile -DryRun 2>&1 | Out-Null }
+        Check ($LASTEXITCODE -eq 0) '  and a dry run through it reaches the runner'
         Remove-FakeBox $root
 
         foreach ($case in @(@{ mode = 'crash' }, @{ mode = 'hang' }, @{ mode = 'healthy'; broken = $true })) {
@@ -371,14 +406,21 @@ try {
         foreach ($step in $steps) {
             $root = New-FakeBox "fault-$($step -replace '[:.]', '_')"
             [void](Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths' $step)
-            $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths'
+            # The power back: the task starts the box's bootstrap, which must find a whole runner
+            # (lib\ may be gone, or new beside the old jobs\), the one that began the update; the
+            # reconcile runs from there, not from this repository.
+            $pick = Resolve-FakeRunner $root
+            Check ($pick.Whole -and $pick.LibFrom -eq '0.1.0' -and $pick.JobsFrom -eq '0.1.0') "after '$step': the task's bootstrap finds the whole runner that began the update (lib $($pick.LibFrom), jobs $($pick.JobsFrom))"
+            $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths' -Lib $pick.Lib
             $j = Get-Journal $root
             $v = Get-ExeVersion $root
             $consistent = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
             $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
             $sameSetup = ($v -eq '0.1.0' -and $kept -eq '0.1.0') -or ($v -eq '0.2.0' -and $kept -eq '0.2.0')
             $runs = Wait-For { Get-Running $root $v } 25
+            $next = Resolve-FakeRunner $root
             Check ($consistent -and $sameSetup -and $runs -and (Get-Leftovers $root).Count -eq 0) "after '$step': $v on disk and running, journal $($j.step), setup $kept ($r)"
+            Check ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"
             Remove-FakeBox $root
         }
     }

@@ -46,7 +46,11 @@ The launcher runs at standard rights (the TV account is an Administrator, but it
 medium integrity). To install or uninstall a machine-wide app it hands the `\HTPC\Jobs` task one
 token, `install:<id>` / `uninstall:<id>` / `upgrade:<id>` / `firewall:<id>`. The task runs
 `lib/Invoke-AppJob.ps1` as SYSTEM, which dispatches to `jobs/<verb>.ps1` (a table other parts of
-the box add to: the updates' verbs below). Nothing but that one catalog id reaches a command:
+the box add to: the updates' verbs below). It starts it through `Start-Job.ps1` beside `lib\`
+(from `lib/Start-Job.ps1`), the one part of the runner a launcher update never swaps: after a
+power cut in the middle of an update it still finds a whole runner, the one that began the
+update, so the reconcile at Windows start can put things right. Nothing but that one catalog id
+reaches a command:
 
 - the token must match `^(verb)(:[A-Za-z0-9][A-Za-z0-9._-]{0,60})?$`, the verb must be a known
   `jobs/<verb>.ps1`, and the id must be in the trusted catalog in Program Files (case-sensitive);

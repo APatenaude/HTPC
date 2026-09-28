@@ -7,7 +7,7 @@ param([string]$Arg)
 if ($script:IsSystem) { throw 'winget-update runs as the signed-in user, not through the task' }
 if ($Arg) { throw 'Refused: winget-update takes no argument' }
 Write-JobProgress 'install' 10 'Updating winget'
-& "$PSScriptRoot\..\lib\Install-Winget.ps1" | ForEach-Object { Write-Host "  $_" }
+& "$JobLib\Install-Winget.ps1" | ForEach-Object { Write-Host "  $_" }
 # Like an app's update (it is one in the Updates list): this user's places and prefs, for every
 # catalog app (lib\AppAutostart.ps1; the machine's places are the upgrade jobs' and the reconcile's).
 [void](Invoke-AppAutostartGuard -Apps (Get-AutostartCatalog $script:TrustedCatalog) -Context 'winget-update')
