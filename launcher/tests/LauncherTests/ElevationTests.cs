@@ -135,9 +135,9 @@ static class ElevationTests
         // What CommandLine writes, Windows splits back into the same list.
         string[] tricky = ["--setup", @"C:\TV box\ui", "", "a\"b", @"trailing\", @"trailing slash\ ", @"C:\dir with space\",
             "--restart-reason=exit:3", @"back\\""quote", "tab\there", "\u00fcn\u00efcode \u00e9", @"\\server\share\x"];
-        var line = SetupElevation.CommandLine(tricky);
-        var back = Split("x.exe " + line).Skip(1).ToArray();
-        Check(back.SequenceEqual(tricky), $"command line round trip through CommandLineToArgvW: {line} -> {string.Join(" | ", back)}");
+        var written = SetupElevation.CommandLine(tricky);
+        var back = Split("x.exe " + written).Skip(1).ToArray();
+        Check(back.SequenceEqual(tricky), $"command line round trip through CommandLineToArgvW: {written} -> {string.Join(" | ", back)}");
         Check(SetupElevation.CommandLine(["--setup", "--dev", @"C:\no\spaces\"]) == @"--setup --dev C:\no\spaces\", "plain arguments stay as they are");
     }
 
