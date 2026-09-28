@@ -77,27 +77,43 @@ sealed class LauncherSettings
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "settings.json");
-    static readonly string BackupPath = FilePath + ".bak";
 
     // Several threads save (the UI thread on a settings change, the library job thread when a tile
     // is added): one save at a time, and one never sees another half-written file.
     static readonly object Gate = new();
 
-    public static LauncherSettings Load()
+    public static LauncherSettings Load() => Load(FilePath);
+
+    /// <summary>
+    /// settings.json, else its backup. Read from the backup, settings.json is written again from it
+    /// at once (the unreadable one kept as settings.json.unreadable): the next save would otherwise
+    /// make the unreadable file the backup, and the good copy would be gone. The path: tests.
+    /// </summary>
+    internal static LauncherSettings Load(string file)
     {
         lock (Gate)
         {
-            foreach (var path in new[] { FilePath, BackupPath })
+            var backup = file + ".bak";
+            foreach (var path in new[] { file, backup })
             {
                 try
                 {
                     if (!File.Exists(path)) continue;
-                    var loaded = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), Json);
-                    if (loaded is not null)
+                    var text = File.ReadAllText(path);
+                    var loaded = JsonSerializer.Deserialize<LauncherSettings>(text, Json);
+                    if (loaded is null) { Log.Warn($"Settings unreadable at {path}: empty"); continue; }
+                    if (path == backup)
                     {
-                        if (path == BackupPath) Log.Warn("Settings read from the backup copy (settings.json was unreadable)");
-                        return loaded;
+                        Log.Warn("Settings read from the backup copy (settings.json was unreadable): settings.json written again from it");
+                        try
+                        {
+                            if (File.Exists(file)) File.Copy(file, file + ".unreadable", overwrite: true);
+                            WriteFlushed(file + ".tmp", text);
+                            File.Move(file + ".tmp", file, overwrite: true);
+                        }
+                        catch (Exception e) { Log.Warn($"settings.json not written again from the backup: {e.Message}"); }
                     }
+                    return loaded;
                 }
                 catch (Exception e) { Log.Warn($"Settings unreadable at {path}: {e.Message}"); }
             }
@@ -106,25 +122,38 @@ sealed class LauncherSettings
     }
 
     /// <summary>
-    /// Writes settings.json atomically: a full temp file is written, the current file is kept as
-    /// settings.json.bak, and the temp file replaces it in one step (File.Replace). A crash mid-save
-    /// leaves either the old file or the backup intact, never a half-written one.
+    /// Writes settings.json atomically: a full temp file is written and flushed to the disk, the
+    /// current file is kept as settings.json.bak, and the temp file replaces it in one step
+    /// (File.Replace). A crash or a power cut mid-save leaves either the old file or the backup
+    /// intact, never a half-written one. Saves are few: a setting changed, the sliders once they
+    /// rest (MainForm.SaveSoon), the Wi-Fi radio switched by standby on a cable.
     /// </summary>
-    public void Save()
+    public void Save() => Save(FilePath);
+
+    internal void Save(string file)
     {
         lock (Gate)
         {
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
                 var json = JsonSerializer.Serialize(this, Json);
-                var temp = FilePath + ".tmp";
-                File.WriteAllText(temp, json);
-                if (File.Exists(FilePath)) File.Replace(temp, FilePath, BackupPath);
-                else File.Move(temp, FilePath);
+                var temp = file + ".tmp";
+                WriteFlushed(temp, json);
+                if (File.Exists(file)) File.Replace(temp, file, file + ".bak");
+                else File.Move(temp, file);
             }
             catch (Exception e) { Log.Error("Saving settings", e); }
         }
+    }
+
+    // On the disk before it replaces anything (FlushFileBuffers): after a power cut the renamed
+    // file must have its content, not only its name. UTF-8 without a BOM, as File.WriteAllText.
+    static void WriteFlushed(string path, string text)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        stream.Write(new System.Text.UTF8Encoding(false).GetBytes(text));
+        stream.Flush(flushToDisk: true);
     }
 
     /// <summary>Applies one value sent by the Settings screen; false for an unknown key or value.</summary>

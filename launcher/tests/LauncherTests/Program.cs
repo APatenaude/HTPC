@@ -608,6 +608,33 @@ Console.WriteLine("== Brightness at start");
     Check(new LauncherSettings().Brightness == 100 && new LauncherSettings().Volume is null, "defaults: full brightness, no volume kept yet");
 }
 
+// ---------------------------------------------------------------- settings.json and its backup
+// In a folder of its own (never the box's settings.json).
+Console.WriteLine("== Settings: an unreadable settings.json");
+{
+    var dir = Path.Combine(Path.GetTempPath(), "htpc-settings-test");
+    if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+    var file = Path.Combine(dir, "settings.json");
+    var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    int Idle(string path) => JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), web)!.IdleMinutes;
+    new LauncherSettings { IdleMinutes = 45 }.Save(file);
+    new LauncherSettings { IdleMinutes = 50 }.Save(file);
+    Check(Idle(file) == 50 && Idle(file + ".bak") == 45 && !File.Exists(file + ".tmp"), "saved twice: the file, the one before as the backup, no temp file left");
+    File.WriteAllText(file, "{ \"idleMinutes\": 5");   // cut short
+    var loaded = LauncherSettings.Load(file);
+    Check(loaded.IdleMinutes == 45, "unreadable: the backup's settings");
+    Check(Idle(file) == 45 && File.ReadAllText(file + ".unreadable").StartsWith("{ \"idleMinutes\": 5"), "settings.json written again from the backup at once, the unreadable one kept aside");
+    loaded.IdleMinutes = 60;
+    loaded.Save(file);
+    Check(Idle(file) == 60 && Idle(file + ".bak") == 45, "the next save: the backup is a good copy, not the unreadable file");
+    File.WriteAllText(file, "");
+    Check(LauncherSettings.Load(file).IdleMinutes == 45, "unreadable again: the backup still has the settings");
+    File.Delete(file);
+    File.Delete(file + ".bak");
+    Check(LauncherSettings.Load(file).IdleMinutes == new LauncherSettings().IdleMinutes, "neither file: the defaults");
+    Directory.Delete(dir, recursive: true);
+}
+
 // ---------------------------------------------------------------- Core Audio (reads only)
 Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
 {
