@@ -5,8 +5,9 @@ using System.Text.Json;
 namespace Htpc.Launcher;
 
 /// <summary>
-/// Setup mode ("TV Box Setup"): runs setup\setup.ps1 elevated, with the one Windows permission
-/// prompt (UAC) the box asks for, and reports its progress from setup-progress.json.
+/// Setup mode ("TV Box Setup"): runs setup\setup.ps1 and reports its progress from
+/// setup-progress.json. The wizard runs elevated already (the one Windows permission prompt came
+/// as it opened: SetupElevation.cs), so setup.ps1 starts directly, elevated like it, no prompt.
 /// </summary>
 sealed class SetupRunner
 {
@@ -58,34 +59,41 @@ sealed class SetupRunner
     public bool Running => process is { HasExited: false };
 
     /// <summary>
-    /// Starts setup.ps1 elevated. False when the permission prompt was declined (nothing ran).
+    /// setup.ps1 as the wizard starts it: directly, with no window and no prompt of its own (it
+    /// inherits the wizard's rights). Windows PowerShell by its full path: this process is
+    /// elevated, and a bare name would be looked for first in the exe's own folder (Downloads).
     /// </summary>
+    public static ProcessStartInfo StartInfo(string script, IReadOnlyCollection<string> apps, string? launcherExe)
+    {
+        var args = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\" -NoPause";
+        args += apps.Count > 0 ? $" -Apps {string.Join(',', apps)}" : " -Skip Apps";
+        if (launcherExe is not null) args += $" -LauncherExe \"{launcherExe}\"";
+        return new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"), args)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(script)!,
+        };
+    }
+
+    /// <summary>Starts setup.ps1. False when it could not start (logged; nothing ran).</summary>
     public bool Start(IReadOnlyCollection<string> apps, string? launcherExe)
     {
         if (Running) return true;
         // The progress file of an earlier run stays (setup, elevated, owns it): only one written
         // after this start counts.
         startedAt = DateTime.Now;
-        var args = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\" -NoPause";
-        args += apps.Count > 0 ? $" -Apps {string.Join(',', apps)}" : " -Skip Apps";
-        if (launcherExe is not null) args += $" -LauncherExe \"{launcherExe}\"";
-        var psi = new ProcessStartInfo("powershell.exe", args)
-        {
-            UseShellExecute = true,
-            Verb = "runas",   // the UAC prompt
-            WindowStyle = ProcessWindowStyle.Hidden,
-            WorkingDirectory = Path.GetDirectoryName(script)!,
-        };
+        var psi = StartInfo(script, apps, launcherExe);
         try
         {
             process = Process.Start(psi);
         }
-        catch (Win32Exception e) when (e.NativeErrorCode == 1223) // ERROR_CANCELLED: prompt declined
+        catch (Exception e) when (e is Win32Exception or InvalidOperationException)
         {
-            Log.Info("Setup: Windows permission declined");
+            Log.Error("Setup did not start", e);
             return false;
         }
-        Log.Info($"Setup started: powershell {args}");
+        Log.Info($"Setup started: powershell {psi.Arguments}");
         lastProgress = "";
         poll.Start();
         return true;

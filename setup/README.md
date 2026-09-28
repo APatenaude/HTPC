@@ -4,16 +4,19 @@ Scripts that turn a clean Windows 11 IoT Enterprise LTSC 2024 install into the f
 (docs/SPEC.md, Architecture > Install). Everything done by hand on the box ends up here.
 
 The usual way in is **TV Box Setup.exe** (`launcher\dev\Publish-Setup.ps1` builds it): the
-launcher in setup mode, one self-contained file with these scripts inside. It asks the
-questions (controller check, TV, apps), then runs setup.ps1 with one Windows permission prompt,
-shows its progress, and hands over to the launcher it installed.
+launcher in setup mode, one self-contained file with these scripts inside. It asks for
+Windows' permission once, as it opens (the UAC prompt names it; declined, it says setup needs
+administrator rights: try again or quit), asks the questions (controller check, TV, apps), then
+runs setup.ps1 with no further prompt, shows its progress, and hands over to the launcher it
+installed, started as the signed-in user, not elevated (launcher/README.md, SetupElevation.cs).
 
 ## setup.ps1
 
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1 -Only Edge,Power
 
-It elevates itself (UAC), is safe to re-run, keeps going when one step fails, and logs to
+It elevates itself (UAC; started elevated, as TV Box Setup starts it, it just runs), is safe
+to re-run, keeps going when one step fails, and logs to
 `C:\ProgramData\HTPC\logs` (`setup-last.json` has the step results). After a USB install the
 answer file runs it with `-Unattended` at the first sign-in.
 

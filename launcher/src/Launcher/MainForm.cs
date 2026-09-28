@@ -179,7 +179,8 @@ sealed partial class MainForm : Form
 
     async Task InitWebView()
     {
-        var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "launcher-webview");
+        // Setup (elevated) has a profile of its own: SetupElevation.cs.
+        var dataDir = SetupElevation.WebViewFolder(options.Setup);
         // The controller's presses reach the page as web messages, not user gestures: without
         // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
         var env = await CoreWebView2Environment.CreateAsync(null, dataDir,
@@ -541,27 +542,36 @@ sealed partial class MainForm : Form
                 Reveal(); // installers may have put windows over the launcher
             };
         }
-        // Start waits for Windows' permission prompt: the wizard stays on the apps step until then.
-        Post(setup.Start(picked, SetupRunner.SelfContainedExe()) ? new { type = "setupStarted" } : new { type = "declined" });
+        // No permission prompt here: the wizard asked as it opened (SetupElevation.cs).
+        if (setup.Start(picked, SetupRunner.SelfContainedExe())) Post(new { type = "setupStarted" });
+        else Post(new { type = "installed", ok = false, results = new { Setup = "FAILED: setup.ps1 did not start (see launcher.log)" }, restartNeeded = Array.Empty<string>() });
     }
 
     /// <summary>
     /// Setup done: the installed launcher takes over (the setup exe may be on a USB stick about
-    /// to be pulled out). Without an installed copy (a dev build), this window becomes the launcher.
+    /// to be pulled out), started as the signed-in user: this window is elevated. Without an
+    /// installed copy (a dev build, or the Launcher step failed) this program becomes the home
+    /// screen, as a copy started the same way (SetupElevation.AfterSetup); in place only when this
+    /// one is not elevated.
     /// </summary>
     void FinishSetup()
     {
         var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
-        if (File.Exists(installed) && !string.Equals(Environment.ProcessPath, installed, StringComparison.OrdinalIgnoreCase))
+        var elevated = Environment.IsPrivilegedProcess;
+        var next = SetupElevation.AfterSetup(installed, File.Exists(installed), File.Exists(Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe")),
+            DesktopMode.WatchdogIsShell(), Environment.ProcessPath!, Environment.GetCommandLineArgs().Skip(1), elevated);
+        if (next is not null)
         {
-            Log.Info($"Setup finished: starting {installed}");
+            Log.Info($"Setup finished: starting {next.Exe} {next.Arguments}");
             try
             {
-                StartInstalled(installed); // MainForm.Shell.cs: through the watchdog
+                StartInstalled(next); // MainForm.Shell.cs: as the signed-in user
                 Close();
                 return;
             }
-            catch (Exception e) { Log.Error("Starting the installed launcher", e); }
+            catch (Exception e) { Log.Error("Starting the launcher after setup", e); }
+            // Never this window instead: apps opened from it would run elevated.
+            if (elevated) { Post(new { type = "toast", text = "The home screen did not start. Restart the box to get to it.", kind = "warn" }); return; }
         }
         setupMode = false;
         tv.InSetup = false;
@@ -778,6 +788,10 @@ sealed partial class MainForm : Form
 
     // --- Power and the sleep timer ----------------------------------------------------------------
 
+    // By its full path: setup's Restart now runs elevated, from wherever the setup exe is (a bare
+    // name is looked for in the exe's own folder first, Downloads say).
+    static readonly string ShutdownExe = Path.Combine(Environment.SystemDirectory, "shutdown.exe");
+
     void Power(string action)
     {
         Log.Info($"Power: {action}");
@@ -787,11 +801,11 @@ sealed partial class MainForm : Form
                 // In the mode chosen in Settings (standby by default).
                 standby.Sleep("Power menu");
                 break;
-            case "restart": apps.MarkAllClosing("restart"); System.Diagnostics.Process.Start("shutdown.exe", "/r /t 0"); break;
+            case "restart": apps.MarkAllClosing("restart"); System.Diagnostics.Process.Start(ShutdownExe, "/r /t 0"); break;
             case "shutdown":
                 apps.MarkAllClosing("shut down");
                 tv.TurnOffBeforeShutdown(); // the TV goes off with a shut down (not with a restart)
-                System.Diagnostics.Process.Start("shutdown.exe", "/s /t 0");
+                System.Diagnostics.Process.Start(ShutdownExe, "/s /t 0");
                 break;
             case "desktop": EnterDesktop(); break; // MainForm.Shell.cs
             case "tv": BackToTv(); break;

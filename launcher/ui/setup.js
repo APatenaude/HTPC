@@ -1,11 +1,12 @@
 'use strict';
 // First-run setup: the launcher in setup mode ("TV Box Setup"; design: First-run setup). Steps:
 // welcome, controller check, Wi-Fi (only without a network cable), find the TV, the TV input
-// (for TVs whose input the box sets or reads), apps, install (setup.ps1 elevated, one Windows
-// permission prompt), done. The phone remote is not a step: the home screen offers it.
+// (for TVs whose input the box sets or reads), apps, install (setup.ps1, no prompt: the setup exe
+// asked Windows for permission once, as it opened), done. The phone remote is not a step: the
+// home screen offers it.
 //   From the host: {type:'init', apps, tv, controller, battery, canInstall, wired} {type:'state', controller, battery}
 //                  {type:'tv.state', tv} {type:'tv.read', power, input} {type:'input', button}
-//                  {type:'setupStarted'} {type:'declined'} {type:'progress', steps, running, results, done}
+//                  {type:'setupStarted'} {type:'progress', steps, running, results, done}
 //                  {type:'installed', ok, results, restartNeeded} {type:'toast', text, kind}
 //   To the host:   {type:'ready'} {type:'install', apps, tiles} {type:'finish'} {type:'restart'} and the
 //                  TV messages (tv.js)
@@ -40,8 +41,7 @@ const state = {
   dialog: false,          // "How should the box control this TV?" is open
   read: null,             // what the TV says it shows: { power, input } (input step)
   canInstall: true,
-  asking: false,          // install pressed: Windows' permission prompt is up
-  declined: false,        // ... and it was declined
+  starting: false,        // install pressed, setup.ps1 not started yet
   progress: null,         // setup-progress.json while installing
   result: null,           // { ok, results, restartNeeded } when setup has finished
   focus: null,            // data-id of the focused element
@@ -100,9 +100,9 @@ function views() {
   if (s === 'tv') return tvView();
   if (s === 'input') return inputView();
   if (s === 'apps') {
-    const note = state.asking ? 'Windows is asking for permission now: choose Yes with a mouse or keyboard (the controller can’t reach that prompt).'
-      : state.declined ? 'Windows did not get permission, so nothing was changed. Try again and choose Yes with a mouse or keyboard.'
-      : `${state.picked.size} picked${state.canInstall ? '' : ' · this copy cannot install (not the setup exe)'} · Install asks Windows once for permission: have a mouse or keyboard at hand for that prompt.`;
+    // Windows' permission was asked for once, as the setup exe opened: Install asks nothing more.
+    const note = state.starting ? 'Starting…'
+      : `${state.picked.size} picked · ${state.canInstall ? 'Install starts right away, with no more questions' : 'this copy cannot install (not the setup exe)'}`;
     return {
       main: '<div class="su-col"><div class="su-head"><h1>Pick your apps</h1>' +
         '<p>Ticked apps install now and get a tile on the home screen. The rest stay in the library for later.</p></div>' +
@@ -112,8 +112,8 @@ function views() {
             `<span class="su-box">${on ? icon('check', 24, 3) : ''}</span>` +
             `<span style="display:flex;color:${esc(a.color)}">${icon(a.glyph, 32)}</span><span class="su-name">${esc(a.name)}</span></div>`;
         }).join('')}</div>` +
-        `<span class="su-note${state.declined || state.asking ? ' warn' : ''}">${esc(note)}</span></div>`,
-      buttons: state.asking ? '' : button('back', 'Back') + button('install', state.declined ? 'Try again' : 'Install', true),
+        `<span class="su-note">${esc(note)}</span></div>`,
+      buttons: state.starting ? '' : button('back', 'Back') + button('install', 'Install', true),
     };
   }
   if (s === 'install') {
@@ -314,8 +314,7 @@ function stepBy(delta) {
 }
 
 function install() {
-  state.declined = false;
-  state.asking = true;
+  state.starting = true;
   state.progress = null;
   const picked = state.apps.filter((a) => state.picked.has(a.id)).map((a) => a.id);
   send({ type: 'install', apps: picked, tiles: picked });
@@ -364,7 +363,7 @@ function closeDialog() { state.dialog = false; state.focus = null; render(); }
 // controller).
 function press(button, fromController) {
   const step = state.step;
-  if (step === 'install' || (step === 'apps' && state.asking)) return; // nothing to do but wait
+  if (step === 'install' || (step === 'apps' && state.starting)) return; // nothing to do but wait
   if (fromController && step === 'controller' && !BUTTONS.every(([b]) => state.pressed.has(b))) {
     if (button === 'homeHold') { stepBy(1); return; }
     if (BUTTONS.some(([b]) => b === button)) { state.pressed.add(button); render(); }
@@ -432,11 +431,10 @@ function onHost(m) {
       break;
     case 'tv.read': state.read = { power: m.power, input: m.input }; if (state.step === 'input') render(); break;
     case 'input': press(m.button, true); break;
-    case 'setupStarted': state.asking = false; goStep('install'); break;
-    case 'declined': state.asking = false; state.declined = true; if (state.step === 'apps') render(); break;
-    case 'progress': state.asking = false; state.progress = m; if (state.step === 'install') render(); break;
+    case 'setupStarted': state.starting = false; goStep('install'); break;
+    case 'progress': state.starting = false; state.progress = m; if (state.step === 'install') render(); break;
     case 'installed':
-      state.asking = false;
+      state.starting = false;
       state.result = m;
       goStep('done');
       break;
@@ -450,7 +448,7 @@ if (host) {
   // Demo data in a plain browser. setup.html#tv?demo=lg opens that step with that TV sample
   // (tv.js: roku, none-found, locked, twins, unbound, lg, paused, none, missing); more flags:
   // dialog=1 (the method dialog), read=3 (the TV says HDMI 3), wired=0 (Wi-Fi step),
-  // asking=1 / declined=1 (apps), restart=1 (done).
+  // starting=1 (apps), restart=1 (done).
   const [name, query] = location.hash.slice(1).split('?');
   const q = new URLSearchParams(query || '');
   onHost({ type: 'init', controller: true, battery: 'full', wired: q.get('wired') !== '0', apps: [
@@ -467,8 +465,7 @@ if (host) {
     // A step by name, or by number (1 = the first) as before.
     const list = steps();
     const step = /^\d+$/.test(name) ? list[Math.min(list.length - 1, Number(name))] : name;
-    state.asking = q.get('asking') === '1';
-    state.declined = q.get('declined') === '1';
+    state.starting = q.get('starting') === '1';
     if (step === 'done') state.result = { ok: true, results: {}, restartNeeded: q.get('restart') === '1' ? ['ComputerName'] : [] };
     goStep(step);
     // setup.html#wifi?wired=0&wifi=password: the Wi-Fi component's sample states (wifi.js demo).

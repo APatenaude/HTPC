@@ -36,18 +36,16 @@ sealed partial class MainForm
 
     /// <summary>
     /// Setup done: the installed launcher takes over, through the watchdog when there is one (it
-    /// keeps the launcher running from now on). This copy's exit is planned (75), not a crash.
+    /// keeps the launcher running from now on; as the shell, --shell, when setup ran again on a
+    /// finished box whose watchdog had gone, not in a session Explorer started). Setup runs
+    /// elevated: they start as the signed-in user, not elevated (AsUser, SetupElevation.cs). A
+    /// watchdog already running (setup run again) starts the launcher itself once the pause is off.
+    /// This copy's exit is planned (75), not a crash.
     /// </summary>
-    void StartInstalled(string installed)
+    void StartInstalled(UserStart next)
     {
-        var watchdog = Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe");
-        var psi = File.Exists(watchdog)
-            // As the shell (setup run again on a finished box whose watchdog had gone): --shell,
-            // as at sign-in. Not in a session Explorer started (the first one after setup).
-            ? new System.Diagnostics.ProcessStartInfo(watchdog, DesktopMode.WatchdogIsShell() ? "--shell" : "")
-            : new System.Diagnostics.ProcessStartInfo(installed);
-        psi.UseShellExecute = true;
-        System.Diagnostics.Process.Start(psi);
+        if (next.Task == AsUser.WatchdogTask && DesktopMode.WatchdogRunning()) Log.Info("The watchdog is running: it starts the launcher");
+        else AsUser.Start(next);
         WatchdogPause.Clear();
         Environment.ExitCode = 75;
     }

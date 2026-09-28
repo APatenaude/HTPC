@@ -5,9 +5,10 @@
     box), with its web UI, the setup scripts and the watchdog (HtpcWatchdog.exe) inside.
 
 .DESCRIPTION
-    Run as "TV Box Setup.exe" it opens in setup mode (the name has "setup" in it): pick apps,
-    find the TV, check the controller, then one Windows permission prompt runs setup.ps1, which
-    also installs this same file as the launcher (Program Files\HTPC\Launcher\HtpcLauncher.exe).
+    Run as "TV Box Setup.exe" it opens in setup mode (the name has "setup" in it), asking for
+    Windows' permission (UAC) once as it opens: pick apps, find the TV, check the controller,
+    then it runs setup.ps1, which also installs this same file as the launcher (Program
+    Files\HTPC\Launcher\HtpcLauncher.exe).
     Needs the .NET SDK named in global.json (setup\dev\Install-BuildTools.ps1). Output:
     launcher\dist (not in git). A release is built by launcher\dev\Build-Release.ps1, which
     calls this with -Locked.
