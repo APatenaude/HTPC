@@ -241,11 +241,7 @@
       const tabs = [['library', 'Library'], ['onbox', 'On this box'], ['website', 'Website']].map(([id, label]) =>
         `<div class="at-tab${id === lib.tab ? ' on' : ''}">${label}<span class="at-underline"></span></div>`).join('');
       const body = lib.tab === 'library' ? libraryTabHtml() : lib.tab === 'onbox' ? onboxTabHtml() : websiteTabHtml();
-      const hintList = lib.tab === 'website'
-        ? [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Add tile'], ['LB', 'Tabs'], ['B', 'Back']]
-        : lib.tab === 'library'
-          ? [['A', 'Install or add'], ['X', 'Uninstall'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']]
-          : [['A', 'Add to home'], ['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
+      const hintList = tabHints(null);
       // The same tab again (install progress, a logo, the catalog after an add): its cards are
       // updated in place (patchHtml), their logos not loaded again, the list's scroll and the
       // focus left be. Another tab is drawn afresh.
@@ -257,10 +253,13 @@
         `<footer class="hints">${hints(hintList)}</footer>`;
       el('addtile').dataset.tab = lib.tab;
     },
-    // The tab's list scrolls to the focus, with room for its ring, above the hints.
+    // The tab's list scrolls to the focus, with room for its ring, above the hints; the hints
+    // say what A and X do there.
     focused(node) {
       const main = node.closest('.at-main');
       if (main) { scrollIntoBox(node, main, 40); listEdges(main); }
+      const bar = el('addtile').querySelector('footer.hints');
+      if (bar) patchHtml(bar, hints(tabHints(node)));
     },
     press(button, node) {
       if (button === 'lb') { switchTab(-1); return true; }
@@ -275,6 +274,22 @@
     },
   });
 
+  // The hints for the focused card or row: A only where it does something, X Uninstall only on
+  // an installed app that can be uninstalled (not a site, not an app to install).
+  function tabHints(node) {
+    const tabs = [['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
+    if (lib.tab === 'website') return [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Add tile'], ...tabs];
+    if (lib.tab === 'onbox') {
+      const add = !node || node.dataset.act === 'addprog' && !node.classList.contains('on-home');
+      return [...(add ? [['A', 'Add to home']] : []), ...tabs];
+    }
+    const card = node && node.dataset.arg ? findCard(node.dataset.arg) : null;
+    if (!card) return [['A', 'Install or add'], ...tabs];
+    const a = card.state === 'install' ? (lib.failed.has(card.id) ? 'Try again' : 'Install') : card.state === 'installed' || card.state === 'add' ? 'Add tile' : null;
+    const x = node.dataset.uninstall === '1' && (card.state === 'installed' || card.state === 'home');
+    return [...(a ? [['A', a]] : []), ...(x ? [['X', 'Uninstall']] : []), ...tabs];
+  }
+
   function openAddTile() {
     lib.tab = 'library';
     lib.website = { name: '', url: '', field: 'url' };
@@ -286,7 +301,7 @@
     if (!TABS.includes(tab) || tab === lib.tab) return;
     lib.tab = tab;
     if (tab === 'library') send({ type: 'library.list' });
-    if (tab === 'onbox') send({ type: 'library.startMenu' });
+    if (tab === 'onbox') { hostAsked('programs', 15000); send({ type: 'library.startMenu' }); }
     render();
     const first = el('addtile').querySelector('.at-main [data-nav]');
     if (first) setFocus(first);
@@ -337,7 +352,7 @@
   }
 
   function onboxTabHtml() {
-    if (!lib.programs.length) return '<p class="at-empty">Reading what’s installed…</p>';
+    if (!lib.programs.length) return `<p class="at-empty">${hostWaitText('programs', 'Reading what’s installed…', 'The list of programs didn’t come. Switch tabs (LB, RB) to try once more.', 15000)}</p>`;
     const rows = lib.programs.map((p) => {
       if (!p.launchable)
         return `<button class="ob-row muted" data-nav data-id="ob-${esc(p.name)}" data-act="prognote" data-note="${esc(p.note || '')}">` +
@@ -385,7 +400,13 @@
     else if (which === 'space' && f === 'name') lib.website[f] = (lib.website[f] + ' ').slice(0, 24);
     render();
   }
-  function saveWebsite() { send({ type: 'library.addWebsite', name: lib.website.name, url: lib.website.url }); }
+  // Adding shows on its key ("Adding…") until the host answers; 15 s without an answer says so.
+  function saveWebsite() {
+    if (lib.adding) return;
+    lib.adding = setTimeout(() => { lib.adding = null; toast('No answer about the website. Try once more.', 'warn'); if (state.view === 'addtile') render(); }, 15000);
+    send({ type: 'library.addWebsite', name: lib.website.name, url: lib.website.url });
+    render();
+  }
 
   onAction('field', (node, id) => { lib.website.field = id; render(); });
   onAction('key', (node, ch) => typeText(ch));
@@ -563,6 +584,7 @@
         break;
       }
       case 'library.programs':
+        hostAnswered('programs');
         lib.programs = msg.list || [];
         if (state.view === 'addtile' && lib.tab === 'onbox') { render(); focusBodyIfNeeded(); }
         break;
@@ -578,6 +600,8 @@
         break;
       }
       case 'library.websiteResult':
+        clearTimeout(lib.adding);
+        lib.adding = null;
         if (msg.ok) { toast(`Added ${msg.name}`); reset('home'); }
         else toast(msg.error || 'That address did not work', 'warn');
         break;
@@ -609,7 +633,7 @@
       (mode === 'website' ? '<button class="kbi-key wide" data-nav data-id="website-dotcom" data-act="dotcom">.com</button>' : '') +
       `<button class="kbi-key space" data-nav data-id="${mode}-space" data-act="${spaceAct}" aria-label="Space"></button>` +
       `<button class="kbi-key" data-nav data-id="${mode}-del" data-act="${delAct}" aria-label="Delete">${icon('backspace', 30, 2)}</button>` +
-      `<button class="kbi-key primary" data-nav data-id="${mode}-done" data-act="${doneAct}">${mode === 'rename' ? 'Save' : 'Add'}</button>` +
+      `<button class="kbi-key primary" data-nav data-id="${mode}-done" data-act="${doneAct}">${mode === 'rename' ? 'Save' : lib.adding ? 'Adding…' : 'Add'}</button>` +
       '</div>';
     return rows + bottom;
   }

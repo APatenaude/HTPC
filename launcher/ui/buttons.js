@@ -113,7 +113,7 @@ addView('maps', {
       '<div class="spane"><main>' +
         `<header><span class="back">${icon('chevleft', 22, 2)}Controller</span><h1>Button maps</h1>` +
         '<p>Each app gets its own buttons. Home always opens the menu.</p></header>' +
-        `<div class="mlist">${rows || `<p class="snote">${maps.data ? 'No apps on the home screen yet.' : waitText()}</p>`}</div>` +
+        `<div class="mlist">${rows || `<p class="snote">${maps.data ? 'No apps on the home screen yet.' : mapsWaitText()}</p>`}</div>` +
       `</main><footer class="hints">${hints([['A', 'Edit'], ['B', 'Back']])}</footer></div>`, '.mlist', 'maps');
   },
   focused() { keepInView('maps', '.mlist'); },   // the list scrolls to the focus
@@ -132,11 +132,11 @@ function askMaps() {
   send({ type: 'maps.get' });
   setTimeout(() => { if (!maps.data && (state.view === 'maps' || state.view === 'buttons')) render(); }, 10500);
 }
-function waitText() {
+function mapsWaitText() {
   return Date.now() - (maps.askedAt || 0) > 10000 ? 'The button maps didn’t load. Press B, then open them again.' : 'Loading…';
 }
 function loadingHtml(cls) {
-  return `<div class="${cls}"><p class="snote">${waitText()}</p></div><footer class="hints">${hints([['B', 'Back']])}</footer>`;
+  return `<div class="${cls}"><p class="snote">${mapsWaitText()}</p></div><footer class="hints">${hints([['B', 'Back']])}</footer>`;
 }
 
 onAction('maps', () => { askMaps(); go('maps'); });

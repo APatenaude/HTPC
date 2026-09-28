@@ -167,10 +167,13 @@ function updateHomeHints() {
     $('home-hints').innerHTML = hints([['D-pad', 'Move it'], ['A', 'Drop it here'], ['B', 'Cancel']]);
     return;
   }
-  const f = $('home').querySelector('.tile.focused');
+  const f = $('home').querySelector('[data-nav].focused');
   const isAdd = f && f.dataset.act === 'addtile';
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
-  const list = f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
+  // Not a tile: the Settings and Power buttons of the top bar, the phone card's "Not now".
+  const other = f && !f.classList.contains('tile') ? ({ settings: 'Settings', power: 'Power', 'phone-card-hide': 'Not now' })[f.dataset.act] || 'Select' : null;
+  const list = other ? [['A', other], ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
     : isAdd ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
   $('home-hints').innerHTML = hints(list);
@@ -209,10 +212,24 @@ function renderMenu() {
       `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
       `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
     '</div></div>' +
-    `<footer class="hints">${hints([['A', 'Select'], ['X', 'Close app'], ['B', 'Back']])}</footer>`);
+    `<footer class="hints">${hints(menuHints($('menu').querySelector('[data-nav].focused')))}</footer>`);
   // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that
   // showed for a few seconds when an app opened).
   if ($('menu-app')) patchHtml($('menu-app'), typeof menuAppCard === 'function' ? menuAppCard() : '');
+}
+
+// The Home menu's hints follow the focus: X only where it does something (an alert's row: it
+// dismisses it; an open app's row, or the app the menu is over: it closes it), left/right on a
+// slider (A does nothing there).
+function menuHints(el) {
+  const list = [el && el.dataset.slider ? ['←→', 'Change'] : ['A', 'Select']];
+  if (el && el.dataset.alert) list.push(['X', 'Dismiss']);
+  else {
+    const id = (el && el.dataset.close) || state.current;
+    if (id && state.tiles.some((t) => t.id === id && t.running)) list.push(['X', 'Close app']);
+  }
+  list.push(['B', 'Back']);
+  return list;
 }
 
 const POWER = [
@@ -493,6 +510,7 @@ function setFocus(el, chosen = true) {
     return;
   }
   if (state.view === 'settings') settingsFocused(el);
+  if (state.view === 'menu') { const bar = $('menu-panel').querySelector('footer.hints'); if (bar) patchHtml(bar, hints(menuHints(el))); }
   const view = EXT.views[state.view];
   if (view && view.focused) view.focused(el);
   // Anything in a box that scrolls (a list, a panel, a dialog's list) comes into view, ring and
@@ -655,6 +673,7 @@ function settingsFocused(el) {
 function settingsHints(el) {
   if (el.dataset.section) return [['A', 'Open'], ['B', 'Back']];
   if (editing === el.dataset.id) return [['←→', 'Change'], ['A', 'Done']];
+  if (el.dataset.noa !== undefined) return [['B', 'Sections']];   // a row A does nothing on
   const what = el.dataset.edit !== undefined ? 'Change' : el.querySelector('.toggle') ? 'On / off' : 'Select';
   return [['A', what], ['B', 'Sections']];
 }
@@ -806,6 +825,16 @@ function hideOpening() {
   if (opening) clearTimeout(opening.timer);
   opening = null;
 }
+
+// Asking the host for something a screen waits on ("Looking…"): never an endless wait. After ms
+// without an answer the screen is drawn again and says so (hostWaitText's late text).
+const hostWaits = {};
+function hostAsked(key, ms = 10000) {
+  hostWaits[key] = Date.now();
+  setTimeout(() => { if (hostWaits[key] && Date.now() - hostWaits[key] >= ms) render(); }, ms + 50);
+}
+function hostAnswered(key) { delete hostWaits[key]; }
+function hostWaitText(key, text, late, ms = 10000) { return hostWaits[key] && Date.now() - hostWaits[key] >= ms ? late : text; }
 
 // A short message from the page, drawn with the alerts (notices.js).
 function toast(text, kind) { if (text) noticeOwn(text, kind); }

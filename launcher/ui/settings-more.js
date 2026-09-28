@@ -204,7 +204,7 @@ settingsSection('sound', {
       `<div class="srow"${nav ? ' data-nav data-id="snd-output" data-output data-edit' : ''}>` +
       `<div class="text"><span class="label">Output</span><span class="caption">${esc(caption)}</span></div>${value}</div>`;
     let output;
-    if (!a) output = row('Looking…', '');
+    if (!a) output = row(hostWaitText('sound', 'Looking…', 'Windows didn’t list the sound outputs. Open Sound again to try once more.'), '');
     else if (!outputs.length) output = row('No sound output found', '');
     else if (a.canSwitch && outputs.length > 1) {
       output = row('Where the sound goes: the TV, a soundbar, Bluetooth headphones',
@@ -227,7 +227,7 @@ settingsSection('sound', {
     }
     return false;
   },
-  shown() { send({ type: 'sound.outputs' }); },
+  shown() { hostAsked('sound'); send({ type: 'sound.outputs' }); },
   demo() {
     more.audio = { canSwitch: true, outputs: [{ id: '1', name: 'TCL TV (HDMI)', isDefault: true }, { id: '2', name: 'Soundbar', isDefault: false }] };
     state.volume = 62;
@@ -235,7 +235,7 @@ settingsSection('sound', {
 });
 
 onAction('test-sound', () => send({ type: 'sound.test' }));
-hostMessage('sound.outputs', (m) => { more.audio = m; if (state.view === 'settings') render(); });
+hostMessage('sound.outputs', (m) => { hostAnswered('sound'); more.audio = m; if (state.view === 'settings') render(); });
 
 // ---- Display (brightness, the decode check, SPEC N5 and N12) ----------------------------------
 
