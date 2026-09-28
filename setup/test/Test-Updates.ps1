@@ -18,7 +18,8 @@
       Faults    the job ended hard after each journal step, then reconcile, started the way the
                 box's task starts it (its Start-Job.ps1 finds a whole runner, the one that began
                 the update, even with lib\ or jobs\ gone): the old launcher or the new one, never
-                half of each, and the launcher running is the one on disk
+                half of each, and the launcher running is the one on disk; and a rollback cut
+                short before or between its slots: the reconcile finishes it
       Planting  a junction for the staging folder, a user-owned .new file, a Users write entry
                 on state\: all refused (run it as SYSTEM in the VM too: -Only Planting)
       Wua       the Windows Update child faked: a hang is ended in time, the count leaves out
@@ -445,6 +446,30 @@ try {
             Check ($consistent -and $sameSetup -and $runs -and (Get-Leftovers $root).Count -eq 0) "after '$step': $v on disk and running, journal $($j.step), setup $kept ($r)"
             Check ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"
             Remove-FakeBox $root
+        }
+
+        # A rollback cut short (the new launcher crashes, then a power cut before or between the
+        # slots it puts back; or a rollback asked for, cut the same way): the reconcile finishes
+        # it, leaving what it put back already as it is.
+        $cases = @(
+            @{ release = 'crash'; action = 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths'; faults = @('rollingback', 'restored-launcher', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') }
+            @{ release = 'healthy'; action = 'Invoke-LauncherRollback -Paths $paths'; faults = @('restored-setup:lib') })
+        foreach ($case in $cases) {
+            Publish-FakeRelease '0.2.0' $case.release
+            foreach ($step in $case.faults) {
+                $root = New-FakeBox "fault-rb-$($case.release)-$($step -replace '[:.]', '_')"
+                if ($case.release -eq 'healthy') { [void](Invoke-FakeJob $root 'Invoke-LauncherUpdate -Version 0.2.0 -Source $src -Paths $paths') }
+                [void](Invoke-FakeJob $root $case.action $step)
+                $cut = (Get-Journal $root).step
+                $pick = Resolve-FakeRunner $root
+                $r = Invoke-FakeJob $root 'Invoke-LauncherReconcile -Paths $paths' -Lib $pick.Lib
+                $j = Get-Journal $root
+                $v = Get-ExeVersion $root
+                $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
+                $runs = Wait-For { Get-Running $root '0.1.0' } 25
+                Check ($cut -eq 'rollingback' -and $pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $runs -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($case.release)) cut after '$step' ($cut): finished, 0.1.0 on disk and running, setup $kept ($r; $($j.message))"
+                Remove-FakeBox $root
+            }
         }
     }
 

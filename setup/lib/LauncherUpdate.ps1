@@ -32,6 +32,8 @@
 #   verifying  the new launcher must say it is healthy (UI ready, controller thread running)
 #              within 3 minutes, by creating the event Local\HtpcHealthy_<version>_<pid>;
 #              otherwise, or when it restarts twice, the job rolls back
+#   rollingback  journaled before a rollback's first move (with its reason): one a power cut
+#              stopped is finished by the reconcile; slots it put back already are left as they are
 #   done | rolledback | aborted
 # Reconcile reads the journal and the files: an interrupted swap is put back to the old
 # launcher; an interrupted check is resumed. Only this job decides a rollback.
@@ -550,28 +552,33 @@ function Complete-LauncherCheck($Paths, $Journal, [TimeSpan]$Wait = $HealthyWait
 # --- Back to the previous launcher --------------------------------------------------------------------
 
 # Puts every slot of the journal back to its .prev (the one before the update), whatever state
-# the files are in: works for a finished swap, a half-done one and a check that failed.
+# the files are in: works for a finished swap, a half-done one, a check that failed and a
+# rollback a power cut stopped ("rollingback": what it put back already is left as it is).
 # Everything is checked before anything is stopped or moved: a rollback that cannot finish must
 # not start.
 function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
+    $resuming = $Journal.step -eq 'rollingback'
     # Setup ran again meanwhile (it copies its launcher before clearing this journal): the launcher
     # in place is not the one this update put there, so there is nothing of this update to undo.
+    # (Not a rollback under way: the launcher it put back is not this update's either.)
     $launcherSlot = @(Get-JournalSlots $Paths $Journal) | Where-Object { $_.Role -eq 'launcher' } | Select-Object -First 1
-    if ($launcherSlot -and $Journal.toSha256 -and (Get-SlotState $launcherSlot) -eq 'placed' -and
+    if (-not $resuming -and $launcherSlot -and $Journal.toSha256 -and (Get-SlotState $launcherSlot) -eq 'placed' -and
         (Get-FileHash -LiteralPath $Paths.Exe -Algorithm SHA256).Hash -ne $Journal.toSha256) {
         Save-LauncherJournal $Paths $Journal 'superseded' 'The launcher was replaced since (setup ran again)'
         Write-Host '  not rolled back: setup replaced the launcher meanwhile'
         return
     }
-    Write-Host "  rolling back: $Reason"
+    Write-Host "  rolling back$(if ($resuming) { ' (again, after an interruption)' }): $Reason"
     $created = Get-JournalList $Journal 'created'
     $plan = foreach ($slot in Get-JournalSlots $Paths $Journal) {
         $names = Get-SlotNames $slot
         $key = Get-SlotKey $slot
         $state = Get-SlotState $slot
         $isNew = $created -contains $key
+        if ($resuming -and $state -eq 'placed' -and -not $isNew -and (Test-SlotRestored $slot $names $Journal)) { $state = 'restored' }
         switch ($state) {
             'untouched' { }
+            'restored' { }
             'moved' { if (-not (Test-Path -LiteralPath $names.Prev)) { throw (New-UpdateError 'failed' "No previous $key to go back to") } }
             'placed' {
                 if (-not $isNew) {
@@ -587,6 +594,8 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
         [pscustomobject]@{ Slot = $slot; Names = $names; State = $state; IsNew = $isNew }
     }
 
+    # From the first move on, a power cut leaves "rollingback": the reconcile finishes it.
+    Save-LauncherJournal $Paths $Journal 'rollingback' $Reason
     Set-WatchdogPause $Paths
     foreach ($p in Get-LauncherProcesses $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
@@ -602,6 +611,8 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
             }
         }
         Remove-TrustedItem $names.New $slot.Root
+        # Test hook: a power cut between two slots of a rollback.
+        Invoke-UpdateFault "restored-$(Get-SlotKey $slot)"
     }
     Save-LauncherJournal $Paths $Journal 'rolledback' "$Reason; back on $($Journal.from)"
     Clear-WatchdogPause $Paths
@@ -626,6 +637,14 @@ function Get-SlotState($Slot) {
     }
     if ($hasNew) { return 'untouched' }
     'placed'
+}
+
+# A "placed" slot that a rollback cut short had put back already: its .prev moved back in (gone),
+# the failed one kept as .bad, and for the launcher, the one in use is the one the update replaced.
+function Test-SlotRestored($Slot, $Names, $Journal) {
+    if ((Test-Path -LiteralPath $Names.Prev) -or -not (Test-Path -LiteralPath $Names.Bad) -or -not (Test-Path -LiteralPath $Slot.Current)) { return $false }
+    if ($Slot.Role -ne 'launcher') { return $true }
+    (Get-FileHash -LiteralPath $Slot.Current -Algorithm SHA256).Hash -eq $Journal.fromSha256
 }
 
 function Invoke-LauncherRollback {
@@ -683,6 +702,10 @@ function Invoke-LauncherReconcile {
         }
         '^(swapping|moved-|placed-)' {
             Restore-PreviousLauncher $Paths $journal 'The update was interrupted'
+        }
+        '^rollingback$' {
+            # A rollback a power cut stopped: finished, for the reason it began with.
+            Restore-PreviousLauncher $Paths $journal $(if ($journal.message) { $journal.message } else { 'The update was interrupted' })
         }
         '^(swapped|verifying)$' {
             Clear-WatchdogPause $Paths
