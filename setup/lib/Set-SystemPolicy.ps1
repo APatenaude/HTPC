@@ -25,6 +25,7 @@ param(
 )
 
 . "$PSScriptRoot\Common.ps1"
+. "$PSScriptRoot\UpdateCore.ps1"   # Get-UntrustedReason (the sign-in picture)
 Assert-Admin
 
 $policies = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows'
@@ -117,14 +118,23 @@ $bitmap = New-Object System.Drawing.Bitmap 1920, 1080
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.Clear([System.Drawing.Color]::FromArgb($bg.R, $bg.G, $bg.B))
 $graphics.Dispose()
-$fresh = Join-Path $env:TEMP 'htpc-sign-in-background.png'
-$bitmap.Save($fresh, [System.Drawing.Imaging.ImageFormat]::Png)
+$png = New-Object IO.MemoryStream
+$bitmap.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
 $bitmap.Dispose()
-$same = (Test-Path $picture) -and ((Get-FileHash $picture).Hash -eq (Get-FileHash $fresh).Hash)
-if ($same) { Write-Same $picture; Remove-Item $fresh }
+$bytes = $png.ToArray()
+$want = [BitConverter]::ToString((New-Object Security.Cryptography.SHA256Managed).ComputeHash($bytes)).Replace('-', '')
+# The sign-in screen (SYSTEM) reads this picture: only administrators may change it. A copy an
+# earlier setup moved in from %TEMP% kept the user's permissions, so it is written again too.
+$same = (Test-Path -LiteralPath $picture -PathType Leaf) -and (Get-FileHash -LiteralPath $picture).Hash -eq $want -and -not (Get-UntrustedReason $picture)
+if ($same) { Write-Same $picture }
 else {
+    # Written where it goes, as a new file that then takes the old one's place: it gets
+    # ProgramData\HTPC's permissions (admin-write), and never passes through %TEMP%, where the
+    # user could swap it before it moved.
     New-Item -ItemType Directory -Force (Split-Path $picture) | Out-Null
-    Move-Item $fresh $picture -Force
+    $tmp = "$picture.new-$PID"
+    [IO.File]::WriteAllBytes($tmp, $bytes)
+    Move-Item -LiteralPath $tmp $picture -Force
     Write-Change "$picture (solid #0D0E11)"
 }
 Set-RegValue "$policies\Personalization" 'LockScreenImage' $picture 'String'
