@@ -39,7 +39,7 @@
 .at-tab.focused { color: #FFFFFF; }
 /* The tab's lists scroll here (library.js focused: to the focus, with room for its ring), above
    the hints; nothing in them scrolls on its own or is squeezed. Their ends fade where there is more. */
-.at-main { flex: 1 1 0; min-height: 0; padding: 24px 96px 40px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.at-main { flex: 1 1 0; min-height: 0; padding: 24px 96px 40px; display: flex; flex-direction: column; gap: 14px; overflow: hidden auto; scrollbar-width: none; }
 .at-main > * { flex-shrink: 0; }
 .at-main.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .at-main.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 32px), transparent); }

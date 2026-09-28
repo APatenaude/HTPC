@@ -250,6 +250,7 @@ sealed partial class MainForm : Form
             case "wake": standby.Wake("keyboard"); break;
             case "home": break; // the page reports going home; nothing to do here
             case "shown": RevealPending("page ready", m); break; // ShowOver: the backdrop is in place
+            case "perf": LogSlowPress(m); break;
             // The TV's messages ("tv.*"): MainForm.Tv.cs.
             case "setting":
                 if (settings.Set(Str("key")!, m.GetProperty("value"))) Log.Info($"Setting {Str("key")} = {m.GetProperty("value")}");
@@ -266,6 +267,30 @@ sealed partial class MainForm : Form
                 if (!DispatchUiMessage(Str("type"), m)) Log.Warn($"UI message {Str("type")} not handled");
                 break;
         }
+    }
+
+    // A press the page took long to show (app.js timePress: over 60 ms to its frame, on the box's
+    // own 4K screen and GPU). One line every 5 s at most, with how many more came meanwhile.
+    long slowPressLogAt;
+    int slowPressesSince;
+    long slowPressWorst;
+
+    void LogSlowPress(JsonElement m)
+    {
+        var ms = m.TryGetProperty("ms", out var v) && v.TryGetInt64(out var n) ? n : 0;
+        string Text(string name) => m.TryGetProperty(name, out var t) ? t.GetString() ?? "?" : "?";
+        var now = Environment.TickCount64;
+        if (now < slowPressLogAt)
+        {
+            slowPressesSince++;
+            slowPressWorst = Math.Max(slowPressWorst, ms);
+            return;
+        }
+        var more = slowPressesSince > 0 ? $"; {slowPressesSince} more since the last line, the slowest {slowPressWorst} ms" : "";
+        Log.Info($"Slow press {ms} ms in {Text("view")} ({Text("button")}{more})");
+        slowPressLogAt = now + 5000;
+        slowPressesSince = 0;
+        slowPressWorst = 0;
     }
 
     void Post(object message)

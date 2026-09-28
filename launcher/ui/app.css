@@ -91,8 +91,11 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 
 /* The tiles, centred while they fit (auto margins); more than fit, they scroll here (app.js
    keepTileInView: the focused tile whole, its zoom and ring too), the clock and the hints stay.
-   Padding: room for the zoom and the ring at the ends; the ends fade where there are more. */
-.tiles-wrap { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 96px; overflow: hidden; }
+   Padding: room for the zoom and the ring at the ends; the ends fade where there are more.
+   Every list the focus scrolls (scrollTop) is overflow auto without a scrollbar, not hidden:
+   Chromium moves an auto one on the GPU, and drew a hidden one afresh at each step. On the TV
+   (4K, the box's GPU) that made a held direction in Add tile take 50-130 ms a press; 33 now. */
+.tiles-wrap { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 96px; overflow: hidden auto; scrollbar-width: none; }
 .tiles { flex-shrink: 0; margin: auto 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 48px; }
 .tiles-wrap.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
 .tiles-wrap.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent); }
@@ -159,7 +162,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; c
 .quick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 116px; border-radius: 22px; background: var(--row); font-size: 22px; color: #D9D8D4; }
 .panel .hints { margin: auto -48px 0; padding: 0 48px; }
 /* The panel's rows: they scroll (to the focus) when there are too many; room for the rings */
-.panel-scroll { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: hidden; padding: 8px; margin: -8px -8px 0; }
+.panel-scroll { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px -8px 0; }
 .panel-scroll > * { flex-shrink: 0; }
 
 /* The Home menu over an app: its buttons, beside the panel (buttons.js menuAppCard) */

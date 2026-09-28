@@ -52,7 +52,7 @@
 }
 .tv-dialog h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 38px; letter-spacing: -0.01em; }
 /* Settings' dialog: its rows scroll (app.js setFocus) inside it, the hints stay; room for rings */
-.tv-list { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden; padding: 8px; margin: -8px; }
+.tv-list { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
 .tv-list > * { flex-shrink: 0; }
 .tv-dialog .hints { flex-shrink: 0; }
 .tv-dialog p { margin: 0 0 14px; font-size: 23px; color: var(--text-2); }

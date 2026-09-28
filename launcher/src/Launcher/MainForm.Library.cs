@@ -85,9 +85,17 @@ sealed partial class MainForm
         return apps.IsInstalled(a.Id) ? "installed" : "install";
     }
 
-    void PushStartMenu()
+    // Add tile > On this box. Reading the Start menu (a shortcut resolved at a time) held the UI
+    // thread 120-410 ms on the box each time the tab came up, and the controller's presses waited
+    // behind it: it is read on a thread of its own.
+    async void PushStartMenu()
     {
-        lastScan = StartMenuScanner.Scan();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        List<InstalledProgram> scan;
+        try { scan = await StartMenuScanner.ScanAsync(); }
+        catch (Exception e) { Log.Error("Reading the Start menu", e); return; }
+        if (clock.ElapsedMilliseconds > 300) Log.Info($"Start menu read in {clock.ElapsedMilliseconds} ms ({scan.Count} programs)");
+        lastScan = scan;
         var onHome = new HashSet<string>(apps.Tiles.Where(t => t.Custom).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
         var list = lastScan.Select(p => new { name = p.Name, launchable = p.Launchable, note = p.Note, onHome = onHome.Contains(p.Name) });
         Post(new { type = "library.programs", list });

@@ -283,6 +283,16 @@ one hint bar shows, every press takes at most 50 ms (timed in a second, real-tim
 each view (`addView`) and each Settings section (what to set up, how to open it); a view without
 one fails the audit. `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element.
 
+A PC's headless Edge is not the TV: on the box the launcher draws 3840x2160 on the N97's GPU.
+The page times every press there too, from the press to the frame that shows it, and one over
+60 ms goes to the log: `Slow press 180 ms in addtile (right)` (one line every 5 s at most, with
+how many more came meanwhile). To try the box's own drawing without the launcher: headless Edge
+on the box itself with the GPU on (no `--disable-gpu`), a 1536x864 page at scale 2.5 (as the
+TV's 250 %), presses sent through the DevTools protocol and timed to the second animation frame.
+Lists the focus scrolls must be `overflow: auto` with `scrollbar-width: none`, not `hidden`:
+Chromium redraws a hidden one whole at each step (Add tile, a direction held: 50-130 ms a
+press at 4K, 33 ms as auto).
+
 Start-Launcher builds, then starts the launcher outside the Claude desktop app as a normal
 user (see setup/README.md on the app's redirected AppData). Needs `setup/dev/Install-BuildTools.ps1`.
 `-NoTv` never sends the TV a key (no on at start, no off in standby): for working on the box

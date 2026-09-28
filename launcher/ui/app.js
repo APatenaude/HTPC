@@ -824,6 +824,7 @@ function back() {
 
 // One entry point for the controller (via the host) and the keyboard.
 function press(button) {
+  timePress(button);
   if (typeof soundsHear === 'function') soundsHear(button);   // interface sounds (sounds.js): what this press does picks one
   const el = focusedEl();
   // Moving a tile on the home screen (Tile options > Move): the mover takes every button.
@@ -882,6 +883,19 @@ function press(button) {
       if (state.view === 'home' && el && el.dataset.act === 'launch' && EXT.actions['tile-options']) EXT.actions['tile-options'](el, el.dataset.arg);
       break;
   }
+}
+
+// How long a press takes on the box itself (4K on its small GPU, not a PC's headless Edge): from
+// the press to the frame that shows it (the second animation frame after it: the first frame
+// has been drawn then). Over 60 ms it goes to the launcher's log, "Slow press 180 ms in addtile
+// (right)"; the host keeps the log from filling up. Not while hidden, nor without a host.
+function timePress(button) {
+  if (!host || document.hidden) return;
+  const asked = performance.now(), view = state.view;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const ms = Math.round(performance.now() - asked);
+    if (ms > 60) send({ type: 'perf', ms, view, button });
+  }));
 }
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
