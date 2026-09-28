@@ -82,6 +82,7 @@ function Invoke-WuaChild {
     $lastLine = $started
     $read = 0
     $result = $null
+    $sawExit = $false
     $currentLimit = $Limit
     try {
         while ($true) {
@@ -103,8 +104,10 @@ function Invoke-WuaChild {
             }
             if ($result) { break }
             if ($child.HasExited) {
-                Start-Sleep -Milliseconds 300
-                if ($read -lt @($lines).Count) { continue }
+                # The file was read above, before this check: the child can write its result line
+                # and end in between. Read the file once more after the exit before giving up
+                # (seen on GitHub's runner: "ended (exit code 0)" with the result on disk).
+                if (-not $sawExit) { $sawExit = $true; Start-Sleep -Milliseconds 300; continue }
                 return @{ ok = $false; kind = 'failed'; error = "The Windows Update helper ended (exit code $($child.ExitCode))" }
             }
             $now = [DateTime]::UtcNow
