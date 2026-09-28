@@ -181,6 +181,10 @@ static class Program
         if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
         if (Rights.SetupElevated)
         {
+            // Setup sets up the account it runs as: only the one signed in here. A standard account
+            // whose prompt an administrator approved would get the administrator's account set up
+            // (its autologon, its shell), so that is refused before anything else.
+            if (!SetupElevation.RunsAsSessionUser()) return;
             // Windows' own environment for the elevated setup and all it starts, not the user's
             // (SetupElevation.CleanEnvironment lists it).
             SetupElevation.ApplyCleanEnvironment();

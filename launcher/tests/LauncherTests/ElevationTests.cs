@@ -23,6 +23,8 @@ static class ElevationTests
         Decisions();
         Console.WriteLine("== Rights: setup or not, and the token (split, no split, standard)");
         RightsTable();
+        Console.WriteLine("== Setup elevation: setup runs as the user signed in here, or not at all");
+        SessionUserCheck();
         Console.WriteLine("== Setup elevation: arguments and the command line");
         Arguments();
         Console.WriteLine("== Setup elevation: who takes over after setup");
@@ -99,6 +101,46 @@ static class ElevationTests
         var token = Rights.Read();
         Check((token == Std) == !Environment.IsPrivilegedProcess && (token == NoSplit) == (Environment.IsPrivilegedProcess && TokenElevationType() == 1),
             $"this process's token: {token} (elevated {Environment.IsPrivilegedProcess}, TokenElevationType {TokenElevationType()})");
+    }
+
+    // An administrator approving a standard account's prompt makes setup run as the administrator:
+    // it would set up that account (its autologon, its shell). Only the signed-in user goes on.
+    static void SessionUserCheck()
+    {
+        const string tv = "S-1-5-21-111-222-333-1001", admin = "S-1-5-21-111-222-333-1002";
+        const SetupElevation.SessionMatch Same = SetupElevation.SessionMatch.Same, Other = SetupElevation.SessionMatch.Other, Unknown = SetupElevation.SessionMatch.Unknown;
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", tv, @"BOX\tv") == Same, "setup as the signed-in user (an administrator): goes on");
+        Check(SetupElevation.CompareSessionUser(admin, @"BOX\admin", tv, @"BOX\tv") == Other, "a standard account, an administrator approved the prompt: refused");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", admin, @"BOX\tv") == Other, "the SID decides, not a name that matches");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", tv.ToLowerInvariant(), @"BOX\tv") == Same, "... in any case");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", null, @"box\TV") == Same, "the session's name with no SID Windows could find: compared by name, any case");
+        Check(SetupElevation.CompareSessionUser(admin, @"BOX\admin", null, @"BOX\tv") == Other, "... another name: refused");
+        Check(SetupElevation.CompareSessionUser(tv, @"BOX\tv", null, null) == Unknown && SetupElevation.CompareSessionUser(tv, @"BOX\tv", null, "") == Unknown,
+            "Windows says nobody is signed in here: unknown, which is refused too");
+
+        // This session, as Windows records it (a CI runner's service session may have nobody).
+        using var id = WindowsIdentity.GetCurrent();
+        var (name, sid) = SetupElevation.SessionUser();
+        if (name is null) Console.WriteLine("    info: nobody signed in to this session (a service): the live check is skipped");
+        else if (SetupElevation.CompareSessionUser(id.User!.Value, id.Name, sid, name) != Same)
+            Console.WriteLine($"    info: this session's user {name} is not this test's {id.Name} (a runner): the live check is skipped");
+        else Check(sid == id.User!.Value, $"this session's user ({name}) found by SID, this test's own ({sid})");
+
+        // The refusal: full screen, one button, built but never shown.
+        const string body = "Sign in as the TV account and run TV Box Setup from there. That account must be an administrator.";
+        using var screen = new AdminNeededForm(@"Windows started setup as BOX\admin, but BOX\tv is signed in here. Setup would have set up BOX\admin instead, so it changed nothing.",
+            askAgain: null, "Setup must run as the TV account", body);
+        var buttons = screen.Controls.OfType<Button>().ToList();
+        Check(buttons.Select(b => b.Text).SequenceEqual(["A   Quit"]) && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
+            "refusal: A Quit only (Enter and Esc quit too), nothing to try again");
+        Check(screen.Controls.OfType<Label>().Any(l => l.Text == body) && screen.Controls.OfType<Label>().Any(l => l.Text == "Setup must run as the TV account"),
+            "refusal: sign in as the TV account, an administrator, and run setup from there");
+        Check(screen.FormBorderStyle == FormBorderStyle.None && screen.StartPosition == FormStartPosition.Manual, "refusal: full screen, no frame");
+        var bounds = new Rectangle(Point.Empty, screen.Size);
+        Rectangle Box(Control c) => new(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size);
+        var boxes = screen.Controls.Cast<Control>().Select(Box).ToList();
+        Check(boxes.All(bounds.Contains) && boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x),
+            "refusal: everything on screen, nothing overlapping " + string.Join(" ", boxes));
     }
 
     static void Arguments()
