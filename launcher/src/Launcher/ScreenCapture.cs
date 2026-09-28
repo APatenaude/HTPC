@@ -74,6 +74,8 @@ static unsafe class ScreenCapture
         lock (Gate)
         {
             var clock = Stopwatch.StartNew();
+            // Its folder is in %TEMP%, which Disk Cleanup may empty while the launcher runs for weeks.
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             var screen = Screen.PrimaryScreen!.Bounds;
             var size = TargetSize(screen.Size);
             string how;
@@ -267,18 +269,26 @@ static unsafe class ScreenCapture
     static extern int D3D11CreateDevice(IntPtr adapter, int driverType, IntPtr software, uint flags, IntPtr levels, uint count, uint sdkVersion,
         out IntPtr device, out int level, out IntPtr context);
 
+    [DllImport("dxgi.dll")] static extern int CreateDXGIFactory1(Guid* iid, IntPtr* factory);
+
     [StructLayout(LayoutKind.Sequential)]
     struct TextureDesc { public uint Width, Height, MipLevels, ArraySize, Format, SampleCount, SampleQuality, Usage, BindFlags, CpuAccess, Misc; }
     [StructLayout(LayoutKind.Sequential)]
     struct Mapped { public IntPtr Data; public uint RowPitch, DepthPitch; }
 
     const uint B8G8R8A8 = 87, UsageStaging = 3, BindShaderResource = 0x8, BindRenderTarget = 0x20, CpuRead = 0x20000, GenerateMipsFlag = 0x1;
-    const int WaitTimeout = unchecked((int)0x887A0027);
+    const int WaitTimeout = unchecked((int)0x887A0027), NotFound = unchecked((int)0x887A0002);
 
-    /// <summary>A D3D11 device and the DXGI output that shows the screen; a duplication per capture.</summary>
+    /// <summary>
+    /// A D3D11 device and the DXGI output that shows the screen; a duplication per capture. The
+    /// output is looked for on every GPU, not only the first: the TV can be on a discrete GPU,
+    /// on the second of two, or on the integrated one of a hybrid pair, and an output can only
+    /// be duplicated with a device made on its own GPU (Windows' default GPU for this program,
+    /// a "high performance" one say, need not be it).
+    /// </summary>
     sealed class Duplicator : IDisposable
     {
-        static readonly Guid IDXGIDevice = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
+        static readonly Guid IDXGIFactory1 = new("770aae78-f26f-4dba-a829-253c83d1b387");
         static readonly Guid IDXGIOutput1 = new("00cddea8-939b-4b83-a340-a685226666cc");
         static readonly Guid ID3D11Texture2D = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
 
@@ -289,32 +299,59 @@ static unsafe class ScreenCapture
         public Duplicator(Rectangle screen)
         {
             Bounds = screen;
-            IntPtr dxgiDevice = IntPtr.Zero, adapter = IntPtr.Zero;
+            IntPtr factory = IntPtr.Zero, adapter = IntPtr.Zero;
             try
             {
-                Ok(D3D11CreateDevice(IntPtr.Zero, 1 /* hardware */, IntPtr.Zero, 0, IntPtr.Zero, 0, 7, out device, out _, out context), "D3D11CreateDevice", setup: true);
-                dxgiDevice = Query(device, IDXGIDevice, "IDXGIDevice");
-                Ok(((delegate* unmanaged[Stdcall]<IntPtr, IntPtr*, int>)Slots(dxgiDevice)[7])(dxgiDevice, &adapter), "GetAdapter", setup: true);
-                // The output showing this screen (DXGI_OUTPUT_DESC: the name, then its desktop rectangle, then the rotation).
-                var desc = stackalloc byte[96];
-                for (uint i = 0; output == IntPtr.Zero; i++)
+                var iid = IDXGIFactory1;
+                Ok(CreateDXGIFactory1(&iid, &factory), "CreateDXGIFactory1", setup: true);
+                uint gpu = 0;
+                for (; output == IntPtr.Zero; gpu++)
                 {
-                    IntPtr o;
-                    Ok(((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)Slots(adapter)[7])(adapter, i, &o), "no output shows this screen", setup: true);
-                    try
-                    {
-                        Ok(((delegate* unmanaged[Stdcall]<IntPtr, byte*, int>)Slots(o)[7])(o, desc), "IDXGIOutput.GetDesc", setup: true);
-                        var r = (int*)(desc + 64);
-                        if (new Rectangle(r[0], r[1], r[2] - r[0], r[3] - r[1]) != screen) continue;
-                        var rotation = *(int*)(desc + 84);
-                        if (rotation > 1) throw new CaptureException("the screen is rotated", setup: true);
-                        output = Query(o, IDXGIOutput1, "IDXGIOutput1");
-                    }
-                    finally { Release(o); }
+                    Release(adapter);
+                    adapter = IntPtr.Zero;
+                    IntPtr a;
+                    var hr = ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)Slots(factory)[7])(factory, gpu, &a);   // EnumAdapters
+                    if (hr == NotFound) throw new CaptureException("no GPU's output shows this screen", setup: true);
+                    Ok(hr, "EnumAdapters", setup: true);
+                    adapter = a;
+                    output = OutputShowing(adapter, screen);
                 }
+                Ok(D3D11CreateDevice(adapter, 0 /* unknown: the adapter's own */, IntPtr.Zero, 0, IntPtr.Zero, 0, 7, out device, out _, out context), "D3D11CreateDevice", setup: true);
+                Log.Info($"Screen capture: {screen.Width}x{screen.Height} duplicated on GPU {gpu - 1} ({AdapterName(adapter)})");
             }
             catch { Dispose(); throw; }
-            finally { Release(adapter); Release(dxgiDevice); }
+            finally { Release(adapter); Release(factory); }
+        }
+
+        // This GPU's output that shows the screen (DXGI_OUTPUT_DESC: the name, then its desktop
+        // rectangle, then the rotation), as IDXGIOutput1; zero if none of its outputs does.
+        static IntPtr OutputShowing(IntPtr adapter, Rectangle screen)
+        {
+            var desc = stackalloc byte[96];
+            for (uint i = 0; ; i++)
+            {
+                IntPtr o;
+                var hr = ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)Slots(adapter)[7])(adapter, i, &o);   // EnumOutputs
+                if (hr == NotFound) return IntPtr.Zero;
+                Ok(hr, "EnumOutputs", setup: true);
+                try
+                {
+                    Ok(((delegate* unmanaged[Stdcall]<IntPtr, byte*, int>)Slots(o)[7])(o, desc), "IDXGIOutput.GetDesc", setup: true);
+                    var r = (int*)(desc + 64);
+                    if (new Rectangle(r[0], r[1], r[2] - r[0], r[3] - r[1]) != screen) continue;
+                    var rotation = *(int*)(desc + 84);
+                    if (rotation > 1) throw new CaptureException("the screen is rotated", setup: true);
+                    return Query(o, IDXGIOutput1, "IDXGIOutput1");
+                }
+                finally { Release(o); }
+            }
+        }
+
+        // DXGI_ADAPTER_DESC starts with its description (128 characters), for the log.
+        static string AdapterName(IntPtr adapter)
+        {
+            var desc = stackalloc byte[304];
+            return ((delegate* unmanaged[Stdcall]<IntPtr, byte*, int>)Slots(adapter)[8])(adapter, desc) >= 0 ? new string((char*)desc) : "?";
         }
 
         /// <summary>The screen now, scaled to size, into a JPEG. Returns how long each step took, for the log.</summary>

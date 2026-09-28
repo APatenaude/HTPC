@@ -923,6 +923,8 @@ sealed partial class MainForm : Form
     {
         try
         {
+            // Made again if gone (Disk Cleanup empties %TEMP%): every Home would lack its backdrop.
+            Directory.CreateDirectory(captureDir);
             // The two newest stay: the page may still be loading one while the next is made. One
             // it still holds is left for next time (access denied made the capture fail, 27 Sept).
             foreach (var old in Directory.GetFiles(captureDir, "screen-*.jpg").OrderDescending().Skip(2))
