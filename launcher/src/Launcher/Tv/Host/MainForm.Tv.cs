@@ -18,7 +18,8 @@ sealed partial class MainForm
             InSetup = options.Setup,
             // Standby is made in OnLoad; until then the screen is on.
             ScreenOn = () => standby is null || !standby.Active,
-            LastUserInput = () => controller.LastActivity,
+            // Real input only (a button, a key, the phone): the launcher up on screen is no one.
+            LastUserInput = () => standby is null ? controller.LastInput : standby.LastUserInput(),
         };
         service.Changed += () => BeginInvoke(PostTv);
         service.TvStateChanged += (on, showingBox) => BeginInvoke(() => OnTvState(on, showingBox));
@@ -55,6 +56,7 @@ sealed partial class MainForm
             case "tv.refresh": _ = tv.Discover(); break;
             case "tv.choose": tv.Choose(Str("id")); break;
             case "tv.none": tv.ChooseNone(); break;
+            case "tv.resume": tv.Resume(); break; // a paused TV: "this is my TV"
             case "tv.input":
                 if (m.TryGetProperty("input", out var input) && input.TryGetInt32(out var n)) tv.SetInput(n);
                 break;

@@ -43,6 +43,7 @@ sealed class TvService
     DateTime nextSearch;
     DateTime nextUiSearch;
     DateTime? doubtSince;
+    DateTime? backSince;
     bool uiShowing;
 
     public Edid? Screen { get; private set; }
@@ -87,7 +88,10 @@ sealed class TvService
     /// <summary>The box's picture is on (not in standby): someone may see it.</summary>
     public Func<bool> ScreenOn { get; set; } = () => true;
 
-    /// <summary>Last controller or keyboard input (someone is looking at the box's picture).</summary>
+    /// <summary>
+    /// Last real input on the box: a controller button or stick, a key, the phone remote (someone
+    /// is looking at the box's picture). Not the launcher merely being on screen.
+    /// </summary>
     public Func<DateTime> LastUserInput { get; set; } = () => DateTime.MinValue;
 
     bool Refuse(string what)
@@ -327,9 +331,11 @@ sealed class TvService
         if (Screen!.Port > 0) profile.Input = Screen.Port;
         else if (tv.State.Input > 0) profile.Input = tv.State.Input;
         if (profile.Paused is not null) { profile.Paused = null; notices.ClearPaused(); }
+        profile.PauseKind = null;
         profiles[Screen.Key] = profile;
         parts.SaveProfiles();
         doubtSince = null;
+        backSince = null;
         lastPower = tv.State.Power is TvPower.On or TvPower.Off ? tv.State.Power : null;
         lastInput = tv.State.Input;
         Changed?.Invoke();
@@ -345,6 +351,7 @@ sealed class TvService
         profile.Name = Screen.Name;
         profile.Model = "";
         profile.Paused = null;
+        profile.PauseKind = null;
         profiles[Screen.Key] = profile;
         parts.SaveProfiles();
         Log.Info($"TV control: none for {Screen.Key}");
@@ -387,33 +394,79 @@ sealed class TvService
 
     /// <summary>
     /// Is the bound TV still the one the box is plugged into? Only asked while someone uses the
-    /// box (settings on screen, or controller or keyboard use in the last minute, box awake), for
-    /// TVs that report their power and input, outside our own quiet time and never under --no-tv:
-    /// if for 30 s the TV says it is on but showing another input, or an identical TV also shows
-    /// the box's input, the box stops controlling it and asks. A TV that says it is off proves
-    /// nothing: the box can be awake and used with the TV off (seen on the box: a controller
-    /// press at night, TV off, paused a right binding).
+    /// box (a controller button or stick, a key or the phone in the last minute, box awake: the
+    /// launcher merely on screen is no one), for TVs that report their power and input, outside
+    /// our own quiet time and never under --no-tv: if for 30 s the TV says it is on but showing
+    /// another input, or an identical TV also shows the box's input, the box stops controlling it
+    /// and asks. A TV that says it is off proves nothing: the box can be awake and used with the
+    /// TV off (seen on the box: a controller press at night, TV off, paused a right binding).
+    /// Seen on the box too (27 Sept 2026): the home screen idle, the TV switched to HDMI 2 by its
+    /// remote or CEC, paused; every sleep after left the TV on. So a pause for the input also ends
+    /// by itself (CheckBack).
     /// </summary>
     void CheckBinding()
     {
-        if (HandsOff || Profile is not { Paused: null } p || p.Input == 0 || Current is not { } tv || DriverFor(p.Method) is not { } d ||
+        if (HandsOff || Profile is not { } p || p.Input == 0 || Current is not { } tv || DriverFor(p.Method) is not { } d ||
             !d.Info.Caps.HasFlag(TvCaps.ReadPower | TvCaps.ReadInput) || !tv.State.IsOn ||
-            clock.Now < quietUntil || turningOn == 1 || !ScreenOn() || !(uiShowing || clock.Now - LastUserInput() < TimeSpan.FromMinutes(1)))
+            clock.Now < quietUntil || turningOn == 1 || !ScreenOn() || clock.Now - LastUserInput() >= TimeSpan.FromMinutes(1))
         {
             doubtSince = null;
+            backSince = null;
             return;
         }
+        if (p.Paused is not null) { CheckBack(p, tv); return; }
         var notShowing = tv.State.Input != p.Input;
-        var twins = Found.Count(t => t.State.IsOn && t.State.Input == p.Input && t.Method == tv.Method && Normalize(t.Model) == Normalize(tv.Model)) > 1;
+        var twins = Twins(p, tv);
         if (!notShowing && !twins) { doubtSince = null; return; }
         doubtSince ??= clock.Now;
         if (clock.Now - doubtSince < TimeSpan.FromSeconds(30)) return;
+        doubtSince = null;
         var reason = twins ? $"Two {tv.Model} TVs show HDMI {p.Input}, the box's input"
             : $"{tv.Name} says it shows {(tv.State.Input > 0 ? $"HDMI {tv.State.Input}" : "something else")}, not the box (HDMI {p.Input})";
         p.Paused = reason;
+        p.PauseKind = twins ? "twins" : "input";
         parts.SaveProfiles();
         Log.Warn($"TV control paused: {reason}");
-        notices.PausedFor(reason);
+        notices.PausedFor(reason, endsByItself: !twins);
+        Changed?.Invoke();
+    }
+
+    /// <summary>Another TV of the bound one's model is on and shows the box's input too.</summary>
+    bool Twins(TvProfile p, TvDevice tv) =>
+        Found.Count(t => t.State.IsOn && t.State.Input == p.Input && t.Method == tv.Method && Normalize(t.Model) == Normalize(tv.Model)) > 1;
+
+    /// <summary>
+    /// A pause for the input ends by itself when the paused TV shows the box's input again, the
+    /// one the EDID names, for 30 s while someone uses the box (CheckBinding's conditions), with no
+    /// identical TV showing it too. A pause for twins waits for the user (a pick, or Resume).
+    /// </summary>
+    void CheckBack(TvProfile p, TvDevice tv)
+    {
+        doubtSince = null;
+        var showingBox = p.PausedForInput && Screen is { Port: > 0 } s && s.Port == p.Input && tv.State.Input == p.Input && BrandMatches(tv) && !Twins(p, tv);
+        if (!showingBox) { backSince = null; return; }
+        backSince ??= clock.Now;
+        if (clock.Now - backSince < TimeSpan.FromSeconds(30)) return;
+        Log.Info($"TV control resumed: {tv.Name} shows HDMI {p.Input}, the box's input, again (it was paused: {p.Paused})");
+        EndPause(p);
+    }
+
+    /// <summary>Settings › TV's Resume: the user says the paused TV is theirs (its settings kept, like picking it again).</summary>
+    public void Resume()
+    {
+        if (Profile is not { Paused: not null } p) return;
+        Log.Info($"TV control resumed from Settings (it was paused: {p.Paused})");
+        EndPause(p);
+    }
+
+    void EndPause(TvProfile p)
+    {
+        p.Paused = null;
+        p.PauseKind = null;
+        doubtSince = null;
+        backSince = null;
+        parts.SaveProfiles();
+        notices.ClearPaused();
         Changed?.Invoke();
     }
 

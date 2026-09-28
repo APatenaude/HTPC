@@ -76,8 +76,11 @@ sealed class TvNoticeRules
         notices.Raise(new TvNotice(NewTv, "New TV detected", $"{screen!.Brand} {screen.Name}: set up how the box controls it?".Trim(), "tv", Bad: false, "Set up"));
     }
 
-    public void PausedFor(string reason) =>
-        notices.Raise(new TvNotice(Paused, "Is this the right TV?", $"{reason}. The box stopped controlling it: pick your TV again in Settings › TV.", "tv", Bad: true, "TV settings"));
+    /// <param name="endsByItself">A pause for the input: it ends once the TV shows the box again.</param>
+    public void PausedFor(string reason, bool endsByItself) =>
+        notices.Raise(new TvNotice(Paused, "Is this the right TV?", endsByItself
+            ? $"{reason}. The box stopped controlling it until the TV shows the box again, or Resume in Settings › TV."
+            : $"{reason}. The box stopped controlling it: pick your TV again in Settings › TV.", "tv", Bad: true, "TV settings"));
 
     public void ClearPaused() => notices.Clear(Paused);
 

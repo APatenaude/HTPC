@@ -333,6 +333,25 @@ sealed class Standby
         finally { LocalFree(ptr); }
     }
 
+    /// <summary>
+    /// When someone last used the box: a controller button, trigger or stick past its dead zone,
+    /// a key or the mouse (not the launcher's own Alt tap or mouse nudge), the phone remote. Not
+    /// the launcher merely being on screen, nor a controller's analog noise. The TV's binding check
+    /// counts only this as "in use".
+    /// </summary>
+    public DateTime LastUserInput()
+    {
+        var last = controller.LastInput;
+        if (PhoneActivity > last) last = PhoneActivity;
+        var tick = LastInputAgeTicks();
+        if (Math.Abs(tick - Native.LastInjectedTick) > 500)
+        {
+            var keys = DateTime.Now - TimeSpan.FromMilliseconds(Environment.TickCount64 - tick);
+            if (keys > last) last = keys;
+        }
+        return last;
+    }
+
     // Tick count (ms since boot) of the last keyboard or mouse input. GetLastInputInfo gives a
     // 32-bit tick; compare it against the 64-bit clock's low bits.
     static long LastInputAgeTicks()
@@ -353,6 +372,7 @@ sealed class Standby
     static void NudgeMouse()
     {
         var input = new Input { Type = 0, Mouse = new MouseInput { Flags = 0x0001 /* MOUSEEVENTF_MOVE */ } };
+        Native.LastInjectedTick = Environment.TickCount64;
         SendInput(1, new[] { input }, Marshal.SizeOf<Input>());
     }
 }
