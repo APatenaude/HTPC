@@ -10,8 +10,10 @@
     fake launchers and a fake watchdog (small C# programs built with the .NET Framework's csc),
     and a fake GitHub on http://127.0.0.1 (Serve-FakeRelease.ps1).
       Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs)
-      Download  pinned redirects: another host, another scheme, more than 5 hops, a lying
-                Content-Length, a longer stream, 429 short and long, 404, a wrong SHA-256
+      Download  pinned redirects: another host, another scheme, more than 5 hops, another
+                repository's path (a renamed one: "moved", also for releases/latest), no release
+                yet, a lying Content-Length, a longer stream, 429 short and long, 403 with and
+                without GitHub's rate-limit headers, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken job runner (all but the
                 first roll back), not newer, no watchdog, a bad download, never back at Home
                 (an app in front: it gives up; nothing touched, nothing stopped)
@@ -211,7 +213,7 @@ function Start-FakeGitHub {
     [void](Wait-For { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', $port); $c.Close(); $true } catch { $false } } 15)
 }
 function Set-Scenario([string]$Name) { [IO.File]::WriteAllText((Join-Path $serverRoot 'scenario'), $Name) }
-$source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
+$source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 
 # Release v<Version> on the fake GitHub: the launcher in the given mode, setup.zip, update.json.
 function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switch]$BrokenRunner, [switch]$WrongHash) {
@@ -248,7 +250,7 @@ function Invoke-FakeJob([string]$Root, [string]$Action, [string]$FaultAt, [strin
 `$HealthyWait = [TimeSpan]::FromSeconds(25)
 `$LeaveWait = [TimeSpan]::FromSeconds(10)
 `$UpdateFaultAt = $(if ($FaultAt) { "'$FaultAt'" } else { '$null' })
-`$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -MaxRetryWaitSec 5
+`$src = New-UpdateSource -Repo 'test/htpc' -BaseUrl 'http://127.0.0.1:$port' -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 `$paths = Get-LauncherPaths -InstallRoot '$Root\PF\HTPC' -DataRoot '$Root\PD\HTPC'
 try { $Action; 'RESULT ok' } catch { "RESULT `$(Get-UpdateErrorKind `$_): `$(`$_.Exception.Message)" }
 "@ | Set-Content -LiteralPath $script -Encoding ASCII
@@ -311,6 +313,20 @@ try {
             try { [void](ConvertFrom-ReleaseManifest $bad.text $bad.tag) } catch { $refused = (Kind $_) -eq 'refused' }
             Check $refused "update.json refused: $($bad.why)"
         }
+        # The box's own source: github.com first, then any *.githubusercontent.com (HTTPS, 443).
+        $hops = @(
+            @{ url = 'https://github.com/APatenaude/HTPC/releases/download/v1.0.0/update.json'; redirect = $false; ok = $true }
+            @{ url = 'https://release-assets.githubusercontent.com/github-production-release-asset/1'; redirect = $false; ok = $false }
+            @{ url = 'https://release-assets.githubusercontent.com/github-production-release-asset/1'; redirect = $true; ok = $true }
+            @{ url = 'https://new-name.githubusercontent.com/x'; redirect = $true; ok = $true }
+            @{ url = 'https://evilgithubusercontent.com/x'; redirect = $true; ok = $false }
+            @{ url = 'https://x.githubusercontent.com.example.net/x'; redirect = $true; ok = $false }
+            @{ url = 'http://release-assets.githubusercontent.com/x'; redirect = $true; ok = $false }
+            @{ url = 'https://release-assets.githubusercontent.com:8443/x'; redirect = $true; ok = $false }
+            @{ url = 'https://user@release-assets.githubusercontent.com/x'; redirect = $true; ok = $false })
+        foreach ($h in $hops) {
+            Check ((Test-AllowedUrl $PinnedSource ([Uri]$h.url) -Redirect:$h.redirect) -eq $h.ok) "$(if ($h.ok) { 'allowed' } else { 'refused' })$(if ($h.redirect) { ' after a redirect' } else { ' first' }): $($h.url)"
+        }
         foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update') {
             Test-Token $t
             Check ($LASTEXITCODE -eq 0) "job token accepted: $t"
@@ -371,6 +387,14 @@ try {
         Check ((& $try 'ratelimit') -eq 'ok') '429 with a short Retry-After: waits once, then downloads'
         Check ((& $try 'ratelimitlong') -eq 'ratelimited') '429 with a long Retry-After: "try again later"'
         Check ((& $try 'notfound') -eq 'notfound') '404: not found'
+        Check ((& $try 'forbidden') -eq 'failed') '403 without the rate-limit headers: a refusal, not "try again later"'
+        Check ((& $try 'forbiddenlimit') -eq 'ratelimited') '403 with X-RateLimit-Remaining: 0: "try again later"'
+        Check ((& $try 'moved') -eq 'moved') 'a redirect to another repository''s path on the pinned host: "moved", not followed'
+        foreach ($case in @(@{ s = 'norelease'; want = 'none' }, @{ s = 'movedlatest'; want = 'moved' })) {
+            Set-Scenario $case.s
+            $got = try { $t = Get-LatestTag $source; if ($null -eq $t) { 'none' } else { $t } } catch { Kind $_ }
+            Check ($got -eq $case.want) "releases/latest ($($case.s)): $($case.want) ($got)"
+        }
         Set-Scenario 'normal'
         Remove-Item $out -ErrorAction SilentlyContinue
         $wrong = try { Save-ReleaseAsset -Source $source -Tag 'v0.2.0' -Name $f.name -Size $f.size -Sha256 ('0' * 64) -OutFile $out; 'ok' } catch { Kind $_ }

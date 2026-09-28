@@ -63,7 +63,6 @@ sealed class UpdatesSaved
 sealed class UpdateService
 {
     const string Repo = "APatenaude/HTPC";
-    static readonly string[] AllowedHosts = { "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com" };
     static readonly string HtpcData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "HTPC");
     static readonly string WindowsFile = Path.Combine(HtpcData, "state", "windows-updates.json");
     static readonly string JournalFile = Path.Combine(HtpcData, "state", "launcher-update.json");
@@ -187,11 +186,18 @@ sealed class UpdateService
         { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"htpc-launcher/{Program.Version}");
         using var latest = await http.GetAsync($"https://github.com/{Repo}/releases/latest");
+        if ((int)latest.StatusCode is 403 or 429) throw new InvalidOperationException(RateLimited(latest) ?? $"releases/latest answered {(int)latest.StatusCode}");
         if ((int)latest.StatusCode is not (301 or 302 or 303 or 307 or 308) || latest.Headers.Location is null)
             throw new InvalidOperationException($"releases/latest answered {(int)latest.StatusCode}");
         var to = new Uri(new Uri($"https://github.com/{Repo}/releases/latest"), latest.Headers.Location);
-        var prefix = $"/{Repo}/releases/tag/";
-        if (to.Host != "github.com" || !to.AbsolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null; // no release yet
+        var releases = $"/{Repo}/releases";
+        var prefix = $"{releases}/tag/";
+        if (to.Scheme != "https" || !to.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"releases/latest pointed away from github.com ({to.Host})");
+        if (to.AbsolutePath.TrimEnd('/').Equals(releases, StringComparison.OrdinalIgnoreCase)) return null;   // no release yet
+        // Anywhere else: the repository was renamed or moved. An error, not "no release".
+        if (!to.AbsolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{Repo} seems to have moved (its releases/latest points to {to.AbsolutePath})");
         var tag = Uri.UnescapeDataString(to.AbsolutePath[prefix.Length..]);
         if (ParseSemVer(tag) is null) return null;   // not a v<major.minor.patch> release
 
@@ -205,13 +211,28 @@ sealed class UpdateService
         return new LauncherRelease(version, S("notes") ?? "", S("minimumFrom"));
     }
 
-    // A small file, following redirects only over HTTPS to GitHub's own hosts (at most 5).
+    /// <summary>
+    /// Where a redirect may take a read that started at github.com/&lt;Repo&gt;/ (the same rules as
+    /// setup\lib\UpdateCore.ps1): HTTPS on 443 only; github.com again only under the repository's
+    /// own path (elsewhere it was renamed or moved: an error, not followed); or any host under
+    /// githubusercontent.com, where GitHub serves release files (TLS and the job's SHA-256 check
+    /// carry the integrity, not that host's exact name). Null when allowed, else why not.
+    /// </summary>
+    public static string? RefusedHop(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri || uri.Scheme != "https" || uri.Port != 443 || uri.UserInfo.Length > 0) return $"Refused to read from {uri.Host}";
+        var host = uri.Host.ToLowerInvariant();
+        if (host == "github.com")
+            return uri.AbsolutePath.StartsWith($"/{Repo}/", StringComparison.OrdinalIgnoreCase) ? null : $"{Repo} seems to have moved (GitHub sent {uri.AbsolutePath})";
+        return host == "githubusercontent.com" || host.EndsWith(".githubusercontent.com") ? null : $"Refused to read from {uri.Host}";
+    }
+
+    // A small file, following redirects (RefusedHop) at most 5 times.
     static async Task<string> GetPinnedText(HttpClient http, Uri uri)
     {
         for (var hop = 0; hop <= 5; hop++)
         {
-            if (uri.Scheme != "https" || !AllowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Refused to read from {uri.Host}");
+            if (RefusedHop(uri) is { } refused) throw new InvalidOperationException(refused);
             using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
             var code = (int)response.StatusCode;
             if (code is 301 or 302 or 303 or 307 or 308 && response.Headers.Location is { } location)
@@ -219,12 +240,22 @@ sealed class UpdateService
                 uri = new Uri(uri, location);
                 continue;
             }
-            if (code is 403 or 429) throw new InvalidOperationException("GitHub is limiting requests from this box; try again later");
+            if (code is 403 or 429 && RateLimited(response) is { } limited) throw new InvalidOperationException(limited);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength > 262144) throw new InvalidOperationException("update.json is too large");
             return await response.Content.ReadAsStringAsync();
         }
         throw new InvalidOperationException("Too many redirects");
+    }
+
+    // GitHub's rate limit: 429, or a 403 that says so (X-RateLimit-Remaining: 0, or Retry-After).
+    // Any other 403 is a plain refusal. The message to show, or null when it is not a rate limit.
+    static string? RateLimited(HttpResponseMessage r)
+    {
+        var code = (int)r.StatusCode;
+        var limited = code == 429 || code == 403 && (r.Headers.RetryAfter is not null ||
+            r.Headers.TryGetValues("X-RateLimit-Remaining", out var left) && left.FirstOrDefault()?.Trim() == "0");
+        return limited ? "GitHub is limiting requests from this box; try again later" : null;
     }
 
     /// <summary>"0.10.2" or "v0.10.2" as a number triple; null otherwise (no pre-releases: stable channel only).</summary>
