@@ -1026,7 +1026,8 @@ sealed partial class MainForm : Form
         }
     }
 
-    // Dev and test hooks:
+    // Dev and test hooks, answered only with --dev (Start-Launcher.ps1 -Dev): in a release any
+    // program the user runs could otherwise press the controller's buttons or put the box in standby.
     //   PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Standby"), 1 = enter standby /
     //     0 = wake / 2 = enter standby leaving the TV as it is, 0)
     //   PostMessage(launcher, RegisterWindowMessage("HtpcLauncher.Pad"), buttons | LT << 16 | RT << 24,
@@ -1041,13 +1042,13 @@ sealed partial class MainForm : Form
     {
         if (m.Msg == DesktopMode.BackToTvMessage) { BackToTv(); return; } // HtpcLauncher.exe --tv
         if (m.Msg == WM_DISPLAYCHANGE) ScreenChanged("display change"); // MainForm.Screen.cs; on to WinForms too
-        if (m.Msg == StandbyMessage && standby is not null)
+        if (options.Dev && m.Msg == StandbyMessage && standby is not null)
         {
             if (m.WParam == 2) tvChangedItself = true; // OnStandbyChanged then leaves the TV alone
             if (m.WParam != IntPtr.Zero) standby.Enter("message"); else standby.Wake("message");
             return;
         }
-        if (m.Msg == PadMessage)
+        if (options.Dev && m.Msg == PadMessage)
         {
             long w = m.WParam, l = m.LParam;
             controller.Inject(w == -1 ? null : new PadState((ushort)w, (byte)(w >> 16), (byte)(w >> 24),
