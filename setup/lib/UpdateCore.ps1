@@ -347,24 +347,30 @@ function Get-UntrustedReason([string]$Path) {
 # Sets a directory's security through a handle opened with FILE_FLAG_OPEN_REPARSE_POINT, so it can
 # never act on a junction or symbolic link's target (Set-Acl and icacls, given a path, follow one:
 # the security would land on wherever the link points - Program Files\HTPC, state\...). The handle
-# is checked to be a real directory and not a reparse point before anything is written. The DACL is
-# marked protected only when the given security is (Set-AccessRuleProtection): a folder that keeps
-# its inherited rules (user\, tv\) is left unprotected.
+# is checked to be a real directory and not a reparse point before anything is written.
+# Written as Set-Acl wrote it (SetSecurityInfo, SE_FILE_OBJECT), so the new inheritable rules also
+# reach the folders below that inherit (state\ and setup\ after their reset, user\, tv\): without
+# that they kept whatever they had inherited before the lock (CI: state\ kept the full control its
+# creator had inherited from %TEMP%). That propagation leaves a junction below alone (it changes the
+# link's own entry, never its target's). Protected ACL (the root): owner and a protected DACL, as
+# given. Unprotected (user\, tv\): only its own explicit rules, the inherited ones recomputed from
+# the parent; the owner is left as it is.
 function Set-DirSecurityNoReparse {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][Security.AccessControl.DirectorySecurity]$Security
     )
-    if (-not ('HtpcUpdate.DirSec' -as [type])) {
-        Add-Type -Namespace HtpcUpdate -Name DirSec -MemberDefinition @'
+    if (-not ('HtpcUpdate.DirSecurity' -as [type])) {
+        Add-Type -Namespace HtpcUpdate -Name DirSecurity -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
 public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string path, uint access, uint share, System.IntPtr sec, uint disposition, uint flags, System.IntPtr template);
 
 [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
 public static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION info);
 
-[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
-public static extern bool SetKernelObjectSecurity(Microsoft.Win32.SafeHandles.SafeFileHandle handle, uint securityInformation, byte[] descriptor);
+// Returns a Win32 error code (0 = done); it does not set the last error.
+[System.Runtime.InteropServices.DllImport("advapi32.dll")]
+public static extern uint SetSecurityInfo(Microsoft.Win32.SafeHandles.SafeFileHandle handle, int objectType, uint securityInfo, byte[] owner, byte[] group, byte[] dacl, byte[] sacl);
 
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct BY_HANDLE_FILE_INFORMATION {
@@ -378,19 +384,34 @@ public struct BY_HANDLE_FILE_INFORMATION {
     # FILE_FLAG_BACKUP_SEMANTICS (open a directory) | FILE_FLAG_OPEN_REPARSE_POINT (the link, not its target).
     $access = [uint32](0x40000 -bor 0x80000 -bor 0x20000)
     $flags = [uint32](0x02000000 -bor 0x00200000)
-    $handle = [HtpcUpdate.DirSec]::CreateFileW($Path, $access, [uint32]7, [IntPtr]::Zero, [uint32]3, $flags, [IntPtr]::Zero)
+    $handle = [HtpcUpdate.DirSecurity]::CreateFileW($Path, $access, [uint32]7, [IntPtr]::Zero, [uint32]3, $flags, [IntPtr]::Zero)
     if ($handle.IsInvalid) { throw "could not open $Path to set its security: $((New-Object ComponentModel.Win32Exception ([Runtime.InteropServices.Marshal]::GetLastWin32Error())).Message)" }
     try {
-        $info = New-Object HtpcUpdate.DirSec+BY_HANDLE_FILE_INFORMATION
-        if (-not [HtpcUpdate.DirSec]::GetFileInformationByHandle($handle, [ref]$info)) { throw "could not read the attributes of $Path" }
+        $info = New-Object HtpcUpdate.DirSecurity+BY_HANDLE_FILE_INFORMATION
+        if (-not [HtpcUpdate.DirSecurity]::GetFileInformationByHandle($handle, [ref]$info)) { throw "could not read the attributes of $Path" }
         if (-not ($info.FileAttributes -band 0x10)) { throw "$Path is not a directory" }        # FILE_ATTRIBUTE_DIRECTORY
         if ($info.FileAttributes -band 0x400) { throw "$Path is a reparse point (junction or link)" }   # FILE_ATTRIBUTE_REPARSE_POINT
-        # OWNER (0x1) | DACL (0x4), and PROTECTED_DACL (0x80000000) only for a protected ACL. The
-        # 'L' keeps 0x80000005 from wrapping to a negative Int32 before the cast (Windows PowerShell 5.1).
-        $si = if ($Security.AreAccessRulesProtected) { [uint32]0x80000005L } else { [uint32]0x00000005 }
-        if (-not [HtpcUpdate.DirSec]::SetKernelObjectSecurity($handle, $si, $Security.GetSecurityDescriptorBinaryForm())) {
-            throw "could not set the security of $($Path): $((New-Object ComponentModel.Win32Exception ([Runtime.InteropServices.Marshal]::GetLastWin32Error())).Message)"
+        $raw = New-Object Security.AccessControl.RawSecurityDescriptor($Security.GetSecurityDescriptorBinaryForm(), 0)
+        $owner = $null
+        if ($Security.AreAccessRulesProtected) {
+            # OWNER (0x1) | DACL (0x4) | PROTECTED_DACL (0x80000000). The 'L' keeps 0x80000005 from
+            # wrapping to a negative Int32 before the cast (Windows PowerShell 5.1).
+            $si = [uint32]0x80000005L
+            $dacl = $raw.DiscretionaryAcl
+            $sid = $Security.GetOwner([Security.Principal.SecurityIdentifier])
+            if ($sid) { $owner = New-Object byte[] $sid.BinaryLength; $sid.GetBinaryForm($owner, 0) } else { $si = [uint32]0x80000004L }
+        } else {
+            # DACL (0x4) | UNPROTECTED_DACL (0x20000000): its explicit rules only; Windows adds the
+            # parent's inheritable ones.
+            $si = [uint32]0x20000004
+            $dacl = New-Object Security.AccessControl.RawAcl($raw.DiscretionaryAcl.Revision, 0)
+            # IsInherited, not -band on AceFlags: that byte-based enum makes -band throw in PS 5.1.
+            foreach ($ace in $raw.DiscretionaryAcl) { if (-not $ace.IsInherited) { $dacl.InsertAce($dacl.Count, $ace) } }
         }
+        $daclBytes = New-Object byte[] $dacl.BinaryLength
+        $dacl.GetBinaryForm($daclBytes, 0)
+        $rc = [HtpcUpdate.DirSecurity]::SetSecurityInfo($handle, 1, $si, $owner, $null, $daclBytes, $null)   # 1 = SE_FILE_OBJECT
+        if ($rc -ne 0) { throw "could not set the security of $($Path): $((New-Object ComponentModel.Win32Exception ([int]$rc)).Message)" }
     } finally { $handle.Dispose() }
 }
 
