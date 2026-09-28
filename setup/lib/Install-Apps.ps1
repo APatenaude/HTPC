@@ -34,8 +34,7 @@ param(
 . "$PSScriptRoot\Common.ps1"
 . "$PSScriptRoot\AppCore.ps1"
 . "$PSScriptRoot\AppAutostart.ps1"
-
-$WorkDir = Join-Path $env:TEMP 'htpc-setup\apps'
+. "$PSScriptRoot\UpdateCore.ps1"   # New-AdminWorkDir
 
 $entries = (Get-Content $Catalog -Raw | ConvertFrom-Json).apps
 $Ids = @($Ids | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
@@ -43,22 +42,31 @@ $picked = if ($Ids) { $entries | Where-Object { $Ids -contains $_.id } } else { 
 $unknown = $Ids | Where-Object { ($entries.id) -notcontains $_ }
 if ($unknown) { throw "Not in the catalog: $($unknown -join ', ')" }
 
+# Downloads staged where only administrators can write (AppCore's GitHub installers run from
+# there, elevated), never in %TEMP%, which is the user's: a checked installer could be swapped
+# there before it runs. At standard rights (a dev run), %TEMP% is theirs anyway.
+$WorkDir = if (Test-Admin) { New-AdminWorkDir 'apps' } else { Join-Path $env:TEMP 'htpc-setup\apps' }
+
 $failed = @()
-foreach ($app in $picked) {
-    try {
-        if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
-        if ($app.install.PSObject.Properties['elevated'] -and $app.install.elevated -eq $false -and (Test-Admin)) {
-            Write-Attention "$($app.name) must be installed without admin rights; install it from the library"; continue
+try {
+    foreach ($app in $picked) {
+        try {
+            if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
+            if ($app.install.PSObject.Properties['elevated'] -and $app.install.elevated -eq $false -and (Test-Admin)) {
+                Write-Attention "$($app.name) must be installed without admin rights; install it from the library"; continue
+            }
+            if (Test-Admin) { Add-InboundBlock $app $null }   # before the app can first run
+            $before = @(Get-Process | Select-Object -ExpandProperty Id)
+            Install-App $app $null $WorkDir
+            Stop-StartedByInstaller $app $before
+            Write-FirstRunFiles $app
+        } catch {
+            Write-Attention "$($app.name): $($_.Exception.Message)"
+            $failed += $app.name
         }
-        if (Test-Admin) { Add-InboundBlock $app $null }   # before the app can first run
-        $before = @(Get-Process | Select-Object -ExpandProperty Id)
-        Install-App $app $null $WorkDir
-        Stop-StartedByInstaller $app $before
-        Write-FirstRunFiles $app
-    } catch {
-        Write-Attention "$($app.name): $($_.Exception.Message)"
-        $failed += $app.name
     }
+} finally {
+    if (Test-Admin) { Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 Write-Host '  Apps that would start by themselves'
 [void](Invoke-AppAutostartGuard -Apps $entries -ReportOthers -Context 'setup')

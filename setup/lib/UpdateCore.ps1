@@ -355,6 +355,19 @@ function New-TrustedDirectory([string]$Path, [string]$Root, [switch]$UsersRead) 
     Assert-TrustedPath $Path $Root
 }
 
+# A fresh admin-only folder for an elevated setup step's downloads: ProgramData\HTPC\state\work\
+# <Name>-<random>, made admin-only as it is created, with everything from ProgramData\HTPC down
+# checked. Never %TEMP%, which the user can write: an installer checked there could be swapped
+# before it runs as administrator. The caller deletes it when done.
+function New-AdminWorkDir([string]$Name, [string]$DataRoot = (Join-Path $env:ProgramData 'HTPC')) {
+    $state = Join-Path $DataRoot 'state'
+    New-TrustedDirectory $state $DataRoot -UsersRead
+    New-TrustedDirectory (Join-Path $state 'work') $DataRoot
+    $dir = Join-Path $state ('work\{0}-{1}' -f $Name, [guid]::NewGuid().ToString('N').Substring(0, 12))
+    New-TrustedDirectory $dir $DataRoot
+    $dir
+}
+
 # --- Moving files so a power cut leaves either the old or the new one --------------------------
 
 # The few Windows calls PowerShell has no command for, compiled once, when first needed

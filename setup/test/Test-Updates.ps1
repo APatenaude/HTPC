@@ -480,6 +480,15 @@ catch { Write-JobProgress 'failed' 0 `$_.Exception.Message; "RESULT refused: `$(
         Check ($r -like 'ok *' -and $progress.phase -eq 'start' -and $progress.jobId -eq 'install:vlc') "app job, a trusted state\: made its work folder and wrote its progress ($r)"
         Check ($temp -and (Test-Path -LiteralPath $temp) -and $null -eq (Get-UntrustedReason $temp) -and (Get-Acl -LiteralPath $temp).AreAccessRulesProtected) '  the work folder: admin-only, made so as it was created'
         Check (@(Get-ChildItem "$data\state" -Filter '*.tmp*').Count -eq 0) '  no temp file left beside the progress'
+
+        # Setup's downloads (Install-Apps, Install-Codecs): an admin-only work folder, never %TEMP%.
+        $data = Join-Path $work 'workdir\HTPC'
+        New-AdminFolder $data
+        $d = try { New-AdminWorkDir 'apps' $data } catch { $null }
+        Check ($d -and $d.StartsWith("$data\state\work\apps-") -and $null -eq (Get-UntrustedReason $d) -and (Get-Acl -LiteralPath $d).AreAccessRulesProtected) "setup's download folder: admin-only, under state\work ($d)"
+        & icacls "$data\state" /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+        $k = try { [void](New-AdminWorkDir 'apps' $data); 'made' } catch { Kind $_ }
+        Check ($k -eq 'refused') "  ... refused under a state\ Users can change ($k)"
     }
 
     if (Section 'Wua') {
