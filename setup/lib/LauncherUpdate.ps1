@@ -277,9 +277,12 @@ function Remove-TrustedItem([string]$Path, [string]$Root) {
     }
 }
 
-# What Remove-TrustedItem set aside, once nothing runs from it any more (at reconcile).
+# What Remove-TrustedItem set aside, once nothing runs from it any more (at reconcile), and the
+# copies setup renamed aside when it replaced them (Install-Launcher.ps1: <name>.<time>.old, 59 MB
+# for the launcher), which stayed until the next setup: at Windows' start nothing runs them. SYSTEM
+# in the launcher's admin-only folder; a copy still in use stays for the next time.
 function Remove-SetAside($Paths) {
-    foreach ($f in Get-ChildItem -LiteralPath $Paths.LauncherDir -Filter '*.old-*' -File -ErrorAction SilentlyContinue) {
+    foreach ($f in Get-ChildItem -LiteralPath $Paths.LauncherDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*.old-*' -or $_.Name -like '*.old' }) {
         try { Assert-TrustedPath $f.FullName $Paths.InstallRoot; Remove-Item -LiteralPath $f.FullName -Force } catch { }
     }
 }
