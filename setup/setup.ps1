@@ -50,9 +50,14 @@
     Start-HtpcSetup.cmd, which then opens the setup exe from the media).
 .PARAMETER NoPause
     Close the window at the end without waiting for Enter.
+.PARAMETER Uninstall
+    Undo what the steps can instead (lib\Uninstall-Htpc.ps1 lists what goes and what stays; the
+    apps stay). Its log and a copy of the box's logs go to Documents\HTPC logs.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File setup\setup.ps1
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
 #>
 param(
     [string[]]$Only,
@@ -60,7 +65,8 @@ param(
     [string[]]$Apps,
     [string]$LauncherExe,
     [switch]$Unattended,
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$Uninstall
 )
 
 $lib = Join-Path $PSScriptRoot 'lib'
@@ -94,6 +100,8 @@ $Steps = [ordered]@{
     Shell        = { & "$lib\Set-Shell.ps1" }
     DecodeCheck  = { & "$lib\Invoke-DecodeCheck.ps1" }
 }
+# -Uninstall: its own steps instead, run the same way.
+if ($Uninstall) { . "$lib\Uninstall-Htpc.ps1"; $Steps = $UninstallSteps }
 
 # One command-line argument, quoted when needed: unquoted, "TV Box Setup.exe" became three
 # arguments and setup stopped on the unknown step "Box" before it logged anything.
@@ -159,11 +167,12 @@ $Apps = Split-List $Apps
 $unknown = @($Only + $Skip) | Where-Object { $Steps.Keys -notcontains $_ }
 if ($unknown) { throw "Unknown step(s): $($unknown -join ', '). Steps: $($Steps.Keys -join ', ')" }
 
-$logDir = Join-Path $HtpcData 'logs'
+# -Uninstall removes ProgramData\HTPC: its log goes to the user's Documents instead.
+$logDir = if ($Uninstall) { Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HTPC logs' } else { Join-Path $HtpcData 'logs' }
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $log = Join-Path $logDir ("setup-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $log | Out-Null
-Write-Host "HTPC setup on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+Write-Host "HTPC setup$(if ($Uninstall) { ' -Uninstall' }) on $env:COMPUTERNAME as $env:USERNAME, $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
 
 # Progress for the setup exe: the steps to run, the one running, the results so far.
 $progressFile = Join-Path $logDir 'setup-progress.json'
@@ -195,14 +204,14 @@ foreach ($name in $planned) {
 
 # After a USB install the wizard opens at each sign-in (lib\Start-SetupWizard.ps1) until the
 # launcher is in; from then on the home screen starts instead.
-if ($results['Launcher'] -eq 'OK') { Unregister-ScheduledTask -TaskName 'HTPC setup wizard' -Confirm:$false -ErrorAction SilentlyContinue }
+if (-not $Uninstall -and $results['Launcher'] -eq 'OK') { Unregister-ScheduledTask -TaskName 'HTPC setup wizard' -Confirm:$false -ErrorAction SilentlyContinue }
 
 $restart = @()
 $activeName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName').ComputerName
 $pendingName = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName
 if ($activeName -ne $pendingName) { $restart += "computer name $pendingName" }
 if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $restart += 'Windows servicing' }
-if ($results['Shell'] -eq 'OK' -and (& "$lib\Set-Shell.ps1" -Pending)) { $restart += 'shell' }
+if (-not $Uninstall -and $results['Shell'] -eq 'OK' -and (& "$lib\Set-Shell.ps1" -Pending)) { $restart += 'shell' }
 
 Write-Host "`n== Summary"
 foreach ($name in $results.Keys) { Write-Host ('  {0,-13} {1}' -f $name, $results[$name]) }

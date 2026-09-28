@@ -1,0 +1,208 @@
+# setup.ps1 -Uninstall: the box back to a plain Windows PC, as far as setup's steps can be undone.
+# Dot-sourced by setup.ps1 (after Common.ps1): $UninstallSteps then replaces its steps, and runs
+# like them (logged, one result each, a failed one does not stop the others). Each one reports
+# what it did ("+" changed, "=" already so). Safe to run again.
+#
+#   Apps        nothing: the apps are ordinary apps, kept (it lists the installed catalog apps)
+#   Shell       Explorer back as this account's shell, the HKCU Run start removed; Defender
+#               exclusion and "Back to TV" shortcuts removed (Set-Shell.ps1 -Undo); next sign-in
+#   AutoLogon   no automatic sign-in any more, the lock and Windows Hello back; the account keeps
+#               its (blank) password: set one
+#   Updates     Windows Update and Store policies back to Windows' defaults
+#   Edge        the Edge policies setup set, its force-installed extensions and the fake MDM
+#               enrollment removed
+#   Tasks       the \HTPC\ tasks (\HTPC\Jobs, Networks private) and HTPC's one-shot tasks
+#   Firewall    the "HTPC" rule group and the apps' "HTPC block inbound" rules
+#   Certificates the phone remote's certificates (O=HTPC TV box) from the CA stores
+#   System      the sign-in screen and the desktop back to Windows' look (default wallpaper),
+#               Windows Search and SysMain back on; the computer name kept
+#   Files       the launcher and watchdog ended; a copy of the box's logs in Documents\HTPC logs;
+#               Program Files\HTPC and ProgramData\HTPC removed
+# Kept (and said so): the apps, winget, the HEVC extension, power settings, the privacy and
+# no-pop-up settings, dark mode, Private networks, automatic time zone, the computer name, and
+# %LOCALAPPDATA%\HTPC (the launcher's settings and the website tiles' Edge profiles, with their
+# sign-ins). A System Restore point from before setup is the other way back (setup/README.md).
+
+$HtpcProgramFiles = Join-Path $env:ProgramFiles 'HTPC'
+
+# Removes a key when nothing is left in it (no values, no subkeys).
+function Remove-EmptyKey([string]$Path) {
+    $key = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+    if ($key -and $key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0) { Remove-Item -LiteralPath $Path -Force; Write-Change "removed $Path (empty)" }
+}
+
+function Remove-RegKey([string]$Path) {
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force; Write-Change "removed $Path" }
+    else { Write-Same "$Path absent" }
+}
+
+$UninstallSteps = [ordered]@{
+    Apps = {
+        $catalog = Join-Path $lib '..\catalog.json'
+        $apps = @(if (Test-Path $catalog) { (Get-Content $catalog -Raw | ConvertFrom-Json).apps })
+        $installed = @($apps | Where-Object { $_.install -and $_.launch.exe -and (Test-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($_.launch.exe))) } | ForEach-Object { $_.name })
+        Write-Same "apps kept, they are ordinary apps: $(if ($installed) { $installed -join ', ' } else { 'none installed' }) (Settings > Apps uninstalls them)"
+    }
+
+    Shell = {
+        & "$lib\Set-Shell.ps1" -Undo
+        # -Undo starts the watchdog from Run again, as before the Shell step; it goes too.
+        Remove-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' 'HTPC launcher'
+        Add-RestartReason 'the Windows desktop (Explorer) at the next sign-in'
+    }
+
+    AutoLogon = {
+        $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-RegValue $winlogon 'AutoAdminLogon' '0' 'String'
+        foreach ($name in 'DefaultPassword', 'ForceAutoLogon', 'AutoLogonCount') { Remove-RegValue $winlogon $name }
+        Remove-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' 'DisableLockWorkstation'
+        Remove-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork' 'Enabled'
+        Remove-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork' 'DisablePostLogonProvisioning'
+        Remove-EmptyKey 'HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork'
+        Remove-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'NoConnectedUser'
+        $protection = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Account protection'
+        Remove-RegValue $protection 'UILockdown'
+        Remove-EmptyKey $protection
+        Write-Attention "$env:USERNAME has no password (the box was open): anyone at this PC can sign in. Set one: Ctrl+Alt+Del > Change a password, or Settings > Accounts > Sign-in options."
+    }
+
+    Updates = {
+        $wu = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+        foreach ($name in 'NoAutoUpdate', 'NoAutoRebootWithLoggedOnUsers') { Remove-RegValue "$wu\AU" $name }
+        foreach ($name in 'ExcludeWUDriversInQualityUpdate', 'SetUpdateNotificationLevel', 'UpdateNotificationLevel') { Remove-RegValue $wu $name }
+        Remove-EmptyKey "$wu\AU"
+        Remove-EmptyKey $wu
+        Remove-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' 'AutoDownload'
+        Remove-EmptyKey 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
+        Write-Same 'Windows updates automatic again (Windows'' defaults), drivers included'
+    }
+
+    Edge = {
+        $edge = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+        # The values Set-EdgePolicy.ps1 sets, read from it: the two lists cannot drift apart.
+        $names = @([regex]::Matches((Get-Content (Join-Path $lib 'Set-EdgePolicy.ps1') -Raw), "Set-RegValue \`$edge '([^']+)'") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+        if (-not $names.Count) { throw 'no Edge policy names found in Set-EdgePolicy.ps1' }
+        foreach ($name in $names) { Remove-RegValue $edge $name }
+        Remove-RegKey "$edge\ExtensionInstallForcelist"
+        Remove-RegKey "$edge\3rdparty\extensions\cimighlppcgcoapaliogpjjdehbnofhn"   # uBlock Origin Lite's settings
+        Remove-EmptyKey "$edge\3rdparty\extensions"
+        Remove-EmptyKey "$edge\3rdparty"
+        Remove-EmptyKey $edge
+        $left = Get-Item -LiteralPath $edge -ErrorAction SilentlyContinue
+        if ($left) { Write-Attention "Edge policies not set by setup kept: $(@($left.GetValueNames()) + @($left.GetSubKeyNames()) -join ', ')" }
+        $fake = 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF'
+        Remove-RegKey "HKLM:\SOFTWARE\Microsoft\Enrollments\$fake"
+        Remove-RegKey "HKLM:\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\$fake"
+        Write-Same 'Edge removes the extensions and takes its own settings back at its next start'
+    }
+
+    Tasks = {
+        foreach ($task in @(Get-ScheduledTask -TaskPath '\HTPC\' -ErrorAction SilentlyContinue)) {
+            Unregister-ScheduledTask -TaskPath $task.TaskPath -TaskName $task.TaskName -Confirm:$false
+            Write-Change "task $($task.TaskPath)$($task.TaskName) removed"
+        }
+        foreach ($task in @(Get-ScheduledTask -TaskPath '\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'HTPC *' })) {
+            Unregister-ScheduledTask -TaskPath '\' -TaskName $task.TaskName -Confirm:$false
+            Write-Change "task $($task.TaskName) removed"
+        }
+        $service = New-Object -ComObject Schedule.Service
+        $service.Connect()
+        try { [void]$service.GetFolder('\HTPC'); $service.GetFolder('\').DeleteFolder('HTPC', 0); Write-Change 'task folder \HTPC removed' }
+        catch { Write-Same 'no \HTPC task folder' }
+    }
+
+    Firewall = {
+        $rules = @(Get-NetFirewallRule -Group 'HTPC' -ErrorAction SilentlyContinue) +
+            @(Get-NetFirewallRule -DisplayName 'HTPC block inbound - *' -ErrorAction SilentlyContinue)
+        foreach ($rule in $rules | Where-Object { $_ }) {
+            Remove-NetFirewallRule -Name $rule.Name
+            Write-Change "firewall rule removed: $($rule.DisplayName)"
+        }
+        if (-not @($rules | Where-Object { $_ }).Count) { Write-Same 'no HTPC firewall rules' }
+    }
+
+    Certificates = {
+        $removed = 0
+        foreach ($store in 'Cert:\LocalMachine\CA', 'Cert:\CurrentUser\CA') {
+            foreach ($cert in @(Get-ChildItem $store -ErrorAction SilentlyContinue | Where-Object { $_.Subject -match '(^|, )O=HTPC TV box(,|$)' })) {
+                Remove-Item -LiteralPath $cert.PSPath -Force
+                Write-Change "certificate removed: $($cert.Subject) ($store)"
+                $removed++
+            }
+        }
+        if (-not $removed) { Write-Same 'no phone remote certificates' }
+    }
+
+    System = {
+        $policies = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows'
+        # The sign-in ("Welcome") screen: Windows' own picture and its blur again.
+        Remove-RegValue "$policies\Personalization" 'LockScreenImage'
+        $csp = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP'
+        foreach ($name in 'LockScreenImagePath', 'LockScreenImageUrl', 'LockScreenImageStatus') { Remove-RegValue $csp $name }
+        Remove-EmptyKey $csp
+        Remove-RegValue "$policies\System" 'DisableAcrylicBackgroundOnLogon'
+        Remove-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' 'Background'
+        # The desktop: Windows' default wallpaper, black behind it.
+        Set-RegValue 'Registry::HKEY_USERS\.DEFAULT\Control Panel\Colors' 'Background' '0 0 0' 'String'
+        Set-RegValue 'HKCU:\Control Panel\Colors' 'Background' '0 0 0' 'String'
+        $wallpaper = Join-Path $env:SystemRoot 'Web\Wallpaper\Windows\img0.jpg'
+        if (Test-Path -LiteralPath $wallpaper) {
+            Set-RegValue 'HKCU:\Control Panel\Desktop' 'WallPaper' $wallpaper 'String'
+            Set-RegValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers' 'BackgroundType' 0
+            if (-not ('HtpcSetup.Wallpaper' -as [type])) {
+                Add-Type -Namespace HtpcSetup -Name Wallpaper -MemberDefinition '[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SystemParametersInfo(uint action, uint param, string value, uint flags);'
+            }
+            [void][HtpcSetup.Wallpaper]::SystemParametersInfo(0x14, 0, $wallpaper, 3)   # SPI_SETDESKWALLPAPER, update and broadcast
+        }
+        # Background work a PC wants (the box had it off): Windows Search indexing and SysMain.
+        foreach ($service in @{ Name = 'WSearch'; Start = 'AutomaticDelayedStart' }, @{ Name = 'SysMain'; Start = 'Automatic' }) {
+            $s = Get-Service $service.Name -ErrorAction SilentlyContinue
+            if (-not $s) { continue }
+            if ($s.StartType -eq 'Disabled') {
+                # Set-Service -StartupType knows no delayed start in Windows PowerShell 5.1.
+                $mode = if ($service.Start -eq 'AutomaticDelayedStart') { 'delayed-auto' } else { 'auto' }
+                & sc.exe config $service.Name start= $mode | Out-Null
+                Start-Service $service.Name -ErrorAction SilentlyContinue
+                Write-Change "service $($service.Name) back on ($mode)"
+            } else { Write-Same "service $($service.Name) $($s.StartType)" }
+        }
+        Write-Same "computer name $env:COMPUTERNAME kept (Settings > System > About renames it)"
+    }
+
+    Files = {
+        # Nothing may run from the folders about to go: this script's own folder (ProgramData\
+        # HTPC\setup) may be one, so the working directory moves out too.
+        Set-Location $env:SystemRoot
+        [Environment]::CurrentDirectory = $env:SystemRoot
+        foreach ($name in 'HtpcWatchdog', 'HtpcLauncher', 'TV Box Setup') {
+            foreach ($p in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                Write-Change "$name ended (pid $($p.Id))"
+            }
+        }
+        # The box's logs, kept for the user (the uninstall's own log is in the same folder).
+        $keep = Join-Path $logDir ('box logs {0:yyyyMMdd-HHmmss}' -f (Get-Date))
+        foreach ($sub in 'logs', 'state') {
+            $from = Join-Path $HtpcData $sub
+            if (Test-Path -LiteralPath $from) {
+                New-Item -ItemType Directory -Force $keep | Out-Null
+                Copy-Item -LiteralPath $from -Destination $keep -Recurse -Force
+                Write-Change "$from copied to $keep"
+            }
+        }
+        foreach ($dir in $HtpcProgramFiles, $HtpcData) {
+            if (-not (Test-Path -LiteralPath $dir)) { Write-Same "$dir absent"; continue }
+            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $dir) { Write-Attention "$dir partly left (files in use): delete it after the restart" }
+            else { Write-Change "removed $dir" }
+        }
+        # The launcher's per-user bits: its watchdog pause and where its single-file exe unpacks.
+        Remove-RegKey 'HKCU:\Software\HTPC'
+        $environment = Get-Item 'HKCU:\Environment'
+        if ($environment.GetValue('DOTNET_BUNDLE_EXTRACT_BASE_DIR', $null, 'DoNotExpandEnvironmentNames') -eq '%LOCALAPPDATA%\HTPC\bundle') {
+            Remove-RegValue 'HKCU:\Environment' 'DOTNET_BUNDLE_EXTRACT_BASE_DIR'
+        }
+        $local = Join-Path $env:LOCALAPPDATA 'HTPC'
+        if (Test-Path -LiteralPath $local) { Write-Same "$local kept: the launcher's settings and the website tiles' Edge profiles (their sign-ins); delete it if not wanted" }
+    }
+}

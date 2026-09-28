@@ -43,6 +43,39 @@ it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the me
 
 `catalog.json` is the one app list for setup and the launcher's library.
 
+## Uninstall
+
+Back to a plain Windows PC (desktop mode, or Ctrl+Shift+Esc > Run new task, then):
+
+    powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
+
+It asks for elevation like setup, undoes what the steps can (`lib/Uninstall-Htpc.ps1`), each step
+saying what it did (`+` changed, `=` already so), and can be run again. Its log, and a copy of the
+box's logs (`logs\`, `state\`), go to `Documents\HTPC logs`. Then restart.
+
+| Step | Undoes |
+|---|---|
+| Apps | nothing: the apps are ordinary apps and stay (it lists them; Settings > Apps removes them) |
+| Shell | Explorer as the shell again, the HKCU Run start of the watchdog removed, the Defender exclusion and "Back to TV" shortcuts removed (`Set-Shell.ps1 -Undo`); next sign-in |
+| AutoLogon | automatic sign-in off; the lock, Windows Hello offers and Account protection back. The account keeps its blank password: it says so, and to set one |
+| Updates | the Windows Update and Store policies removed: Windows' defaults, drivers from Windows Update included |
+| Edge | the policies the Edge step set (read from `Set-EdgePolicy.ps1`), the force-installed extensions and uBlock Origin Lite's settings, the fake MDM enrollment; other Edge policies are kept and named |
+| Tasks | the `\HTPC\` tasks (`Jobs`, `Networks private`) and the folder, the one-shot `HTPC ...` tasks |
+| Firewall | the `HTPC` rule group and the apps' `HTPC block inbound` rules |
+| Certificates | the phone remote's certificates (`O=HTPC TV box`) in the machine's and the user's CA stores |
+| System | the sign-in screen's picture and blur, Windows' default wallpaper, Windows Search and SysMain on again; the computer name is kept (it says so) |
+| Files | the launcher and watchdog ended, `Program Files\HTPC` and `ProgramData\HTPC` removed (the logs copied first), `HKCU\Software\HTPC` and the launcher's unpack folder variable removed |
+
+Kept: the apps, winget, the HEVC extension, the power settings, the privacy and no-pop-up
+settings, dark mode, Private networks, automatic time zone, the computer name, and
+`%LOCALAPPDATA%\HTPC` (the launcher's settings and the website tiles' Edge profiles, with their
+sign-ins: delete it by hand if not wanted).
+
+The other way back is System Restore: the RestorePoint step made "HTPC setup" before any change.
+`rstrui.exe`, "Choose a different restore point", that one: Windows' settings and programs go
+back to before setup (apps installed since then are gone, Windows updates since then too);
+personal files stay.
+
 ## Installing from the TV (SPEC W5)
 
 The launcher runs at standard rights (the TV account is an Administrator, but its processes are
