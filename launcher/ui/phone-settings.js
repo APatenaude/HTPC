@@ -65,7 +65,7 @@ function renderPhoneSection() {
     body += `<div class="srow phone-warn"><div class="text"><span class="label">${esc(problem[0])}</span>` +
       `<span class="caption">${esc(problem[1])}</span></div></div>`;
   }
-  body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'The first time a phone connects, a 4-digit code shows on the TV', toggle(p.requireCode));
+  body += settingRow('phone.requireCode', 'Ask for a code on new phones', 'A new phone asks for a 4-digit code, and it shows on the TV. The QR code above needs none.', toggle(p.requireCode));
   body += '<span class="ssection">Phones</span>';
   const shown = p.phones.filter((ph) => !ph.shortcut);
   // Shortcut keys under the phone that made them (forgetting the phone forgets them); older ones
