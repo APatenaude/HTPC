@@ -48,6 +48,7 @@ sealed partial class MainForm
         if (next.Task == AsUser.WatchdogTask && DesktopMode.WatchdogRunning()) Log.Info("The watchdog is running: it starts the launcher");
         else AsUser.Start(next);
         WatchdogPause.Clear();
+        SetupElevation.HandedOver = true;
         Environment.ExitCode = 75;
     }
 
@@ -121,10 +122,27 @@ sealed partial class MainForm
             catch (Exception ex)
             {
                 Log.Error("WebView2 failed to start", ex);
+                // Setup: no watchdog starts it again, so its own screen says what happened.
+                if (setupMode) { SetupCannotShow(ex); return; }
                 ExitForRestart("no web view");
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Setup's screens could not show (no WebView2): a screen of setup's own instead of a black one
+    /// or a browser dialog only a mouse closes. A starts setup again (a new copy, through the
+    /// trusted start: SetupElevation.StartAgain), B quits; nothing was changed either way.
+    /// </summary>
+    void SetupCannotShow(Exception ex)
+    {
+        using var screen = new AdminNeededForm($"Windows' web view (WebView2) did not start: {ex.Message}", SetupElevation.StartAgain,
+            heading: "Setup could not show its screens",
+            body: "Nothing was changed. Try again; if it happens again, restart the box and start TV Box Setup once more.");
+        screen.ShowDialog(this);
+        Log.Info(screen.HandedOver ? "Setup: started again after WebView2 failed" : "Setup: quit after WebView2 failed");
+        Close();
     }
 
     /// <summary>

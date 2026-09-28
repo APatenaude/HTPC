@@ -159,13 +159,24 @@ static class Program
         }
         // Setup replaces a launcher that is already running (setup run again on a finished box).
         // The watchdog must not start it again meanwhile. Only this session's: setup is elevated.
+        var launchersEnded = 0;   // setup: launchers it ended here, put back if it ends without handing over
         if (options.Setup)
         {
             WatchdogPause.Set(TimeSpan.FromMinutes(15));
             using var me = System.Diagnostics.Process.GetCurrentProcess();
             foreach (var other in System.Diagnostics.Process.GetProcessesByName("HtpcLauncher").Concat(System.Diagnostics.Process.GetProcessesByName(me.ProcessName)))
                 using (other)
-                    if (other.Id != Environment.ProcessId && other.SessionId == me.SessionId) { try { other.Kill(); other.WaitForExit(3000); } catch (Exception) { } }
+                    if (other.Id != Environment.ProcessId && other.SessionId == me.SessionId)
+                    {
+                        try
+                        {
+                            var isLauncher = other.ProcessName == "HtpcLauncher";
+                            other.Kill();
+                            other.WaitForExit(3000);
+                            if (isLauncher) launchersEnded++;
+                        }
+                        catch (Exception) { }
+                    }
         }
         // One launcher at a time. A new one waits a moment for the one handing over to it (the
         // setup exe starting the installed launcher as it closes). Setup's names the user too.
@@ -181,13 +192,20 @@ static class Program
         // locked and Administrators' (TvFiles refuses otherwise); everything else it keeps in
         // Program Files\HTPC\Setup, never in the user's profile.
         if (options.Setup && elevated) SetupRunner.LockData();
+        // The elevated setups' WebView2 profiles, one per run in the user's profile: the launcher removes them, as the user.
+        if (!options.Setup) SetupElevation.ClearSetupWebViews();
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);
         Application.ThreadException += (_, e) => Log.Error("UI thread", e.Exception);
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
-        Application.Run(new MainForm(options));
+        try { Application.Run(new MainForm(options)); }
+        finally
+        {
+            // Setup closed or failed before it handed over: nothing may be left on a bare desktop.
+            if (options.Setup && !SetupElevation.HandedOver) SetupElevation.RestoreAfterEarlyExit(launchersEnded);
+        }
         Log.Info("Launcher closed");
     }
 }

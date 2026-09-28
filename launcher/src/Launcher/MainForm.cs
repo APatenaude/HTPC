@@ -235,12 +235,14 @@ sealed partial class MainForm : Form
 
     async Task InitWebView()
     {
-        // Setup (elevated) has a profile of its own: SetupElevation.cs.
+        // Setup (elevated) has a profile of its own, new each run: SetupElevation.WebViewFolder.
         var dataDir = SetupElevation.WebViewFolder(options.Setup, Environment.IsPrivilegedProcess);
         // The controller's presses reach the page as web messages, not user gestures: without
         // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
+        // No error dialogs of the browser's own ("can't read and write to its data directory"):
+        // only a mouse closes them; a failure here is ours to show (StartWebView).
         var env = await CoreWebView2Environment.CreateAsync(null, dataDir,
-            new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--autoplay-policy=no-user-gesture-required" });
+            new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--autoplay-policy=no-user-gesture-required --noerrdialogs" });
         await web.EnsureCoreWebView2Async(env);
         var core = web.CoreWebView2;
         core.Settings.AreDevToolsEnabled = options.Dev;
@@ -691,6 +693,7 @@ sealed partial class MainForm : Form
             if (elevated) { Post(new { type = "toast", text = "The home screen did not start. Restart the box to get to it.", kind = "warn" }); return; }
         }
         setupMode = false;
+        SetupElevation.HandedOver = true;   // this window is the home screen now (not elevated)
         tv.InSetup = false;
         uiReady = false;
         Log.Info("Setup finished: home screen");

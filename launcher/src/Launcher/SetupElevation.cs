@@ -23,8 +23,9 @@ namespace Htpc.Launcher;
 /// prompt. The elevated copy gets only harmless arguments (no --ui, --catalog or --dev), and in
 /// setup mode the page may only send setup's own messages (IsSetupMessage).
 ///
-/// The elevated wizard runs setup.ps1 directly (SetupRunner), with a WebView2 profile of its own
-/// (setup-webview: the launcher's stays the standard-rights one it always was), and holds the
+/// The elevated wizard runs setup.ps1 directly (SetupRunner), with a WebView2 profile of its own,
+/// new each run (%LOCALAPPDATA%\HTPC\setup-webview\run-*: the browser runs at the user's rights,
+/// see WebViewFolder; the launcher's stays the one it always was), and holds the
 /// single-instance mutex with the user's access in it. Whatever it starts for the user runs as
 /// the signed-in user, not elevated (AsUser): the installed watchdog and launcher at the end, or
 /// this program as the home screen. Checked in launcher\tests\LauncherTests (ElevationTests.cs).
@@ -305,14 +306,49 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// The WebView2 profile. The elevated setup's: Program Files\HTPC\Setup\webview, admin-only
-    /// (the elevated wizard is its only user), so nothing an elevated WebView2 writes lands in the
-    /// user's profile, where a link they planted could send it anywhere. The launcher's, and a
-    /// setup at standard rights (a dev run): its own in %LOCALAPPDATA%\HTPC, as always.
+    /// The WebView2 profile, in %LOCALAPPDATA%\HTPC: launcher-webview for the launcher,
+    /// setup-webview for a setup at standard rights (a dev run), and for the elevated setup a new
+    /// one each run, setup-webview\run-&lt;id&gt;. The elevated setup's is in the user's profile, a
+    /// folder the user can write, and that is safe:
+    ///   - WebView2 starts its browser de-elevated, at the user's own rights, whatever its host's
+    ///     (runtime 154 does): in admin-only Program Files\HTPC\Setup it could not make its
+    ///     profile, and setup stopped before its first page.
+    ///   - The browser makes and writes the folder itself, at the user's rights. This elevated
+    ///     process only names it: it never writes, reads or runs anything in it.
+    ///   - Whatever a changed profile could make the page do, the user's own programs can do
+    ///     already: the browser runs at their rights and is theirs to drive. So the elevated window
+    ///     trusts nothing from the page: only setup's own messages get in (IsSetupMessage), app ids
+    ///     are checked against the catalog and a pattern (SetupRunner.StartInfo), the page's files
+    ///     come from the admin-only bundle, and nothing the page sends is run.
+    ///   - A new folder each run: nothing an earlier run, or anyone, left there is loaded; the
+    ///     launcher removes them as the user at its start (ClearSetupWebViews).
     /// </summary>
     public static string WebViewFolder(bool setupMode, bool elevated) =>
-        setupMode && elevated ? Path.Combine(TrustedDir, "webview")
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", setupMode ? "setup-webview" : "launcher-webview");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC",
+            setupMode && elevated ? Path.Combine("setup-webview", SetupRun) : setupMode ? "setup-webview" : "launcher-webview");
+
+    /// <summary>This elevated setup's run: its WebView2 profile's folder (WebViewFolder).</summary>
+    static readonly string SetupRun = $"run-{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// The launcher, at the user's rights, at its start: the elevated setups' WebView2 profiles
+    /// (setup-webview\run-*) go. In the background, best effort.
+    /// </summary>
+    public static void ClearSetupWebViews()
+    {
+        if (Environment.IsPrivilegedProcess) return;   // never elevated: the user's folder
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC", "setup-webview");
+        Task.Run(() =>
+        {
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+                foreach (var run in Directory.GetDirectories(dir, "run-*"))
+                    try { Directory.Delete(run, true); } catch (Exception) { } // still open: next time
+            }
+            catch (Exception e) { Log.Warn($"Setup's WebView2 profiles not removed: {e.Message}"); }
+        });
+    }
 
     /// <summary>
     /// Why a folder is not safe for an elevated process to rely on, or null when it is: a junction
@@ -422,6 +458,50 @@ static class SetupElevation
             Log.Error("Setup: starting again with administrator rights", e);
             return $"Windows could not start setup with administrator rights ({e.Message}).";
         }
+    }
+
+    /// <summary>
+    /// A new copy of this setup, started the trusted way (Relaunch: no prompt when elevated), with
+    /// this one's arguments; this one then ends. Null once it runs, else why not, for the screen.
+    /// </summary>
+    public static string? StartAgain()
+    {
+        var why = Relaunch(Environment.GetCommandLineArgs().Skip(1), prompt: !Environment.IsPrivilegedProcess);
+        if (why is null) HandedOver = true;
+        return why;
+    }
+
+    /// <summary>
+    /// Setup handed over: the installed launcher (or its watchdog) started for the user, this window
+    /// became the home screen, or a new copy of setup took over. Otherwise its end puts things back
+    /// (RestoreAfterEarlyExit).
+    /// </summary>
+    public static bool HandedOver { get; set; }
+
+    /// <summary>
+    /// Setup ended before it handed over (closed, or its screens did not show): the watchdog's pause
+    /// it set goes, and a launcher it ended as it started comes back, started as the signed-in user
+    /// (AsUser: the one-shot not-elevated task), through the watchdog when it is installed. A
+    /// watchdog already running starts it by itself once the pause is off. Without this an install
+    /// from before the Shell step (the launcher started from Run, no watchdog) was left on a bare
+    /// desktop. Never throws.
+    /// </summary>
+    public static void RestoreAfterEarlyExit(int launchersEnded)
+    {
+        try
+        {
+            WatchdogPause.Clear();
+            if (launchersEnded == 0) return;
+            if (DesktopMode.WatchdogRunning()) { Log.Info("Setup ended early: the watchdog starts the launcher again"); return; }
+            var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
+            var watchdog = Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe");
+            if (!File.Exists(installed)) { Log.Info("Setup ended early: no installed launcher to start again"); return; }
+            var start = File.Exists(watchdog) ? new UserStart(watchdog, DesktopMode.WatchdogIsShell() ? "--shell" : "", AsUser.WatchdogTask)
+                : new UserStart(installed, "", AsUser.LauncherTask);
+            AsUser.Start(start);
+            Log.Info($"Setup ended early: {start.Exe} started again for the user");
+        }
+        catch (Exception e) { Log.Error("Setup ended early: starting the launcher again", e); }
     }
 
     /// <summary>
@@ -543,7 +623,8 @@ sealed class AdminNeededForm : Form
     /// <summary>The elevated copy runs: this one only ends.</summary>
     public bool HandedOver { get; private set; }
 
-    public AdminNeededForm(string why, Func<string?> askAgain)
+    /// <summary>heading and body: another reason setup cannot go on (its screens did not show: MainForm.SetupCannotShow).</summary>
+    public AdminNeededForm(string why, Func<string?> askAgain, string? heading = null, string? body = null)
     {
         this.askAgain = askAgain;
         Text = "TV Box Setup";
@@ -560,8 +641,8 @@ sealed class AdminNeededForm : Form
         var width = Width - 2 * left;
         Label Line(string text, Font font, Color color) => new() { Text = text, Font = font, ForeColor = color, AutoSize = true, MaximumSize = new Size(width, 0), BackColor = Bg };
         var title = Line("TV Box Setup", Px(28), Muted);
-        var heading = Line("Setup needs administrator rights to install", Px(64, FontStyle.Bold), Fg);
-        var body = Line("Try again, then choose Yes when Windows asks for permission. That prompt needs a mouse or keyboard: the controller can’t reach it.", Px(32), Fg);
+        var headingLine = Line(heading ?? "Setup needs administrator rights to install", Px(64, FontStyle.Bold), Fg);
+        var bodyLine = Line(body ?? "Try again, then choose Yes when Windows asks for permission. That prompt needs a mouse or keyboard: the controller can’t reach it.", Px(32), Fg);
         note = Line(why, Px(26), Warn);
         Button Choice(string text, bool primary)
         {
@@ -586,7 +667,7 @@ sealed class AdminNeededForm : Form
 
         // Top to bottom, the block centred on the screen.
         var gap = (int)(36 * s);
-        var parts = new Control[] { title, heading, body, note };
+        var parts = new Control[] { title, headingLine, bodyLine, note };
         var heights = parts.Select(c => c.GetPreferredSize(new Size(width, 0)).Height).ToArray();
         var y = (Height - (heights.Sum() + again.Height + gap * parts.Length)) / 2;
         for (var i = 0; i < parts.Length; i++)
@@ -596,7 +677,7 @@ sealed class AdminNeededForm : Form
         }
         again.Location = new Point(left, y);
         quit.Location = new Point(left + again.Width + (int)(24 * s), y);
-        Controls.AddRange([title, heading, body, note, again, quit]);
+        Controls.AddRange([title, headingLine, bodyLine, note, again, quit]);
         ActiveControl = again;
 
         controller.Pressed += (pad, repeat) =>

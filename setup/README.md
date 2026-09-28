@@ -11,6 +11,11 @@ user can write runs elevated; declined, it says setup needs administrator rights
 quit), asks the questions (controller check, TV, apps), then
 runs setup.ps1 with no further prompt, shows its progress, and hands over to the launcher it
 installed, started as the signed-in user, not elevated (launcher/README.md, SetupElevation.cs).
+Where it writes: as administrator, `Program Files\HTPC` (the setup copy, its log, temp files and
+settings in `Setup\`; the launcher) and `ProgramData\HTPC` (locked first), never the user's
+profile, except the WebView2 profile its browser makes itself at the user's rights
+(`%LOCALAPPDATA%\HTPC\setup-webview\run-*`); before the prompt, the first copy (not elevated, the
+user's own process: accepted as it is) writes its two lines to `%LOCALAPPDATA%\HTPC\logs\launcher.log`.
 
 ## setup.ps1
 
@@ -45,12 +50,6 @@ it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the me
 | Shell | `lib/Set-Shell.ps1` | the launcher replaces the Windows desktop for this account: the watchdog becomes its shell (see below); Defender exclusion for `Program Files\HTPC`; "Back to TV" shortcuts. Next sign-in. `-Skip Shell` keeps Explorer (the dev box) |
 | DecodeCheck | `lib/Invoke-DecodeCheck.ps1` | `tools/Test-HwDecode.ps1 -NoPlayback`: does the GPU that drives the TV (the primary display's, whatever its maker; with two GPUs the other is named) decode H.264, HEVC, VP9 and AV1 in 4K, as its driver says (no clip played); says "Microsoft Basic Display Adapter" when a graphics chip has no driver. Skipped in a VM |
 
-**TODO (1.0):** the Drivers step (the drivers Windows Update has for the box's devices, at setup)
-and `setup.ps1 -Uninstall` are not in this branch yet: add the Drivers row above and an
-"Uninstall" section below (what it undoes, what it leaves) when they land. The landing page
-(README.md) already describes `-Uninstall` as
-`powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall`.
-
 `catalog.json` is the one app list for setup and the launcher's library.
 
 ## Uninstall
@@ -78,8 +77,8 @@ box's logs (`logs\`, `state\`), go to `Documents\HTPC logs`. Then restart.
 
 Kept: the apps, winget, the HEVC extension, the power settings, the privacy and no-pop-up
 settings, dark mode, Private networks, automatic time zone, the computer name, and
-`%LOCALAPPDATA%\HTPC` (the launcher's settings and the website tiles' Edge profiles, with their
-sign-ins: delete it by hand if not wanted).
+`%LOCALAPPDATA%\HTPC` (the launcher's settings and logs, setup's WebView2 profiles and the
+website tiles' Edge profiles, with their sign-ins: delete it by hand if not wanted).
 
 The other way back is System Restore: the RestorePoint step made "HTPC setup" before any change.
 `rstrui.exe`, "Choose a different restore point", that one: Windows' settings and programs go

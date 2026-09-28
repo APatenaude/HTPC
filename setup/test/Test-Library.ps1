@@ -72,12 +72,14 @@ function App-Installed($app) {
 Write-Host "`n== Token validation (-DryRun)"
 $good = 'install:vlc', 'uninstall:kodi', 'upgrade:plex', 'firewall:stremio'
 $bad = 'install:VLC', 'install:twitch', 'install:edge', 'evil:vlc', 'install:vlc; calc', 'install:../x', 'install:'
+# The runner's own refusals come on stderr: under Stop, PowerShell 5.1 would turn the first one
+# into this script's error (as Test-Updates' Test-Token, these run under Continue).
 foreach ($t in $good) {
-    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $jobRunner -Job $t -DryRun -Catalog $catalog 2>&1 | Out-String
+    $r = & { $ErrorActionPreference = 'Continue'; & powershell -NoProfile -ExecutionPolicy Bypass -File $jobRunner -Job $t -DryRun -Catalog $catalog 2>&1 | Out-String }
     Want ($r -match 'OK:') "accepts $t"
 }
 foreach ($t in $bad) {
-    $r = & powershell -NoProfile -ExecutionPolicy Bypass -File $jobRunner -Job $t -DryRun -Catalog $catalog 2>&1 | Out-String
+    $r = & { $ErrorActionPreference = 'Continue'; & powershell -NoProfile -ExecutionPolicy Bypass -File $jobRunner -Job $t -DryRun -Catalog $catalog 2>&1 | Out-String }
     Want ($r -notmatch 'OK:') "refuses $t"
 }
 if ($DryRunOnly) { Write-Host "`n$pass passed, $fail failed"; exit ([int]($fail -gt 0)) }
