@@ -612,6 +612,7 @@ Console.WriteLine("== Brightness at start");
 // In a folder of its own (never the box's settings.json).
 Console.WriteLine("== Settings: an unreadable settings.json");
 {
+    LauncherSettings.TestElevated = false;   // the launcher's own (standard-rights) path, also on an elevated CI runner
     var dir = Path.Combine(Path.GetTempPath(), "htpc-settings-test");
     if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
     var file = Path.Combine(dir, "settings.json");

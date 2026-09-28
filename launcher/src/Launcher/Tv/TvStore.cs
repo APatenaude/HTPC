@@ -30,6 +30,9 @@ sealed class TvFiles
     /// </summary>
     internal static Func<string, string?>? ElevatedTrust;
 
+    /// <summary>Tests only: run the standard-rights path even when the test runs elevated (CI).</summary>
+    internal static bool? TestElevated;
+
     /// <summary>
     /// Written in full to a new file of an unguessable name, then moved over the old one: never
     /// half a file, and never through a file already there (tv\ is the user's to write: a link or
@@ -40,7 +43,7 @@ sealed class TvFiles
     internal static void WriteAtomic(string path, byte[] data, FileSecurity? security = null)
     {
         var dir = Path.GetDirectoryName(path)!;
-        if (Environment.IsPrivilegedProcess)
+        if (TestElevated ?? Environment.IsPrivilegedProcess)
         {
             var why = ElevatedTrust is null ? "no trust check" : ElevatedTrust(Path.GetDirectoryName(dir)!);
             if (why is not null) throw new IOException($"not written elevated: {why}");

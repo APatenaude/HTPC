@@ -95,6 +95,9 @@ sealed class LauncherSettings
     // is added): one save at a time, and one never sees another half-written file.
     static readonly object Gate = new();
 
+    /// <summary>Tests only: save to the file given even when the test runs elevated (CI runs as an administrator).</summary>
+    internal static bool? TestElevated;
+
     /// <summary>
     /// This user's settings.json, or the elevated setup's copy when that is newer than what the
     /// file last took in (setup ran since): at standard rights it is taken in and saved, as the
@@ -172,7 +175,7 @@ sealed class LauncherSettings
         {
             // Elevated (TV Box Setup): its own admin-only copy, never the user's file (SetupCopyPath).
             // A new file of an unguessable name, moved over the old one.
-            if (Environment.IsPrivilegedProcess)
+            if (TestElevated ?? Environment.IsPrivilegedProcess)
             {
                 try
                 {
