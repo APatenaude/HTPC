@@ -124,7 +124,7 @@ partial class MainForm
     void OnPhoneCommand(PhoneClient phone, PhoneCommand command)
     {
         if (command is PingCommand) return;
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         Interlocked.Exchange(ref phoneActivityTicks, now.Ticks);
         standby.PhoneActivity = now; // phone use keeps the box awake, like the controller
         switch (command)
@@ -428,11 +428,11 @@ partial class MainForm
     /// <summary>http://IP (or tv.local), with the port when it is not 80.</summary>
     string PhoneUrl()
     {
-        if (phoneUrl.Url is { } cached && DateTime.Now - phoneUrl.At < TimeSpan.FromSeconds(30)) return cached;
+        if (phoneUrl.Url is { } cached && DateTime.UtcNow - phoneUrl.At < TimeSpan.FromSeconds(30)) return cached;
         var port = phones?.Port ?? 0;
         var suffix = port is 0 or 80 ? "" : $":{port}";
         var home = PhoneNetwork.HomeAddress();
-        phoneUrl = (home is null ? $"http://tv.local{suffix}" : $"http://{home}{suffix}", DateTime.Now);
+        phoneUrl = (home is null ? $"http://tv.local{suffix}" : $"http://{home}{suffix}", DateTime.UtcNow);
         return phoneUrl.Url!;
     }
 
@@ -501,8 +501,8 @@ partial class MainForm
     /// <summary>Reads the firewall rule and the network category off the UI thread (at most every 20 s).</summary>
     void CheckPhoneReach()
     {
-        if (DateTime.Now - phoneReachChecked < TimeSpan.FromSeconds(20)) return;
-        phoneReachChecked = DateTime.Now;
+        if (DateTime.UtcNow - phoneReachChecked < TimeSpan.FromSeconds(20)) return;
+        phoneReachChecked = DateTime.UtcNow;
         var exe = Environment.ProcessPath ?? "";
         _ = Task.Run(() =>
         {

@@ -86,7 +86,7 @@ sealed class SetupRunner
         if (Running) return true;
         // The progress file of an earlier run stays (setup, elevated, owns it): only one written
         // after this start counts.
-        startedAt = DateTime.Now;
+        startedAt = DateTime.UtcNow;
         var psi = StartInfo(script, apps, launcherExe);
         try
         {
@@ -107,7 +107,7 @@ sealed class SetupRunner
     {
         try
         {
-            if (File.Exists(ProgressFile) && File.GetLastWriteTime(ProgressFile) >= startedAt)
+            if (File.Exists(ProgressFile) && File.GetLastWriteTimeUtc(ProgressFile) >= startedAt)
             {
                 // Shared read: setup.ps1 may be writing it this very moment.
                 using var stream = new FileStream(ProgressFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -128,7 +128,7 @@ sealed class SetupRunner
             JsonElement? summary = null;
             try
             {
-                if (File.GetLastWriteTime(Path.Combine(LogDir, "setup-last.json")) < startedAt) throw new IOException("not written by this run");
+                if (File.GetLastWriteTimeUtc(Path.Combine(LogDir, "setup-last.json")) < startedAt) throw new IOException("not written by this run");
                 using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(LogDir, "setup-last.json")));
                 summary = doc.RootElement.Clone();
             }

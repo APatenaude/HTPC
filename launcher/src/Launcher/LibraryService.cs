@@ -284,7 +284,7 @@ sealed class LibraryService
             Thread.Sleep(1000);
         }
         lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");
-        var startedAt = DateTime.Now;
+        var startedAt = DateTime.UtcNow;
         if (waitForProgress) ClearProgress(MachineProgress);
         try
         {
@@ -328,7 +328,7 @@ sealed class LibraryService
     (bool, string) RunAsUser(LibraryJob job, JobName app)
     {
         ClearProgress(UserProgress);
-        var startedAt = DateTime.Now;
+        var startedAt = DateTime.UtcNow;
         var psi = new ProcessStartInfo("powershell.exe")
         {
             UseShellExecute = false,
@@ -403,7 +403,7 @@ sealed class LibraryService
     {
         try
         {
-            if (!File.Exists(progressPath) || File.GetLastWriteTime(progressPath) < after) return null;
+            if (!File.Exists(progressPath) || File.GetLastWriteTimeUtc(progressPath) < after) return null;
             return File.ReadAllText(progressPath);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
