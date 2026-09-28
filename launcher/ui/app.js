@@ -446,13 +446,13 @@ function underViews() {
   return list;
 }
 
-let renderedView = null;
+let renderedView = null, pageBackdrop = '';
 function render() {
   const keep = state.memory[state.view];
   // Where the focus is: if its element goes (a network, a device, a TV no longer found), the one
   // now nearest its place takes it (restoreFocus), not the view's first element.
   const was = renderedView === state.view ? focusedEl() : null;
-  const wasAt = was && { rect: was.getBoundingClientRect(), section: !!was.dataset.section };
+  const wasAt = was && { id: was.dataset.id, rect: was.getBoundingClientRect(), section: !!was.dataset.section, el: was };
   const unders = underViews();
   if (state.view !== 'settings') editing = null;
   renderStatus();
@@ -479,6 +479,14 @@ function render() {
   const overApp = state.view !== 'home' && state.backdrop;
   $('backdrop').classList.toggle('on', !!overApp);
   $('backdrop').style.backgroundImage = overApp ? `url("${state.backdrop}")` : '';
+  // Beyond the stage (a screen that is not 16:9: 16:10, ultrawide) the app's frame fills the rest
+  // of the screen too, dimmed the same, lined up with the stage's (both cover the same frame).
+  const page = overApp ? `linear-gradient(rgba(13, 14, 17, 0.45), rgba(13, 14, 17, 0.45)), center / cover no-repeat url("${state.backdrop}")` : '';
+  if (pageBackdrop !== page) {
+    pageBackdrop = page;
+    document.documentElement.style.background = page;
+    document.documentElement.classList.toggle('over-app', !!page);
+  }
   home.classList.toggle('behind', state.view !== 'home' && !overApp);
   // Home back from under an overlay (a confirmation, Tile options, the menu) was on screen all
   // along: it must not play its entrance again, a flash of the whole screen.
@@ -486,7 +494,7 @@ function render() {
   else if (wasBehind && !home.classList.contains('behind')) home.classList.add('stay');
   for (const v of chain) if (EXT.views[v] && EXT.views[v].layout) EXT.views[v].layout();
   renderedView = state.view;
-  restoreFocus(keep, was && !was.isConnected ? wasAt : null);
+  restoreFocus(keep, wasAt);
 }
 
 // ---- Focus and spatial navigation ---------------------------------------------------------
@@ -520,11 +528,22 @@ function setFocus(el, chosen = true) {
   noticeAvoid(el);   // the alerts' cards move off it (notices.js)
 }
 
-// gone: { rect, section } of a focused element the render took away (render), else null.
-function restoreFocus(id, gone) {
+// prev: { id, rect, section, el } of the element focused before this render, in the same view
+// (render), else null. Not chosen (the view's first pick), it stays where it is all the same
+// (an alert's row arriving above it does not take the focus from under the user), but on the
+// home screen, whose first pick waits for the tiles. Taken away by the render: its new element
+// if there is one (the same TV, the list sorted again), else the one nearest its place.
+function restoreFocus(id, prev) {
   const list = items();
   const kept = list.find((e) => e.dataset.id === id) || list.find((e) => e.dataset.id === state.memory[state.view]);
   if (kept) { setFocus(kept); return; }
+  // A memory set to null asks for the view's first pick again (a question opening on Cancel, a
+  // new list in the button editor): then neither.
+  const gone = prev && !prev.el.isConnected && state.memory[state.view] !== null ? prev : null;
+  if (prev && state.memory[state.view] !== null && (gone || state.view !== 'home')) {
+    const same = list.find((e) => e.dataset.id === prev.id);
+    if (same) { setFocus(same, false); return; }
+  }
   if (gone) {
     const r = gone.rect, cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     let best = null, bestD = Infinity;

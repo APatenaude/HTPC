@@ -169,15 +169,17 @@ function tvView() {
   const status = TvUi.statusLine(tv);
   const showStatus = ['locked', 'missing', 'paused', 'unavailable'].includes(tv.status) || tv.handsOff;
   return {
+    // The TVs found and what follows them scroll (su-tvlist) when there are many.
     main: '<div class="su-two"><div class="su-grow">' +
       '<h1 style="margin-bottom:12px">Find your TV</h1>' +
+      '<div class="su-tvlist">' +
       (rows || '<div class="su-row">No TV found on the network yet. Check it is on and connected, or pick its brand below.</div>') +
       `<div class="su-row" data-nav data-id="tv-other">${icon('pencil', 34)}` +
         `${p && p.method === 'none' ? 'No TV control (its own remote). Change?' : 'Not listed? Pick your TV’s brand, or skip TV control'}</div>` +
       `<div class="su-row" data-nav data-id="tv-refresh">${icon('restart', 34)}Search again</div>` +
       (tv.caps && tv.caps.test && p ? `<div class="su-btn" data-nav data-id="tv-test" style="align-self:flex-start;margin-top:12px">Test: turn the TV off and back on</div>` : '') +
       (showStatus ? `<div class="tv-status ${status.kind}"><span></span>${esc(status.text)}</div>` : '') +
-      '</div>' +
+      '</div></div>' +
       // Pairing the picked TV takes the side panel's place while it runs (or while the TV waits for it).
       (TvUi.pairHtml(tv) ? `<div class="tv-side">${TvUi.pairHtml(tv)}</div>` : p && p.method === 'none' ? '' : TvUi.checklistHtml(tv, side)) +
       '</div>' + (state.dialog ? tvDialog() : ''),
@@ -237,7 +239,7 @@ function render() {
   } else patchHtml(main, v.main);
   patchHtml($('su-buttons'), v.buttons);
   if (state.step === 'wifi' && typeof WifiUI !== 'undefined') WifiUI.afterRender();
-  for (const box of main.querySelectorAll('.su-summary, .tv-list, .wifi-scroll')) listEdges(box);
+  for (const box of main.querySelectorAll(SCROLLERS)) listEdges(box);
   const nav = items();
   const keep = nav.find((e) => e.dataset.id === state.focus) || (at && state.focus && was.dataset.id === state.focus && !was.isConnected ? nearestTo(at, nav) : null);
   // While pairing, its controls first (the first key, or its button).
@@ -332,19 +334,31 @@ function setFocus(el) {
   state.focus = el.dataset.id;
   // The lists that scroll (Wi-Fi networks, the TV dialog's TVs and brands, the Done page's
   // lines): a row the focus moves to comes into view, ring and all.
-  const box = el.closest('.wifi-scroll, .tv-list, .su-summary');
+  const box = el.closest(SCROLLERS);
   if (box) scrollIntoBox(el, box, 16);
 }
+
+// The lists that scroll: the Wi-Fi networks (and the Wi-Fi step, for its forms), the TVs found,
+// the TV dialog's list, the Done page's lines.
+const SCROLLERS = '.wifi-scroll, .tv-list, .su-summary, .su-tvlist, #su-wifi';
 
 function move(dir) {
   const cur = document.querySelector('[data-nav].focused');
   if (!cur) { render(); return; }
   const r = cur.getBoundingClientRect();
   const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const ownBox = cur.closest(SCROLLERS);
   let best = null, bestScore = Infinity;
   for (const el of items()) {
     if (el === cur) continue;
     const q = el.getBoundingClientRect();
+    // A row scrolled out of its list is not a place to go from outside that list (from Next up
+    // into the list, from the rows above it down); within it, it is (the list scrolls to it).
+    const box = el.closest(SCROLLERS);
+    if (box && box !== ownBox) {
+      const b = box.getBoundingClientRect(), x = q.left + q.width / 2, y = q.top + q.height / 2;
+      if (x < b.left || x > b.right || y < b.top || y > b.bottom) continue;
+    }
     const dx = q.left + q.width / 2 - cx, dy = q.top + q.height / 2 - cy;
     const [main, side] = dir === 'right' ? [dx, dy] : dir === 'left' ? [-dx, dy] : dir === 'down' ? [dy, dx] : [-dy, dx];
     if (main <= 8) continue;
@@ -543,7 +557,14 @@ if (host) {
     { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF' },
     { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F' },
   ], tv: TvUi.demo(q.get('demo') || 'roku') });
-  if (name) {
+  // setup.html#audit (#audit?page=...): the UI audit's setup pages (audit.js), loaded before the
+  // page's load event, which waits for it.
+  if (name && name.startsWith('audit')) {
+    window.auditRoute = location.hash.slice(1);
+    const s = document.createElement('script');
+    s.src = 'audit.js';
+    document.body.appendChild(s);
+  } else if (name) {
     // A step by name, or by number (1 = the first) as before.
     const list = steps();
     const step = /^\d+$/.test(name) ? list[Math.min(list.length - 1, Number(name))] : name;

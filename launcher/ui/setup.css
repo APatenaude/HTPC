@@ -40,8 +40,12 @@
 .su-note { font-size: 24px; color: var(--muted); }
 
 /* TV */
-.su-two { display: flex; gap: 72px; }
-.su-grow { flex-grow: 1; display: flex; flex-direction: column; gap: 22px; }
+.su-two { display: flex; gap: 72px; min-height: 0; }
+.su-grow { flex-grow: 1; display: flex; flex-direction: column; gap: 22px; min-height: 0; }
+/* The TVs found and the rows after them: they scroll (to the focus) when there are many, room
+   inside for the rings, the ends faded where there is more. */
+.su-tvlist { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 22px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
+.su-tvlist > * { flex-shrink: 0; }
 .su-row {
   display: flex; align-items: center; gap: 22px; min-height: 104px; padding: 0 32px; box-sizing: border-box;
   border-radius: 24px; background: var(--panel); font-size: 28px; color: #D9D8D4;
@@ -87,7 +91,7 @@
 .su-spin { width: 26px; height: 26px; border-radius: 50%; border: 4px solid #33373F; border-top-color: var(--accent); animation: su-spin 0.9s linear infinite; }
 @keyframes su-spin { to { transform: rotate(360deg); } }
 .su-pending { width: 14px; height: 14px; border-radius: 7px; background: #33373F; }
-.su-summary { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
+.su-summary { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden auto; scrollbar-width: none; padding: 8px 16px; margin: -8px -16px; }
 .su-summary > * { flex-shrink: 0; }
 .su-summary.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); }
 .su-summary.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); }
@@ -97,4 +101,9 @@
 .su-line .ok { color: #7FD1AE; display: flex; } .su-line .warn { color: var(--warn); display: flex; }
 
 /* The Wi-Fi step: the network list (wifi.js's .wifi-scroll) scrolls inside the step, clear of Back / Next. */
-#su-wifi { display: flex; flex-direction: column; max-height: 470px; min-height: 0; }
+/* Its forms (a password, a hidden network) scroll in it too, never squeezed. */
+#su-wifi { display: flex; flex-direction: column; max-height: 560px; min-height: 0; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
+#su-wifi > :not(.wifi-scroll) { flex-shrink: 0; }
+.su-tvlist.more-down, #su-wifi.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); }
+.su-tvlist.more-up, #su-wifi.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); }
+.su-tvlist.more-up.more-down, #su-wifi.more-up.more-down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); }

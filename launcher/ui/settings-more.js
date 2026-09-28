@@ -175,12 +175,13 @@ hostMessage('controller.pad', (m) => {
     if (!more.bHeldSince) more.bHeldSince = Date.now();
     else if (Date.now() - more.bHeldSince > 1000) { setTesting(false); return; }
   } else more.bHeldSince = 0;
-  // Only the test card changes, 30 times a second: no full render.
+  // Only the test card changes, 30 times a second: no full render, and in place (patchNode): a
+  // card drawn afresh each time drew its focus ring in again, 30 times a second.
   const card = document.querySelector('#settings .scard.test');
   if (!card) return;
-  const focused = card.classList.contains('focused');
-  card.outerHTML = testCard();
-  if (focused) document.querySelector('#settings .scard.test').classList.add('focused');
+  const t = document.createElement('template');
+  t.innerHTML = testCard();
+  patchNode(card, t.content.firstChild);
 });
 
 // ---- Sound -----------------------------------------------------------------------------------

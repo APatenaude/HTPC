@@ -244,8 +244,8 @@ addView('updrestart', {
 
 // ---- Demo data (a plain browser) -------------------------------------------------------------
 
-function updDemo() {
-  const kind = new URLSearchParams(location.search).get('upd') || 'ready';
+function updDemo(kindArg) {
+  const kind = kindArg || new URLSearchParams(location.search).get('upd') || 'ready';
   const hour = 3600000;
   const app = (id, name, glyph, color, installed, available, update, job) => ({ id, name, glyph, color, installed, available, update, job: job || null });
   const s = {

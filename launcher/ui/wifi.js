@@ -79,7 +79,9 @@ const WifiUI = (() => {
   function formHtml() {
     const f = form;
     const net = f.hidden ? null : (st.networks || []).find((n) => n.ssid === f.ssid);
-    const needsPassword = f.hidden ? f.security !== 'open' : !!(net && net.password);
+    // Asked once, as the form opened: the network may drop out of a later scan while the password
+    // is typed (its field must not go with it).
+    const needsPassword = f.hidden ? f.security !== 'open' : f.needsPassword ?? !!(net && net.password);
     let h = `<span class="section">${f.hidden ? 'Hidden network' : 'Join ' + esc(f.ssid)}</span>`;
     if (f.hidden) {
       h += `<div class="srow wifi-field" data-nav data-id="wifi-name"><div class="text"><span class="label">Network name</span>` +
@@ -133,7 +135,7 @@ const WifiUI = (() => {
   function pickNetwork(n) {
     if (n.refusal) { say(n.refusal, 'warn'); return; }
     if (n.saved || !n.password) { send({ type: 'wifi.join', ssid: n.ssid }); say(`Joining ${n.ssid}…`); return; }
-    openForm({ ssid: n.ssid, hidden: false }, 'wifi-password');
+    openForm({ ssid: n.ssid, hidden: false, needsPassword: true }, 'wifi-password');
   }
 
   function forget(ssid) {
@@ -256,7 +258,7 @@ const WifiUI = (() => {
       if (name === 'location') { st.location = 'denied'; st.networks = []; }
       if (name === 'noadapter') st.adapter = false;
       if (name === 'off') st.radio = 'off';
-      if (name === 'password') form = { ssid: '[Network name 2]', hidden: false, error: 'Wrong password. Check it and try again.', busy: false, reveal: false, name: '', password: '', caret: null, focused: null };
+      if (name === 'password') form = { ssid: '[Network name 2]', hidden: false, needsPassword: true, error: 'Wrong password. Check it and try again.', busy: false, reveal: false, name: '', password: '', caret: null, focused: null };
       if (name === 'hidden') form = { ssid: '', hidden: true, security: 'wpa3sae', error: null, busy: false, reveal: false, name: '', password: '', caret: null, focused: null };
     },
     get joining() { return !!form; },
