@@ -993,7 +993,8 @@ sealed partial class MainForm : Form
             mapper.Map = null;
             CloseKeyboard("standby");
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
-            Post(new { type = "blank" });
+            Post(new { type = "blank" }); // the page's sections stop their timers (app.js sectionHooks)
+            tv.UiShowing(false);          // no TV search every 10 s all night, whatever the page did
             // Not while UI Automation listens for an app's text fields (Reveal says why).
             void Front() { if (!Visible) Show(); Native.ForceForeground(Handle); }
             if (textFields.Quiet) Front();

@@ -40,7 +40,9 @@ sealed partial class MainForm
     void OpenTvSettings()
     {
         if (setupMode) return;
-        Post(new { type = "tv.open" });
+        // "show" (not "tv.open"): over an app the page is blank, and only "show" brings it back
+        // (the section's TV search starts once it is on screen).
+        Post(new { type = "show", view = "settings", section = "tv" });
         Reveal();
     }
 

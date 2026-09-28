@@ -571,6 +571,18 @@
   state.current = null; state.backdrop = null;
   reset('home');
 
+  // Settings › TV left open, then the launcher goes (an app in front, standby): its TV search
+  // (every 10 s on the host) stops until the section is on screen again.
+  state.section = 'tv';
+  reset('settings');
+  check('Settings › TV on screen: the host searches', lastSent('tv.showing') && lastSent('tv.showing').on === true);
+  onHost({ type: 'blank' });
+  check('Blank stage: the TV search stops, no section in view', lastSent('tv.showing').on === false && sectionInView === null);
+  onHost({ type: 'show', view: 'settings', section: 'tv' });
+  check('Back on screen: the TV search starts again', lastSent('tv.showing').on === true && sectionInView === 'tv');
+  reset('home');
+  check('Settings left: the TV search stops', lastSent('tv.showing').on === false);
+
   // ---- Logos: the app's own where the host has one, the glyph otherwise --------------------------
   const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
   const plain = document.createElement('div');

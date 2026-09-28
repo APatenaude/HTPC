@@ -691,11 +691,14 @@ function addView(id, view) {
 function onAction(name, fn) { EXT.actions[name] = fn; }
 function hostMessage(type, fn) { EXT.host[type] = fn; }
 
-// shown / left for the Settings section in view (none while Settings is not).
+// shown / left for the Settings section in view (none while Settings is not, nor while the stage
+// is blank: the launcher gone behind an app, or standby, where Settings › TV left open searched
+// for TVs every 10 s all night).
 let sectionInView = null;
 function sectionHooks() {
   // The TV method dialog over Settings is still the TV section (its list keeps refreshing).
-  const now = state.view === 'settings' || state.view === 'tvmethod' ? state.section : null;
+  const onScreen = !$('stage').classList.contains('blank');
+  const now = onScreen && (state.view === 'settings' || state.view === 'tvmethod') ? state.section : null;
   if (now === sectionInView) return;
   const was = EXT.sections[sectionInView];
   sectionInView = now;
@@ -930,7 +933,7 @@ function onHost(msg) {
       render();
       break;
     case 'tiles': state.tiles = msg.tiles; render(); break;
-    case 'blank': $('stage').classList.add('blank'); break;
+    case 'blank': $('stage').classList.add('blank'); sectionHooks(); break;   // the section in view is left
     case 'opened':
       hideOpening();
       if (!msg.ok && msg.text) toast(msg.text, 'warn'); // failures come as alerts now
@@ -965,6 +968,7 @@ function onHost(msg) {
         if (msg.backdrop) stage.style.transition = 'none';
         stage.classList.remove('blank');
         if (msg.backdrop) { void stage.offsetWidth; stage.style.transition = ''; }
+        sectionHooks();   // a Settings section back on screen is shown again
       };
       if (!msg.backdrop) { view(); unblank(); if (msg.ack) ackShown(asked, 0); break; }
       // Shown once its backdrop is decoded, so it does not flash the home screen first. The view
