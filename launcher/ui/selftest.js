@@ -4,6 +4,7 @@
 //   msedge --headless=new --dump-dom file:///.../launcher/ui/index.html#selftest
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
 // X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
+// its quick buttons in the order of the home screen's top bar (Settings, then Power),
 // Power's Restart and Shut down asking first, moving around Settings and changing a value there only once A has picked its row, the
 // interface sounds (rendered offline; which sound a press picks; none while hidden).
 
@@ -144,9 +145,34 @@
   // The crowded menu: 6 apps and an alert row fit without scrolling.
   const panel = $('menu-panel'), rowsBox = panel.querySelector('.panel-scroll');
   check('menu: 6 apps + an alert row fit', rowsBox.scrollHeight <= rowsBox.clientHeight + 1, `${rowsBox.scrollHeight} > ${rowsBox.clientHeight}`);
-  const settingsQuick = panel.querySelector('[data-id="q-settings"]');
+  const quicks = [...panel.querySelectorAll('.quicks [data-nav]')];
   const hintsBox = panel.querySelector('.hints').getBoundingClientRect();
-  check('menu: the last row is above the button hints', settingsQuick.getBoundingClientRect().bottom <= hintsBox.top + 1);
+  check('menu: the last row is above the button hints', quicks[quicks.length - 1].getBoundingClientRect().bottom <= hintsBox.top + 1);
+
+  // Its quick buttons: Settings, then Power, as on the home screen's top bar. The D-pad goes along
+  // them in that order and stops at the end; A opens each, and B from there comes back to it.
+  const quickIds = quicks.map((e) => e.dataset.id);
+  const barIds = [...$('status').querySelectorAll('[data-nav]')].map((e) => e.dataset.id);
+  check('menu: Settings then Power, in the order of the home screen\'s top bar',
+    barIds.indexOf('settings') >= 0 && barIds.indexOf('settings') < barIds.indexOf('power') &&
+    quickIds.join(',') === 'q-buttons,q-timer,q-settings,q-power', `menu ${quickIds.join(',')}; top bar ${barIds.join(',')}`);
+  setFocus(panel.querySelector('[data-id="q-timer"]'));
+  const walked = [];
+  for (let i = 0; i < 3; i++) { press('right'); walked.push(focusedEl() && focusedEl().dataset.id); }
+  press('left');
+  walked.push(focusedEl() && focusedEl().dataset.id);
+  check('menu: right from Timer: Settings, Power, and stays; left: Settings', walked.join(',') === 'q-settings,q-power,q-power,q-settings', walked.join(','));
+  press('a');
+  const toSettings = state.view;
+  press('b');
+  check('menu: A on Settings opens Settings, B comes back to it', toSettings === 'settings' && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === 'q-settings',
+    `${toSettings}, then ${state.view} on ${focusedEl() && focusedEl().dataset.id}`);
+  setFocus(panel.querySelector('[data-id="q-power"]'));
+  press('a');
+  const toPower = state.view;
+  press('b');
+  check('menu: A on Power opens Power, B comes back to it', toPower === 'power' && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === 'q-power',
+    `${toPower}, then ${state.view} on ${focusedEl() && focusedEl().dataset.id}`);
 
   // ---- Home lands on an actionable card's row ----------------------------------------------------
   reset('home');

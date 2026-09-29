@@ -7,21 +7,24 @@
 //   - are whole inside every box that clips them (a list that scrolls, a pane), and on screen;
 //   - are not under a hint bar, nor covered by anything (elementFromPoint at the corners and the
 //     centre);
-// and for the page: every focusable element is reached; no press wraps round or jumps back (up at
-// the first row, down at the last, stays); B leaves it; exactly one hint bar shows; every press
-// (press() plus style and layout) takes 50 ms at most. As it walks, it replays the host's
-// periodic messages for the page (the clock and state pushes, the TV search, Wi-Fi scans, install
-// progress...): the focus must stay where it is, and nothing on screen may be drawn afresh (an
-// entrance animation playing again: a dialog popping in twice a second).
+// and for the page: no text runs out of its card or row, nor is cut off at the side of a pane
+// (auditSpills: what the focus never lands on too); every focusable element is reached; no press
+// wraps round or jumps back (up at the first row, down at the last, stays); B leaves it; exactly
+// one hint bar shows; every press (press() plus style and layout) takes 50 ms at most. As it
+// walks, it replays the host's periodic messages for the page (the clock and state pushes, the TV
+// search, Wi-Fi scans, install progress...): the focus must stay where it is, and nothing on
+// screen may be drawn afresh (an entrance animation playing again: a dialog popping in twice a
+// second).
 //
 // Three pages: the launcher (index.html), first-run setup (setup.html) and the on-screen keyboard
 // (keyboard.html), each with its own pages below. Runs, all from launcher\dev\Test-Ui.ps1
 // -SelfTest: in the self-test (index.html#selftest, headless Edge's virtual time: every check but
 // the time, which does not move there); on its own (index.html#audit, real time: the times too; it
 // runs before the page's load event ends, so headless Edge's --dump-dom waits for it); and
-// setup.html#audit, keyboard.html#audit, index.html#audit again at other screen sizes (1280x720,
-// 2560x1080: the stage scaled, letterboxed). #audit?page=<name> sets one page up in its stress
-// state with the focus on its last element, for a screenshot.
+// setup.html#audit, keyboard.html#audit, index.html#audit again at other screen sizes (1920x1080,
+// 1536x864: a 4K TV at Windows' 250 %, 1280x720, 2560x1080: the stage scaled, letterboxed).
+// #audit?page=<name> sets one page up in its stress state with the focus on its last element
+// (or the page's last()), for a screenshot.
 //
 // EVERY VIEW MUST BE IN THE WALKER: a new view (addView), Settings section or setup step is
 // checked by adding an auditPage() for it below (what to set up, how to open it). One missing
@@ -276,6 +279,22 @@ if (AUDIT_PAGE === 'index') {
   sectionState('Updates, apps updating', 'updates', () => auditUpdates('running'));
   sectionState('Updates, Windows updates installing', 'updates', () => auditUpdates('wininstall'));
   sectionState('Updates, an update failed', 'updates', () => auditUpdates('failed'));
+  // The launcher's row in each state, and the longest text each place can get (1.0.3's notes ran
+  // out of that row on a TV); a screenshot (#audit?page=) ends on that row.
+  const launcherRow = { last: () => $('settings').querySelector('[data-id="upd-launcher"]') };
+  sectionState('Updates, checking', 'updates', () => auditUpdates('checking'), launcherRow);
+  sectionState('Updates, up to date', 'updates', () => auditUpdates('uptodate'), launcherRow);
+  sectionState('Updates, the launcher downloading', 'updates', () => auditUpdates('downloading'), launcherRow);
+  sectionState('Updates, the launcher waiting for Home', 'updates', () => auditUpdates('waiting'), launcherRow);
+  sectionState('Updates, a release that needs setup', 'updates', () => auditUpdates('setup'), launcherRow);
+  sectionState('Updates, the longest notes', 'updates', () => auditUpdates('longnotes'), launcherRow);
+  sectionState('Updates, long errors', 'updates', () => auditUpdates('longerrors'), launcherRow);
+  for (const [name, kind] of [['ask: update the TV launcher', 'ready'], ['ask: update the TV launcher, the longest notes', 'longnotes']]) {
+    auditPage(name, { view: 'ask', covers: [], open() {
+      auditSettings('updates'); auditUpdates(kind); render();
+      EXT.actions['upd-row'](null, 'launcher');
+    } });
+  }
   // The button test takes every button (Home stops it): only its card is checked, as the pad's
   // state streams in 30 times a second.
   auditPage('settings: Controller, button test', { view: 'settings', covers: [], scope: '.scol-left', dirs: [], back: 0,
@@ -481,6 +500,35 @@ function auditProblems(el) {
   return out;
 }
 
+// Text that runs out of its box, where the focus never lands too: a card or a row whose content
+// spills out of it, or a box that clips (overflow hidden, a pane that scrolls) holding something
+// wider than itself, cut off at its side. An ellipsis or a line clamp cuts text on purpose.
+const AUDIT_BOXES = '.srow, .scard, .upd-card, .dialog';
+function auditSpills() {
+  const root = AUDIT_IO.root();
+  if (!root) return [];
+  const out = [];
+  for (const box of root.querySelectorAll(AUDIT_BOXES)) {
+    if (box.hasAttribute('data-nav')) continue;   // auditProblems, as the focus lands on it
+    const r = box.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    for (const c of box.querySelectorAll('*')) {
+      const q = c.getBoundingClientRect();
+      if (q.width && q.height && (q.left < r.left - 1 || q.top < r.top - 1 || q.right > r.right + 1 || q.bottom > r.bottom + 1)) {
+        out.push(`${auditDescribe(c)} spills out of ${auditDescribe(box)}`);
+        break;
+      }
+    }
+  }
+  for (const e of [root, ...root.querySelectorAll('*')]) {
+    if (!e.clientWidth) continue;
+    const cs = getComputedStyle(e);
+    if (cs.overflowX === 'visible' || cs.textOverflow === 'ellipsis' || (cs.webkitLineClamp && cs.webkitLineClamp !== 'none')) continue;
+    if (e.scrollWidth > e.clientWidth + 1) out.push(`${auditDescribe(e)} holds something wider than itself (${e.scrollWidth} in ${e.clientWidth} px): cut off at its side`);
+  }
+  return out;
+}
+
 // The page's focusable elements (in its scope), shown.
 function auditItems(page) {
   const view = AUDIT_IO.root();
@@ -602,6 +650,7 @@ async function runAudit(check, only) {
       await null;
       if (AUDIT_IO.view() !== page.view) report(`it did not open (the view is ${AUDIT_IO.view()})`);
       else {
+        for (const p of auditSpills()) report(p);
         const slowest = page.walk ? page.walk(page, report) : await auditWalk(page, report);
         times.push([page.name, slowest || 0]);
         const bars = auditHintBars().length;

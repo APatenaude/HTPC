@@ -30,5 +30,6 @@ foreach ($s in $Shots) {
     for ($i = 0; $i -lt 20 -and -not (Test-Path $s.Out); $i++) { Start-Sleep -Milliseconds 500 }
     "{0} {1}" -f $(if (Test-Path $s.Out) { 'OK  ' } else { 'FAIL' }), $s.Out
 }
-Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*htpc-dev-shots*" } |
+# Its own profile's only (another checkout's run may be taking its shots meanwhile).
+Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*$shotProfile*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

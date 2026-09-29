@@ -379,17 +379,20 @@ The self-test ends with the UI audit (`ui/audit.js`, a "focus walker"): every pa
 stress state (24 tiles, 20 library apps, 15 Wi-Fi networks, 10 Bluetooth devices, long names...)
 and walked with the D-pad through `press()`, the controller's path. At each focus: the element,
 its ring and its zoom are whole inside every box that clips them, on screen, above the hints and
-not covered; and for the page: everything focusable is reached, nothing wraps round, B leaves,
+not covered; and for the page: no text runs out of its card or row, or is cut off at the side of
+a pane (the long release notes that did), everything focusable is reached, nothing wraps round, B leaves,
 one hint bar shows, every press takes at most 50 ms (timed in a second, real-time run,
 `index.html#audit`). As it walks it replays the host's periodic messages for the page (the clock,
 state pushes, the TV search, Wi-Fi scans in another order, install progress): the focus must stay
 put and nothing on screen may be drawn afresh (an entrance playing again). First-run setup
 (`setup.html#audit`: every step, the TV dialog, the Wi-Fi forms) and the on-screen keyboard
-(`keyboard.html#audit`) are walked too, and the launcher again at 1280x720, 2560x1080 and 1920x1200
-(the TV or monitor may be any size and shape: the stage scales and letterboxes). **Every new view
+(`keyboard.html#audit`) are walked too, and the launcher again at 1920x1080, 1536x864 (a 4K TV at
+Windows' 250 %: the page the owner's TV gets), 1280x720, 2560x1080 and 1920x1200 (the TV or monitor
+may be any size and shape: the stage scales and letterboxes). **Every new view
 must be in the walker**: an `auditPage()` in audit.js for each view (`addView`), each Settings
 section and each setup step (what to set up, how to open it); one without fails the audit.
-`-Shots "audit?page=home"` shows a page in its stress state, focus on its last element.
+`-Shots "audit?page=home"` shows a page in its stress state, focus on its last element;
+`-ShotSize 1536x864` takes it at the TV's size.
 
 A PC's headless Edge is not the TV: on the box the launcher draws 3840x2160 on the N97's GPU.
 The page times every press there too, from the press to the frame that shows it, and one over

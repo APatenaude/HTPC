@@ -4,19 +4,31 @@
 .upd-list { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .upd-side { width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; }
 
+/* Every text here wraps inside its row or card, whatever it says: a release's notes, an error, a
+   path with backslashes, a word longer than the row (overflow-wrap: anywhere breaks it; min-width:
+   0 lets the text column be narrower than its longest line). One line of notes that did not wrap
+   (nowrap) made the launcher's row as wide as the notes: they ran under the cards and off the TV,
+   and took the row's status with them. */
 .upd-row { min-height: 84px; padding: 12px 28px; gap: 22px; border-radius: 20px; }
 .upd-row .glyph { display: flex; flex-shrink: 0; }
+.upd-row .text { min-width: 0; overflow-wrap: anywhere; }
 .upd-row .label { font-size: 27px; }
 .upd-row .caption { font-size: 21px; }
-.upd-row .notes { font-size: 20px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.upd-status { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; white-space: nowrap; }
+/* 4 lines at most: a release's notes (updates.js cuts them first, at a word; the question A asks
+   has more of them), and a row's caption, an error message too: a row never gets taller than the
+   pane, its focus ring always whole. */
+.upd-row .notes { font-size: 20px; line-height: 1.35; color: var(--muted); }
+.upd-row .caption, .upd-row .notes, .upd-card .upd-error, .upd-checked {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden;
+}
+.upd-status { flex-shrink: 0; display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; white-space: nowrap; }
 .upd-status.update { color: var(--warn); }
 .upd-status.ok { color: #7FD1AE; }
 .upd-status.busy { color: var(--accent); }
 .upd-status.quiet { color: var(--muted); font-weight: 400; }
 .upd-status.bad { color: #FF8A7A; }
 
-.upd-card { padding: 28px; border-radius: 24px; background: #16181C; display: flex; flex-direction: column; gap: 14px; }
+.upd-card { padding: 28px; border-radius: 24px; background: #16181C; display: flex; flex-direction: column; gap: 14px; overflow-wrap: anywhere; }
 .upd-card h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; }
 .upd-card p { margin: 0; font-size: 22px; line-height: 1.4; color: var(--text-2); }
 .upd-card .small { font-size: 21px; color: var(--muted); }
@@ -29,7 +41,8 @@
 .upd-bar { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
 .upd-bar span { display: block; height: 100%; background: var(--accent); border-radius: 5px; transition: width 0.4s ease; }
 
-.upd-checked { display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--muted); }
+.upd-checked { font-size: 22px; color: var(--muted); }
+.upd-card .upd-error { color: var(--warn); }
 
 /* "Restarting the TV launcher": the last thing the old launcher shows (exit code 75). */
 /* Shown like any view (.view.on in app.css): no display here, or it covers every screen. */
