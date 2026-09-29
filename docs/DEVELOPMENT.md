@@ -18,7 +18,7 @@ powershell -ExecutionPolicy Bypass -File launcher\dev\New-DevMachine.ps1 -Instal
 It checks and, with `-Install`, installs: Git, the .NET SDK that `global.json` names (10.0.x,
 `latestPatch`), and checks for Edge (the UI tests drive it headless). It then builds the launcher
 and runs `Test-All.ps1 -SkipSetupTests`. Optional: the GitHub CLI (`winget install GitHub.cli`) for
-releases and repo settings, and Hyper-V (Windows Pro/Enterprise) for the test VM.
+releases and repo settings, and Hyper-V (Windows Pro/Enterprise) or an Incus server for the test VM.
 
 `dotnet` is `C:\Program Files\dotnet\dotnet.exe` (it may not be on PATH). Set
 `DOTNET_CLI_TELEMETRY_OPTOUT=1`. PowerShell scripts target Windows PowerShell 5.1.
@@ -120,6 +120,95 @@ repo. Checkpoints before risky steps; after restoring one, `ipconfig /renew` in 
 Before a release, in the VM: a real TV Box Setup run from Downloads (the permission prompt, the
 wizard, Install, a restart into the launcher), `Test-Updates.ps1` and `Test-Library.ps1` elevated,
 an update from the previous release, and `setup.ps1 -Uninstall` run as the TV user.
+
+### The test VM on an Incus server
+
+The same VM, "htpc-test", can live on an Incus server instead (the owner's homelab), which keeps
+Hyper-V off the dev machine. The scripts are `setup\test\*-IncusTestVM*.ps1`; each takes
+`-Remote` (default `homelab`) and `-Name` (default `htpc-test`), and keeps its local files (the
+SSH key, `known_hosts`, the answer ISO and its `credentials.txt`, screenshots) in
+`%USERPROFILE%\VMs\htpc-test-incus`, outside the repo. On the server they create only `htpc-*`
+things: the VM and the ISO volumes `htpc-iso-windows`, `htpc-iso-virtio-win`, `htpc-iso-answer`.
+
+```powershell
+# Once per machine: the Incus client (winget install LinuxContainers.Incus), then the remote,
+# from a trust token made on the server (incus config trust add <name>); nothing is saved in the repo.
+# (Run from the Claude desktop app, the remote lands in the app's private AppData, which a plain
+# terminal does not see: run it once more from a normal PowerShell to use the scripts there.)
+powershell -ExecutionPolicy Bypass -File launcher\dev\Connect-Incus.ps1
+
+# The VM (4 vCPU, 8 GiB, 64 GiB NVMe disk, UEFI Secure Boot, vTPM): uploads the Windows ISO, the
+# virtio-win ISO (%USERPROFILE%\VMs\iso\virtio-win*.iso, from fedorapeople.org's stable-virtio)
+# and a test answer ISO, made with the SSH key. Then the unattended install, to SSH:
+powershell -ExecutionPolicy Bypass -File setup\test\New-IncusTestVM.ps1 -LauncherExe <TV-Box-Setup.exe>
+powershell -ExecutionPolicy Bypass -File setup\test\Start-IncusTestVM.ps1 -WaitSsh
+
+# Snapshots, named like the Hyper-V checkpoints (Incus allows no spaces or "+": "launcher shell
+# installed" is stored as launcher-shell-installed; either spelling works). Restoring one boots it
+# and waits for SSH.
+powershell -ExecutionPolicy Bypass -File setup\test\Checkpoint-IncusTestVM.ps1 'before-shell' -Stop
+powershell -ExecutionPolicy Bypass -File setup\test\Restore-IncusTestVM.ps1 'before-shell'
+
+# Run, copy, look, type.
+powershell -ExecutionPolicy Bypass -File setup\test\Invoke-IncusTestVM.ps1 'Get-Content C:\ProgramData\HTPC\logs\setup-last.json'
+powershell -ExecutionPolicy Bypass -File setup\test\Invoke-IncusTestVM.ps1 -File setup\test\Test-Rights.ps1
+powershell -ExecutionPolicy Bypass -File setup\test\Invoke-IncusTestVM.ps1 -InSession 'whoami /groups'
+powershell -ExecutionPolicy Bypass -File setup\test\Copy-IncusTestVMFile.ps1 .\setup C:\htpc-test\
+powershell -ExecutionPolicy Bypass -File setup\test\Get-IncusTestVMScreenshot.ps1
+powershell -ExecutionPolicy Bypass -File setup\test\Send-IncusTestVMKeys.ps1 Win+R 'text:notepad' Enter
+powershell -ExecutionPolicy Bypass -File setup\test\Stop-IncusTestVM.ps1
+
+# A TV Box Setup run as the Hyper-V runs did it: the exe in Downloads, owned by the TV user, then Win+R.
+powershell -ExecutionPolicy Bypass -File setup\test\Copy-IncusTestVMFile.ps1 <TV-Box-Setup.exe> C:\Users\user\Downloads\ -Owner user
+powershell -ExecutionPolicy Bypass -File setup\test\Send-IncusTestVMKeys.ps1 Win+R 'text:C:\Users\user\Downloads\TV-Box-Setup.exe' Enter
+```
+
+Times on the homelab (29 Sept 2026): the unattended install to SSH about 10 min (Windows 7, then
+OpenSSH Server from Windows Update 3); a snapshot under a second; a restore about 1 min to SSH
+(2 s for the restore, the rest is Windows booting); an SSH command 3 to 5 s.
+
+| Script | Does |
+|---|---|
+| `New-IncusTestVM.ps1` | Makes the SSH key and the test answer ISO, uploads the ISOs, creates the VM (not started); `-Force` recreates it |
+| `Start-IncusTestVM.ps1` | Starts it; on an empty disk answers "Press any key to boot from CD or DVD" through the VGA console; `-WaitSsh` |
+| `Stop-IncusTestVM.ps1` | Shuts Windows down over SSH (then the power button, then off); `-Force` turns it off |
+| `Checkpoint-IncusTestVM.ps1` | Takes, lists (no name) or `-Delete`s a snapshot; `-Stop` shuts down first for a clean disk |
+| `Restore-IncusTestVM.ps1` | Turns it off, restores a snapshot, boots it and waits for SSH |
+| `Invoke-IncusTestVM.ps1` | PowerShell over SSH (elevated, session 0), `-File` for a local script; `-InSession` in the TV user's desktop session (standard rights, or `-Elevated`); `-Start` a program there |
+| `Copy-IncusTestVMFile.ps1` | scp in (owner Administrators; `-Owner user` for the TV user's), or out with `-FromGuest` |
+| `Get-IncusTestVMScreenshot.ps1` | PNG of the screen, taken by Incus (QEMU's screendump): firmware, Setup, sign-in and secure desktop included |
+| `Send-IncusTestVMKeys.ps1` | Send-VMKeys' steps, by SendInput from a helper in the TV user's session; `-Console` types through the VGA console (SPICE) instead, which reaches every screen |
+
+How it reaches the guest: the VM sits on the server's NAT bridge (internet, but not the TVs and
+Rokus on the LAN, and no second "TV" computer name on the LAN). The first logon installs the Incus
+agent (from Incus' `agent:config` CD, after the virtio-win guest tools), and the scripts run
+`incus port-forward` to the guest's port 22 on a free local port, through the Incus API: nothing
+changes on the server's network or firewall. (A proxy device forwarding a port of the server's
+LAN address was tried first; the homelab drops forwarded LAN-to-bridge connections.) The
+forwarder stays up hidden between calls and `Stop-IncusTestVM.ps1` ends it. `incus list` shows
+the guest's own address on the bridge. OpenSSH Server accepts only the key. The agent also gives
+`incus exec` (as SYSTEM) and `incus file`, if ever handier.
+
+Screen and keyboard without the guest's help: Incus takes screenshots itself (QEMU's screendump,
+`GET /1.0/instances/<name>/console?type=vga`), and `incus console --type=vga`, with no SPICE
+viewer installed, offers the SPICE socket on 127.0.0.1, which `IncusSpiceKeyboard.cs` types
+into (US layout; no mouse). That is how `Start-IncusTestVM.ps1` answers the CD prompt, only while
+a screenshot shows it. `incus console` in text mode (the serial port) fails from a Windows client:
+it asks the console input for its size, which Windows refuses.
+
+**How the test VM differs from a real box** (all from `New-InstallMedia.ps1 -TestAccess`, which
+exists for answer ISOs only; `setup\test` is in neither the setup exe nor setup.zip):
+- **UAC elevates administrators without the consent prompt** (`ConsentPromptBehaviorAdmin` 0):
+  nothing over SSH can click the secure desktop. UAC stays on, so split tokens and the privilege
+  model are as on a box, but "the permission prompt" of a TV Box Setup run cannot be checked here;
+  check it in the Hyper-V VM or on a box.
+- OpenSSH Server runs, with a firewall rule for it; the virtio-win guest tools, the virtio socket
+  driver and the Incus agent service are installed.
+- The first logon does not start TV Box Setup (`-SkipFirstLogonSetup`): the VM ends on a plain
+  desktop and TV Box Setup is run by hand, as in the Hyper-V runs (`-RunSetupAtFirstLogon` on
+  `New-IncusTestVM.ps1` keeps the USB-stick flow).
+- The automatic sign-in is permanent and the VM never sleeps or turns its screen off.
+- The account has the random test password until TV Box Setup clears it; SSH uses the key either way.
 
 ## 7. How this project works (rules that stay)
 

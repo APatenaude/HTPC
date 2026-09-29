@@ -11,6 +11,8 @@ Clean install side of Phase 1: a Windows install that asks nothing and ends in T
 | `../test/Start-TestVM.ps1` | Starts it and presses a key for "Press any key to boot from CD or DVD" |
 | `../test/Get-VMScreenshot.ps1` | PNG of the VM's screen, to follow the install without a console |
 | `../test/Send-VMKeys.ps1` | Types into the VM (text, keys, combinations like Win+R): the installed VM has no password, and PowerShell Direct refuses blank passwords |
+| `../test/*-IncusTestVM*.ps1` | The same test VM on an Incus server, driven over SSH (docs/DEVELOPMENT.md, "The test VM") |
+| `../test/Enable-TestAccess.ps1` | Test VM only: the first-logon step `New-InstallMedia.ps1 -TestAccess` adds (virtio network driver, OpenSSH Server with a key, UAC without the consent prompt) |
 
 None of them needs admin (the VM scripts need membership in Hyper-V Administrators).
 
