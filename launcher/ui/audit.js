@@ -18,9 +18,9 @@
 //
 // Three pages: the launcher (index.html), first-run setup (setup.html) and the on-screen keyboard
 // (keyboard.html), each with its own pages below. Runs, all from launcher\dev\Test-Ui.ps1
-// -SelfTest: in the self-test (index.html#selftest, headless Edge's virtual time: every check but
-// the time, which does not move there); on its own (index.html#audit, real time: the times too; it
-// runs before the page's load event ends, so headless Edge's --dump-dom waits for it); and
+// -SelfTest, all in real time (press times checked each time): in the self-test
+// (index.html#selftest); on its own (index.html#audit: it runs before the page's load event ends,
+// so headless Edge's --dump-dom waits for it); and
 // setup.html#audit, keyboard.html#audit, index.html#audit again at other screen sizes (1920x1080,
 // 1536x864: a 4K TV at Windows' 250 %, 1280x720, 2560x1080: the stage scaled, letterboxed).
 // #audit?page=<name> sets one page up in its stress state with the focus on its last element
@@ -316,11 +316,18 @@ if (AUDIT_PAGE === 'index') {
 }
 
 // Move mode: every press moves the tile; it must stay in view (and focused) wherever it goes.
+// A slow press is slow only if it is slow again, as in auditWalk: the tile back where it was, the
+// same press twice more, the fastest counts.
 function auditMoveWalk(page, report) {
   const seq = [...Array(7).fill('down'), ...Array(3).fill('right'), ...Array(7).fill('up'), ...Array(3).fill('left')];
+  const back = { down: 'up', up: 'down', left: 'right', right: 'left' };
   let slowest = 0;
   for (const b of seq) {
-    const ms = auditPress(b);
+    let ms = auditPress(b);
+    for (let again = 0; again < 2 && ms > AUDIT.slowMs && state.moving; again++) {
+      AUDIT_IO.press(back[b]);
+      ms = Math.min(ms, auditPress(b));
+    }
     slowest = Math.max(slowest, ms);
     const el = $('tiles').querySelector('.tile.moving');
     if (!el || !el.classList.contains('focused')) { report(`${b}: the moving tile lost the focus`); continue; }

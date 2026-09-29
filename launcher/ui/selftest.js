@@ -1,7 +1,8 @@
 'use strict';
 // The page's own checks, in a plain browser: index.html#selftest. Results go into the page
-// (#selftest-results) and the title ("SELFTEST PASS" / "SELFTEST FAIL n"), for headless Edge:
-//   msedge --headless=new --dump-dom file:///.../launcher/ui/index.html#selftest
+// (#selftest-results) and the title ("SELFTEST PASS" / "SELFTEST FAIL n"), for headless Edge
+// (launcher\dev\Test-Ui.ps1 -SelfTest: in real time, the page read through the DevTools protocol
+// once its title says it is done).
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
 // X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
 // its quick buttons in the order of the home screen's top bar (Settings, then Power),
@@ -31,8 +32,8 @@
   }
 
   // The interface sounds (sounds.js), rendered offline, a channel each; checked near the end.
-  // Started first, so the render runs beside the other checks: waiting for it with nothing else
-  // to do would let headless Edge's virtual time (--virtual-time-budget) run out first.
+  // Started first, so the render runs beside the other checks and is done by then (it was also
+  // what kept headless Edge's virtual time, which Test-Ui.ps1 used before, from running out).
   async function renderSounds() {
     const names = Object.keys(SOUNDS), rate = 48000;
     const offline = new OfflineAudioContext(names.length, rate * 1.5, rate);

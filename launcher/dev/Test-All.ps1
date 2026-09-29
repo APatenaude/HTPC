@@ -61,7 +61,8 @@ $lines | Where-Object { $_ -match '^\s*FAIL|WARN' } | Select-Object -First 12
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 $profileDir = Join-Path $env:TEMP 'htpc-testall-edge'
 $page = 'file:///' + ("$l\dev\phone-test.html" -replace '\\', '/')
-$dom = & $edge --headless=new --do-not-de-elevate --disable-gpu "--user-data-dir=$profileDir" --virtual-time-budget=30000 --dump-dom $page 2>$null | Out-String
+# --disable-extensions: not the extensions TV Box Setup forces into every Edge profile (Test-Ui.ps1).
+$dom = & $edge --headless=new --do-not-de-elevate --disable-gpu --disable-extensions "--user-data-dir=$profileDir" --virtual-time-budget=30000 --dump-dom $page 2>$null | Out-String
 if ($dom -match 'ALL PASSED') { 'phone-test => ALL PASSED' } else { $failed++; 'phone-test => FAILED ' + ([regex]::Match($dom, '\d+ FAILED').Value) }
 Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*htpc-testall-edge*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
