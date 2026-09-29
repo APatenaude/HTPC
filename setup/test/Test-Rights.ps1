@@ -14,7 +14,8 @@
                 (UpdateCore.ps1). With admin: Register-AppInstaller.ps1 -LockOnly replaces a junction
                 planted where tv\ should be with a real folder, leaving the link's target untouched.
       JobParams Start-Job.ps1 refuses -DryRun/-Catalog/-Resolve/-DataRoot as SYSTEM (needs admin to
-                run it as SYSTEM through a task), and does not refuse them for a normal user.
+                run it as SYSTEM through a task), and does not refuse them for a normal user. A job's
+                progress reporter works in the runner as Start-Job.ps1 calls it (with &).
 
     Runs elevated (CI) and not elevated; the admin-only parts are skipped with a clear message.
 
@@ -162,6 +163,18 @@ try {
         # A normal user is not refused for -DryRun (the guard is only for SYSTEM).
         $userOut = & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $startJob -Job reconcile -DryRun 2>&1 | Out-String }
         Check ($userOut -notmatch [regex]::Escape($refusal)) 'a normal user is not refused for -DryRun'
+
+        # Start-Job.ps1 calls the runner with & (not dot-sourced), so the runner's helpers are not
+        # global: a reporter made with GetNewClosure() could not see Write-JobProgress (install:kodi
+        # failed "Write-JobProgress is not recognized"). The same chain, with the real Job-Common.ps1.
+        $chain = Join-Path $work 'chain'
+        New-Item -ItemType Directory -Force $chain | Out-Null
+        $progress = Join-Path $chain 'progress.json'
+        [IO.File]::WriteAllText((Join-Path $chain 'Runner.ps1'), ". '$lib\Job-Common.ps1'`r`n`$script:ProgressPath = '$progress'`r`nSet-JobContext 'install:test' 'install'`r`n& (Get-JobReporter) 'download' 42 'Downloading test'`r`n")
+        [IO.File]::WriteAllText((Join-Path $chain 'Start.ps1'), "& '$chain\Runner.ps1'`r`n")
+        $chainOut = (& { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $chain 'Start.ps1') 2>&1 | Out-String }) -replace '\s+', ' '
+        $got = if (Test-Path -LiteralPath $progress) { [IO.File]::ReadAllText($progress) | ConvertFrom-Json }
+        Check ([bool]($got -and $got.phase -eq 'download' -and $got.percent -eq 42 -and $got.jobId -eq 'install:test')) "a job's progress reporter reaches Write-JobProgress when the runner is called with &, as Start-Job.ps1 does ($($chainOut.Trim()))"
 
         if ($elevated) {
             # Runs Start-Job.ps1 as SYSTEM through a one-shot task. Returns ONE string: its output, or

@@ -61,8 +61,11 @@ function Write-JobProgress([string]$Phase, $Percent, [string]$Message) {
     } catch { }
 }
 
-# A -Report scriptblock for the AppCore functions, forwarding to Write-JobProgress.
-function Get-JobReporter { { param($phase, $percent, $message) Write-JobProgress $phase $percent $message }.GetNewClosure() }
+# A -Report scriptblock for the AppCore functions, forwarding to Write-JobProgress. A plain block,
+# not GetNewClosure(): a closure only sees global functions, and Start-Job.ps1 calls the runner with
+# &, so these helpers are the runner's own, not global ("Write-JobProgress is not recognized" failed
+# every install that reported progress; Test-Rights checks this chain).
+function Get-JobReporter { { param($phase, $percent, $message) Write-JobProgress $phase $percent $message } }
 
 # The catalog entry for an id, from the trusted catalog in Program Files. Throws for an unknown id,
 # a website (nothing to install) or the builtin Browser tile.
