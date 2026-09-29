@@ -21,6 +21,8 @@ static class LogoTests
         Images();
         Console.WriteLine("== Logos: resolving a site's icon (fake sites)");
         await Resolve();
+        Console.WriteLine("== Logos: the catalog's logoUrl");
+        CatalogLogoUrls();
         Console.WriteLine("== Logos: the cache");
         await Cache();
         Console.WriteLine("== Logos: a program's own icon (the Shell, 256 px)");
@@ -61,6 +63,9 @@ static class LogoTests
             <link rel="icon" type="image/svg+xml" href="/icon.svg">
             <link rel="icon" href="javascript:alert(1)" sizes="400x400">
             <link rel="stylesheet" href="/site.css">
+            <meta name="msapplication-TileImage" content="/tile-144.png">
+            <meta name="msapplication-TileImage" content="">
+            <meta property="og:image" content="/social-1200x630.png">
             </head><body><link rel="icon" href="/late.png" sizes="999x999"></body></html>
             """;
         var (manifest, icons) = SiteIcons.ParsePage(html, new Uri("https://www.example.com/home"));
@@ -69,15 +74,15 @@ static class LogoTests
         Check(urls.SequenceEqual(new[]
         {
             "https://www.example.com/apple-180.png", "https://cdn.example.com/apple-152.png?a=1&b=2",
-            "https://www.example.com/icon-192.png", "https://www.example.com/favicon-32.png", "https://www.example.com/favicon.ico",
-        }), "apple-touch-icons (180 unless said, largest first), then favicons largest first, then /favicon.ico: " + string.Join(" ", urls));
-        Check(!urls.Any(u => u.StartsWith("http:") || u.Contains("javascript") || u.EndsWith(".svg") || u.Contains("late") || u.Contains(".css")),
-            "never http, javascript:, SVG, a stylesheet, or a link after the head");
+            "https://www.example.com/icon-192.png", "https://www.example.com/tile-144.png", "https://www.example.com/favicon-32.png", "https://www.example.com/favicon.ico",
+        }), "apple-touch-icons (180 unless said, largest first), then favicons and the Windows tile (144) largest first, then /favicon.ico: " + string.Join(" ", urls));
+        Check(!urls.Any(u => u.StartsWith("http:") || u.Contains("javascript") || u.EndsWith(".svg") || u.Contains("late") || u.Contains(".css") || u.Contains("social")),
+            "never http, javascript:, SVG, a stylesheet, a link after the head, or the page's social-media picture");
         var (none, plain) = SiteIcons.ParsePage("<html><head><title>x</title></head></html>", new Uri("https://site.test/a/b"));
-        Check(none is null && plain.Select(c => c.Url.AbsoluteUri).SequenceEqual(new[] { "https://site.test/apple-touch-icon.png", "https://site.test/favicon.ico" }),
-            "a page naming none: the usual /apple-touch-icon.png, then /favicon.ico");
-        var (_, fromHttp) = SiteIcons.ParsePage("<link rel=icon href=/i.png sizes=96x96>", new Uri("http://old.test/"));
-        Check(fromHttp.Count == 0, "on a page that is http, even its relative icons are http: none");
+        Check(none?.AbsoluteUri == "https://site.test/manifest.json" && plain.Select(c => c.Url.AbsoluteUri).SequenceEqual(new[] { "https://site.test/apple-touch-icon.png", "https://site.test/favicon.ico" }),
+            $"a page naming none: the usual /manifest.json ({none}), /apple-touch-icon.png, then /favicon.ico");
+        var (httpManifest, fromHttp) = SiteIcons.ParsePage("<link rel=icon href=/i.png sizes=96x96>", new Uri("http://old.test/"));
+        Check(fromHttp.Count == 0 && httpManifest is null, "on a page that is http, even its relative icons and usual manifest are http: none");
         Check(SiteIcons.LargestSize("16x16 32x32 24x24") == 32 && SiteIcons.LargestSize("any") == 0 && SiteIcons.LargestSize("180X180") == 180 && SiteIcons.LargestSize(null) == 0, "sizes: the largest, 'any' is none");
     }
 
@@ -230,6 +235,37 @@ static class LogoTests
         found = await SiteIcons.Resolve(new Uri("https://bare.test/"), bare.Fetch);
         Check(found?.From.Url.AbsolutePath == "/favicon.ico", "a site whose page does not answer: /apple-touch-icon.png, then /favicon.ico");
 
+        // A site that turns the fetcher away (a bot challenge, a refused request): the catalog's
+        // logoUrl, on its own static host, first; the page is not even asked for.
+        var walled = new FakeWeb();
+        walled.Files["https://static.walled.test/app-512.png"] = Png(512, 512, Color.DarkOrange);
+        found = await SiteIcons.Resolve(new Uri("https://www.walled.test/"), walled.Fetch, "https://static.walled.test/app-512.png");
+        Check(found?.From.Source == SiteIcons.CatalogSource && walled.Asked.SequenceEqual(new[] { "https://static.walled.test/app-512.png" }),
+            $"a catalog logoUrl: fetched first, alone ({string.Join(" ", walled.Asked)})");
+        walled.Files["https://static.walled.test/app-512.png"] = Encoding.UTF8.GetBytes("<html>Just a moment...</html>");
+        walled.Files["https://www.walled.test/apple-touch-icon.png"] = Png(180, 180, Color.Orange);
+        walled.Asked.Clear();
+        found = await SiteIcons.Resolve(new Uri("https://www.walled.test/"), walled.Fetch, "https://static.walled.test/app-512.png");
+        Check(found?.From.Url.AbsoluteUri == "https://www.walled.test/apple-touch-icon.png" && walled.Asked[0] == "https://static.walled.test/app-512.png",
+            "a logoUrl that is no image (moved, challenged): the site's own icons as before");
+        walled.Asked.Clear();
+        found = await SiteIcons.Resolve(new Uri("https://www.walled.test/"), walled.Fetch, "http://static.walled.test/app-512.png");
+        Check(found is not null && !walled.Asked.Any(u => u.Contains("static.")), "a logoUrl over http: never asked for");
+
+        // A page that links no manifest while the site has one at /manifest.json (its scripts link it).
+        var spa = new FakeWeb();
+        spa.Files["https://spa.test/"] = Encoding.UTF8.GetBytes("<head><link rel=icon href=/fav.ico></head>");
+        spa.Files["https://spa.test/manifest.json"] = Encoding.UTF8.GetBytes("""{"icons":[{"src":"/pwa/512.png","sizes":"512x512","type":"image/png"}]}""");
+        spa.Files["https://spa.test/pwa/512.png"] = Png(512, 512, Color.SeaGreen);
+        found = await SiteIcons.Resolve(new Uri("https://spa.test/"), spa.Fetch);
+        Check(found?.From.Source == "manifest" && found.Value.From.Url.AbsolutePath == "/pwa/512.png", $"an unlinked /manifest.json: its icons ({found?.From.Url})");
+        var html404 = new FakeWeb();
+        html404.Files["https://catchall.test/"] = Encoding.UTF8.GetBytes("<head><link rel=apple-touch-icon href=/t.png></head>");
+        html404.Files["https://catchall.test/manifest.json"] = html404.Files["https://catchall.test/"]; // a site answering every address with its page
+        html404.Files["https://catchall.test/t.png"] = Png(180, 180, Color.Blue);
+        found = await SiteIcons.Resolve(new Uri("https://catchall.test/"), html404.Fetch);
+        Check(found?.From.Url.AbsolutePath == "/t.png", "a /manifest.json that is the site's page again: passed over");
+
         var tiny = new FakeWeb();
         tiny.Files["https://tiny.test/"] = Encoding.UTF8.GetBytes("<link rel=icon href=/f.png>");
         tiny.Files["https://tiny.test/f.png"] = Png(16, 16, Color.Red);
@@ -256,6 +292,20 @@ static class LogoTests
         Check(threw, "offline: it says so (not \"no icon\"), to be tried again soon");
 
         Check(await AppLogos.Fetch(new Uri("http://example.com/favicon.ico"), 1000) is null, "the real fetcher: an http address is refused without asking");
+    }
+
+    // The sites that turn the fetcher away name their icon in the catalog: websites only, https,
+    // read into the app list (checked without the network; the addresses were checked live).
+    static void CatalogLogoUrls()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
+        var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
+        var withLogo = apps.Catalog.Where(a => a.LogoUrl is not null).ToList();
+        foreach (var id in new[] { "crunchyroll", "paramountplus", "rds", "tsn", "youtubekids" })
+            Check(apps.Get(id)?.LogoUrl is { } u && u.StartsWith("https://"), $"{id}: a logoUrl ({apps.Get(id)?.LogoUrl})");
+        Check(withLogo.All(a => a.IsWebsite && Uri.TryCreate(a.LogoUrl, UriKind.Absolute, out var u) && SiteIcons.Secure(u, a.LogoUrl!) is not null),
+            "every logoUrl: on a website, an absolute https address: " + string.Join(" ", withLogo.Where(a => !a.IsWebsite || !a.LogoUrl!.StartsWith("https://")).Select(a => a.Id)));
     }
 
     // --- The cache ------------------------------------------------------------------------------------
@@ -343,6 +393,15 @@ static class LogoTests
         await logos.RefreshNow(sources);
         await logos.RefreshNow(sources);
         Check(extracted.Count(e => e == other) == 1 && logos.Url("other") is null, "a program without an icon: not read again at each pass");
+
+        // The catalog's logoUrl goes through with the site (a site that refuses the fetcher).
+        web.Files["https://cdn.walled.test/w-512.png"] = Png(512, 512, Color.DarkOrange);
+        sources.Add(new("walled", "https://www.walled.test/", null, "https://cdn.walled.test/w-512.png"));
+        web.Asked.Clear();
+        await logos.RefreshNow(sources);
+        Check(logos.Url("walled") is not null && !web.Asked.Any(u => u.Contains("www.walled.test"))
+            && Log.Lines.Any(l => l.Contains("Logo walled: " + SiteIcons.CatalogSource + " cdn.walled.test/w-512.png")),
+            "a site with a logoUrl: its logo from there, its page not asked, the log says where from");
 
         // Refresh (the background one): Changed on a thread-pool thread, the cache the same.
         var done = new TaskCompletionSource();

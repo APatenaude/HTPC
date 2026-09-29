@@ -12,11 +12,14 @@ sealed record IconCandidate(Uri Url, int Size, string Source);
 
 /// <summary>
 /// Where a website keeps its own high-resolution icon (G7: real logos, taken from the sites
-/// themselves). In the order tried: the web app manifest's icons (largest first, "any" before
-/// "maskable", monochrome ones left out), then apple-touch-icon (180 px unless it says), then
-/// the favicons (largest first), with the usual /apple-touch-icon.png and /favicon.ico when the
-/// page names none. Only https addresses: an http icon, or one on a page that redirected to
-/// http, is never fetched. SVG icons are skipped (nothing here draws them into a PNG).
+/// themselves). In the order tried: the catalog's logoUrl when it names one (a site that turns
+/// the fetcher away: a bot challenge, a refused request, icons only in its scripts), then the
+/// web app manifest's icons (largest first, "any" before "maskable", monochrome ones left out;
+/// the usual /manifest.json when the page links none), then apple-touch-icon (180 px unless it
+/// says), then the favicons and msapplication-TileImage (largest first), with the usual
+/// /apple-touch-icon.png and /favicon.ico when the page names none. Only https addresses: an
+/// http icon, or one on a page that redirected to http, is never fetched. SVG icons are skipped
+/// (nothing here draws them into a PNG).
 /// </summary>
 static class SiteIcons
 {
@@ -26,7 +29,10 @@ static class SiteIcons
     /// <summary>Smallest icon worth showing: a 16 or 32 px favicon on a tile looks worse than the glyph.</summary>
     public const int MinSize = 64;
 
-    static readonly Regex LinkTag = new(@"<(link|base)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    /// <summary>The source named for an icon found at the catalog's logoUrl.</summary>
+    public const string CatalogSource = "catalog logoUrl";
+
+    static readonly Regex LinkTag = new(@"<(link|base|meta)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static readonly Regex Attribute = new(@"([\w:-]+)\s*=\s*(?:""([^""]*)""|'([^']*)'|([^\s>]+))", RegexOptions.Compiled);
 
     /// <summary>The page's own icons (manifest link first), as its head names them, in the order to try.</summary>
@@ -44,6 +50,14 @@ static class SiteIcons
             var attrs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (Match a in Attribute.Matches(tag.Value))
                 attrs.TryAdd(a.Groups[1].Value, WebUtility.HtmlDecode(a.Groups[2].Success ? a.Groups[2].Value : a.Groups[3].Success ? a.Groups[3].Value : a.Groups[4].Value).Trim());
+            if (tag.Groups[1].Value.Equals("meta", StringComparison.OrdinalIgnoreCase))
+            {
+                // Windows' pinned-site tile (144 px as a rule), tried with the favicons by size.
+                if (string.Equals(attrs.GetValueOrDefault("name"), "msapplication-TileImage", StringComparison.OrdinalIgnoreCase)
+                    && attrs.GetValueOrDefault("content") is { Length: > 0 } content && Secure(baseUri, content) is { } tile && !IsSvg(tile, null))
+                    icons.Add(new IconCandidate(tile, 144, "msapplication-TileImage"));
+                continue;
+            }
             if (!attrs.TryGetValue("href", out var href) || href.Length == 0) continue;
             if (tag.Groups[1].Value.Equals("base", StringComparison.OrdinalIgnoreCase))
             {
@@ -68,6 +82,8 @@ static class SiteIcons
         list.AddRange(icons.OrderByDescending(c => c.Size));
         if (Secure(page, "/favicon.ico") is { } usualIcon)
             list.Add(new IconCandidate(usualIcon, 32, "favicon"));
+        // Some sites keep a manifest there without linking it (their scripts add the link).
+        manifest ??= Secure(page, "/manifest.json");
         return (manifest, Distinct(list));
     }
 
@@ -99,22 +115,26 @@ static class SiteIcons
 
     /// <summary>
     /// The site's logo as a PNG, from the first candidate that is a real image of at least
-    /// MinSize: the manifest's icons, then the page's own list. <paramref name="fetch"/> reads an
-    /// https address, up to a size (null: not there, too big or not https); it throws when the
-    /// site cannot be reached. The page not reached ends the search at once; an icon not reached
-    /// is passed over, and if no other one does, the search ends the same way (tried again soon,
-    /// not a day later). Null: the site has no usable icon.
+    /// MinSize: the catalog's <paramref name="logoUrl"/> (https only; the page is not even asked
+    /// for when it is good), the manifest's icons, then the page's own list. <paramref name="fetch"/>
+    /// reads an https address, up to a size (null: not there, too big or not https); it throws
+    /// when the site cannot be reached. The page not reached ends the search at once; an icon not
+    /// reached is passed over, and if no other one does, the search ends the same way (tried
+    /// again soon, not a day later). Null: the site has no usable icon.
     /// </summary>
-    public static async Task<(byte[] Png, IconCandidate From)?> Resolve(Uri page, Func<Uri, int, Task<(byte[] Data, Uri Final)?>> fetch)
+    public static async Task<(byte[] Png, IconCandidate From)?> Resolve(Uri page, Func<Uri, int, Task<(byte[] Data, Uri Final)?>> fetch, string? logoUrl = null)
     {
         if (page.Scheme != Uri.UriSchemeHttps) page = new UriBuilder(page) { Scheme = Uri.UriSchemeHttps, Port = -1 }.Uri;
-        var got = await fetch(page, MaxPage);
         Exception? unreached = null;
         async Task<(byte[] Data, Uri Final)?> TryFetch(Uri url, int max)
         {
             try { return await fetch(url, max); }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException) { unreached = e; return null; }
         }
+        if (!string.IsNullOrWhiteSpace(logoUrl) && Secure(page, logoUrl) is { } known
+            && await TryFetch(known, MaxIcon) is { } k && LogoImage.ToPng(k.Data, MinSize, out _) is { } knownPng)
+            return (knownPng, new IconCandidate(known, 0, CatalogSource));
+        var got = await fetch(page, MaxPage);
         // The page's head names the icons; relative addresses are from where it ended up (a redirect).
         var html = got is { } p ? System.Text.Encoding.UTF8.GetString(p.Data) : "";
         var (manifest, icons) = ParsePage(html, got?.Final ?? page);
