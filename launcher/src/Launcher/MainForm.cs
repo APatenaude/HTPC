@@ -747,7 +747,7 @@ sealed partial class MainForm : Form
             Log.Info($"{id} window up after {waited + 250} ms (foreground {how}{(filled ? ", made to fill the screen" : "")})");
             return;
         }
-        AppDidntOpen(id, $"{name} is taking long to open", "It may still appear. Home comes back here.", retry: false);
+        AppDidntOpen(id, $"{name} is taking long to open", "It may still appear.", retry: false);
     }
 
     void SwitchTo(string id, bool waited = false)

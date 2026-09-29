@@ -843,7 +843,7 @@ let opening = null;   // { id, timer }
 function showOpening(t) {
   const el = $('opening');
   el.innerHTML = `<span class="logo">${appIcon(t, 160, 1.5)}</span>` +
-    `<span class="name">Opening ${esc(t.name)}</span><span class="sub">Home comes back here anytime</span>`;
+    `<span class="name">Opening ${esc(t.name)}</span>`;
   el.classList.add('on');
   if (opening) clearTimeout(opening.timer);
   opening = { id: t.id, timer: setTimeout(hideOpening, 40000) };
