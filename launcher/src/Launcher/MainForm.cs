@@ -455,12 +455,14 @@ sealed partial class MainForm : Form
         // Text fields are watched (for the keyboard to pop up) only while a Mouse or Keyboard
         // preset app is in front, and only if the keyboard is to pop up by itself: Chromium-based
         // apps build their accessibility tree while anyone listens. Apps on the Controller
-        // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard. Not while the
-        // launcher is on its way up (Home pressed): it would take 2 s to come (Reveal). Nor in
-        // desktop mode (the owner, 29 Sept 2026): a keyboard popping up on every search box gets
-        // in the way there; R3 (or the button the map gives it) still opens it, and Back to TV
-        // brings the automatic keyboard back.
-        textFields.Enabled = settings.ShowKeyboardAutomatically && !desktopMode && (preset is "mouse" or "keyboard") && !LauncherComing;
+        // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard, and so do the
+        // catalog's ownKeyboard apps on a preset (Plex HTPC: its TV keyboard, driven by the
+        // arrows). Not while the launcher is on its way up (Home pressed): it would take 2 s to
+        // come (Reveal). Nor in desktop mode (the owner, 29 Sept 2026): a keyboard popping up on
+        // every search box gets in the way there; R3 (or the button the map gives it) still opens
+        // it, and Back to TV brings the automatic keyboard back.
+        textFields.Enabled = settings.ShowKeyboardAutomatically && !desktopMode && (preset is "mouse" or "keyboard")
+            && foregroundApp is not { OwnKeyboard: true } && !LauncherComing;
         if (keyboard.Visible) map = null; // the controller drives the keyboard
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
@@ -752,14 +754,39 @@ sealed partial class MainForm : Form
                 Log.Info($"{id} window up after {waited + 250} ms: left behind the launcher (Home or B while it opened)");
                 return;
             }
-            var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
+            var fill = apps.Get(id)?.Fill == true;
+            var filled = fill && Native.FillScreen(window);
             var how = Native.ForceForeground(window);
             StepAside(id);
             Post(new { type = "opened", id, ok = true });
             Log.Info($"{id} window up after {waited + 250} ms (foreground {how}{(filled ? ", made to fill the screen" : "")})");
+            if (fill) _ = SettleFilled(id);
             return;
         }
         AppDidntOpen(id, $"{name} is taking long to open", "It may still appear.", retry: false);
+    }
+
+    /// <summary>
+    /// The first 10 s after a "fill" app opened: while its main window is in front, it is filled
+    /// again as soon as it stops filling the screen (checked every half second), in desktop mode
+    /// too. Apps lay their window out again once it is shown (an Electron app's saved size, Qt
+    /// restoring its geometry, the real window coming after the one filled); KeepFilled acts only
+    /// after 2 s, and never in desktop mode, where an app opened from its tile still opens
+    /// filling the screen. Never while the launcher is in front or coming (Home).
+    /// </summary>
+    async Task SettleFilled(string id)
+    {
+        var again = 0;
+        for (var waited = 500; waited <= 10_000; waited += 500)
+        {
+            await Task.Delay(500);
+            if (!apps.IsRunning(id)) return;
+            if (setupMode || standby is not { Active: false } || LauncherActive || LauncherComing) continue;
+            var window = apps.MainWindow(id);
+            if (window == IntPtr.Zero || window != Native.GetForegroundWindow() || !Native.FillScreen(window)) continue;
+            if (again++ == 0) Log.Info($"{id} stopped filling the screen {waited} ms after it opened: filled again");
+        }
+        if (again > 1) Log.Info($"{id} filled again {again} times while it opened");
     }
 
     void SwitchTo(string id, bool waited = false)
@@ -793,7 +820,8 @@ sealed partial class MainForm : Form
     /// Each second: a "fill" app in front whose own window no longer fills the screen (VLC once
     /// a video leaves its full screen: Qt puts the title bar back; a splash was filled, then the
     /// real window came) is filled again after 2 s. Only the app's main window, and only while
-    /// it is the one in front: never a dialog of it, never under the Home menu or in desktop mode.
+    /// it is the one in front: never a dialog of it, never under the Home menu or in desktop mode
+    /// (there only SettleFilled, the first 10 s after the app opened from its tile).
     /// </summary>
     void KeepFilled()
     {

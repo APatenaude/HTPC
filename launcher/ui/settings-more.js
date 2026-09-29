@@ -146,7 +146,7 @@ settingsSection('controller', {
           '<div class="srow" data-nav data-id="set-maps" data-act="maps">' +
             '<div class="text"><span class="label">Button maps per app</span><span class="caption">What each button does in each app: keys, clicks, media, the keyboard</span></div>' +
             `<div class="value">${icon('chevright', 30, 2)}</div></div>` +
-          flagRow('showKeyboardAutomatically', 'Show keyboard automatically', 'When a text or password box is selected. Never in YouTube, Jellyfin and Moonlight, which have their own.') +
+          flagRow('showKeyboardAutomatically', 'Show keyboard automatically', 'When a text or password box is selected. Never in YouTube, Jellyfin, Moonlight and Plex, which have their own.') +
           '<p class="snote">R3 (right stick press) opens the keyboard; an app’s map can give it to another button. ' +
             'Start + Up/Down changes the volume in every app, Start + Left mutes. ' +
             'Home: tap for the menu, hold for Power. In Moonlight a tap goes to the game PC and holding opens this menu.</p>' +

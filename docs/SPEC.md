@@ -107,8 +107,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
   symbols, show password, and a row of what a controller lacks (Tab, refresh, zoom, full
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
-  with their own keyboard (VacuumTube, Jellyfin, Moonlight); R3 not intercepted in Moonlight.
-  No automatic pop-up in desktop mode either (the owner, 29 Sept 2026): R3 opens it there.
+  with their own keyboard (VacuumTube, Jellyfin, Moonlight, Plex HTPC); R3 not intercepted in
+  Moonlight. No automatic pop-up in desktop mode either (the owner, 29 Sept 2026): R3 opens it
+  there.
 - **N12 Global brightness.** One slider dims the whole screen in every app (a software dimming
   layer), from the Home menu, the phone remote and Settings › Display; kept across restarts.
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
@@ -198,7 +199,7 @@ Launcher & menus: D-pad/L stick move · A select · B back · X close app (Home 
 | R3 | keyboard | keyboard | keyboard |
 | Home | launcher | launcher | launcher |
 
-Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jellyfin, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse. Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
+Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jellyfin, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse; Plex HTPC = Keyboard (29 Sept 2026: its own controller support ignored the 8BitDo, which its input maps do not name). Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
 
 ## Risks and pushback
 
