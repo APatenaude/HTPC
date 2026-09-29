@@ -113,7 +113,10 @@ user) are folded into the items below; what was dropped is listed under "Not now
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
   with their own keyboard (VacuumTube, Jellyfin, Moonlight, Plex HTPC); R3 not intercepted in
   Moonlight. No automatic pop-up in desktop mode either (the owner, 29 Sept 2026): R3 opens it
-  there.
+  there. LT is Shift, RT the symbols; moving past an edge wraps round to the other
+  side (unlike every list on the TV). 440 of 1080 high (it was 560: half the screen). The
+  launcher's own fields (Wi-Fi, a website's address, a tile's name) use it too; no page draws a
+  keyboard of its own (the owner, 29 Sept 2026).
 - **N12 Global brightness.** One slider dims the whole screen in every app (a software dimming
   layer), from the Home menu, the phone remote and Settings › Display; kept across restarts.
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
@@ -133,7 +136,8 @@ user) are folded into the items below; what was dropped is listed under "Not now
 
 - **W1 Edit tiles on the TV.** Add (an installed app, anything in the Start menu, or a
   website), move, rename, change icon, remove. Website tiles open in Edge (4K for Netflix and
-  co.).
+  co.). The Start menu's programs show with their own icons; one added opens filling the
+  screen like the catalog's apps (a window that cannot be sized, such as Calculator, in the middle).
 - **W2 Status bar and alerts.** Clock, date, controller battery, alert pills. Alerts: an app
   did not open or closed unexpectedly, no internet, idle sleep in a minute, headphones, updates
   (home screen only), the phone, the TV not coming on. No controller or battery alerts; only
@@ -152,19 +156,16 @@ user) are folded into the items below; what was dropped is listed under "Not now
   full screen, RetroArch; RetroBat, whose setup cannot run unattended: the library starts it on
   screen, over the TV with the controller as a mouse, and the user finishes it) (plus
   the six), and sites that open in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max,
-  Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, T
-é
-l
-é
--Qu
-é
-bec, TVA+, illico+,
-  ONF, RDS, TSN, Sportsnet+, OHdio, YouTube Music, Apple Music, YouTube Kids; cloud gaming with
+  Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, Télé-Québec, TVA+, illico+,
+  ONF, RDS, TSN, Sportsnet+, OHdio, YouTube Music, Apple Music; cloud gaming with
   the controller passed to the page: GeForce NOW, Xbox Cloud Gaming, Amazon Luna). Install and
   uninstall from the TV (not from the Browser), keeping app data; installs start right away at
   low priority. If it's installed, it's on the home screen (29 September): installing adds the
   tile, taking the tile away uninstalls (asked first); sites and the Browser, which install
   nothing, come and go from Home freely.
+  Shown by category (29 September: the list is long now), in setup's app list too: Movies &
+  shows, Canadian TV, Sports, Music, Games, Your media & tools (catalog `categories`); LT and RT
+  jump from one to the next in Add a tile.
 
 ## Not now
 

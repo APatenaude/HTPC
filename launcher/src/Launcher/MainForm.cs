@@ -701,8 +701,10 @@ sealed partial class MainForm : Form
         // finished on screen: later, from the library) and websites (nothing to install, just a tile).
         var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated && !a.InstallInteractive) || a.IsWebsite)
             // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
-            .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
-        Post(new { type = "init", apps = list, tv = TvUiState.Describe(tv), controller = controller.Connected, battery = controller.BatteryLevel,
+            .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type, category = a.Category });
+        // Shown by category, as in Add a tile's library (setup.js).
+        var categories = apps.Categories.Select(c => new { id = c.Id, name = c.Name });
+        Post(new { type = "init", apps = list, categories, tv = TvUiState.Describe(tv), controller = controller.Connected, battery = controller.BatteryLevel,
             canInstall = SetupRunner.FindSetupDir() is not null, wired = TvNet.Wired() });
     }
 

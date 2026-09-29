@@ -179,6 +179,28 @@ sealed class AppLogos
         }
     }
 
+    /// <summary>
+    /// Takes away the logos whose id starts with prefix, but those kept: the icons of programs no
+    /// longer in the Start menu (Add tile &gt; On this box). Returns how many went.
+    /// </summary>
+    public int Forget(string prefix, IReadOnlySet<string> keep)
+    {
+        var gone = 0;
+        foreach (var png in Directory.EnumerateFiles(dir, prefix + "*.png"))
+        {
+            var id = Path.GetFileNameWithoutExtension(png);
+            if (keep.Contains(id) || !SafeId.IsMatch(id)) continue;
+            try
+            {
+                File.Delete(png);
+                File.Delete(Path.Combine(dir, id + ".from"));
+                gone++;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Warn($"Logo {id}: not removed ({e.Message})"); }
+        }
+        return gone;
+    }
+
     void RetryIn(string id, TimeSpan wait)
     {
         lock (retryAt) retryAt[id] = now() + wait;

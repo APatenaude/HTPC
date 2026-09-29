@@ -390,8 +390,9 @@ static class LogoImage
 
 /// <summary>
 /// A program's own icon, as Explorer shows it at its largest (256 px, the "jumbo" size), through
-/// the Shell's image factory rather than the 32 px ExtractAssociatedIcon. Runs on a short-lived
-/// STA thread of its own (the Shell's objects want one).
+/// the Shell's image factory rather than the 32 px ExtractAssociatedIcon. A shortcut (.lnk) gives
+/// its own icon the same way, without the shortcut arrow (Add tile &gt; On this box). Runs on a
+/// short-lived STA thread of its own (the Shell's objects want one).
 /// </summary>
 static class ExeIcon
 {

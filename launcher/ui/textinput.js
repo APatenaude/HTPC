@@ -1,5 +1,6 @@
 'use strict';
-// Text fields in the launcher's own screens (the Wi-Fi password, a hidden network's name).
+// Text fields in the launcher's own screens (the Wi-Fi password, a hidden network's name, a
+// website's address and name, a tile's new name: library.js).
 // Typing reaches them three ways, all ending here or in the field itself:
 // - a real keyboard: keys stay in the field (keyGuard), except Enter (A: confirm) and Escape
 //   (B: cancel), which still work the dialog;

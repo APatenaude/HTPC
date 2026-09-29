@@ -29,6 +29,8 @@ namespace Htpc.Launcher;
 /// front end with an icon of its own (RetroBat runs EmulationStation).</param>
 /// <param name="MinimizeUnderMenu">launch.minimizeUnderMenu: its own windows are minimized while the
 /// Home menu is over it (Steam's Big Picture reads the controller even in the background).</param>
+/// <param name="Category">category: the id of one of the catalog's categories (Add a tile's library
+/// and setup's app list are shown by category); null for an added tile.</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? WingetScope = null, string? InstallSource = null, bool Custom = false,
@@ -36,11 +38,14 @@ sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool 
     string? LogoUrl = null,
     bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
     int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null,
-    bool OwnController = false, string? LogoExe = null, bool MinimizeUnderMenu = false)
+    bool OwnController = false, string? LogoExe = null, bool MinimizeUnderMenu = false, string? Category = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
 }
+
+/// <summary>catalog.json "categories": { "id": "movies", "name": "Movies &amp; shows" }, in the order they show.</summary>
+sealed record CatalogCategory(string Id, string Name);
 
 /// <summary>
 /// catalog.json "menuKeys": { "select": "key:Shift+Tab", "whileClass": "Qt*QWindow*" }. For an
@@ -104,6 +109,9 @@ sealed class AppManager
     /// <summary>Only the shipped catalog entries (the library and setup's list to pick from).</summary>
     public IReadOnlyList<CatalogApp> Catalog => catalog;
 
+    /// <summary>The catalog's categories, in the order the library and setup show them.</summary>
+    public IReadOnlyList<CatalogCategory> Categories { get; }
+
     /// <summary>An app started, exited or was closed. Raised on a thread-pool thread.</summary>
     public event Action<string, bool>? RunningChanged;
 
@@ -148,6 +156,7 @@ sealed class AppManager
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(catalogPath));
         catalog = doc.RootElement.GetProperty("apps").EnumerateArray().Select(Parse).ToList();
+        Categories = CategoriesOf(doc.RootElement);
         All = catalog;
         byId = catalog.ToDictionary(a => a.Id);
         Tiles = catalog.Where(a => a.Default).ToList();
@@ -187,7 +196,20 @@ sealed class AppManager
             OwnProcesses: launch.ValueKind == JsonValueKind.Object ? OwnProcessesOf(launch) : null,
             OwnController: a.TryGetProperty("ownController", out var oc) && oc.ValueKind == JsonValueKind.True,
             LogoExe: Str(a, "logoExe"),
-            MinimizeUnderMenu: launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("minimizeUnderMenu", out var mu) && mu.ValueKind == JsonValueKind.True);
+            MinimizeUnderMenu: launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("minimizeUnderMenu", out var mu) && mu.ValueKind == JsonValueKind.True,
+            Category: Str(a, "category"));
+    }
+
+    /// <summary>The catalog's "categories", each with an id and a name, the first of an id kept; none: an empty list.</summary>
+    internal static IReadOnlyList<CatalogCategory> CategoriesOf(JsonElement root)
+    {
+        if (!root.TryGetProperty("categories", out var list) || list.ValueKind != JsonValueKind.Array) return [];
+        var seen = new HashSet<string>();
+        return list.EnumerateArray()
+            .Where(c => c.ValueKind == JsonValueKind.Object && c.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                && c.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+            .Select(c => new CatalogCategory(c.GetProperty("id").GetString()!, c.GetProperty("name").GetString()!))
+            .Where(c => c.Id.Length > 0 && c.Name.Length > 0 && seen.Add(c.Id)).ToList();
     }
 
     /// <summary>launch.quitWhenWindowless: whole seconds, 30 to 3600; else 0 (off).</summary>
@@ -251,13 +273,18 @@ sealed class AppManager
             psi.Environment[name] = Environment.ExpandEnvironmentVariables(value);
     }
 
-    /// <summary>A custom tile (added website or program) as a CatalogApp, so it launches like any app.</summary>
-    static CatalogApp FromCustom(CustomTile t) => new(
+    /// <summary>
+    /// A custom tile (added website or program) as a CatalogApp, so it launches like any app. A
+    /// program added from On this box opens filling the screen, as the catalog's fill apps do
+    /// (the owner, 29 Sept 2026: Paint came up in a window): it has no switch the launcher knows.
+    /// Read each time the tiles are loaded, so the tiles added before this fill too.
+    /// </summary>
+    internal static CatalogApp FromCustom(CustomTile t) => new(
         t.Id, t.Name, t.Kind == "program" ? "app" : "website",
         t.Kind == "website" ? t.Url : null,
         false, t.Preset, t.Glyph, t.Color,
         t.Kind == "program" ? t.Exe : null, t.Args,
-        Installable: false, Scope: "machine", Fill: false, Custom: true);
+        Installable: false, Scope: "machine", Fill: t.Kind == "program", Custom: true);
 
     /// <summary>
     /// Merges the user's added tiles and per-tile edits (rename, icon) into the app list. Called on

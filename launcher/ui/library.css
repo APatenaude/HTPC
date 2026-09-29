@@ -51,16 +51,21 @@
 .at-note { margin: 0 0 20px; font-size: 26px; color: var(--muted); }
 .at-empty { font-size: 26px; color: var(--muted); }
 
-/* Library cards */
+/* Library cards, by category (library.js libraryGroups): a heading, the apps, then the websites.
+   An app card holds its icon and name, and what it is (installed, to install, installing...)
+   under them: no description since 9c3bc25, so no room kept for one. A two-line status (did not
+   install) makes its row taller, the whole row. */
+.lc-group { display: flex; flex-direction: column; gap: 14px; }
+.lc-group + .lc-group { margin-top: 20px; }
 .lc-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; }
 .lc-app {
-  display: flex; flex-direction: column; gap: 10px; height: 200px; padding: 22px 24px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 12px; min-height: 124px; padding: 22px 24px 20px; box-sizing: border-box;
   border: 0; border-radius: 22px; background: var(--panel); color: var(--text); text-align: left; cursor: pointer;
 }
 .lc-app.focused { background: var(--tile-focus); }
 .lc-top { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .lc-name { min-width: 0; font-family: var(--display); font-weight: 600; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* long names: one line */
-.lc-app .lc-status { margin-top: auto; }   /* at the bottom of the card, however long the description */
+.lc-app .lc-status { margin-top: auto; }   /* at the bottom of the card, in a row made taller by a neighbour's */
 .lc-status { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; }
 /* Installing (or waiting to): a dashed blue edge (as its home tile), the app's icon dimmed, a
    spinner and a bar along the bottom. Did not install: a dashed amber edge. */
@@ -99,21 +104,39 @@
 .ob-row .grow { flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ob-row.focused { background: var(--tile-focus); }
 .ob-row.muted { color: var(--muted); }
+.ob-row.muted .appicon { opacity: 0.55; }   /* its own icon too, as its name: it cannot be added */
 .ob-row.on-home { color: var(--muted); }
-.ob-tag { font-size: 22px; color: var(--muted); }
+.ob-tag { flex-shrink: 0; font-size: 22px; color: var(--muted); }
 
-/* Website form */
-.ws-form { display: flex; gap: 72px; }
-.ws-fields { flex-grow: 1; display: flex; flex-direction: column; gap: 16px; }
-.ws-field {
-  display: flex; flex-direction: column; gap: 8px; padding: 14px 28px; border: 0; border-radius: 20px;
-  background: var(--panel); color: var(--text); text-align: left; cursor: pointer;
+/* Text fields (the website's, the tile's new name): a row the focus lands on, its label over a
+   real text field (library.js fieldHtml); the on-screen keyboard types into it (textinput.js). */
+.lib-field {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 28px 18px; box-sizing: border-box;
+  border-radius: 20px; background: var(--panel); color: var(--text);
 }
-.ws-field.focused, .ws-field.on { background: var(--tile-focus); }
-.ws-label { font-size: 22px; color: var(--muted); }
-.ws-value { min-height: 40px; display: flex; align-items: center; font-size: 30px; }
-.ws-ph { color: var(--muted); }
-.ws-hint { font-size: 21px; line-height: 1.4; color: var(--muted); padding: 4px 4px 0; }
+.lib-field.focused { background: var(--tile-focus); }
+.lib-label { font-size: 22px; color: var(--muted); }
+/* A long address: cut with an ellipsis, unless typed into (then it scrolls to the caret). */
+.lib-field input {
+  width: 100%; height: 56px; box-sizing: border-box; padding: 0 20px; border: 0; border-radius: 14px; text-overflow: ellipsis;
+  background: var(--bg); color: var(--text); font: 30px 'Atkinson Hyperlegible', sans-serif; outline: none; caret-color: var(--accent);
+}
+.lib-field input::placeholder { color: #5E626B; }
+.lib-field input:focus { box-shadow: inset 0 0 0 2px var(--accent); }   /* typing into it */
+.lib-buttons { display: flex; gap: 20px; }
+.lib-btn {
+  display: flex; align-items: center; height: 72px; padding: 0 40px; box-sizing: border-box; border-radius: 20px;
+  background: #22252B; color: var(--text); font-size: 28px;
+}
+.lib-btn.primary { padding: 0 48px; background: var(--accent); color: var(--bg); font-weight: 700; }
+.lib-btn.focused { background: var(--tile-focus); }
+.lib-btn.primary.focused { background: var(--accent); box-shadow: 0 0 0 4px var(--bg), 0 0 0 8px var(--accent) !important; }   /* a ring apart from its own colour */
+.lib-note { display: flex; align-items: center; gap: 14px; margin: 0; font-size: 22px; line-height: 1.4; color: var(--muted); }
+.lib-note .icon { flex-shrink: 0; }
+
+/* Website form: the fields and Add tile, the preview beside them */
+.ws-form { display: flex; gap: 72px; padding-top: 6px; }
+.ws-fields { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .ws-preview { width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
 .ws-plabel { font-size: 22px; color: var(--muted); }
 .ws-card {
@@ -121,33 +144,18 @@
   min-height: 210px; box-sizing: border-box; padding: 20px 24px; text-align: center;   /* a long name wraps inside it */
   border-radius: 26px; background: #191B20; box-shadow: inset 0 0 0 2px var(--tile-edge);
 }
-.ws-cname { font-family: var(--display); font-weight: 600; font-size: 30px; }
+/* A name, or an address with nothing to break it at: three lines at most, inside the card. */
+.ws-cname { max-width: 100%; font-family: var(--display); font-weight: 600; font-size: 30px; line-height: 1.25;
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .ws-added { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; color: #8E9199; }   /* as a card on the home screen */
-.ws-kb { margin-top: 20px; }
 
-/* Inline on-screen keyboard (rename + website) */
-.kbi { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 0; border-radius: 28px; background: var(--panel); }
-.kbi-row { display: flex; gap: 12px; }
-.kbi-key {
-  display: flex; align-items: center; justify-content: center; min-width: 84px; height: 62px; padding: 0 10px;
-  border: 0; border-radius: 16px; background: #22252B; color: var(--text);
-  font-family: 'Atkinson Hyperlegible', sans-serif; font-size: 28px; font-weight: 700; cursor: pointer;
-}
-.kbi-key.focused { background: #3A3F48; }
-.kbi-key.space { min-width: 420px; }
-.kbi-key.wide { min-width: 132px; }
-.kbi-key.primary { min-width: 150px; background: var(--accent); color: var(--bg); }
-.kbi-key.primary.focused { box-shadow: 0 0 0 4px var(--panel), 0 0 0 8px var(--accent) !important; }   /* a ring apart from its own colour */
-
-/* Rename */
-.rn-wrap { display: flex; flex-direction: column; gap: 28px; width: 1200px; }
-.rn-field { display: flex; align-items: center; gap: 20px; padding: 18px 32px; border-radius: 22px; background: var(--panel); }
-.rn-label { font-size: 24px; color: var(--muted); }
-.rn-input { flex-grow: 1; display: flex; align-items: center; font-size: 40px; min-height: 52px; }
-.rn-ph { color: var(--muted); }
+/* Rename: the tile's icon beside its name, near the top (the keyboard, up, stays clear of it) */
+.rn-main { flex: 1 1 0; min-height: 0; padding: 40px 96px 0; display: flex; flex-direction: column; gap: 28px; }
+.rn-row { display: flex; align-items: center; gap: 32px; max-width: 1400px; }
+.rn-icon { display: flex; align-items: center; justify-content: center; width: 124px; height: 124px; flex-shrink: 0; border-radius: 28px; background: var(--tile); }
+.rn-field { flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 20px; }
+.rn-field .lib-label { grid-column: 1 / -1; }
 .rn-count { font-size: 22px; color: var(--muted); }
-.rn-caret { width: 3px; height: 34px; margin-left: 4px; background: var(--accent); animation: blink 1s step-end infinite; }
-@keyframes blink { 50% { opacity: 0; } }
 
 /* Change icon */
 .ci-wrap { display: flex; flex-direction: column; align-items: center; gap: 36px; }

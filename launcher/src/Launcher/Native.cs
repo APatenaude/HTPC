@@ -44,14 +44,24 @@ static class Native
     /// <param name="cropTop">The app's own title strip (catalog launch.cropTop, pixels at 100 %
     /// scaling): the window goes that much above the screen, so the strip is off it (FillRect).</param>
     /// <returns>False when it already filled the screen and was left untouched.</returns>
+    /// <remarks>A window that cannot be sized (FixedSize: Calculator, a dialog) is not stretched:
+    /// it goes to the middle of the screen at its own size, its title bar kept.</remarks>
     public static bool FillScreen(IntPtr hWnd, int cropTop = 0)
     {
         const int GWL_STYLE = -16, SW_RESTORE = 9;
         const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_SYSMENU = 0x00080000,
             WS_MINIMIZEBOX = 0x00020000, WS_MAXIMIZEBOX = 0x00010000;
-        const uint SWP_NOZORDER = 0x4, SWP_NOOWNERZORDER = 0x200, SWP_FRAMECHANGED = 0x20;
+        const uint SWP_NOZORDER = 0x4, SWP_NOOWNERZORDER = 0x200, SWP_FRAMECHANGED = 0x20, SWP_NOSIZE = 0x1;
         if (Fills(hWnd, cropTop)) return false; // already
         var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+        if (FixedSize(style))
+        {
+            if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
+            if (!GetWindowRect(hWnd, out var r)) return false;
+            var middle = CentredRect(Screen.FromHandle(hWnd).Bounds, new Size(r.Right - r.Left, r.Bottom - r.Top));
+            SetWindowPos(hWnd, IntPtr.Zero, middle.X, middle.Y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+            return true;
+        }
         var target = FillTarget(hWnd, cropTop);
         if (IsIconic(hWnd) || (style & 0x01000000) != 0) ShowWindow(hWnd, SW_RESTORE); // minimized or maximized: normal first
         SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)(style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)));
@@ -83,9 +93,33 @@ static class Native
         return true;
     }
 
-    /// <summary>Whether the window covers its screen with no frame showing (FillsScreen), its strip cropped, minimized not.</summary>
-    public static bool Fills(IntPtr hWnd, int cropTop = 0) =>
-        !IsIconic(hWnd) && GetWindowRect(hWnd, out var r) && FillsScreen((long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */), r, FillTarget(hWnd, cropTop));
+    /// <summary>
+    /// Whether the window covers its screen with no frame showing (FillsScreen), its strip cropped,
+    /// minimized not; one that cannot be sized (FixedSize), whether it is in the middle of its screen.
+    /// </summary>
+    public static bool Fills(IntPtr hWnd, int cropTop = 0)
+    {
+        if (IsIconic(hWnd) || !GetWindowRect(hWnd, out var r)) return false;
+        var style = (long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */);
+        if (!FixedSize(style)) return FillsScreen(style, r, FillTarget(hWnd, cropTop));
+        return CentredRect(Screen.FromHandle(hWnd).Bounds, new Size(r.Right - r.Left, r.Bottom - r.Top)) == new Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+    }
+
+    /// <summary>
+    /// A window with a title bar and no sizing border: a program's fixed-size window (Calculator,
+    /// Character Map, added from On this box) or a dialog (an app's first-run question). Stretched
+    /// to the screen, its controls would sit in a corner of an empty one: FillScreen puts it in
+    /// the middle of the screen instead.
+    /// </summary>
+    public static bool FixedSize(long style)
+    {
+        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
+        return (style & WS_CAPTION) == WS_CAPTION && (style & WS_THICKFRAME) == 0;
+    }
+
+    /// <summary>A window of this size in the middle of the screen; one larger than it, from its top left.</summary>
+    public static Rectangle CentredRect(Rectangle screen, Size size) =>
+        new(screen.X + Math.Max(0, (screen.Width - size.Width) / 2), screen.Y + Math.Max(0, (screen.Height - size.Height) / 2), size.Width, size.Height);
 
     static Rectangle FillTarget(IntPtr hWnd, int cropTop) =>
         FillRect(Screen.FromHandle(hWnd).Bounds, cropTop, cropTop > 0 ? DpiOf(hWnd) : 96);

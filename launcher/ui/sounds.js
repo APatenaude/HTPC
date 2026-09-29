@@ -217,7 +217,7 @@ function soundFor(button, was, now) {
   if (now.opening && !was.opening) return 'open';   // an app starting (its tile, Reopen)
   switch (button) {
     case 'up': case 'down': case 'left': case 'right': return changed ? 'move' : 'bump';
-    case 'lb': case 'rb': return changed ? 'move' : null;
+    case 'lb': case 'rb': case 'lt': case 'rt': return changed ? 'move' : null;   // a tab, a category (Add a tile)
     case 'a':
       if (!was.el || (was.noA && !changed)) return null;   // a row that does nothing (data-noa)
       if (was.act === 'launch' || was.act === 'switch') return 'open';
