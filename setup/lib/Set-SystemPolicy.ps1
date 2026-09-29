@@ -6,7 +6,8 @@
 .DESCRIPTION
     - Diagnostic data at the minimum LTSC allows; no consumer features, tips, Spotlight or
       "finish setting up" screens; no lock screen; no toast notifications; no error-report
-      dialogs; no Sticky/Filter/Toggle Keys prompts; no Game DVR.
+      dialogs; no Sticky/Filter/Toggle Keys prompts; no Game DVR; no controller navigation of
+      Windows' own (the stick moving the focus in the Start menu and Explorer in desktop mode).
     - Less background work: Windows Search indexing and SysMain (prefetch) off, no peer-to-peer
       update sharing.
     - Connected networks set to Private (the phone remote and TV discovery need the LAN), and
@@ -75,6 +76,17 @@ foreach ($protocol in 'ms-gamebar', 'ms-gamebarservices', 'ms-gamingoverlay') {
     Set-RegValue $key 'NoOpenWith' '' 'String'
     Set-RegValue "$key\shell\open\command" '(default)' "`"$env:SystemRoot\System32\systray.exe`"" 'String'
 }
+
+Write-Host '  The controller: no Windows navigation of its own'
+# Windows turns a controller into keys for its UWP and XAML parts (the Start menu, Search,
+# Settings, the taskbar, File Explorer's): the left stick and the D-pad move their focus, A and
+# B are Enter and Escape. In desktop mode the launcher moves the pointer with the left stick, so
+# the focus in the Start menu and Explorer moved with it (the owner, 29 Sept 2026), and the
+# D-pad's arrows came twice there. Windows' switch for it (since build 21286), machine-wide and
+# read by Windows' input service; it may take a restart. Nothing on the box needs it: the
+# launcher, its setup and the Controller-preset apps read the controller themselves, and the
+# Mouse preset's D-pad, A and B still send arrows, Enter and Escape.
+Set-RegValue 'HKLM:\SOFTWARE\Microsoft\Input\Settings\ControllerProcessor\ControllerToVKMapping' 'Enabled' 0
 
 if ($user) {
     Write-Host '  Dark mode (Windows and apps that follow it: Edge, the website apps, dialogs)'
