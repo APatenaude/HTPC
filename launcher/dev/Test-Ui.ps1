@@ -70,14 +70,18 @@ function Stop-OwnEdge {
 
 # One DevTools protocol request to the page of the Edge on $userData (started with
 # --remote-debugging-port=0), on a socket of its own: the answer's JSON, or '' if none came within
-# $TimeoutMs (the page busy: it answers between its tasks).
+# $TimeoutMs (the page busy: it answers between its tasks). The page is the file: page among the
+# targets: Edge lists others beside it at times (its built-in extensions' background pages and
+# service worker, on 29 Sept 2026 for the first 30 s or more of a run). PowerShell 5.1 hands a
+# JSON array on as one object (ForEach-Object unrolls it): with a second target, the old
+# filter kept the whole list, never got the page's address, and the run hung until its timeout.
 function Invoke-PageDevTools([string]$userData, [string]$method, [hashtable]$params, [int]$TimeoutMs = 2000) {
     $port = Get-Content (Join-Path $userData 'DevToolsActivePort') -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $port) { return '' }
     $socket = New-Object Net.WebSockets.ClientWebSocket
     try {
-        $target = @(Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5) | Where-Object { $_.type -eq 'page' } |
-            Select-Object -First 1
+        $target = Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5 | ForEach-Object { $_ } |
+            Where-Object { $_.type -eq 'page' -and "$($_.url)".StartsWith('file:') } | Select-Object -First 1
         if (-not $target) { return '' }
         $none = [Threading.CancellationToken]::None
         if (-not $socket.ConnectAsync([Uri]$target.webSocketDebuggerUrl, $none).Wait($TimeoutMs)) { return '' }
