@@ -10,9 +10,11 @@
 //   From the host: updates.state (UpdateService.Describe)  updates.restarting {version}
 //                  updates.stay (the launcher update stopped before its restart)
 //
-// Demo (a plain browser): index.html#settings/updates, and ?upd=<state> for the other states
-// (uptodate, checking, running, failed, winfound, winscan, wininstall, winrestart, wintonight,
-// winstuck, restarting).
+// Demo (a plain browser): index.html#settings/updates, a launcher update ready (1.0.2 to 1.0.3,
+// with 1.0.3's own notes), and ?upd=<state> for the other states (uptodate, checking, running,
+// failed, downloading and waiting: the launcher's update, setup: a release that needs TV Box
+// Setup (its minimumFrom), longnotes and longerrors: the longest text each place can get,
+// winfound, winscan, wininstall, winrestart, wintonight, winstuck, restarting).
 
 const upd = { s: null, restarting: null };
 
@@ -31,6 +33,16 @@ function updDate(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// A release's notes as shown: on one line (they wrap), cut at a word to max characters. update.json
+// may hold 256 KB of them; the launcher's row shows 4 lines, the question A asks a few more.
+function updNotes(text, max) {
+  const all = String(text || '');
+  const t = all.slice(0, 4 * max).replace(/\s+/g, ' ').trim();
+  if (t.length <= max && all.length <= 4 * max) return t;
+  const cut = t.slice(0, max), at = cut.lastIndexOf(' ');
+  return `${(at > max * 0.7 ? cut.slice(0, at) : cut).replace(/[\s.,;:·-]+$/, '')}…`;
 }
 
 function updBar(percent) { return `<div class="upd-bar"><span style="width:${Math.max(2, Math.min(100, percent || 0))}%"></span></div>`; }
@@ -85,7 +97,7 @@ function renderUpdatesSection() {
   const L = s.launcher;
   list.push(updRow('launcher', 'app', '#8CC2FF', 'TV launcher',
     L.update ? `${L.installed} → ${L.latest}${L.skipped ? ' · did not start here last time' : ''}` : L.installed, { update: L.update, skipped: L.skipped, job: L.job },
-    L.update && L.notes ? `<span class="notes">${esc(L.notes)}</span>` : ''));
+    L.update && L.notes ? `<span class="notes">${esc(updNotes(L.notes, 300))}</span>` : ''));
   for (const a of s.apps) list.push(updRow(a.id, a.id === 'winget' ? 'download' : a.glyph, a.id === 'winget' ? '#B3B5BC' : a.color, a.name, updVersions(a), a));
   const self = (id, glyph, color, name, version) =>
     // data-noa: A does nothing here (no A in the hints, no select sound).
@@ -141,7 +153,7 @@ function updWindowsCard(w) {
     body += '<p><b>Restart to finish</b> installing Windows updates.</p>' +
       `<div class="pair">${button('upd-restart-now', 'upd-restart-now', 'Restart now', true)}${button('upd-restart-tonight', 'upd-restart-tonight', 'Tonight')}</div>`;
   } else if (w.result === 'busy' || w.result === 'timeout' || w.result === 'failed') {
-    body += `<p style="color:var(--warn)">${esc(w.message || 'Windows Update did not answer.')}</p>` + button('upd-win-scan', 'upd-win-scan', 'Try again');
+    body += `<p class="upd-error">${esc(w.message || 'Windows Update did not answer.')}</p>` + button('upd-win-scan', 'upd-win-scan', 'Try again');
   } else if (w.result === 'ok' && w.total > 0) {
     const size = (w.updates || []).reduce((t, u) => t + (u.sizeMb || 0), 0);
     const counted = w.counted;
@@ -179,7 +191,7 @@ onAction('upd-row', (el, id) => {
     ask({
       title: `${L.skipped ? 'Try' : 'Update'} the TV launcher ${L.skipped ? 'again ' : ''}to ${L.latest}?`,
       text: (L.skipped ? `Last time ${L.latest} did not start here and the box went back to ${L.installed}. ` : '') +
-        'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${L.notes}` : ''),
+        'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${updNotes(L.notes, 320)}` : ''),
       yes: 'Update', onYes: () => send({ type: 'updates.app', id: 'launcher' }),
     });
     return;
@@ -254,13 +266,21 @@ addView('updrestart', {
 
 // ---- Demo data (a plain browser) -------------------------------------------------------------
 
+// Release 1.0.3's notes, as its update.json has them.
+const UPD_DEMO_NOTES = 'Uninstalling now leaves its log and a copy of setup in Documents\\HTPC logs, as it says it does. Boxes on 0.1.x: run TV Box Setup to get it.';
+// Text with no place to break a line: a path, a word longer than a row.
+const UPD_DEMO_UNBROKEN = 'C:\\Users\\television\\Documents\\HTPC\\logs\\' + 'uninstall-and-a-copy-of-setup-'.repeat(6) + 'log';
+// The longest notes a release can have: update.json is read up to 256 KB (UpdateService, UpdateCore).
+const UPD_DEMO_LONG_NOTES = `Unbroken first: ${UPD_DEMO_UNBROKEN}. ` +
+  `${UPD_DEMO_NOTES} Also a path with backslashes, Documents\\HTPC logs\\setup, then a great deal more. `.repeat(1800).slice(0, 260000);
+
 function updDemo(kindArg) {
   const kind = kindArg || new URLSearchParams(location.search).get('upd') || 'ready';
   const hour = 3600000;
   const app = (id, name, glyph, color, installed, available, update, job) => ({ id, name, glyph, color, installed, available, update, job: job || null });
   const s = {
     type: 'updates.state', checking: false, checkedAt: Date.now() - 2 * hour, checkError: null,
-    launcher: { installed: '0.1.0', latest: '0.2.0', update: true, notes: 'Updates from the TV, phone remote, library', job: null },
+    launcher: { installed: '1.0.2', latest: '1.0.3', update: true, notes: UPD_DEMO_NOTES, job: null },
     apps: [
       app('youtube', 'YouTube', 'youtube', '#FF5B52', '1.8.2', '1.8.3', true),
       app('stremio', 'Stremio', 'film', '#7C8CFF', '5.0.26', '5.0.27', true),
@@ -278,22 +298,49 @@ function updDemo(kindArg) {
   const found = [{ title: '2026-10 Cumulative Update (KB5131000)', kb: '5131000', sizeMb: 612, counted: true },
     { title: '2026-10 .NET Framework Security Update', kb: '5131200', sizeMb: 70, counted: true },
     { title: 'Security Intelligence Update for Microsoft Defender (KB2267602)', kb: '2267602', sizeMb: 110, counted: false }];
+  const L = s.launcher;
+  const updating = (percent, message) => ({ label: `Updating the TV launcher to ${L.latest}`, percent, message });
   switch (kind) {
     case 'uptodate':
-      s.launcher.update = false; s.launcher.latest = '0.1.0';
+      L.update = false; L.latest = L.installed;
       for (const a of s.apps) { a.update = false; a.available = a.installed; }
       Object.assign(w, { result: 'ok', checkedAt: new Date(Date.now() - 3 * hour).toISOString() });
       break;
     case 'checking': s.checking = true; break;
+    // The launcher's own update (UpdateService.Describe, LauncherUpdate.ps1's progress): it
+    // downloads, then waits for Home; a release whose minimumFrom is newer than this box needs setup.
+    case 'downloading':
+      L.job = { status: 'running', percent: 38, message: 'Downloading version 1.0.3 (21 of 55 MB)' };
+      s.lane = updating(38, L.job.message);
+      break;
+    case 'waiting':
+      L.job = { status: 'waiting', percent: 90, message: 'Waits until you are back at Home' };
+      s.lane = updating(90, L.job.message);
+      break;
+    case 'setup':
+      L.job = { status: 'failed', percent: 100, message: 'Version 1.0.3 needs setup to run again (it updates launchers from 1.0.3 on)' };
+      break;
+    case 'longnotes': L.notes = UPD_DEMO_LONG_NOTES; break;
+    // Every message as long as it gets, with a path or a word that has no place to break.
+    case 'longerrors':
+      L.skipped = true;
+      L.job = { status: 'failed', percent: 100, message: `The update stopped: ${UPD_DEMO_UNBROKEN} could not be replaced, it is in use by another program. Back on version 1.0.2.` };
+      s.apps[1].name = `Stremio ${UPD_DEMO_UNBROKEN}`;
+      s.apps[1].job = { status: 'failed', percent: 100, message: `The update asked for admin rights; stopped. ${UPD_DEMO_UNBROKEN}` };
+      s.apps[3].error = `Not checked: ${UPD_DEMO_UNBROKEN}`;
+      s.checkError = `GitHub is limiting requests from this box; try again later. ${UPD_DEMO_UNBROKEN}`;
+      Object.assign(w, { result: 'failed', message: `Windows Update did not answer (0x8024402C): ${UPD_DEMO_UNBROKEN}. Restart the box, then try again.` });
+      break;
     case 'running':
       s.restorePoint = { status: 'done', percent: 100, message: 'Restore point saved (21:47)' };
       s.apps[0].job = { status: 'done', percent: 100, message: 'YouTube updated to 1.8.3' };
       s.apps[1].job = { status: 'running', percent: 45, message: 'Updating Stremio' };
       s.apps[2].job = { status: 'queued', percent: 0, message: 'Waiting' };
-      s.launcher.job = { status: 'queued', percent: 0, message: 'Waiting' };
+      L.job = { status: 'queued', percent: 0, message: 'Waiting' };
       s.lane = { label: 'Updating Stremio', percent: 45, message: 'Downloading 5.0.27' };
       break;
     case 'failed':
+      L.job = { status: 'failed', percent: 100, message: 'Not enough free disk space for version 1.0.3: 312 MB free, 668 MB needed' };
       s.apps[1].job = { status: 'failed', percent: 100, message: 'The update asked for admin rights; stopped' };
       s.checkError = 'GitHub is limiting requests from this box; try again later';
       break;

@@ -60,8 +60,8 @@ releases and repo settings, and Hyper-V (Windows Pro/Enterprise) for the test VM
 | The setup exe | `launcher\dev\Publish-Setup.ps1` (writes `launcher\dist\TV Box Setup.exe`) |
 
 `Test-All.ps1` runs the build, every test project, `setup\test\Test-*.ps1` (not `Test-Library.ps1`,
-which installs real apps: VM only), the UI self-test with the audit at 1080p, 720p, 1200p and
-ultrawide, and the phone page. `Test-Updates.ps1` needs administrator rights (it sets folder
+which installs real apps: VM only), the UI self-test with the audit at 1080p, 1536x864 (a 4K TV
+at Windows' 250 % scaling), 720p, 1200p and ultrawide, and the phone page. `Test-Updates.ps1` needs administrator rights (it sets folder
 owners): run it elevated, or in the VM.
 
 ### On a TV box itself

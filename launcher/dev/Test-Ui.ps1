@@ -10,20 +10,24 @@
     index.html#selftest and prints its results (exit code 1 if any failed): the page's checks
     and the UI audit (audit.js, every page walked with the D-pad), in Edge's virtual time; then
     the audit again, index.html#audit, in real time, for how long each press takes; then the
-    audit of setup.html and keyboard.html, and of index.html at 1280x720, 2560x1080 and
-    1920x1200 (a TV or monitor that is not 1080p 16:9). -Shots takes a
-    1920x1080 PNG of each route into -OutDir (index.html#<route>; e.g. alerts, menu-alerts,
-    settings/wifi). Headless Edge can linger after it has written its output: once the output
+    audit of setup.html and keyboard.html, and of index.html at 1920x1080, 1536x864 (a 4K TV at
+    Windows' 250% scaling: what the page gets there), 1280x720, 2560x1080 and 1920x1200 (a TV
+    or monitor that is not 1080p 16:9). -Shots takes a PNG of each route into -OutDir
+    (index.html#<route>; e.g. alerts, menu-alerts, settings/wifi, ?upd=failed#settings/updates,
+    audit?page=<an audit page's name>), -ShotSize big (1920x1080 unless said: 1536x864 is the
+    4K TV at 250%). Headless Edge can linger after it has written its output: once the output
     is there, or after -TimeoutSeconds, this script ends the processes on its own profile
     (and only those).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -Shots alerts,menu-alerts -OutDir C:\temp\shots
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -Shots '?upd=longnotes#settings/updates' -ShotSize 1536x864
 #>
 param(
     [switch]$SelfTest,
     [string[]]$Shots = @(),
+    [string]$ShotSize = '1920x1080',
     [string]$OutDir = (Join-Path $env:TEMP 'htpc-ui-shots'),
     [string]$Page = '',
     [int]$TimeoutSeconds = 300
@@ -118,11 +122,13 @@ if ($SelfTest) {
     # keyboard's band the screen's width), in virtual time (no press times there).
     # --window-size is the window's: headless Edge keeps 40x100 of it for its frame, so each size
     # below is the page's plus that (setup at 1920x1080 and 1280x720, the keyboard's band at
-    # 1920x560 and 2560x560, the launcher at 1280x720, 2560x1080 and 1920x1200).
+    # 1920x560 and 2560x560, the launcher at 1920x1080, 1536x864 (4K at 250%), 1280x720,
+    # 2560x1080 and 1920x1200).
     $uiDir = Split-Path $Page -Parent
     $runs = @(
         @('setup.html', '1960,1180'), @('setup.html', '1320,820'),
         @('keyboard.html', '1960,660'), @('keyboard.html', '2600,660'),
+        @('index.html', '1960,1180'), @('index.html', '1576,964'),
         @('index.html', '1320,820'), @('index.html', '2600,1180'), @('index.html', '1960,1300')
     )
     foreach ($r in $runs) {
@@ -152,11 +158,15 @@ if ($SelfTest) {
 }
 if ($Shots.Count -gt 0) {
     New-Item -ItemType Directory -Force $OutDir | Out-Null
+    # A screenshot's window is the page: no frame taken off (unlike --dump-dom above).
+    if ($ShotSize -notmatch '^(\d+)[x,](\d+)$') { throw "-ShotSize: width x height, e.g. 1536x864" }
+    $shotW = $Matches[1]; $shotH = $Matches[2]
+    $suffix = if ("${shotW}x$shotH" -eq '1920x1080') { '' } else { "-${shotW}x$shotH" }
     foreach ($route in $Shots) {
-        $png = Join-Path $OutDir (($route -replace '[^\w-]', '_') + '.png')
+        $png = Join-Path $OutDir (($route -replace '[^\w-]', '_') + "$suffix.png")
         Remove-Item $png -ErrorAction SilentlyContinue
         try {
-            Invoke-Edge @("--screenshot=$png", $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" })) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png }
+            Invoke-Edge @("--screenshot=$png", $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" })) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png } -Size "$shotW,$shotH"
             "$route -> $png"
         } catch { Write-Warning "${route}: $($_.Exception.Message)"; $failed = 1 }
     }
