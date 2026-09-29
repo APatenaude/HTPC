@@ -178,7 +178,7 @@ function slideTiles(before) {
 // Hints change with the focused tile and with move mode.
 function updateHomeHints() {
   if (state.moving) {
-    $('home-hints').innerHTML = hints([['D-pad', 'Move it'], ['A', 'Drop it here'], ['B', 'Cancel']]);
+    setHomeHints(hints([['D-pad', 'Move it'], ['A', 'Drop it here'], ['B', 'Cancel']]));
     return;
   }
   const f = $('home').querySelector('[data-nav].focused');
@@ -190,7 +190,14 @@ function updateHomeHints() {
     : f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
     : isAdd ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : [['A', 'Open'], ['Hold A', 'Move'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
-  $('home-hints').innerHTML = hints(list);
+  setHomeHints(hints(list));
+}
+
+// The bar is drawn again only when it says something else: from one tile to the next it mostly
+// says the same, and each redraw laid it out and drew it again at 4K for nothing.
+function setHomeHints(html) {
+  const bar = $('home-hints');
+  if (bar.hintsHtml !== html) { bar.innerHTML = html; bar.hintsHtml = html; }
 }
 
 function renderMenu() {
