@@ -98,7 +98,8 @@ routine, scripted in `launcher\dev\Merge-Branch.ps1`:
   the tests fail nothing is tagged: fix, commit, run it again with the same version. Never push a
   `v*` tag by hand: a pushed tag can't be moved or deleted, so a failed release uses up the number.
 - The tag publishes: `release.yml` checks Tests passed on the commit, builds TV-Box-Setup.exe,
-  setup.zip, HtpcWatchdog.exe, update.json and their .sha256 files, creates the release as not
+  setup.zip, HtpcWatchdog.exe and update.json (the only four assets: GitHub shows each one's
+  SHA-256, and the license and notices are inside the exe and setup.zip), creates the release as not
   "latest", downloads and checks it, then marks it latest (a failed check deletes it).
 - Boxes check GitHub daily (Settings › Updates shows it); the launcher update is a journaled swap
   with rollback, run by the SYSTEM task `\HTPC\Jobs` through `Start-Job.ps1`. It waits until the

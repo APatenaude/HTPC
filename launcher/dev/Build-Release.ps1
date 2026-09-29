@@ -14,9 +14,9 @@
                                parts), with VERSION: the job runner, the catalog, the scripts
       update.json              what a box checks before it installs anything: version, tag,
                                notes, minimumFrom, and each file's name, role, size and SHA-256
-      <file>.sha256            "<hash>  <name>", for people checking a download by hand
-      LICENSE, THIRD-PARTY-NOTICES.txt
-                               the project's license and what the exe bundles (also in setup.zip)
+      HtpcWatchdog.exe         the watchdog (with -Watchdog), which boxes update with the launcher
+    Nothing else: GitHub shows each file's SHA-256 on the release page, and the license and the
+    third-party notices are in the exe (bundled content) and at setup.zip's root.
     The version is Directory.Build.props's; with -Tag the tag must be exactly v<version>. The
     built exe must report that version (--version and its file version), and update.json must
     pass the same checks a box applies (setup\lib\UpdateCore.ps1).
@@ -91,9 +91,8 @@ try {
         if ($errors) { throw "$($f.FullName): $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))" }
     }
     $zip = Join-Path $Out 'setup.zip'
-    # The license and the third-party notices: release assets, and in setup.zip's root.
+    # The license and the third-party notices, at setup.zip's root (the exe bundles them too).
     $notices = @('LICENSE', 'THIRD-PARTY-NOTICES.txt') | ForEach-Object { Join-Path $repoRoot $_ }
-    foreach ($f in $notices) { Copy-Item -LiteralPath $f $Out }
     $archive = [IO.Compression.ZipFile]::Open($zip, 'Create')
     try {
         # The same parts the exe carries (Launcher.csproj): not dev\, test\, autounattend\ or the decoding test's clips.
@@ -121,10 +120,9 @@ try {
         $files += @{ name = 'HtpcWatchdog.exe'; role = 'watchdog'; path = $wd }
     }
 
-    # --- update.json and the .sha256 files ------------------------------------------------------------
+    # --- update.json -----------------------------------------------------------------------------------
     $entries = foreach ($f in $files) {
         $hash = (Get-FileHash -LiteralPath $f.path -Algorithm SHA256).Hash.ToLowerInvariant()
-        [IO.File]::WriteAllText("$($f.path).sha256", "$hash  $($f.name)`n", (New-Object Text.UTF8Encoding $false))
         [ordered]@{ name = $f.name; role = $f.role; size = (Get-Item -LiteralPath $f.path).Length; sha256 = $hash }
     }
     $manifest = [ordered]@{

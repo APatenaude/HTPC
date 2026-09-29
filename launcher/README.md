@@ -307,8 +307,8 @@ cases run side by side, each on a fake box of its own (`-Parallel 1`: one at a t
     powershell -ExecutionPolicy Bypass -File launcher\dev\New-Release.ps1 -Version 0.2.0 -Notes "What changed, in a sentence"
 
 `New-Release.ps1` sets the one version (`Directory.Build.props`), builds it once as a check
-(`Build-Release.ps1`: `TV-Box-Setup.exe`, `setup.zip`, `update.json`, `.sha256` files in
-`launcher\dist\release`), commits and pushes, then waits for `.github/workflows/tests.yml` on that
+(`Build-Release.ps1`: `TV-Box-Setup.exe`, `setup.zip`, `HtpcWatchdog.exe` and `update.json` in
+`launcher\dist\release`, the release's only assets), commits and pushes, then waits for `.github/workflows/tests.yml` on that
 very commit (it runs on every push: every `launcher\tests\*` project and TvLab with
 `dotnet run -c Release`, and setup's `Test-Updates`, `Test-Autostart`, `Test-Drivers` and
 `Test-Rights`, as an administrator). Only when that passed does it tag and push the tag: a
