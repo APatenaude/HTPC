@@ -131,8 +131,6 @@
 .lib-btn.primary { padding: 0 48px; background: var(--accent); color: var(--bg); font-weight: 700; }
 .lib-btn.focused { background: var(--tile-focus); }
 .lib-btn.primary.focused { background: var(--accent); box-shadow: 0 0 0 4px var(--bg), 0 0 0 8px var(--accent) !important; }   /* a ring apart from its own colour */
-.lib-note { display: flex; align-items: center; gap: 14px; margin: 0; font-size: 22px; line-height: 1.4; color: var(--muted); }
-.lib-note .icon { flex-shrink: 0; }
 
 /* Website form: the fields and Add tile, the preview beside them */
 .ws-form { display: flex; gap: 72px; padding-top: 6px; }

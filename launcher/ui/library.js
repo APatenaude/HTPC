@@ -222,7 +222,6 @@
             '<div class="lib-btn primary" data-nav data-id="rn-save" data-act="rn-save">Save</div>' +
             '<div class="lib-btn" data-nav data-id="rn-cancel" data-act="rn-cancel">Cancel</div>' +
           '</div>' +
-          `<p class="lib-note">${icon('keyboard', 28)}Type with the on-screen keyboard (A or R3) or on your phone; Enter saves.</p>` +
         '</main>' +
         `<footer class="hints">${hints(renameHints(focusedEl()))}</footer>`));
     },
