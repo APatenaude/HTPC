@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT }
+enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT, AHold, AUp }
 
 /// <summary>
 /// Start + D-pad, the volume in every app (the user's request, 27 Sept; Home is out: holding it
@@ -67,8 +67,10 @@ sealed class StartChord
 /// the undocumented XInputGetStateEx (ordinal 100) reports. Works whichever window has focus.
 /// Raises Pressed on a background thread: D-pad and left stick repeat while held; Home fires
 /// HomeDown the moment it goes down (standby wakes on that), then Home on a short press or
-/// HomeHold as soon as it has been held for 0.5 s. Start + D-pad raises Chord instead (the
-/// volume, StartChord); Start alone then comes as it is let go.
+/// HomeHold as soon as it has been held for 0.5 s. A comes as it goes down, as every button
+/// does, then AHold once it has been held for 0.5 s and AUp when it is let go (hold A on a home
+/// tile to move it). Start + D-pad raises Chord instead (the volume, StartChord); Start alone
+/// then comes as it is let go.
 /// </summary>
 sealed class ControllerService : IDisposable
 {
@@ -110,13 +112,31 @@ sealed class ControllerService : IDisposable
         });
     }
 
+    /// <summary>
+    /// A light tick on the rumble motors, one short pulse: a home tile picked up to move (A held
+    /// on it, app.js).
+    /// </summary>
+    public void Buzz()
+    {
+        var slot = currentSlot;
+        if (slot < 0) return;
+        Task.Run(async () =>
+        {
+            var on = new Vibration { Left = 6000, Right = 20000 };
+            XInputSetState((uint)slot, ref on);
+            await Task.Delay(70);
+            var off = new Vibration();
+            XInputSetState((uint)slot, ref off);
+        });
+    }
+
     static readonly (ushort Bit, Pad Pad)[] Buttons =
     {
         (0x0001, Pad.Up), (0x0002, Pad.Down), (0x0004, Pad.Left), (0x0008, Pad.Right),
         (0x0010, Pad.Start), (0x0020, Pad.Select), (0x0040, Pad.L3), (0x0080, Pad.R3),
         (0x0100, Pad.LB), (0x0200, Pad.RB), (0x1000, Pad.A), (0x2000, Pad.B), (0x4000, Pad.X), (0x8000, Pad.Y)
     };
-    const ushort HomeBit = 0x0400;
+    const ushort HomeBit = 0x0400, ABit = 0x1000;
     const short StickThreshold = 16000;
     const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 500;
     const int TriggerDown = 96, TriggerUp = 48; // a trigger counts as a button past half-way
@@ -209,8 +229,8 @@ sealed class ControllerService : IDisposable
     ushort previous;
     uint lastPacket;
     readonly Dictionary<Pad, long> nextRepeat = new();
-    long homeDown = -1;
-    bool homeHeld, ltDown, rtDown;
+    long homeDown = -1, aDown = -1;
+    bool homeHeld, aHeld, ltDown, rtDown;
     long nextScan, nextBattery;
     StartChord chord = new();
 
@@ -264,6 +284,16 @@ sealed class ControllerService : IDisposable
                     Raise(button, true);
                 }
             }
+
+            // A, raised above as it went down, is followed by AHold at 0.5 s and AUp when let
+            // go (hold A on a home tile to move it). Not for an A already down at connect: no A
+            // was raised for it.
+            if ((buttons & ABit) != 0)
+            {
+                if ((previous & ABit) == 0) { aDown = now; aHeld = false; }
+                else if (aDown >= 0 && !aHeld && now - aDown >= HoldMs) { aHeld = true; Raise(Pad.AHold, false); }
+            }
+            else if (aDown >= 0) { aDown = -1; Raise(Pad.AUp, false); }
 
             // Triggers as buttons (the on-screen keyboard's Shift), with some play so they do not flicker.
             if (!ltDown && pad.LeftTrigger >= TriggerDown) { ltDown = true; Raise(Pad.LT, false); }
@@ -326,7 +356,7 @@ sealed class ControllerService : IDisposable
         if (XInputGetStateEx((uint)slot, out state) != 0)
         {
             Log.Info("Controller disconnected");
-            slot = -1; currentSlot = -1; previous = 0; homeDown = -1;
+            slot = -1; currentSlot = -1; previous = 0; homeDown = -1; aDown = -1;
             Mapper?.Update(default, now, enabled: false); // lets go of anything the map holds down
             SetStatus(false, null);
             return false;

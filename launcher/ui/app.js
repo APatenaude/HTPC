@@ -176,7 +176,7 @@ function updateHomeHints() {
   const list = other ? [['A', other], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
     : isAdd ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
-    : [['A', 'Open'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
+    : [['A', 'Open'], ['Hold A', 'Move'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];
   $('home-hints').innerHTML = hints(list);
 }
 
@@ -932,8 +932,12 @@ function back() {
   else reset('home');
 }
 
-// One entry point for the controller (via the host) and the keyboard.
-function press(button) {
+// One entry point for the controller (via the host) and the keyboard. held: the controller's A,
+// whose release follows ('aUp'; 'aHold' after 0.5 s): see aWaitStart.
+function press(button, held) {
+  if (button === 'aHold' || button === 'aUp') { aHeldPress(button); return; }
+  aWaitDrop();   // any other press first: a waiting A is dropped
+  if (held && button === 'a' && aWaitStart()) return;
   timePress(button);
   if (typeof soundsHear === 'function') soundsHear(button);   // interface sounds (sounds.js): what this press does picks one
   // "Opening X" is up: nothing under it takes a press. Home or B take it away (the host then
@@ -1003,6 +1007,39 @@ function press(button) {
   }
 }
 
+// Hold A on a home tile to move it (the owner, 29 Sept 2026). The controller's A on an app or
+// site tile (not Add tile, nor a tile installing) waits: let go before 0.5 s ('aUp'), it opens the
+// tile as A always did; held ('aHold'), the tile goes into move mode (library.js: the same as
+// Tile options > Move), and let go after moving it, it drops there. The focus or the view
+// changing, another press, or 3 s with neither drops the wait. The phone's and the keyboard's A
+// have no release: they act at once.
+let aWait = null;   // { el, timer }
+function aWaitStart() {
+  const el = focusedEl();
+  if (opening || state.moving || state.view !== 'home' || !el || el.dataset.act !== 'launch' || !EXT.actions['tile-hold']) return false;
+  aWait = { el, timer: setTimeout(aWaitDrop, 3000) };
+  return true;
+}
+function aWaitDrop() {
+  if (aWait) clearTimeout(aWait.timer);
+  aWait = null;
+}
+function aHeldPress(button) {
+  const w = aWait;
+  aWaitDrop();
+  if (w && state.view === 'home' && !opening && !state.moving && focusedEl() === w.el) {
+    if (button === 'aUp') { press('a'); return; }
+    EXT.actions['tile-hold'](w.el, w.el.dataset.arg);
+    if (typeof soundsDo === 'function') soundsDo('select');
+    return;
+  }
+  // Let go in move mode: the mover decides (a move started by this hold drops on it).
+  if (button === 'aUp' && state.moving && EXT.actions['tile-move']) {
+    EXT.actions['tile-move'](focusedEl(), button);
+    if (!state.moving && typeof soundsDo === 'function') soundsDo('select');
+  }
+}
+
 // How long a press takes on the box itself (4K on its small GPU, not a PC's headless Edge): from
 // the press to the frame that shows it (the second animation frame after it: the first frame
 // has been drawn then). Over 60 ms it goes to the launcher's log, "Slow press 180 ms in addtile
@@ -1059,7 +1096,7 @@ function onHost(msg) {
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;
-    case 'input': press(msg.button); break;
+    case 'input': press(msg.button, !!msg.held); break;
     case 'show': {
       hideOpening();
       const asked = performance.now();

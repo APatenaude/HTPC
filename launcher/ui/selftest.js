@@ -22,7 +22,7 @@
   // press() calls, seen through the global binding the keydown handler uses.
   const pressed = [];
   const realPress = press;
-  press = (b) => { pressed.push(b); realPress(b); };   // eslint-disable-line no-global-assign
+  press = (b, held) => { pressed.push(b); realPress(b, held); };   // eslint-disable-line no-global-assign
 
   function key(k) {
     const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
@@ -532,6 +532,43 @@
   check('Move: it trades places with its neighbour, the same element', state.tiles.findIndex((t) => t.id === 'moonlight') === 5 && tileEl('moonlight') === mv && mv.classList.contains('focused'));
   press('b');
   check('Move: B puts it back', state.tiles.findIndex((t) => t.id === 'moonlight') === 4 && !state.moving);
+
+  // Hold A on a tile to move it: the controller's A comes held, then the host's aHold / aUp.
+  const pad = (button, held) => onHost({ type: 'input', button, held });
+  const mlAt = () => state.tiles.findIndex((t) => t.id === 'moonlight');
+  setFocus(tileEl('moonlight'));
+  sent.length = 0;
+  pad('a', true);
+  const waited = !lastSent('launch') && !$('opening').classList.contains('on');
+  pad('aUp');
+  check('Hold A: a tap (A, then let go at once) still opens the tile', waited && lastSent('launch') && lastSent('launch').id === 'moonlight', JSON.stringify(sent));
+  hideOpening();
+  sent.length = 0;
+  pad('a', true); pad('aHold');
+  check('Hold A: held, the tile goes into move mode, with a buzz, and does not open', state.moving === 'moonlight' && tileEl('moonlight').classList.contains('moving') && lastSent('controller.buzz') && !lastSent('launch'));
+  pad('right'); pad('aUp');
+  check('Hold A: moved, then let go: dropped there', !state.moving && mlAt() === 5 && lastSent('tile.order'), `${state.moving} ${mlAt()}`);
+  pad('a', true); pad('aHold'); pad('aUp');
+  check('Hold A: let go without a move, move mode stays', state.moving === 'moonlight');
+  sent.length = 0;
+  pad('left'); pad('a', true); pad('aUp');
+  check('Hold A: ... the D-pad moves it, A again drops it (its release opens nothing)', !state.moving && mlAt() === 4 && lastSent('tile.order') && !lastSent('launch'), `${state.moving} ${mlAt()}`);
+  pad('a', true); pad('aHold'); pad('aUp'); pad('right'); pad('b');
+  check('Hold A: ... or B puts it back', !state.moving && mlAt() === 4, `${state.moving} ${mlAt()}`);
+  sent.length = 0;
+  pad('a', true); pad('right'); pad('aHold'); pad('aUp');
+  check('Hold A: the focus moved while A was down: nothing opens or moves', !state.moving && !lastSent('launch') && focusedEl() !== tileEl('moonlight'));
+  setFocus(tileEl('moonlight'));
+  pad('a');
+  check('Hold A: the phone\'s A (no release follows) opens at once', lastSent('launch') && lastSent('launch').id === 'moonlight');
+  hideOpening();
+  // The longest tile hints (a running app: six), in stage pixels: the same at every 16:9 size.
+  state.tiles.find((t) => t.id === 'moonlight').running = true;
+  setFocus(tileEl('moonlight'));
+  const homeBar = $('home-hints');
+  check('Hold A: the tile hints say so, and all six fit (a running app)', /Hold A\s*Move/.test(homeBar.textContent) && /Close app/.test(homeBar.textContent) && homeBar.scrollWidth <= homeBar.clientWidth,
+    `${homeBar.scrollWidth} > ${homeBar.clientWidth}: ${homeBar.textContent}`);
+  state.tiles.find((t) => t.id === 'moonlight').running = false;
 
   // Install from Add tile: A starts it at once (no dialog), Add tile stays up with the focus on
   // its card, which shows the progress; home shows a tile installing it, then that it did not.
