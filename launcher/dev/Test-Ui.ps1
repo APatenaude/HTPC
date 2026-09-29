@@ -207,12 +207,12 @@ if ($SelfTest) {
     # event: performance.now() moved some 65 s over one such run).
     # --window-size is the window's: headless Edge keeps 40x100 of it for its frame, so each size
     # below is the page's plus that (setup at 1920x1080 and 1280x720, the keyboard's band at
-    # 1920x560 and 2560x560, the launcher at 1920x1080, 1536x864 (4K at 250%), 1280x720,
-    # 2560x1080 and 1920x1200).
+    # 1920x440 and 2560x440, its window's size on those screens, the launcher at 1920x1080,
+    # 1536x864 (4K at 250%), 1280x720, 2560x1080 and 1920x1200).
     $uiDir = Split-Path $Page -Parent
     $runs = @(
         @('setup.html', '1960,1180'), @('setup.html', '1320,820'),
-        @('keyboard.html', '1960,660'), @('keyboard.html', '2600,660'),
+        @('keyboard.html', '1960,540'), @('keyboard.html', '2600,540'),
         @('index.html', '1960,1180'), @('index.html', '1576,964'),
         @('index.html', '1320,820'), @('index.html', '2600,1180'), @('index.html', '1960,1300')
     )
