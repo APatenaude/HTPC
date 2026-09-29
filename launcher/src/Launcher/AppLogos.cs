@@ -4,8 +4,11 @@ using System.Text.RegularExpressions;
 
 namespace Htpc.Launcher;
 
-/// <summary>Where an app's logo comes from: its program (Exe, resolved when needed) or its website (Url).</summary>
-sealed record LogoSource(string Id, string? Url, Func<string?>? Exe);
+/// <summary>
+/// Where an app's logo comes from: its program (Exe, resolved when needed) or its website (Url),
+/// for a website first the icon the catalog names (LogoUrl: a site that turns the fetcher away).
+/// </summary>
+sealed record LogoSource(string Id, string? Url, Func<string?>? Exe, string? LogoUrl = null);
 
 /// <summary>
 /// The apps' real logos (G7), taken from the apps themselves, never shipped: a program's own
@@ -146,7 +149,7 @@ sealed class AppLogos
         if (!Uri.TryCreate(s.Url, UriKind.Absolute, out var page) || page.Scheme is not ("http" or "https")) return false;
         try
         {
-            if (await SiteIcons.Resolve(page, fetch) is not { } found)
+            if (await SiteIcons.Resolve(page, fetch, s.LogoUrl) is not { } found)
             {
                 Log.Info($"Logo {s.Id}: {page.Host} has no usable icon; again in a day");
                 RetryIn(s.Id, RetryNoIcon);

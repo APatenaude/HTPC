@@ -5,10 +5,13 @@ namespace Htpc.Launcher;
 
 /// <param name="InstallInteractive">install.interactive: an installer with a wizard that the user
 /// finishes on screen (RetroBat), from the library only, never in setup (LibraryService, MainForm.Library.cs).</param>
+/// <param name="LogoUrl">logoUrl: a website's own icon, for a site that turns the logo fetcher away
+/// (AppLogos tries it before the site's page).</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
-    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false)
+    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false,
+    string? LogoUrl = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -101,7 +104,8 @@ sealed class AppManager
             Custom: false,
             InstallElevated: !(installable && install.TryGetProperty("elevated", out var el) && el.ValueKind == JsonValueKind.False),
             Env: launch.ValueKind == JsonValueKind.Object ? LaunchEnv(launch) : null,
-            InstallInteractive: installable && install.TryGetProperty("interactive", out var ia) && ia.ValueKind == JsonValueKind.True);
+            InstallInteractive: installable && install.TryGetProperty("interactive", out var ia) && ia.ValueKind == JsonValueKind.True,
+            LogoUrl: Str(a, "logoUrl"));
     }
 
     /// <summary>
