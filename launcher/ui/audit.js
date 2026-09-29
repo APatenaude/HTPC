@@ -206,7 +206,7 @@ if (AUDIT_PAGE === 'index') {
   // Apps being installed (library.js): their tiles show the progress, pushed twice a second.
   auditPage('home with apps installing', { view: 'home', back: 0, tick: () => onHost(AUDIT_PROGRESS), open() {
     auditLibrary();
-    EXT.actions.libcard(null, 'lib2'); EXT.actions.installBtn(null, 'home'); reset('home');
+    EXT.actions.libcard(null, 'lib2'); reset('home');
     onHost(AUDIT_PROGRESS);
   } });
   auditPage('tile options', { view: 'tileopts', open() {
@@ -238,17 +238,6 @@ if (AUDIT_PAGE === 'index') {
   auditPage('add tile: library', { view: 'addtile', covers: ['addtile'], tick: () => onHost(AUDIT_PROGRESS), open() { auditLibrary(); EXT.actions.addtile(); auditLibrary(); render(); } });
   auditPage('add tile: on this box', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rb'); auditLibrary(); render(); } });
   auditPage('add tile: website', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb'); } });
-  auditPage('installing (dialog)', { view: 'installing', tick: () => onHost(AUDIT_PROGRESS), open() {
-    auditLibrary(); EXT.actions.addtile(); auditLibrary(); render();
-    EXT.actions.libcard(null, 'lib2');
-  } });
-  // After A: the progress, pushed twice a second (it popped in again at each one); here waiting
-  // behind another app, with Back to library only.
-  auditPage('installing (dialog), waiting', { view: 'installing', dirs: [], tick: () => onHost(AUDIT_PROGRESS), open() {
-    auditLibrary(); EXT.actions.addtile(); auditLibrary(); render();
-    EXT.actions.libcard(null, 'lib2'); EXT.actions.installBtn(null, 'only');
-    onHost(AUDIT_PROGRESS);
-  } });
   auditPage('settings: section list', { view: 'settings', covers: ['settings'], scope: '.snav', dirs: ['up', 'down'], open() { state.section = 'sleep'; reset('settings'); } });
   const sectionData = { tv: auditTv, wifi: () => WifiUI.handle(AUDIT_WIFI), bluetooth: () => onHost(AUDIT_BT), phone: auditPhone,
     sound: () => onHost({ type: 'sound.outputs', canSwitch: true, outputs: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, name: i === 1 ? `Output ${AUDIT_LONG}` : `Output ${i + 1}`, isDefault: i === 0 })) }),

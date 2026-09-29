@@ -78,23 +78,22 @@ function run() {
   press('rb'); check('RB -> Website tab', /Website/.test(activeTab()));
   press('lb'); press('lb'); check('LB back to Library tab', /Library/.test(activeTab()));
 
-  // A on an installed app (VLC) appends it to the home order and returns home.
+  // A on an installed app (VLC) appends it to the home order; Add tile stays, on VLC, now on home.
   window.__sent.length = 0;
   focus('[data-arg="vlc"]'); press('a');
   const order = lastSent('tile.order');
   check('A on an installed app sends tile.order', !!order);
   check('tile.order includes vlc at the end', order && order.ids[order.ids.length - 1] === 'vlc');
-  check('after adding, back on home', document.getElementById('home').classList.contains('on'));
+  const vlc = document.querySelector('#addtile [data-arg="vlc"]');
+  check('after adding, still on Add tile, on VLC, which says on home', document.getElementById('addtile').classList.contains('on') &&
+    vlc.classList.contains('focused') && /On home screen/.test(vlc.textContent));
 
-  // A on an app to install (Kodi) opens the dialog; the button sends library.install(addToHome).
-  focus('.tile.add'); press('a');
-  feed({ type: 'library.catalog', apps: [ { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: 'x', type: 'app', state: 'install', canUninstall: true } ], sites: [] });
-  focus('[data-arg="kodi"]'); press('a');
-  check('Install opens the Installing dialog', document.getElementById('installing').classList.contains('on'));
+  // A on an app to install (Kodi) sends library.install(addToHome) at once: no dialog.
   window.__sent.length = 0;
-  focus('[data-act="installBtn"][data-arg="home"]'); press('a');
+  focus('[data-arg="kodi"]'); press('a');
   const inst = lastSent('library.install');
-  check('Install and add to home sends library.install (addToHome)', inst && inst.id === 'kodi' && inst.addToHome === true);
+  check('Install sends library.install (addToHome) at once', inst && inst.id === 'kodi' && inst.addToHome === true);
+  check('Install: no dialog, still on Add tile', document.getElementById('addtile').classList.contains('on') && !document.getElementById('installing'));
 
   // Tile options > Move: D-pad reorders on the home grid, A drops with a tile.order.
   reset('home');
