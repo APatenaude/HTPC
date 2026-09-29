@@ -173,7 +173,7 @@ sealed class AlertCenter : IAlerts
 
     // --- The UI thread's side -----------------------------------------------------------------
 
-    /// <summary>What is in front changed (polled). isMoonlight: an app that owns the controller (Moonlight, Steam): Home there is "Hold Home".</summary>
+    /// <summary>What is in front changed (polled). isMoonlight: an app that owns the controller (Moonlight): Home there is "Hold Home".</summary>
     public void SetPlace(AlertPlace newPlace, bool isMoonlight = false)
     {
         if (newPlace == place && isMoonlight == moonlight) return;

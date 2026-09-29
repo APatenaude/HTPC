@@ -102,7 +102,7 @@ sealed partial class MainForm
         else
         {
             place = AlertPlace.App;
-            holdHome = foregroundApp?.OwnController == true; // Home there is "Hold Home" (Moonlight, Steam)
+            holdHome = foregroundApp?.OwnController == true; // Home there is "Hold Home" (Moonlight)
             if (foregroundApp is { } front) { lastFrontApp = front.Id; lastFrontSeen = DateTime.UtcNow; }
         }
         if (place != alertPlace)

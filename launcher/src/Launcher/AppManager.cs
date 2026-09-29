@@ -22,13 +22,11 @@ namespace Htpc.Launcher;
 /// steamwebhelper.exe); anything else in its process tree is one it started (a game), and it is
 /// not quit while one runs. Null: not declared, only windows count.</param>
 /// <param name="OwnController">ownController: the app uses every button itself, Home included
-/// (Moonlight: the game PC's; Steam: its own overlay, in its games too, which run in its process
-/// tree). There a tap on Home is the app's and holding it opens the Home menu; R3 and Start + D-pad
+/// (Moonlight: a tap on Home is the game PC's; any app in its process tree, a game it started,
+/// counts as it). There a tap on Home is the app's and holding it opens the Home menu; R3 and Start + D-pad
 /// are the app's too (MainForm.OnPad, OnChord; Alerts' chips say "Hold Home").</param>
 /// <param name="LogoExe">logoExe: the program whose icon is the app's logo, when launch.exe is a
 /// front end with an icon of its own (RetroBat runs EmulationStation).</param>
-/// <param name="MinimizeUnderMenu">launch.minimizeUnderMenu: its own windows are minimized while the
-/// Home menu is over it (Steam's Big Picture reads the controller even in the background).</param>
 /// <param name="Category">category: the id of one of the catalog's categories (Add a tile's library
 /// and setup's app list are shown by category); null for an added tile.</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
@@ -38,7 +36,7 @@ sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool 
     string? LogoUrl = null,
     bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
     int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null,
-    bool OwnController = false, string? LogoExe = null, bool MinimizeUnderMenu = false, string? Category = null)
+    bool OwnController = false, string? LogoExe = null, string? Category = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -196,7 +194,6 @@ sealed class AppManager
             OwnProcesses: launch.ValueKind == JsonValueKind.Object ? OwnProcessesOf(launch) : null,
             OwnController: a.TryGetProperty("ownController", out var oc) && oc.ValueKind == JsonValueKind.True,
             LogoExe: Str(a, "logoExe"),
-            MinimizeUnderMenu: launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("minimizeUnderMenu", out var mu) && mu.ValueKind == JsonValueKind.True,
             Category: Str(a, "category"));
     }
 
@@ -710,36 +707,6 @@ sealed class AppManager
             }
             catch (Exception e) { Log.Warn($"{id}: looking for its window: {e.Message}"); }
         }
-    }
-
-    /// <summary>
-    /// launch.minimizeUnderMenu (Steam): the Home menu has come up over the app, and its own
-    /// windows (its program's and launch.ownProcesses', never a game's it started) go down to the
-    /// taskbar, without taking the focus from the launcher. Steam's Big Picture reads the
-    /// controller even when another window is in front, so under the menu it moved with every
-    /// press. Going back to it restores them (Native.ForceForeground). On the UI thread: a process
-    /// snapshot and a window list, as CheckWindowless.
-    /// </summary>
-    public void MinimizeOwnWindows(string id)
-    {
-        Process? p;
-        lock (running) running.TryGetValue(id, out p);
-        if (p is null || Get(id) is not { MinimizeUnderMenu: true } app) return;
-        try
-        {
-            if (p.HasExited) return;
-            var root = (uint)p.Id;
-            var tree = Native.ProcessTreeNames(root);
-            var rootName = tree.GetValueOrDefault(root);
-            var own = tree.Where(t => t.Key == root || (rootName is not null && t.Value.Equals(rootName, StringComparison.OrdinalIgnoreCase))
-                    || (app.OwnProcesses?.Any(rx => rx.IsMatch(t.Value)) ?? false))
-                .Select(t => t.Key).ToHashSet();
-            var down = 0;
-            foreach (var w in Native.TopLevelWindows(own))
-                if (!Native.IsIconic(w)) { Native.ShowWindow(w, 7 /* SW_SHOWMINNOACTIVE */); down++; }
-            if (down > 0) Log.Info($"{id}: {down} window(s) minimized under the Home menu (it reads the controller in the background)");
-        }
-        catch (Exception e) { Log.Warn($"{id}: minimizing under the Home menu: {e.Message}"); }
     }
 
     /// <summary>

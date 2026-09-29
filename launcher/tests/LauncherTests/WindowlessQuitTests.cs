@@ -139,25 +139,27 @@ static class WindowlessQuitTests
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
         var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
-        var steam = apps.Get("steam");
+        // Steam's ownProcesses as the catalog had them (Steam left the catalog on 29 Sept 2026): the rules
+        // stay for any app that outlives its window and starts games.
+        var steamOwn = AppManager.OwnProcessesOf(L("""{ "ownProcesses": [ "steamwebhelper.exe", "steamerrorreporter*.exe", "steamsysinfo.exe", "gldriverquery*.exe", "vulkandriverquery*.exe", "fossilize-replay*.exe", "steam_monitor.exe", "steamxboxutil*.exe" ] }"""));
         var steamTree = new Dictionary<uint, string>
         {
             [100] = "steam.exe", [101] = "steamwebhelper.exe", [102] = "steamwebhelper.exe", [103] = "steamwebhelper.exe",
             [104] = "fossilize-replay64.exe", [105] = "steamerrorreporter64.exe", [106] = "vulkandriverquery64.exe",
         };
-        check(WindowlessQuit.StartedProgram(steamTree, 100, steam?.OwnProcesses) is null, "Steam's tree after Exit Big Picture (its web helpers, shader and crash helpers): nothing it started");
-        check(WindowlessQuit.StartedProgram(new Dictionary<uint, string>(steamTree) { [107] = "hl2.exe" }, 100, steam?.OwnProcesses) == "hl2.exe", "  a game among them: named");
-        check(WindowlessQuit.StartedProgram(new Dictionary<uint, string>(steamTree) { [107] = "gameoverlayui64.exe" }, 100, steam?.OwnProcesses) == "gameoverlayui64.exe", "  its in-game overlay (with a game only): counts as a game");
-        check(WindowlessQuit.StartedProgram(new Dictionary<uint, string>(steamTree) { [107] = "steam.exe" }, 100, steam?.OwnProcesses) is null, "  another steam.exe under it: its own");
+        check(WindowlessQuit.StartedProgram(steamTree, 100, steamOwn) is null, "Steam's tree after Exit Big Picture (its web helpers, shader and crash helpers): nothing it started");
+        check(WindowlessQuit.StartedProgram(new Dictionary<uint, string>(steamTree) { [107] = "hl2.exe" }, 100, steamOwn) == "hl2.exe", "  a game among them: named");
+        check(WindowlessQuit.StartedProgram(new Dictionary<uint, string>(steamTree) { [107] = "gameoverlayui64.exe" }, 100, steamOwn) == "gameoverlayui64.exe", "  its in-game overlay (with a game only): counts as a game");
+        check(WindowlessQuit.StartedProgram(new Dictionary<uint, string>(steamTree) { [107] = "steam.exe" }, 100, steamOwn) is null, "  another steam.exe under it: its own");
         check(WindowlessQuit.StartedProgram(new Dictionary<uint, string> { [1] = "stremio-shell-ng.exe", [2] = "stremio-runtime.exe", [3] = "msedgewebview2.exe" }, 1, null) is null,
             "no ownProcesses declared (Stremio): only windows count");
         check(WindowlessQuit.StartedProgram(new Dictionary<uint, string> { [1] = "x.exe", [2] = "y.exe" }, 1, []) == "y.exe", "ownProcesses declared empty: anything but launch.exe is started by it");
 
         // The catalog.
-        check(steam is { QuitWhenWindowless: 60, QuitArgs: ["-shutdown"] } && steam.OwnProcesses is { Count: > 0 }, "Steam: asked to quit (steam.exe -shutdown) after 60 s without a window; its own programs named");
+        check(apps.Get("steam") is null && steamOwn is { Count: 8 } && AppManager.QuitArgsOf(L("""{ "quitArgs": [ "-shutdown" ] }""")) is ["-shutdown"], "no Steam in the catalog; its quitArgs and ownProcesses still read");
         check(apps.Get("stremio") is { QuitWhenWindowless: 60, QuitArgs: null, OwnProcesses: null }, "Stremio (hides to a notification area the TV lacks): ended after 60 s without a window, windows only");
         var watched = apps.Catalog.Where(a => a.QuitWhenWindowless > 0).Select(a => a.Id).ToList();
-        check(watched.SequenceEqual(["stremio", "steam"]), $"only Steam and Stremio are watched ({string.Join(", ", watched)})");
+        check(watched.SequenceEqual(["stremio"]), $"only Stremio is watched ({string.Join(", ", watched)})");
         check(apps.Catalog.Where(a => a.QuitArgs is not null || a.OwnProcesses is not null).All(a => a.QuitWhenWindowless > 0), "quitArgs and ownProcesses only on watched apps");
         JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
         check(AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": "60" }""")) == 0 && AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": 5 }""")) == 0

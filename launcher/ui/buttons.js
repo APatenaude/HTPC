@@ -179,7 +179,7 @@ function menuAppCard() {
   let rows, how;
   if (app.map.preset === 'controller') {
     how = `${app.name} reads the controller itself`;
-    // An app that owns the controller (Moonlight, Steam): Home is its own, held it is this menu.
+    // An app that owns the controller (Moonlight, and any other the catalog marks): Home is its own, held it is this menu.
     rows = id === 'moonlight' ? [['Home', 'To the game PC'], ['Hold Home', 'This menu']]
       : tile.ownController ? [['Home', `${app.name}’s own menu`], ['Hold Home', 'This menu']]
       : [['Home', 'This menu'], ['Hold Home', 'Power'], ['R3', 'On-screen keyboard']];

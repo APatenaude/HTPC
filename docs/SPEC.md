@@ -156,8 +156,8 @@ user) are folded into the items below; what was dropped is listed under "Not now
 - **W4 First-run setup.** Welcome, controller check, Wi-Fi (only without a cable), find the TV,
   the TV's input, pick apps, install, done. The phone remote is not a step.
 - **W5 App library.** Client apps only, from one catalog file that drives setup and the
-  library: Kodi, VLC, Plex HTPC, Spotify, Feishin, the games (Steam in Big Picture, Playnite
-  full screen, RetroArch; RetroBat was dropped on 29 Sept 2026: its setup needs administrator rights,
+  library: Kodi, VLC, Plex HTPC, Spotify, Feishin, the games (Playnite full screen, RetroArch;
+  Steam was dropped on 29 Sept 2026, slow and laggy drawing Big Picture at 4K on the box; RetroBat too: its setup needs administrator rights,
   whose prompt the controller cannot answer) (plus
   the six), and sites that open in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max,
   Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, Télé-Québec, TVA+, illico+,

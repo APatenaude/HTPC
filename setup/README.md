@@ -227,7 +227,6 @@ done about it:
 | Kodi (NSIS) | Start-menu shortcuts only, settings in HKCU; its version-check add-on only shows a notice | nothing |
 | Feishin (per user, electron-builder) | a desktop shortcut; a tray icon while it runs (closing still quits); its updater downloads new versions and installs them when it quits | started with `DISABLE_AUTO_UPDATES=1` (`launch.env`), which turns its updater off |
 | YouTube (VacuumTube, zip) | its updater (electron-updater) looks at every start | `install.selfUpdate`: `resources\app-update.yml` removed |
-| Steam (machine, NSIS) | HKCU Run `Steam` = `steam.exe -silent` (its "Run Steam when my computer starts", written back while it runs); updates itself at each start; after Big Picture is left it keeps running with no window (no tray without Explorer); listens on the home network for Remote Play | Run value removed (`autostart.run`, again after it ends); the launcher's Close asks it to quit (`steam.exe -shutdown`, `launch.quitArgs`) and ends it only if it is still there 20 s later; left with no window for 60 s (Exit Big Picture), it is asked the same way (`launch.quitWhenWindowless`, below), never while a program it started runs (`launch.ownProcesses` names Steam's own, from its folders: web helpers, crash reporters, shader and driver helpers; anything else in its tree is a game); its self-update left (Steam needs a current client); `install.allowInbound` for steam.exe (not tried: not installed on this box) |
 | Playnite (per user, Inno) | its "start with Windows" option (off by default) puts `Playnite.lnk` in the user's Startup folder; looks for a newer version at start and says so | the shortcut removed (`autostart.startup`, and by folder) |
 | RetroArch (machine, NSIS, `C:\RetroArch-Win64`) | none known; updates only from its Online Updater menu | nothing |
 
@@ -240,8 +239,8 @@ windowless at start; a copy the launcher took over already windowless is left al
 first minute after it opened, while a program it started runs (`launch.ownProcesses`: anything
 else in its process tree), while another program covers the screen in front (a game started
 through another store's launcher, outside its tree), or while the Home menu is over it; each of
-these, and a window coming back, starts the count over. Set for Steam (60 s, `-shutdown`) and
-Stremio (60 s). Left without it: Playnite (quits from its own menu, and the games it starts
+these, and a window coming back, starts the count over. Set for Stremio (60 s); Steam had it too (60 s,
+`-shutdown`) until it left the catalog on 29 Sept 2026. Left without it: Playnite (quits from its own menu, and the games it starts
 through other launchers run outside its tree, so a windowless check could end it mid-game),
 Spotify (music may play with no window in front), Plex HTPC (quits with its window; Plex Media
 Server is a separate program, not in the catalog) and the apps that quit with their window.

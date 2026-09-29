@@ -766,7 +766,7 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     var catalog = Path.Combine(root!.FullName, "setup", "catalog.json");
     using var doc = JsonDocument.Parse(File.ReadAllText(catalog));
     // --start-maximized: the Browser, which fills the screen with the launcher as the shell (no taskbar).
-    // -gamepadui: Steam straight into Big Picture.
+    // Each app's full-screen switch.
     string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen", "--start-maximized", "-gamepadui", "--fullscreen-borderless" };
     foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
     {
@@ -855,9 +855,8 @@ Console.WriteLine("== Keys for an app's own menus (menuKeys)");
     Check(apps.Catalog.Where(a => a.MenuKeys is not null).All(a => a.Preset == "controller"), "menu keys only for apps on the Controller preset");
     // Apps that own the controller, Home included: a tap on Home is theirs, holding it opens the menu.
     var ownersOfPad = apps.Catalog.Where(a => a.OwnController).Select(a => a.Id).OrderBy(id => id).ToList();
-    Check(ownersOfPad.SequenceEqual(["moonlight", "steam"]), $"Moonlight and Steam own the controller, Home included ({string.Join(", ", ownersOfPad)})");
-    var underMenu = apps.Catalog.Where(a => a.MinimizeUnderMenu).Select(a => a.Id).ToList();
-    Check(underMenu.SequenceEqual(["steam"]) && apps.Get("steam")!.OwnProcesses is { Count: > 0 }, $"Steam goes down under the Home menu, its own windows only ({string.Join(", ", underMenu)})");
+    Check(ownersOfPad.SequenceEqual(["moonlight"]), $"Moonlight owns the controller, Home included ({string.Join(", ", ownersOfPad)})");
+    Check(apps.Get("steam") is null, "no Steam (slow and laggy at 4K on the box: removed, the owner's call, 29 Sept 2026)");
     Check(apps.Get("youtubekids") is null, "no YouTube Kids (not offered in Canada; a kid profile in YouTube instead)");
     Check(apps.Get("retrobat") is null, "no RetroBat (its installer needs administrator rights, whose prompt the controller cannot answer: dropped, the owner's call)");
     JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();

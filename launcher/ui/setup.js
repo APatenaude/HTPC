@@ -571,7 +571,7 @@ if (host) {
   // starting=1 (apps), restart=1 (done).
   const [name, query] = location.hash.slice(1).split('?');
   const q = new URLSearchParams(query || '');
-  // The real catalog as setup gets it (38: all but Spotify, which installs only from
+  // The real catalog as setup gets it (37: all but Spotify, which installs only from
   // the library), in its categories: more than one screen, as on a box, so the audit walks a list
   // that has to scroll (a list of 8 hid that it didn't).
   const categories = [['movies', 'Movies & shows'], ['canada', 'Canadian TV'], ['sports', 'Sports'], ['music', 'Music'],
@@ -581,7 +581,7 @@ if (host) {
     ['stremio', 'Stremio', 'film', '#7C8CFF', 'movies', true], ['jellyfin', 'Jellyfin', 'library', '#3DC0F0', 'media', true],
     ['moonlight', 'Moonlight', 'moon', '#F5D16B', 'games', true], ['edge', 'Browser', 'globe', '#3CCB9A', 'media', true],
     ['kodi', 'Kodi', 'play', '#5AB0FF', 'media'], ['vlc', 'VLC', 'play', '#FF8A1F', 'media'], ['plex', 'Plex HTPC', 'play', '#F5B82E', 'media'],
-    ['feishin', 'Feishin', 'music', '#FF7AB6', 'music'], ['steam', 'Steam', 'controller', '#66C0F4', 'games'],
+    ['feishin', 'Feishin', 'music', '#FF7AB6', 'music'],
     ['playnite', 'Playnite', 'controller', '#B08CFF', 'games'], ['retroarch', 'RetroArch', 'controller', '#5AB0FF', 'games'],
     ['netflix', 'Netflix', 'play', '#FF4B55', 'movies'], ['disneyplus', 'Disney+', 'play', '#4D8DFF', 'movies'],
     ['primevideo', 'Prime Video', 'play', '#2BB0F5', 'movies'], ['crunchyroll', 'Crunchyroll', 'play', '#FF8A2B', 'movies'],

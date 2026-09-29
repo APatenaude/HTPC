@@ -567,7 +567,7 @@ sealed partial class MainForm : Form
         // The controller is in use: no mouse pointer on the TV, unless a preset moves it.
         if (mapper.Map is null) cursor.Hide();
         // An app that owns the controller (catalog ownController: Moonlight, whose Home tap belongs
-        // to the game PC; Steam, whose Home opens its own overlay, in its games too): a tap on Home
+        // to the game PC): a tap on Home
         // is the app's, a 0.5 s hold opens our menu.
         var ownsPad = app?.OwnController == true;
         // An alert that takes Home (the sleep timer's last minute: +15 min) gets it first.
@@ -996,8 +996,6 @@ sealed partial class MainForm : Form
         web.Focus();
         var ms = clock.ElapsedMilliseconds;
         launcherComingUntil = 0; // up: UpdateMapper keeps UI Automation off while it is in front
-        // Over Steam: its windows down, or its Big Picture moves under the menu with every press.
-        if (menuOver is { } over) apps.MinimizeOwnWindows(over);
         if (shown || how != "already" || homeAt != 0)
             Log.Info($"Launcher up in {ms} ms ({(shown ? $"shown {showMs} ms, " : "")}foreground {how} {foregroundMs - showMs} ms, " +
                 $"pointer {pointerMs - foregroundMs} ms, focus {ms - pointerMs} ms)" +

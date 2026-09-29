@@ -135,7 +135,7 @@ sealed partial class MainForm
     /// <summary>
     /// Start + D-pad (StartChord): the volume over any app, the launcher included. Not in
     /// standby, nor in an app that owns the controller (catalog ownController: Moonlight, whose
-    /// buttons all belong to the game PC, its Home tap too; Steam and its games).
+    /// buttons all belong to the game PC, its Home tap too).
     /// Apps on the Controller preset (VacuumTube, Jellyfin, Kodi...) read the controller
     /// themselves: they see Start and the D-pad as well, which the launcher cannot hold back.
     /// </summary>

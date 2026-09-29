@@ -786,7 +786,7 @@
     ['moonlight', 'Moonlight', 'moon', '#F5D16B', 'app', 'games', 'uninstalling'], ['edge', 'Browser', 'globe', '#3CCB9A', 'app', 'media', 'home'],
     ['kodi', 'Kodi', 'play', '#5AB0FF', 'app', 'media', 'install'], ['vlc', 'VLC', 'play', '#FF8A1F', 'app', 'media', 'home'],
     ['plex', 'Plex HTPC', 'play', '#F5B82E', 'app', 'media', 'install'], ['spotify', 'Spotify', 'music', '#1ED760', 'app', 'music', 'installing'],
-    ['feishin', 'Feishin', 'music', '#FF7AB6', 'app', 'music', 'install'], ['steam', 'Steam', 'controller', '#66C0F4', 'app', 'games', 'install'],
+    ['feishin', 'Feishin', 'music', '#FF7AB6', 'app', 'music', 'install'], 
     ['playnite', 'Playnite', 'controller', '#B08CFF', 'app', 'games', 'install'], ['retroarch', 'RetroArch', 'controller', '#5AB0FF', 'app', 'games', 'home'],
     ['netflix', 'Netflix', 'play', '#FF4B55', 'website', 'movies', 'add'],
     ['disneyplus', 'Disney+', 'play', '#4D8DFF', 'website', 'movies', 'add'], ['primevideo', 'Prime Video', 'play', '#2BB0F5', 'website', 'movies', 'home'],
