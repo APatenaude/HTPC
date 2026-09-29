@@ -104,6 +104,9 @@ sealed partial class MainForm : Form
             // Neither waits for the other (a frozen player held the TV's poll up), and one still
             // running is not started again on top of itself.
             if (++ticks % 5 != 0) return;
+            // Apps left running with no window (Steam after Exit Big Picture): asked to quit, then
+            // ended (catalog launch.quitWhenWindowless); not while the Home menu is over one.
+            if (!setupMode) apps.CheckWindowless(id => menuOver == id && LauncherActive);
             if (!setupMode && idleCheck is not { IsCompleted: false }) idleCheck = Logged(standby.Tick(), "Idle check");
             if (tvPoll is not { IsCompleted: false }) tvPoll = Logged(tv.Poll(), "TV poll");
         };
@@ -366,7 +369,7 @@ sealed partial class MainForm : Form
                 RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
-            case "home": break; // the page reports going home; nothing to do here
+            case "home": menuOver = null; break; // the page went home: the Home menu is over no app now
             case "shown": RevealPending("page ready", m); break; // ShowOver: the backdrop is in place
             case "perf": LogSlowPress(m); break;
             // The TV's messages ("tv.*"): MainForm.Tv.cs.
@@ -892,6 +895,7 @@ sealed partial class MainForm : Form
     // appearance starts dark instead of flashing the screen it last showed.
     async void StepAside(string id)
     {
+        menuOver = null;
         revealTimer.Stop();
         revealPending = false; // a Home menu still waiting to show is not wanted any more
         showOverTurn++;        // nor one still waiting for its backdrop
@@ -988,6 +992,7 @@ sealed partial class MainForm : Form
             // Overtaken meanwhile: another Home, an app coming forward, standby, the launcher up already.
             if (turn != showOverTurn || standby.Active || LauncherActive) { Log.Info($"Home over {current}: no longer wanted"); return; }
         }
+        menuOver = app?.Id;
         Post(new { type = "show", view, current, backdrop, focus, ack = backdrop is not null });
         PushState();
         if (backdrop is null) { Reveal(asked); return; }
@@ -1002,6 +1007,10 @@ sealed partial class MainForm : Form
     }
 
     readonly System.Windows.Forms.Timer revealTimer = new() { Interval = 400 };
+    // The app the Home menu (or Power menu) was opened over, until an app comes forward, the page
+    // goes home or standby: while it is up over that app, the app is never asked to quit for
+    // want of a window (AppManager.CheckWindowless).
+    string? menuOver;
     bool revealPending;
     long menuAskedAt;                              // the Home that ShowOver's pending menu is for
     int showOverTurn;                              // a newer ShowOver, or an app coming forward, ends an older one
@@ -1122,6 +1131,7 @@ sealed partial class MainForm : Form
         {
             mapper.Map = null;
             CloseKeyboard("standby");
+            menuOver = null;
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
             Post(new { type = "blank" }); // the page's sections stop their timers (app.js sectionHooks)
             tv.UiShowing(false);          // no TV search every 10 s all night, whatever the page did
