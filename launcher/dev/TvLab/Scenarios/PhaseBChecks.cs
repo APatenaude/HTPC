@@ -16,10 +16,15 @@ static class PhaseBChecks
     static readonly IPAddress LgIp = IPAddress.Parse("127.0.0.21"), AtvIp = IPAddress.Parse("127.0.0.31"), StreamerIp = IPAddress.Parse("127.0.0.32");
     static readonly Edid LgScreen = new("GSM-C001-00000000-LG TV SSCR2", "GSM", "LG TV SSCR2", 1);
 
-    static NewHost Host(RokuWorld w, bool handsOff = false)
+    static NewHost Host(RokuWorld w, bool handsOff = false) => Host(w, handsOff, out _);
+
+    /// <summary>atv: the host's Google TV driver, to read what the box itself believes.</summary>
+    static NewHost Host(RokuWorld w, bool handsOff, out AndroidTvDriver atv)
     {
-        var h = new NewHost(w, handsOff, (net, clock) => new ITvDriver[] { new RokuDriver(net, clock: clock), new WebOsDriver(net, clock, LgPort, LgPlainPort), new AndroidTvDriver(net, clock) });
+        AndroidTvDriver? android = null;
+        var h = new NewHost(w, handsOff, (net, clock) => new ITvDriver[] { new RokuDriver(net, clock: clock), new WebOsDriver(net, clock, LgPort, LgPlainPort), android = new AndroidTvDriver(net, clock) });
         w.Host = h;
+        atv = android!;
         return h;
     }
 
@@ -213,7 +218,7 @@ static class PhaseBChecks
     static async Task Atv()
     {
         using var w = new RokuWorld();
-        var h = Host(w);
+        var h = Host(w, false, out var atvDriver);
         using var atv = new FakeAtv("atv", AtvIp, w.Trace);
         h.Net.MdnsResponders.Add(atv.Mdns);
         h.Net.MdnsResponders.Add(s => s switch
@@ -245,6 +250,14 @@ static class PhaseBChecks
         // 30 s: each key opens a TLS connection with a client certificate (Schannel), which took
         // over 10 s on a busy box and on GitHub's runner (the v1.0.0 release run failed on it).
         Check.That(await Eventually(() => atv.Keys.Contains(223) && !atv.On, 30), "Google TV: SLEEP when the box sleeps");
+        // Then the box itself must have heard it go off (the power state the TV pushes back) before
+        // the wake: the fake is off first, and on a slow runner its push reached the box after the
+        // wake, so the box still read on and rightly sent no WAKEUP (the check below failed at random).
+        var device = h.Tv.Found.First(t => t.Key == key);
+        var heardOff = false;
+        for (var until = DateTime.UtcNow.AddSeconds(30); !heardOff && DateTime.UtcNow < until; await Task.Delay(50))
+            heardOff = (await atvDriver.Refresh(device, true, CancellationToken.None))?.State.Power == TvPower.Off;
+        Check.That(heardOff, "Google TV: the box hears it go off (the power state it pushes)");
         await w.RunFor(10);
         await h.Wake();
         Check.That(await Eventually(() => atv.Keys.Contains(224) && atv.On, 30), "Google TV: WAKEUP when the box wakes");
