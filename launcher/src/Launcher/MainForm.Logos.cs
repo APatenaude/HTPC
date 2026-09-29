@@ -31,11 +31,12 @@ sealed partial class MainForm
     /// <summary>Every app the launcher knows (the library's too), in the background.</summary>
     void RefreshLogos()
     {
-        // A program's logo from its own icon, or from the catalog's logoExe (RetroBat's own, not
-        // EmulationStation's, which its tile runs), once the app is installed.
-        var sources = apps.All.Select(a => new LogoSource(a.Id, a.IsWebsite ? a.Url : null,
-            a.IsWebsite ? null : () => apps.ProgramPath(a.Id) is { } exe ? (a.LogoExe is { } logoExe ? Environment.ExpandEnvironmentVariables(logoExe) : exe) : null,
-            a.IsWebsite ? a.LogoUrl : null)).ToList();
+        // A program's logo from its own icon, or from the catalog's logoExe (a front end's own
+        // program), once the app is installed. An app whose catalog entry names its icon (logoUrl:
+        // YouTube's own, not VacuumTube's) gets it from there, as a website does.
+        var sources = apps.All.Select(a => a.IsWebsite || a.LogoUrl is not null
+            ? new LogoSource(a.Id, a.IsWebsite ? a.Url : a.LogoUrl, null, a.LogoUrl)
+            : new LogoSource(a.Id, null, () => apps.ProgramPath(a.Id) is { } exe ? (a.LogoExe is { } logoExe ? Environment.ExpandEnvironmentVariables(logoExe) : exe) : null)).ToList();
         logos.Refresh(sources);
     }
 
