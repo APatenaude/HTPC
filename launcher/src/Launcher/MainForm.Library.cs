@@ -32,9 +32,41 @@ sealed partial class MainForm
         }
     }
 
-    /// <summary>On UI ready: tell it whether installing from the TV is set up (the \HTPC\Jobs task).</summary>
+    /// <summary>
+    /// On UI ready: tell it whether installing from the TV is set up (the \HTPC\Jobs task), and
+    /// give every installed app its home tile.
+    /// </summary>
     [UiReady]
-    void PostLibraryReady() => Post(new { type = "library.available", available = library.Available });
+    void PostLibraryReady()
+    {
+        Post(new { type = "library.available", available = library.Available });
+        EnsureInstalledOnHome();
+    }
+
+    /// <summary>A catalog app the box installs and uninstalls (not a website, not the built-in Browser).</summary>
+    static bool BoxInstalls(CatalogApp a) => a.Installable && a.InstallSource != "builtin";
+
+    /// <summary>
+    /// The owner's rule: if it's installed, it's on the home screen. A catalog app the box installs
+    /// that is installed with no tile (installed outside the launcher, by setup without its tile,
+    /// or from before this rule) gets its tile at the end of the row: at start and each time the
+    /// library looks at what is installed. Not for an app with a job queued (installing adds its
+    /// tile when it is done, uninstalling takes it away). Not in TV Box Setup.
+    /// </summary>
+    void EnsureInstalledOnHome()
+    {
+        if (setupMode) return;
+        var missing = apps.Catalog
+            .Where(a => BoxInstalls(a) && !apps.Tiles.Any(t => t.Id == a.Id) && !library.IsQueued(a.Id) && apps.IsInstalled(a.Id))
+            .Select(a => a.Id).ToList();
+        if (missing.Count == 0) return;
+        EnsureTiles();
+        settings.Tiles!.AddRange(missing);
+        settings.Save();
+        apps.SetTiles(settings.Tiles);
+        PushTiles();
+        Log.Info($"Library: installed, so on the home screen: {string.Join(", ", missing)}");
+    }
 
     void PushTiles() => Post(new { type = "tiles", tiles = TileList() });
 
@@ -56,6 +88,7 @@ sealed partial class MainForm
 
     void PushLibraryCatalog()
     {
+        EnsureInstalledOnHome();
         var appCards = apps.Catalog.Where(a => !a.IsWebsite).Select(LibraryCard).ToList();
         var siteCards = apps.Catalog.Where(a => a.IsWebsite).Select(LibraryCard).ToList();
         Post(new { type = "library.catalog", apps = appCards, sites = siteCards, available = library.Available });
@@ -71,18 +104,18 @@ sealed partial class MainForm
         desc = a.Desc ?? "",
         type = a.Type,
         state = LibraryState(a),
-        canUninstall = a.Installable && a.InstallSource != "builtin"
+        canUninstall = BoxInstalls(a),
+        builtin = a.InstallSource == "builtin" // the Browser: Edge, part of Windows
     };
 
-    // home = already a tile; installed = on the box, A adds a tile; install = not there yet;
-    // installing = a job is running; add = a website (nothing to install, A just adds the tile).
+    // An app the box installs: install = not there; home = installed, so on the home screen (X
+    // uninstalls it); installing / uninstalling = its job is queued or running. A website or the
+    // Browser, nothing to install: home = its tile is there (X takes it away), add = A adds it.
     string LibraryState(CatalogApp a)
     {
-        if (library.IsQueued(a.Id)) return "installing";
-        var onHome = apps.Tiles.Any(t => t.Id == a.Id);
-        if (a.IsWebsite) return onHome ? "home" : "add";
-        if (onHome) return "home";
-        return apps.IsInstalled(a.Id) ? "installed" : "install";
+        if (library.QueuedAction(a.Id) is { } action) return action == "uninstall" ? "uninstalling" : "installing";
+        if (!BoxInstalls(a)) return apps.Tiles.Any(t => t.Id == a.Id) ? "home" : "add";
+        return apps.IsInstalled(a.Id) ? "home" : "install";
     }
 
     // Add tile > On this box. Reading the Start menu (a shortcut resolved at a time) held the UI

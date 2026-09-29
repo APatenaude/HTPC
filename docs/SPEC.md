@@ -146,11 +146,19 @@ user) are folded into the items below; what was dropped is listed under "Not now
   library: Kodi, VLC, Plex HTPC, Spotify, Feishin, the games (Steam in Big Picture, Playnite
   full screen, RetroArch; RetroBat, whose setup cannot run unattended, is set up by hand) (plus
   the six), and sites that open in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max,
-  Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, Télé-Québec, TVA+, illico+,
+  Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, T
+é
+l
+é
+-Qu
+é
+bec, TVA+, illico+,
   ONF, RDS, TSN, Sportsnet+, OHdio, YouTube Music, Apple Music, YouTube Kids; cloud gaming with
   the controller passed to the page: GeForce NOW, Xbox Cloud Gaming, Amazon Luna). Install and
   uninstall from the TV (not from the Browser), keeping app data; installs start right away at
-  low priority.
+  low priority. If it's installed, it's on the home screen (29 September): installing adds the
+  tile, taking the tile away uninstalls (asked first); sites and the Browser, which install
+  nothing, come and go from Home freely.
 
 ## Not now
 

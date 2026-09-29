@@ -123,9 +123,12 @@ sealed class LibraryService
     }
 
     /// <summary>Whether a job for this id is running or queued.</summary>
-    public bool IsQueued(string id)
+    public bool IsQueued(string id) => QueuedAction(id) is not null;
+
+    /// <summary>What is queued or running for this id (install, uninstall, upgrade), or null.</summary>
+    public string? QueuedAction(string id)
     {
-        lock (gate) return current?.Id == id || pending.Any(j => j.Id == id);
+        lock (gate) return current?.Id == id ? current.Action : pending.FirstOrDefault(j => j.Id == id)?.Action;
     }
 
     /// <summary>
@@ -240,6 +243,7 @@ sealed class LibraryService
 
         var machine = app.Scope != "user";
         var (ok, message) = machine ? RunThroughTask(job.Token, app, waitForProgress: true) : RunAsUser(job, app);
+        if (ok && job.Action == "uninstall") message = $"{app.Name} is uninstalled";   // not "is ready"
         return (ok, message);
     }
 
@@ -463,11 +467,13 @@ sealed class LibraryService
     /// app installed with "add to home", and loses the one uninstalled (its catalog entry stays,
     /// so it can be added again). There, not on the job's thread: the UI thread edits the same
     /// list (tile order, added and removed tiles), and one changed from two threads could lose a
-    /// tile or throw.
+    /// tile or throw. A home row never edited yet (the catalog's defaults) is written down first,
+    /// or an uninstalled default app would keep its tile.
     /// </summary>
     public void UpdateTiles(LibraryJob job)
     {
-        if (job.BoxJob || apps.Get(job.Id) is null || settings.Tiles is not { } tiles) return;
+        if (job.BoxJob || apps.Get(job.Id) is null) return;
+        var tiles = settings.Tiles ??= apps.Tiles.Select(t => t.Id).ToList();
         if (job.Action == "install" && job.AddToHome && !tiles.Contains(job.Id)) tiles.Add(job.Id);
         else if (!(job.Action == "uninstall" && tiles.Remove(job.Id))) return; // nothing changed
         settings.Save();

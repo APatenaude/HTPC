@@ -126,10 +126,11 @@ function auditLibrary() {
     const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
     return { id: `lib${i}`, name: i === 7 ? `Library app ${AUDIT_LONG}` : `Library app ${i + 1}`, glyph, color, type: 'app',
       desc: i % 3 ? 'Plays what is on your network' : `A description ${AUDIT_LONG}, and then some more words`,
-      state: ['home', 'installed', 'install', 'install'][i % 4], canUninstall: true };
+      state: ['home', 'uninstalling', 'install', 'install'][i % 4], canUninstall: true };
   });
   apps[5].state = 'installing';
-  const sites = Array.from({ length: 12 }, (_, i) => ({ id: `site${i}`, name: i === 4 ? `Streaming site ${AUDIT_LONG}` : `Site ${i + 1}`, color: '#FF4B55', type: 'website', state: 'add' }));
+  Object.assign(apps[12], { state: 'home', canUninstall: false, builtin: true });   // the Browser: Built in, X Remove from Home
+  const sites = Array.from({ length: 12 }, (_, i) => ({ id: `site${i}`, name: i === 4 ? `Streaming site ${AUDIT_LONG}` : `Site ${i + 1}`, color: '#FF4B55', type: 'website', state: i % 3 === 1 ? 'home' : 'add' }));
   // lib9 went through the queue and is still to install: it did not install.
   onHost({ type: 'library.progress', current: { id: 'lib9', name: 'Library app 10', action: 'install', phase: 'download', percent: 30 }, pending: [] });
   onHost(AUDIT_PROGRESS);
