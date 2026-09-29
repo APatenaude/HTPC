@@ -1,15 +1,17 @@
 'use strict';
-// The Home menu's resource view: the box's CPU, memory, disk and network use, and the three
-// programs using the most, in the menu's column under its sliders and quick buttons (the owner,
-// 29 Sept 2026: there, not in a card on the right). The host samples only while the page shows
-// the menu (MainForm.Resources.cs, ResourceWatch.cs): the menu opens as fast as ever, the view
-// comes with the first numbers a moment later, and every 2 s only its numbers change
-// (patchHtml), never the menu around it. Down from the quick buttons goes to its programs, up
-// from them back (app.js move, as anywhere in the column).
-// A (or X) on a program's row asks, then stops it: an app is closed as its tile's X closes it,
-// another program ended. Windows' own and the launcher's rows show, but never take the focus.
-// While the focus is on a row, the rows stay where they are (their numbers still change): what
-// A stops is what the focus is on.
+// The Home menu's resource view (the owner's "system monitor"): the box's CPU, memory, disk and
+// network use, and the three programs using the most, the last part of the menu's column, under
+// its sliders and quick buttons (the owner, 29 Sept 2026: there, not in a card on the right; then
+// smaller: the four figures two by two on a line each, the programs on short rows). The host
+// samples only while the page shows the menu (MainForm.Resources.cs, ResourceWatch.cs): the menu
+// opens as fast as ever, the view comes with the first numbers a moment later, and every 2 s only
+// its numbers change (patchHtml), never the menu around it. Down from the quick buttons goes to
+// its programs, up from them back (app.js move, as anywhere in the column).
+// X on a program's row asks, then stops it (the owner: X, as on a tile, and a question first; A
+// does nothing there): an app is closed as its tile's X closes it, another program ended.
+// Windows' own and the launcher's rows show, but never take the focus. While the focus is on a
+// row, the rows stay where they are (their numbers still change): what X stops is what the focus
+// is on.
 //   To the host:   res.watch {on, hold: [keys of the rows kept in place]}  res.stop {key}
 //   From the host: res.data {cpu (%), memUsed, memTotal (MB), disk (bytes/s), down, up (bits/s),
 //                  top: [{key, name, app, cpu, mem (MB), stop}], held: [{...} or {key, gone}]}
@@ -53,10 +55,10 @@ function resRows() {
   }).filter(Boolean);
 }
 
-// A label and its number on one line, a bar or a second line under them.
-function resMeter(label, value, detail, high) {
+// A short label and its number on one line, a thin bar under them (CPU, memory) or nothing.
+function resMeter(label, value, bar, high) {
   return `<div class="rs-meter${high ? ' high' : ''}"><div class="rs-top"><span class="rs-label">${label}</span>` +
-    `<span class="rs-value">${value}</span></div>${detail}</div>`;
+    `<span class="rs-value">${value}</span></div>${bar || ''}</div>`;
 }
 
 function resBar(percent) {
@@ -70,31 +72,33 @@ function resRowHtml(r) {
   const tile = r.app && state.tiles.find((t) => t.id === r.app);
   // The launcher itself, Windows' own programs, any other program: a glyph of their own.
   const glyph = r.key === 'self' ? 'tv' : r.key.startsWith('win:') ? 'desktop' : 'app';
-  const pic = tile ? appIcon(tile, 28) : `<span class="appicon rs-glyph">${icon(glyph, 28)}</span>`;
+  const pic = tile ? appIcon(tile, 24) : `<span class="appicon rs-glyph">${icon(glyph, 24)}</span>`;
   const tag = r.gone ? '<span class="tag">Ended</span>' : r.app && closing.has(r.app) ? '<span class="tag">Closing…</span>' : '';
   const numbers = r.gone ? '' : `<span class="rs-cpu">${resPercent(r.cpu)}</span><span class="rs-mem">${resMemory(r.mem)}</span>`;
-  // Only what may be stopped takes the focus (a held row that ended keeps it until the focus leaves).
-  const nav = r.stop || r.gone ? ` data-nav data-act="res-stop" data-x="res-stop" data-arg="${esc(r.key)}" data-res="${esc(r.key)}"` : '';
+  // Only what may be stopped takes the focus (a held row that ended keeps it until the focus
+  // leaves). X stops it; A does nothing (data-noa: no A in the hints, no select sound).
+  const nav = r.stop || r.gone ? ` data-nav data-noa data-x="res-stop" data-arg="${esc(r.key)}" data-res="${esc(r.key)}"` : '';
   return `<div class="row rs-row${nav ? '' : ' fixed'}" data-id="res:${esc(r.key)}"${nav}>${pic}` +
     `<span class="grow">${esc(r.name)}</span>${tag}${numbers}</div>`;
 }
 
-// The view (app.js's renderMenu draws it into #menu-res, at the bottom of the menu's column; the
+// The view (app.js's renderMenu draws it into #menu-res, the last part of the menu's column; the
 // host's numbers patch it in place). None until the first numbers: the menu's first frame is
 // what it was without it, and the view fades in with them, a moment after, under the rest.
+// CPU and RAM, then Disk and Net, on a line each; the network's two ways on one line.
 function resViewHtml() {
   const d = res.data;
   res.rows = resRows();
   if (!d) return '';
   const memory = d.memTotal ? d.memUsed / d.memTotal * 100 : null;
-  const down = resRate(d.down, 'b'), up = resRate(d.up, 'b');
-  return '<div class="rs-view"><span class="section">System</span><div class="rs-meters">' +
+  const way = (arrow, pair) => pair && `<span class="rs-way">${arrow}</span>${resAmount(pair)}`;
+  const net = [way('↓', resRate(d.down, 'b')), way('↑', resRate(d.up, 'b'))].filter(Boolean).join(' ') || '–';
+  return '<div class="rs-view"><div class="rs-meters">' +
       resMeter('CPU', `${Math.round(d.cpu)}<small>%</small>`, resBar(d.cpu), d.cpu >= 85) +
-      resMeter('Memory', `${(d.memUsed / 1024).toFixed(1)}<small> / ${(d.memTotal / 1024).toFixed(1)} GB</small>`, resBar(memory), memory >= 90) +
-      resMeter('Disk', resAmount(resRate(d.disk, 'B')), '<span class="rs-sub">read and written</span>') +
-      resMeter('Network', down ? `↓ ${resAmount(down)}` : '–', `<span class="rs-sub">${up ? `↑ ${esc(up[0])} ${esc(up[1])}` : '&nbsp;'}</span>`) +
+      resMeter('RAM', `${(d.memUsed / 1024).toFixed(1)}<small> / ${(d.memTotal / 1024).toFixed(1)} GB</small>`, resBar(memory), memory >= 90) +
+      resMeter('Disk', resAmount(resRate(d.disk, 'B'))) +
+      resMeter('Net', net) +
     '</div>' +
-    '<span class="section">Using the most</span>' +
     `<div class="rs-rows">${res.rows.length ? res.rows.map(resRowHtml).join('') : '<span class="empty">Nothing running</span>'}</div>` +
   '</div>';
 }
@@ -134,10 +138,10 @@ function resFocus(el) {
   if (res.on) resTell();
 }
 
-// The Home menu's hints on a row (app.js menuHints).
+// The Home menu's hints on a row (app.js menuHints): X, as on a tile, never A.
 function resHints(el) {
   const r = res.rows.find((x) => x.key === el.dataset.res);
-  return r && r.stop && !r.gone ? [['A', r.app ? 'Close app' : 'End program'], ['B', 'Back']] : [['B', 'Back']];
+  return r && r.stop && !r.gone ? [['X', r.app ? 'Close app' : 'End program'], ['B', 'Back']] : [['B', 'Back']];
 }
 
 onAction('res-stop', (el, key) => {

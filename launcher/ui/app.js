@@ -204,10 +204,13 @@ function setHomeHints(html) {
   if (bar.hintsHtml !== html) { bar.innerHTML = html; bar.hintsHtml = html; }
 }
 
-// The Home menu: one column down the left of the screen. The way home and the open apps, only
-// when there is somewhere to go (the owner, 29 Sept 2026: no "Home screen" over the home screen,
-// no "Open apps" with none open), the sliders and the quick buttons, then what the box is busy
-// with (resources.js), under them.
+// The Home menu: one column down the left of the screen, in three parts, a line between them
+// (the owner, 29 Sept 2026: the open apps, the box's controls and the system monitor apart).
+// First the alerts, the way home and the open apps, only when there is somewhere to go (no "Home
+// screen" over the home screen, no "Open apps" with none open: then an empty part, not drawn,
+// nor its line); then the sliders and the quick buttons; then what the box is busy with
+// (resources.js: the resource view, the owner's system monitor). The three are always in the
+// page, empty or not, so that a redraw (patchHtml, by place) never makes one part of another.
 function renderMenu() {
   const running = state.tiles.filter((t) => t.running);
   const apps = running.map((t) =>
@@ -215,6 +218,11 @@ function renderMenu() {
       appIcon(t, 32) + `<span class="grow">${esc(t.name)}</span>` +
       (closing.has(t.id) ? '<span class="tag">Closing…</span>' : t.id === state.current ? '<span class="tag">Now</span>' : '') +
     '</div>').join('');
+  const openApps = noticeRowsHtml() + // alerts with something to do (notices.js)
+    // Over the Windows desktop (desktop mode) the way back comes first.
+    (state.desktop ? `<div class="row big" data-nav data-id="back-tv" data-act="power-action" data-arg="tv">${icon('tv', 32, 2)}Back to TV</div>` : '') +
+    (state.current ? `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 32, 2)}Home screen</div>` : '') +
+    (running.length ? `<span class="section">Open apps</span><div class="apps">${apps}</div>` : '');
   // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
   $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
   // In place (patchHtml): the volume changing redraws its value, not the focused row's ring, and
@@ -224,25 +232,23 @@ function renderMenu() {
   patchHtml($('menu-panel'), '<div class="panel-scroll">' +
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
       `<span class="pad">${icon('controller', 28)}${esc(batteryText())}</span></div>` +
-    noticeRowsHtml() + // alerts with something to do (notices.js)
-    // Over the Windows desktop (desktop mode) the way back comes first.
-    (state.desktop ? `<div class="row big" data-nav data-id="back-tv" data-act="power-action" data-arg="tv">${icon('tv', 32, 2)}Back to TV</div>` : '') +
-    (state.current ? `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 32, 2)}Home screen</div>` : '') +
-    (running.length ? `<span class="section">Open apps</span><div class="apps">${apps}</div>` : '') +
-    `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 30)}` +
-      `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
-    `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 30)}` +
-      `<div class="track"><div class="fill white" style="width:${state.brightness}%"></div></div><span class="value">${state.brightness}</span></div>` +
-    // Settings, then Power: in the order of the home screen's top bar (renderStatus).
-    '<div class="quicks">' +
-      `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 30)}Buttons</div>` +
-      `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 30)}Timer</div>` +
-      `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 30)}Settings</div>` +
-      `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 30)}Power</div>` +
+    `<div class="menu-part" data-part="apps">${openApps}</div>` +
+    '<div class="menu-part" data-part="controls">' +
+      `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 30)}` +
+        `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
+      `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 30)}` +
+        `<div class="track"><div class="fill white" style="width:${state.brightness}%"></div></div><span class="value">${state.brightness}</span></div>` +
+      // Settings, then Power: in the order of the home screen's top bar (renderStatus).
+      '<div class="quicks">' +
+        `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 30)}Buttons</div>` +
+        `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 30)}Timer</div>` +
+        `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 30)}Settings</div>` +
+        `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 30)}Power</div>` +
+      '</div>' +
     '</div>' +
-    // The box's CPU, memory, disk and network, and what uses the most (resources.js): nothing
-    // until the host's first numbers, which then change in it alone.
-    `<div id="menu-res">${typeof resViewHtml === 'function' ? resViewHtml() : ''}</div>` +
+    // The box's CPU, memory, disk and network, and what uses the most (resources.js): nothing,
+    // nor its line, until the host's first numbers, which then change in it alone.
+    `<div class="menu-part" id="menu-res" data-part="monitor">${typeof resViewHtml === 'function' ? resViewHtml() : ''}</div>` +
     '</div>' +
     `<footer class="hints">${hints(menuHints($('menu').querySelector('[data-nav].focused')))}</footer>`);
   // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that

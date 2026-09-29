@@ -8,8 +8,9 @@
 // its quick buttons in the order of the home screen's top bar (Settings, then Power), the home
 // grid (38 tiles: three whole rows, a sliver of the next, a row at a time),
 // Power's Restart and Shut down asking first, moving around Settings and changing a value there only once A has picked its row, the
-// Home menu's resource view (in its column, sampled only while the menu shows, patched in place,
-// its rows kept under the focus, the D-pad in and out of it, asking before it stops anything),
+// Home menu's three parts and its resource view (the last part, small, sampled only while the
+// menu shows, patched in place, its rows kept under the focus, the D-pad in and out of it, X
+// asking before it stops anything, A doing nothing there),
 // the interface sounds (rendered offline;
 // which sound a press picks; none while hidden); Add a tile (On this box's icons, the Website form
 // and Rename typing with the launcher's keyboard, the library by category), setup's apps by
@@ -161,7 +162,7 @@
   render();
 
   // The crowded menu: 6 apps and an alert row fit down to the quick buttons without scrolling;
-  // the resource view under them comes into view with the focus.
+  // with a second alert, the resource view under them comes into view with the focus.
   const panel = $('menu-panel'), rowsBox = panel.querySelector('.panel-scroll');
   const quicks = [...panel.querySelectorAll('.quicks [data-nav]')];
   const hintsBox = panel.querySelector('.hints').getBoundingClientRect();
@@ -169,10 +170,12 @@
   check('menu: 6 apps + an alert row fit, down to the quick buttons', rowsBox.scrollTop === 0 && quicks[quicks.length - 1].getBoundingClientRect().bottom <= rowsBox.getBoundingClientRect().bottom,
     `${quicks[quicks.length - 1].getBoundingClientRect().bottom} > ${rowsBox.getBoundingClientRect().bottom}`);
   check('menu: the quick buttons are above the button hints', quicks[quicks.length - 1].getBoundingClientRect().bottom <= hintsBox.top + 1);
+  noticeUpdate({ toasts: [], pills: [], rows: [...notices.rows,
+    { id: 'tv', title: 'Can’t reach the TV', body: 'Is it on the network? Settings › TV can find it again.', glyph: 'tv', tone: 'bad', action: 'TV settings' }] });
   setFocus(panel.querySelector('[data-id="q-timer"]'));
   press('down');
   const lowRow = focusedEl(), lowBox = rowsBox.getBoundingClientRect();
-  check('menu: crowded, down from the quick buttons to a program: the column scrolls, the row shows whole', lowRow && lowRow.closest('#menu-res') && rowsBox.scrollTop > 0
+  check('menu: crowded (6 apps, 2 alerts), down from the quick buttons to a program: the column scrolls, the row shows whole', lowRow && lowRow.closest('#menu-res') && rowsBox.scrollTop > 0
     && lowRow.getBoundingClientRect().bottom <= lowBox.bottom && lowRow.getBoundingClientRect().top >= lowBox.top, `${focusedEl() && focusedEl().dataset.id}, ${rowsBox.scrollTop}`);
 
   // Its quick buttons: Settings, then Power, as on the home screen's top bar. The D-pad goes along
@@ -719,17 +722,24 @@
   reset('home');
 
   // ---- The Home menu's resource view (resources.js) ------------------------------------------------
-  // The host samples only while the menu is on screen; the view comes with the numbers, in the
-  // menu's column under the quick buttons, patched in place; the rows stay under the focus; A asks
-  // before stopping anything; Windows' own rows never take the focus. The D-pad goes into it and
-  // out of it along the column, with real presses, over the home screen with nothing open and
-  // over an app (in its old card the focus was stuck on the TV).
+  // The host samples only while the menu is on screen; the view comes with the numbers, the last
+  // of the menu's three parts (the open apps, the controls, the monitor: a line between two, no
+  // part with nothing in it), small, patched in place; the rows stay under the focus; X asks
+  // before stopping anything, A does nothing there; Windows' own rows never take the focus. The
+  // D-pad goes into it and out of it along the column, with real presses, over the home screen
+  // with nothing open and over an app with two open and an alert, all of it fitting (in its old
+  // card the focus was stuck on the TV).
   const rNode = (key) => $('menu-res').querySelector(`[data-id="res:${key}"]`);
   const menuNode = (id) => $('menu-panel').querySelector(`[data-id="${id}"]`);
   const menuIds = () => [...$('menu-panel').querySelectorAll('[data-nav]')].map((e) => e.dataset.id);
   const menuColumn = () => $('menu-panel').querySelector('.panel-scroll');
   const fits = () => menuColumn().scrollHeight <= menuColumn().clientHeight + 1;
   const presses = (buttons) => buttons.map((b) => { press(b); return focusId(); }).join(',');
+  // The column's parts on screen, in order, and those with a line over them.
+  const shownParts = () => [...menuColumn().querySelectorAll('.menu-part')].filter((p) => p.offsetHeight > 0);
+  const partNames = () => shownParts().map((p) => p.dataset.part).join(',');
+  const linedParts = () => shownParts().filter((p) => parseFloat(getComputedStyle(p).borderTopWidth) > 0).map((p) => p.dataset.part).join(',');
+  const menuHintList = () => [...$('menu-panel').querySelectorAll('footer.hints .hint')].map((h) => h.textContent.trim()).join(',');
   const resData = (top, extra) => ({ type: 'res.data', cpu: 42.4, memUsed: 5120, memTotal: 8192, disk: 12.5e6, down: 45.2e6, up: 1.2e6, top, held: [], ...extra });
   const RJ = { key: 'app:jellyfin', name: 'Jellyfin', app: 'jellyfin', cpu: 30.2, mem: 900, stop: true };
   const RX = { key: 'exe:long.exe', name: `Program ${'with a very long name '.repeat(3)}.exe`, app: null, cpu: 7.25, mem: 2048, stop: true };
@@ -742,9 +752,9 @@
   reset('home');
   check('Resources: nothing asked for on the home screen', !sent.some((m) => m.type === 'res.watch' && m.on));
 
-  // Over the home screen with nothing open: neither the Home screen row nor Open apps, the
-  // focus on the volume; all of the column fits. The box's usual top three: the launcher,
-  // Windows' own, and one program it may stop.
+  // Over the home screen with nothing open: neither the Home screen row nor Open apps (no part
+  // for them, nor its line), the focus on the volume; all of the column fits. The box's usual top
+  // three: the launcher, Windows' own, and one program it may stop.
   for (const t of state.tiles) t.running = false;
   state.memory.menu = null;
   press('home');
@@ -754,12 +764,23 @@
   check('Resources: no view before the numbers (the menu\'s first frame as it was without it)', $('menu-res').innerHTML === '');
   check('Menu over the home screen, nothing open: no Home screen row, no Open apps, the focus on the volume',
     !menuIds().includes('home') && !/Open apps/i.test($('menu-panel').textContent) && focusId() === 'volume', `${menuIds().join(',')} on ${focusId()}`);
+  check('Menu: nothing open, no numbers yet: the controls alone, no empty part drawn, no line',
+    partNames() === 'controls' && linedParts() === '' && menuColumn().querySelector('[data-part="apps"]').offsetHeight === 0, `${partNames()}; lined: ${linedParts()}`);
   const RL = { key: 'self', name: 'TV launcher', app: null, cpu: 14, mem: 620, stop: false };
   onHost(resData([RL, RW, RX]));
   const quickBottom = () => menuNode('q-power').getBoundingClientRect().bottom;
-  check('Resources: in the menu\'s column, under the quick buttons; all of it fits, no scrolling',
-    $('menu-res').closest('#menu-panel .panel-scroll') && $('menu-res').getBoundingClientRect().top >= quickBottom() && fits(),
-    `${$('menu-res').getBoundingClientRect().top} / ${quickBottom()}; ${menuColumn().scrollHeight} in ${menuColumn().clientHeight}`);
+  check('Resources: the column\'s last part, under the quick buttons, a line between them; all of it fits, no scrolling',
+    $('menu-res').closest('#menu-panel .panel-scroll') && $('menu-res').getBoundingClientRect().top >= quickBottom()
+    && partNames() === 'controls,monitor' && linedParts() === 'monitor' && fits(),
+    `${$('menu-res').getBoundingClientRect().top} / ${quickBottom()}; ${partNames()}; lined: ${linedParts()}; ${menuColumn().scrollHeight} in ${menuColumn().clientHeight}`);
+  // Small (the owner, 29 Sept 2026: "still too big"; 386 px tall in 1.0.8), and still read from
+  // the couch: no text under 18 px of the 1920 x 1080 stage.
+  const tiny = [...$('menu-res').querySelectorAll('*')].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())
+    && parseFloat(getComputedStyle(e).fontSize) < 18);
+  const resRowHeights = [...$('menu-res').querySelectorAll('.rs-row')].map((r) => r.offsetHeight);
+  check(`Resources: small (${$('menu-res').offsetHeight} px tall, its line included), rows of 38 px, no text under 18 px`,
+    $('menu-res').offsetHeight <= 230 && resRowHeights.every((h) => h === 38) && !tiny.length,
+    `${resRowHeights.join(' ')}; ${tiny.map((e) => `${e.className || e.tagName} ${getComputedStyle(e).fontSize}`).join(', ')}`);
   const inHome = presses(['down', 'down', 'down']);
   check('Resources, over the home screen: down from the volume, the brightness, a quick button, then the one program it can stop',
     new RegExp(`^brightness,q-\\w+,res:${RX.key.replace('.', '\\.')}$`).test(inHome), inHome);
@@ -768,11 +789,23 @@
   const outHome = presses(['up', 'up']);
   check('Resources: ... up: out of it to a quick button, then the brightness; the rows follow the host again',
     /^q-\w+,brightness$/.test(outHome) && lastSent('res.watch').hold.length === 0, `${outHome}; ${JSON.stringify(lastSent('res.watch'))}`);
+  // An app opening under the menu, then closing: its part comes and goes, and the others stay
+  // the same elements (redrawn by place, the monitor was made of the controls: it faded in again).
+  const resEl = $('menu-res'), controlsEl = menuColumn().querySelector('[data-part="controls"]');
+  onHost({ type: 'state', running: ['jellyfin'] });
+  const withApp = partNames();
+  onHost({ type: 'state', running: [] });
+  check('Menu: an app opening under it, then closing: its part comes and goes, the controls and the monitor stay as they are, the focus too',
+    withApp === 'apps,controls,monitor' && partNames() === 'controls,monitor' && $('menu-res') === resEl
+    && menuColumn().querySelector('[data-part="controls"]') === controlsEl && focusId() === 'brightness', `${withApp}; ${partNames()}; on ${focusId()}`);
   reset('home');
 
-  // Over an app, two open: the Home screen row and the open apps; all of it fits too.
+  // Over an app, two open and an alert: the alert, the Home screen row and the open apps, then
+  // the controls, then the monitor; all of it fits too.
   for (const t of state.tiles) t.running = t.id === 'jellyfin' || t.id === 'twitch';
   state.current = 'twitch';
+  noticeUpdate({ toasts: [], pills: [], rows: [
+    { id: 'app:stremio', title: 'Stremio closed unexpectedly', body: 'It stopped working and closed.', glyph: 'warn', tone: 'bad', action: 'Reopen' }] });
   go('menu');
   res.data = null;
   render();
@@ -784,10 +817,12 @@
   onHost(resData([RJ, RX, RW]));
   check('Resources: the numbers patch the view in place, the menu and its focus untouched',
     $('menu-res').firstElementChild === cardEl && menuNode('home') === panelRow && focusedEl() === panelRow
-    && /42%/.test($('menu-res').textContent) && /5\.0 \/ 8\.0 GB/.test($('menu-res').textContent) && /13 MB\/s/.test($('menu-res').textContent)
-    && /↓ 45 Mb\/s/.test($('menu-res').textContent) && /↑ 1\.2 Mb\/s/.test($('menu-res').textContent), $('menu-res').textContent.slice(0, 120));
-  check('Menu over an app, two open: the Home screen row and both apps; all of it fits, no scrolling',
-    ['home', 'app:twitch', 'app:jellyfin'].every((id) => menuIds().includes(id)) && fits(), `${menuIds().join(',')}; ${menuColumn().scrollHeight} in ${menuColumn().clientHeight}`);
+    && /CPU\s*42%/.test($('menu-res').textContent) && /RAM\s*5\.0 \/ 8\.0 GB/.test($('menu-res').textContent) && /Disk\s*13 MB\/s/.test($('menu-res').textContent)
+    && /Net\s*↓45 Mb\/s ↑1\.2 Mb\/s/.test($('menu-res').textContent), $('menu-res').textContent.slice(0, 120));
+  check('Menu over an app, two open and an alert: the alert, the Home screen row and both apps, then the controls, then the monitor, a line over each of the last two; all of it fits, no scrolling',
+    ['alert:app:stremio', 'home', 'app:twitch', 'app:jellyfin'].every((id) => menuNode(id) && menuNode(id).closest('[data-part="apps"]'))
+    && partNames() === 'apps,controls,monitor' && linedParts() === 'controls,monitor' && fits(),
+    `${menuIds().join(',')}; ${partNames()}; lined: ${linedParts()}; ${menuColumn().scrollHeight} in ${menuColumn().clientHeight}`);
   check('Resources: Windows\' own row shows but takes no focus', rNode(RW.key) && !rNode(RW.key).hasAttribute('data-nav') && rNode(RX.key).hasAttribute('data-nav'));
   const inApp = presses(['down', 'down', 'down', 'down', 'down', 'down']);
   check('Resources, over an app: down the column from Home screen, into the view on its first program',
@@ -797,25 +832,35 @@
   const onLong = focusedEl();
   press('down');
   check('Resources: down to the last row it can stop, and stays there', onLong === rNode(RX.key) && focusedEl() === onLong, focusedEl() && focusedEl().dataset.id);
-  check('Resources: its hints: A ends the program', /End program/.test($('menu-panel').querySelector('footer.hints').textContent));
+  check('Resources: its hints: X ends the program; nothing on A', menuHintList() === 'XEnd program,BBack', menuHintList());
   onHost(resData([RW, { ...RX, cpu: 55 }, RJ]));
   check('Resources: a new ranking under the focus: the rows stay where they are, their numbers change',
     focusedEl() === onLong && rNode(RJ.key) === $('menu-res').querySelectorAll('.rs-row')[0] && /55%/.test(onLong.textContent), $('menu-res').textContent.slice(-120));
-  press('a');
-  check('Resources: A asks before ending a program, on Cancel', state.view === 'ask' && /^End Program/.test(asking.title) && focusedEl().dataset.id === 'ask-no', asking && asking.title);
+  // The owner, 29 Sept 2026: X ends a program, with a question first as everywhere, never A.
   sent.length = 0;
+  press('a');
+  check('Resources: A on a program\'s row does nothing: no question, nothing ended', state.view === 'menu' && focusedEl() === onLong && !lastSent('res.stop'), state.view);
+  press('x');
+  check('Resources: X asks before ending a program, on Cancel', state.view === 'ask' && /^End Program/.test(asking.title) && focusedEl().dataset.id === 'ask-no', asking && asking.title);
+  press('a');
+  check('Resources: ... Cancel: nothing ended, back on its row', state.view === 'menu' && !lastSent('res.stop') && focusId() === `res:${RX.key}`, `${state.view} on ${focusId()}`);
+  press('x');
+  press('b');
+  check('Resources: ... B: nothing ended either, back on its row', state.view === 'menu' && !lastSent('res.stop') && focusId() === `res:${RX.key}`, `${state.view} on ${focusId()}`);
+  press('x');
   setFocus($('ask').querySelector('[data-id="ask-yes"]'));
   press('a');
   check('Resources: yes: the host ends it, back on its row', lastSent('res.stop') && lastSent('res.stop').key === RX.key && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === `res:${RX.key}`);
   onHost(resData([RJ, RW], { held: [{ key: RX.key, gone: true }] }));
   check('Resources: ended: its row stays under the focus, says so, and offers nothing more',
-    focusedEl() === rNode(RX.key) && /Ended/.test(rNode(RX.key).textContent) && !/End program/.test($('menu-panel').querySelector('footer.hints').textContent));
+    focusedEl() === rNode(RX.key) && /Ended/.test(rNode(RX.key).textContent) && menuHintList() === 'BBack', menuHintList());
   const outApp = presses(['left', 'up', 'up']);
   check('Resources: left stays; up to the program above, then out to a quick button; the rows follow the host again',
     /^res:exe:long\.exe,res:app:jellyfin,q-\w+$/.test(outApp) && !rNode(RX.key) && lastSent('res.watch').hold.length === 0, outApp);
   press('down');
+  check('Resources: on an app\'s row, the hints: X closes it', focusId() === `res:${RJ.key}` && menuHintList() === 'XClose app,BBack', `${focusId()}: ${menuHintList()}`);
   press('x');
-  check('Resources: X on an app\'s row asks too (Close)', state.view === 'ask' && asking.title === 'Close Jellyfin?');
+  check('Resources: X on an app\'s row asks (Close)', state.view === 'ask' && asking.title === 'Close Jellyfin?');
   setFocus($('ask').querySelector('[data-id="ask-yes"]'));
   press('a');
   check('Resources: yes: the host closes it; its rows say Closing…', lastSent('res.stop').key === RJ.key && /Closing/.test(rNode(RJ.key).textContent)
@@ -827,6 +872,7 @@
   check('Resources: the menu back: sampling again', lastSent('res.watch').on === true);
   reset('home');
   check('Resources: the menu left: sampling stops', lastSent('res.watch').on === false);
+  noticeUpdate({ toasts: [], rows: [], pills: [] });
   state.current = null;
   for (const t of state.tiles) t.running = t.id === 'jellyfin';
 

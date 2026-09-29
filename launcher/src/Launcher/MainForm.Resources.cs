@@ -72,7 +72,7 @@ sealed partial class MainForm
     }
 
     /// <summary>
-    /// A in the resource view, confirmed: an app is closed as its tile's X closes it (asked
+    /// X in the resource view, confirmed: an app is closed as its tile's X closes it (asked
     /// first, then ended: AppManager.Close; the page says "Closing…"). Anything else has its
     /// processes ended, in the user's session only, never Windows' own nor the launcher's
     /// (ResourceRules, checked here again, whatever the page sent).
