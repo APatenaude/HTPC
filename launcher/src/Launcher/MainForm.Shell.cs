@@ -9,6 +9,8 @@ sealed partial class MainForm
 {
     readonly DesktopMode desktop = new();
     readonly System.Windows.Forms.Timer watchdogCheck = new() { Interval = 30_000 };
+    bool desktopMode;       // desktop mode entered and not left (or the desktop was up when the launcher started)
+    DesktopTray? tray;      // its icon in the taskbar, made the first time it is wanted
 
     /// <summary>
     /// As the shell, the watchdog is what brings the launcher back after a crash: if it is gone
@@ -23,6 +25,9 @@ sealed partial class MainForm
         shellStarted = true;
         // Started by the Back to TV shortcut with no launcher running: close the desktop.
         if (options.BackToTv) BackToTv();
+        // Started again while the desktop was up (a crash, an update): still desktop mode, as the
+        // Power menu's Back to TV says.
+        else if (desktop.Active) { desktopMode = true; UpdateTray(); }
         if (setupMode || !desktop.ShellSession) return;
         watchdogCheck.Tick += (_, _) => DesktopMode.EnsureWatchdog();
         watchdogCheck.Start();
@@ -60,6 +65,8 @@ sealed partial class MainForm
     {
         Log.Info($"Desktop mode ({(desktop.ShellSession ? "the launcher is the shell" : "next to Explorer")})");
         desktop.Enter();
+        desktopMode = true;
+        UpdateTray(); // added as soon as Explorer's taskbar takes it
         cursor.Show(); // the desktop is for the mouse (or the controller's Mouse preset)
         // Entered from inside an app: the app would still cover the desktop. Open apps go down
         // to the taskbar; switching to one later restores it (Native.ForceForeground).
@@ -72,24 +79,52 @@ sealed partial class MainForm
         {
             Id = "desktop",
             Title = "Desktop mode",
-            Body = "Back to TV: press Home on the controller, or the Back to TV icon on the desktop.",
+            Body = "Back to TV: press Home on the controller, or click the TV box icon in the taskbar.",
             Glyph = "desktop",
             Urgent = true,
             Duration = TimeSpan.FromSeconds(10),
         });
     }
 
-    /// <summary>Back to TV (Power menu, the desktop shortcut): Explorer closes where the launcher
-    /// is the shell, and the home screen shows.</summary>
+    /// <summary>Back to TV (Power menu, the desktop shortcut, the tray icon: DesktopMode.BackToTvMessage):
+    /// Explorer closes where the launcher is the shell, and the home screen shows.</summary>
     async void BackToTv()
     {
         Log.Info("Back to TV");
+        desktopMode = false;
+        UpdateTray();
         alertCenter.Clear("desktop");
         Post(new { type = "show", view = "home" });
         Reveal();
         await desktop.Leave();
         PushState();
         Reveal(); // Explorer going away may have moved the focus
+    }
+
+    /// <summary>
+    /// Desktop mode's icon in the taskbar (DesktopTray.cs): while in desktop mode where the
+    /// launcher is the shell, never in setup or TV mode. Its Back to TV comes back through
+    /// WndProc (DesktopMode.BackToTvMessage) to BackToTv above; its Home menu is the controller's.
+    /// A failure costs the icon only, never desktop mode.
+    /// </summary>
+    void UpdateTray()
+    {
+        var wanted = DesktopTray.WantedIn(setupMode, desktop.ShellSession, desktopMode);
+        if (!wanted && tray is null) return;
+        try
+        {
+            tray ??= new DesktopTray(() => Handle, TrayHomeMenu);
+            tray.Set(wanted);
+        }
+        catch (Exception e) { Log.Error("Tray icon", e); }
+    }
+
+    // After the tray's menu has faded (Windows fades the chosen item out), so the menu's backdrop
+    // is the desktop alone.
+    async void TrayHomeMenu()
+    {
+        await Task.Delay(250);
+        if (desktopMode) ShowOver(null, "menu");
     }
 
     /// <summary>B in the Home menu opened over the desktop: back to the desktop.</summary>

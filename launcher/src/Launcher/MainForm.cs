@@ -1088,6 +1088,7 @@ sealed partial class MainForm : Form
         volumeWatch.Dispose();
         textFields.Dispose();
         keyboard.Dispose();
+        tray?.Dispose(); // MainForm.Shell.cs: no icon left behind in the taskbar
         cursor.Restore();
         dimmer.Close();
         base.OnFormClosed(e);

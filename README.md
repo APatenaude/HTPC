@@ -104,7 +104,10 @@ can ship code to every box ([launcher/README.md](launcher/README.md), "Releases"
 
 - **Desktop mode:** hold Home for Power, then **Desktop mode** (or Settings › About & Desktop
   mode). The normal Windows desktop opens for maintenance; Home still works over it. To come
-  back: Home, then **Back to TV**, or the Back to TV icon on the desktop.
+  back: Home, then **Back to TV**; or with a mouse or keyboard, the TV box icon in the taskbar
+  by the clock (click it, or Win+B, the arrow keys to it, Enter; right click for its menu), or
+  the Back to TV icon on the desktop. If the icon sits under the ^ instead: Settings ›
+  Personalization › Taskbar › Other system tray icons, turn on HtpcLauncher (the TV box icon).
 - **Uninstall:** in Desktop mode, from PowerShell as administrator:
 
       powershell -ExecutionPolicy Bypass -File C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
