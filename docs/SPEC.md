@@ -29,7 +29,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   hang; after repeated fast exits it restarts the box once, then gives the desktop with a
   message and tries again later. Desktop mode (Power menu, one confirmation) opens Explorer for
   maintenance; Back to TV closes it (Home menu, Power menu, the desktop shortcut, or the TV box
-  icon in the taskbar for a mouse or keyboard). The sign-in screen and desktop are in the home screen's
+  icon in the taskbar for a mouse or keyboard). There the controller is a mouse (Other windows'
+  map), and Windows' own controller navigation is off (the System step), so the stick moves the
+  pointer only. The sign-in screen and desktop are in the home screen's
   colour. Catalog apps never start by themselves (the autostart guard: their Run and RunOnce
   values, Startup shortcuts and tasks, and the services the catalog names), and their own
   updaters are off where they can be.
@@ -106,6 +108,7 @@ user) are folded into the items below; what was dropped is listed under "Not now
   symbols, show password, and a row of what a controller lacks (Tab, refresh, zoom, full
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
   with their own keyboard (VacuumTube, Jellyfin, Moonlight); R3 not intercepted in Moonlight.
+  No automatic pop-up in desktop mode either (the owner, 29 Sept 2026): R3 opens it there.
 - **N12 Global brightness.** One slider dims the whole screen in every app (a software dimming
   layer), from the Home menu, the phone remote and Settings › Display; kept across restarts.
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the

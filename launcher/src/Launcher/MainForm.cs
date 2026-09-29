@@ -450,8 +450,11 @@ sealed partial class MainForm : Form
         // preset app is in front, and only if the keyboard is to pop up by itself: Chromium-based
         // apps build their accessibility tree while anyone listens. Apps on the Controller
         // preset (VacuumTube, Jellyfin, Moonlight) have their own keyboard. Not while the
-        // launcher is on its way up (Home pressed): it would take 2 s to come (Reveal).
-        textFields.Enabled = settings.ShowKeyboardAutomatically && (preset is "mouse" or "keyboard") && !LauncherComing;
+        // launcher is on its way up (Home pressed): it would take 2 s to come (Reveal). Nor in
+        // desktop mode (the owner, 29 Sept 2026): a keyboard popping up on every search box gets
+        // in the way there; R3 (or the button the map gives it) still opens it, and Back to TV
+        // brings the automatic keyboard back.
+        textFields.Enabled = settings.ShowKeyboardAutomatically && !desktopMode && (preset is "mouse" or "keyboard") && !LauncherComing;
         if (keyboard.Visible) map = null; // the controller drives the keyboard
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
