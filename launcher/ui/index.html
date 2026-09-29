@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="library.css">
 <link rel="stylesheet" href="tv.css">
 <link rel="stylesheet" href="phone-card.css">
+<link rel="stylesheet" href="resources.css">
 <script>
 // Demo only (a plain browser, for headless screenshots): show a script error on the page. Never
 // attaches under the launcher's WebView, so nothing extra ships on the box.
@@ -35,6 +36,7 @@ if (!(window.chrome && window.chrome.webview)) {
 
   <section id="menu" class="view overlay">
     <aside class="panel" id="menu-panel"></aside>
+    <div id="menu-res"></div>
     <div id="menu-app"></div>
   </section>
 
@@ -80,6 +82,7 @@ if (!(window.chrome && window.chrome.webview)) {
 <!-- Screens added to app.js (settingsSection, addView): -->
 <script src="settings-more.js"></script>
 <script src="buttons.js"></script>
+<script src="resources.js"></script>
 <script src="library.js"></script>
 <script src="qr.js"></script>
 <script src="phone-settings.js"></script>

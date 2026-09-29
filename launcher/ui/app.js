@@ -231,12 +231,15 @@ function renderMenu() {
   // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that
   // showed for a few seconds when an app opened).
   if ($('menu-app')) patchHtml($('menu-app'), typeof menuAppCard === 'function' ? menuAppCard() : '');
+  // The box's CPU, memory, disk and network, and what uses the most (resources.js), at the top right.
+  if ($('menu-res')) patchHtml($('menu-res'), typeof resCardHtml === 'function' ? resCardHtml() : '');
 }
 
 // The Home menu's hints follow the focus: X only where it does something (an alert's row: it
 // dismisses it; an open app's row, or the app the menu is over: it closes it), left/right on a
-// slider (A does nothing there).
+// slider (A does nothing there). A program's row in the resource view: resources.js's own.
 function menuHints(el) {
+  if (el && el.dataset.res && typeof resHints === 'function') return resHints(el);
   const list = [el && el.dataset.slider ? ['←→', 'Change'] : ['A', 'Select']];
   if (el && el.dataset.alert) list.push(['X', 'Dismiss']);
   else {
@@ -533,7 +536,11 @@ function setFocus(el, chosen = true) {
     return;
   }
   if (state.view === 'settings') settingsFocused(el);
-  if (state.view === 'menu') { const bar = $('menu-panel').querySelector('footer.hints'); if (bar) patchHtml(bar, hints(menuHints(el))); }
+  if (state.view === 'menu') {
+    if (typeof resFocus === 'function') resFocus(el);   // resources.js: its rows stay in place under the focus
+    const bar = $('menu-panel').querySelector('footer.hints');
+    if (bar) patchHtml(bar, hints(menuHints(el)));
+  }
   const view = EXT.views[state.view];
   if (view && view.focused) view.focused(el);
   // Anything in a box that scrolls (a list, a panel, a dialog's list) comes into view, ring and
@@ -622,11 +629,28 @@ function scrollerOf(el) {
   return null;
 }
 
-// Nothing wraps round, anywhere: past the end of a row, a list or a grid the focus stays.
+// Nothing wraps round, anywhere: past the end of a row, a list or a grid the focus stays. A box
+// of its own (data-column: the Home menu's resource card) is a column: up and down stay in it,
+// and left or right go into it only from beside it. On a view with one, left and right go only
+// to what is beside the focus (nearest's across): from the menu's wide rows, right went down to
+// its quick buttons, ahead of the card beside them.
 function move(dir) {
   const cur = focusedEl();
   if (!cur) { restoreFocus(); return; }
-  const best = nearest(cur, dir);
+  const column = cur.closest('[data-column]');
+  let list = column && (dir === 'up' || dir === 'down') ? [...column.querySelectorAll('[data-nav]')] : items();
+  let across = false;
+  if (dir === 'left' || dir === 'right') {
+    const r = cur.getBoundingClientRect();
+    list = list.filter((e) => {
+      const other = e.closest('[data-column]');
+      if (other) across = true;
+      if (!other || other === column) return true;
+      const q = other.getBoundingClientRect();
+      return q.bottom > r.top && q.top < r.bottom;
+    });
+  }
+  const best = nearest(cur, dir, list, across);
   if (best) setFocus(best);
 }
 
@@ -785,9 +809,11 @@ function hostMessage(type, fn) { EXT.host[type] = fn; }
 
 // shown / left for the Settings section in view (none while Settings is not, nor while the stage
 // is blank: the launcher gone behind an app, or standby, where Settings › TV left open searched
-// for TVs every 10 s all night).
+// for TVs every 10 s all night). The Home menu's resource view starts and stops the same way
+// (resources.js: the host samples only while the menu is on screen).
 let sectionInView = null;
 function sectionHooks(unders = []) {
+  if (typeof resourcesInView === 'function') resourcesInView(unders);
   // A dialog or a question over Settings (the TV method dialog, "Forget this TV?") leaves the
   // section in view: its list keeps refreshing, and nothing stops and starts again under it.
   // A blank stage (the launcher behind an app, or in standby) has no section in view.

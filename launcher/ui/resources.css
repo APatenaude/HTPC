@@ -1,0 +1,31 @@
+/* The Home menu's resource view (resources.js): a card at the top right, in the look of the
+   app's buttons' card below it (.ma-card, app.css), a little tighter: over an app with every
+   button mapped (its card at its tallest) the two still fit, one above the other. */
+#menu-res { position: absolute; right: 96px; top: 56px; width: 800px; }
+.rs-card { gap: 12px; padding: 22px 32px 24px; }
+
+/* CPU, memory, disk, network: a label, the number (its unit smaller), a bar or a second line */
+.rs-meters { display: grid; grid-template-columns: 0.8fr 1.3fr 1fr 1.1fr; gap: 24px; }
+.rs-meter { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rs-label { font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+/* Its height set: the unit's other font would make the line taller than the dash before the numbers */
+.rs-value { height: 38px; font-family: var(--display); font-weight: 600; font-size: 34px; letter-spacing: -0.01em; line-height: 38px; white-space: nowrap; }
+.rs-value small { font-family: 'Atkinson Hyperlegible', sans-serif; font-weight: 400; font-size: 22px; letter-spacing: 0; color: var(--text-2); }
+.rs-sub { font-size: 21px; line-height: 1.2; color: var(--text-2); white-space: nowrap; }
+.rs-meter .track { height: 8px; margin-top: 7px; border-radius: 4px; background: var(--track); }
+.rs-meter .fill { height: 8px; border-radius: 4px; background: var(--accent); }
+/* Near the top (CPU 85 %, memory 90 %): amber, as a warning is */
+.rs-meter.high .rs-value, .rs-meter.high .rs-value small { color: var(--warn); }
+.rs-meter.high .fill { background: var(--warn); }
+
+/* The three programs: the menu's rows, shorter; the name gives way to the numbers */
+.rs-section { margin-top: 4px; }
+.rs-rows { display: flex; flex-direction: column; gap: 8px; min-height: 178px; }
+.row.rs-row { height: 54px; padding: 0 22px; gap: 16px; border-radius: 18px; font-size: 26px; }
+.rs-row .grow { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rs-row .tag { flex-shrink: 0; }
+.rs-row .rs-cpu { flex-shrink: 0; width: 80px; text-align: right; font-weight: 700; }
+.rs-row .rs-mem { flex-shrink: 0; width: 108px; text-align: right; color: var(--text-2); }
+.rs-glyph { color: var(--muted); }
+/* Windows' own and the launcher: shown, never stopped from here (no focus) */
+.rs-row.fixed .grow { color: var(--text-2); }
