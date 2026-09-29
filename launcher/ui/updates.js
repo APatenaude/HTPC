@@ -125,8 +125,10 @@ function updAppsCard(s) {
     body += updBar(lane.percent) + `<p>${esc(lane.message || 'Working…')}</p>`;
     if (s.restorePoint && s.restorePoint.status === 'done') body += `<span class="small">${icon('check', 20, 2.25)} ${esc(s.restorePoint.message || 'Restore point saved')}</span>`;
   } else if (n && !s.checking) {
+    // Check again stays offered once updates are found: a newer release may be out since.
     body += '<div class="sbutton primary" data-nav data-id="upd-all" data-act="upd-all">Update all</div>' +
-      '<p class="small">A restore point is saved first, so a bad update can be undone.</p>';
+      '<p class="small">A restore point is saved first, so a bad update can be undone.</p>' +
+      '<div class="sbutton" data-nav data-id="upd-check" data-act="upd-check">Check again</div>';
   } else if (!s.checking) {
     body += '<div class="sbutton" data-nav data-id="upd-check" data-act="upd-check">Check now</div>';
   }
@@ -159,7 +161,8 @@ function updWindowsCard(w) {
     const counted = w.counted;
     const what = counted ? `${counted} update${counted === 1 ? '' : 's'}` : 'Security definitions';
     body += `<p><b>${esc(what)} ready</b>${size ? ` · ${Math.round(size)} MB` : ''}</p>` +
-      `<div class="pair">${button('upd-win-now', 'upd-win-now', 'Install now', true)}${button('upd-win-tonight', 'upd-win-tonight', 'Tonight')}</div>`;
+      `<div class="pair">${button('upd-win-now', 'upd-win-now', 'Install now', true)}${button('upd-win-tonight', 'upd-win-tonight', 'Tonight')}</div>` +
+      button('upd-win-scan', 'upd-win-scan', 'Check again');
   } else if (w.result === 'ok') {
     body += `<p>${icon('check', 22, 2.25)} Windows is up to date</p>` + button('upd-win-scan', 'upd-win-scan', 'Check again');
   } else {
