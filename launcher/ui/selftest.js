@@ -533,8 +533,9 @@
   press('b');
   check('Move: B puts it back', state.tiles.findIndex((t) => t.id === 'moonlight') === 4 && !state.moving);
 
-  // Install from Add tile: A starts it at once (no dialog), Add tile stays up with the focus on
-  // its card, which shows the progress; home shows a tile installing it, then that it did not.
+  // Install from Add tile: A asks "Install Kodi?" (on Cancel); Yes starts it and Add tile stays up
+  // with the focus on its card, which shows the progress; home shows a tile installing it, then
+  // that it did not.
   const kodi = { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: '', type: 'app', state: 'install', canUninstall: true };
   state.libraryAvailable = true;
   EXT.actions.addtile();
@@ -542,7 +543,10 @@
   const kodiCard = () => $('addtile').querySelector('[data-id="app-kodi"]');
   setFocus(kodiCard());
   press('a');
-  check('Install: A starts it at once, with add to home, no dialog', state.view === 'addtile' && lastSent('library.install').id === 'kodi' && lastSent('library.install').addToHome === true, state.view);
+  check('Install: A asks "Install Kodi?" first, on Cancel', state.view === 'ask' && /Install Kodi\?/.test($('ask').textContent) && focusedEl() && focusedEl().dataset.id === 'ask-no', state.view);
+  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
+  press('a');
+  check('Install: Yes starts it, with add to home, back on Add tile', state.view === 'addtile' && lastSent('library.install').id === 'kodi' && lastSent('library.install').addToHome === true, state.view);
   onHost({ type: 'library.progress', current: { id: 'kodi', name: 'Kodi', action: 'install', phase: 'download', percent: 40 }, pending: [] });
   check('Install: Add tile stays, on its card, which shows the progress', state.view === 'addtile' && focusedEl() === kodiCard() && /Downloading/.test(kodiCard().textContent) && !!kodiCard().querySelector('.lc-bar'));
   reset('home');
