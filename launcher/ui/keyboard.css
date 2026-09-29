@@ -1,27 +1,30 @@
-/* On-screen keyboard: a 1920x560 band ("Keyboard over a website" on the design canvas),
-   scaled to its window's width. */
+/* On-screen keyboard: a 1920x440 band ("Keyboard over a website" on the design canvas), scaled
+   to its window's width. 440 of the stage's 1080 (keyboard.js BAND, KeyboardForm.HeightOf1080):
+   it was 560, and took half the screen (the owner, 29 Sept 2026). */
 
 html, body { background: var(--panel); }   /* the band's colour, also beside it on an ultrawide screen */
 
 #kb {
-  position: absolute; left: 0; top: 0; width: 1920px; height: 560px;
+  position: absolute; left: 0; top: 0; width: 1920px; height: 440px;
   transform-origin: 0 0; box-sizing: border-box;
   display: flex; flex-direction: column;
   background: var(--panel); color: var(--text);
   font-family: 'Atkinson Hyperlegible', sans-serif;
 }
 
-.kb-head { display: flex; align-items: center; gap: 20px; height: 60px; padding: 8px 96px 0; box-sizing: border-box; }
-.kb-into { font-size: 22px; color: var(--muted); }
-.kb-field { font-size: 24px; font-weight: 700; max-width: 900px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.kb-typed { font-size: 24px; color: var(--text-2); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; max-width: 700px; }
+.kb-head { display: flex; align-items: center; gap: 20px; height: 40px; padding: 6px 96px 0; box-sizing: border-box; flex-shrink: 0; }
+.kb-into { font-size: 21px; color: var(--muted); }
+.kb-field { font-size: 22px; font-weight: 700; max-width: 900px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.kb-typed { font-size: 22px; color: var(--text-2); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; max-width: 700px; }
 
-.kb-rows { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 8px; }
-.kb-row { display: flex; gap: 10px; }
+/* Six rows of 48 px keys, 8 apart: still big enough to read from the couch (on a 4K TV at 250 %,
+   a key is 96 screen pixels high, its letter 52). */
+.kb-rows { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
+.kb-row { display: flex; gap: 8px; }
 
 .kb-key {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 84px; height: 56px; border-radius: 14px; box-sizing: border-box;
+  width: 84px; height: 48px; border-radius: 12px; box-sizing: border-box;
   background: #22252B; color: var(--text);
   font-size: 26px; font-weight: 700; line-height: 1;
   transition: background 0.08s ease-out, transform 0.08s ease-out;
@@ -37,5 +40,6 @@ html, body { background: var(--panel); }   /* the band's colour, also beside it 
 .kb-key.hit { transform: scale(0.94); }
 .kb-key .icon { flex-shrink: 0; }
 
-/* Six rows of keys and the hints in 560 px: a lower hint bar, clear of the last row's rings. */
-#kb .hints { margin-top: auto; height: 80px; flex-shrink: 0; }
+/* The hints under the keys, clear of the last row's rings: a lower bar, a little closer together
+   than the launcher's (eight of them with a password's Show). */
+#kb .hints { margin-top: auto; height: 60px; flex-shrink: 0; gap: 32px; }

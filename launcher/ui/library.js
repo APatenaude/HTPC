@@ -8,6 +8,11 @@
 // rename, changeicon. Home-screen bits (the "+" tile, Start = Tile options, moving a tile) are
 // wired through onAction hooks app.js calls.
 //
+// Typing (a website's address and name, a tile's new name) is in real text fields with the
+// launcher's own on-screen keyboard, as the Wi-Fi password (textinput.js): A or R3 on a field
+// opens it across the bottom of the screen, Enter there adds or saves. No keyboard of its own in
+// the page any more (the owner, 29 Sept 2026: two keyboards, the page's clipping into the form).
+//
 // Adding stays on Add tile (the owner adds several in a row): what was just added shows as on
 // the home screen where it is, the focus left on it. An app to install starts at once, with no
 // dialog: its card and its home tile show the progress, and that it did not install.
@@ -34,15 +39,13 @@
   const COLORS = ['#FF5B52', '#FF8A1F', '#F5B82E', '#1ED760', '#3DC0F0', '#3CCB9A', '#7C8CFF',
     '#B08CFF', '#FF7AB6', '#F5D16B', '#5AB0FF', '#F3F2EF'];
 
-  const KB_ROWS = ['1234567890'.split(''), 'qwertyuiop'.split(''), 'asdfghjkl-'.split(''), 'zxcvbnm./'.split('')];
-
   const lib = {
     tab: 'library',
-    catalog: { apps: [], sites: [] },
+    catalog: { apps: [], sites: [], categories: [] },
     programs: [],
     progress: { current: null, pending: [] },
     target: null,          // tile id being edited (tileopts / rename / changeicon)
-    website: { name: '', url: '', field: 'url', added: null },   // added: the site just added, till typing starts
+    website: { name: '', url: '', added: null },   // added: the site just added, till typing starts
     addingProgram: null,   // the On this box row whose tile the host is adding
     moveOrigin: null,      // tile order to restore if a move is cancelled
     draft: '',             // the name being typed in the rename view
@@ -159,7 +162,14 @@
   }
 
   onAction('opt-move', startMove);
-  onAction('opt-rename', () => { const t = targetTile(); lib.draft = t ? t.name : ''; go('rename'); });
+  // Rename opens with the keyboard up for its field, the caret after the name.
+  onAction('opt-rename', () => {
+    const t = targetTile();
+    lib.draft = t ? t.name : '';
+    state.memory.rename = null;
+    go('rename');
+    typeInto(el('rename').querySelector('[data-id="rn-name"]'));
+  });
   onAction('opt-icon', () => go('changeicon'));
   onAction('opt-remove', removeTarget);
 
@@ -192,35 +202,50 @@
   }
 
   // ---- Rename ------------------------------------------------------------------------------
+  // The name in a text field, near the top: the keyboard across the bottom never covers it.
 
   addView('rename', {
     demo() { lib.target = state.tiles[0] && state.tiles[0].id; lib.draft = (state.tiles[0] && state.tiles[0].name) || ''; },
     render() {
       const t = targetTile();
       if (!t) { back(); return; }
-      // In place: a key typed changes the name and its count, not the 41 keys under it.
-      patchHtml(el('rename'),
-        '<main class="lib-center"><div class="rn-wrap">' +
-          '<div class="rn-field">' +
-            '<span class="rn-label">Name</span>' +
-            `<div class="rn-input">${esc(lib.draft) || '<span class="rn-ph">Type a name</span>'}<span class="rn-caret"></span></div>` +
-            `<span class="rn-count">${lib.draft.length}/24</span>` +
+      // In place: the clock and host pushes change nothing here, and the field keeps what is typed.
+      drawFields(el('rename'), () => patchHtml(el('rename'),
+        '<header class="at-header"><h1>Rename tile</h1></header>' +
+        '<main class="rn-main">' +
+          `<div class="rn-row"><span class="rn-icon">${appIcon(t, 64)}</span>` +
+            '<div class="lib-field rn-field" data-nav data-id="rn-name" data-act="field">' +
+              `<span class="lib-label">Name</span>${fieldHtml('rn-input', 'draft', lib.draft, 24, 'Type a name', 'Tile name')}` +
+              `<span class="rn-count">${lib.draft.length}/24</span>` +
+            '</div></div>' +
+          '<div class="lib-buttons">' +
+            '<div class="lib-btn primary" data-nav data-id="rn-save" data-act="rn-save">Save</div>' +
+            '<div class="lib-btn" data-nav data-id="rn-cancel" data-act="rn-cancel">Cancel</div>' +
           '</div>' +
-          `<div class="kbi">${keyboardHtml('rename')}</div>` +
-        '</div></main>' +
-        `<footer class="hints">${hints([['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Save'], ['B', 'Cancel']])}</footer>`);
+          `<p class="lib-note">${icon('keyboard', 28)}Type with the on-screen keyboard (A or R3) or on your phone; Enter saves.</p>` +
+        '</main>' +
+        `<footer class="hints">${hints(renameHints(focusedEl()))}</footer>`));
     },
-    press(button) {
-      if (button === 'x') { lib.draft = lib.draft.slice(0, -1); render(); return true; }
-      if (button === 'y') { typeRename(' '); return true; }
+    focused(node) {
+      letGoOfFields(node);
+      const bar = el('rename').querySelector('footer.hints');
+      if (bar) patchHtml(bar, hints(renameHints(node)));
+    },
+    press(button, node) {
       if (button === 'start') { saveRename(); return true; }
+      if (button === 'b') { cancelRename(); return true; }
+      if (button === 'r3') { typeInto(node); return true; }
       return false;
     },
   });
 
-  function typeRename(ch) { if (lib.draft.length < 24) { lib.draft += ch; render(); } }
-  function saveRename() { send({ type: 'tile.rename', id: lib.target, name: lib.draft.trim() }); toast('Renamed'); back(); }
-  onAction('renameKey', (node, ch) => typeRename(ch));
+  function renameHints(node) {
+    return [['A', node && node.dataset.act === 'field' ? 'Type' : 'Select'], ['Start', 'Save'], ['B', 'Cancel']];
+  }
+  function saveRename() { closeFields(); send({ type: 'tile.rename', id: lib.target, name: lib.draft.trim() }); toast('Renamed'); back(); }
+  function cancelRename() { closeFields(); back(); }
+  onAction('rn-save', saveRename);
+  onAction('rn-cancel', cancelRename);
 
   // ---- Change icon -------------------------------------------------------------------------
 
@@ -277,64 +302,73 @@
       // focus left be. Another tab is drawn afresh.
       const old = el('addtile').querySelector('.at-main');
       if (old && el('addtile').dataset.tab === lib.tab) {
-        patchHtml(old, body);
+        drawFields(old, () => patchHtml(old, body));
         // The focused card may have changed (installing, uninstalling, added): so have its hints.
         const f = focusedEl(), bar = el('addtile').querySelector('footer.hints');
         if (bar && f && old.contains(f)) patchHtml(bar, hints(tabHints(f)));
         return;
       }
-      el('addtile').innerHTML =
-        '<header class="at-header"><h1>Add a tile</h1>' + `<nav class="at-tabs" aria-label="Tile source">${tabs}</nav></header>` +
-        `<main class="at-main">${body}</main>` +
-        `<footer class="hints">${hints(hintList)}</footer>`;
+      drawFields(el('addtile'), () => {
+        el('addtile').innerHTML =
+          '<header class="at-header"><h1>Add a tile</h1>' + `<nav class="at-tabs" aria-label="Tile source">${tabs}</nav></header>` +
+          `<main class="at-main">${body}</main>` +
+          `<footer class="hints">${hints(hintList)}</footer>`;
+      });
       el('addtile').dataset.tab = lib.tab;
     },
-    // The tab's list scrolls to the focus, with room for its ring, above the hints; the hints
-    // say what A and X do there.
+    // The tab's list scrolls to the focus, with room for its ring (and a category's first row,
+    // its heading) above the hints; the hints say what A and X do there.
     focused(node) {
+      letGoOfFields(node);
       const main = node.closest('.at-main');
-      if (main) { scrollIntoBox(node, main, 40); listEdges(main); }
+      if (main) { scrollIntoBox(node, main, 40); headingInView(node, main); listEdges(main); }
       const bar = el('addtile').querySelector('footer.hints');
       if (bar) patchHtml(bar, hints(tabHints(node)));
     },
     press(button, node) {
       if (button === 'lb') { switchTab(-1); return true; }
       if (button === 'rb') { switchTab(1); return true; }
+      if (lib.tab === 'library' && (button === 'lt' || button === 'rt')) { jumpCategory(button === 'rt' ? 1 : -1, node); return true; }
       if (lib.tab === 'website') {
-        if (button === 'x') { typeKey('del'); return true; }
-        if (button === 'y') { typeKey('space'); return true; }
         if (button === 'start') { saveWebsite(); return true; }
+        if (button === 'r3') { typeInto(node); return true; }
       }
+      if (button === 'b' || button === 'home' || button === 'homeHold') closeFields();   // and on, as usual
       return false;
     },
   });
 
   // The hints for the focused card or row: A, named for what it offers (it asks first), where it
-  // does something.
+  // does something. The bumpers (tabs) and, in the library, the triggers (categories) share a chip each.
   function tabHints(node) {
-    const tabs = [['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
-    if (lib.tab === 'website') return [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Add tile'], ...tabs];
+    const tabs = [[['LB', 'RB'], 'Tabs'], ['B', 'Back']];
+    if (lib.tab === 'website') {
+      const field = !node || node.dataset.act === 'field';
+      return [['A', field ? 'Type' : 'Add tile'], ...(field ? [['Start', 'Add tile']] : []), ...tabs];
+    }
     if (lib.tab === 'onbox') {
       const add = !node || node.dataset.act === 'addprog' && !node.classList.contains('on-home');
       return [...(add ? [['A', 'Add to home']] : []), ...tabs];
     }
+    const cats = [['LT', 'RT'], 'Category'];
     const card = node && node.dataset.arg ? findCard(node.dataset.arg) : null;
-    if (!card) return [['A', 'Install or add'], ...tabs];
+    if (!card) return [['A', 'Install or add'], cats, ...tabs];
     const kind = cardKind(card);
     const a = kind === 'install' ? (lib.failed.has(card.id) ? 'Try again' : 'Install') : kind === 'uninstall' ? 'Uninstall'
       : kind === 'add' ? 'Add to Home' : kind === 'remove' ? 'Remove from Home' : cardStatus(card).wizard ? 'Show the installer' : null;
-    return [...(a ? [['A', a]] : []), ...tabs];
+    return [...(a ? [['A', a]] : []), cats, ...tabs];
   }
 
   function openAddTile() {
     lib.tab = 'library';
-    lib.website = { name: '', url: '', field: 'url', added: null };
+    lib.website = { name: '', url: '', added: null };
     go('addtile');
     send({ type: 'library.list' });
   }
   function switchTab(step) { setTab(TABS[(TABS.indexOf(lib.tab) + step + TABS.length) % TABS.length]); }
   function setTab(tab) {
     if (!TABS.includes(tab) || tab === lib.tab) return;
+    closeFields();
     lib.tab = tab;
     if (tab === 'library') send({ type: 'library.list' });
     if (tab === 'onbox') { hostAsked('programs', 15000); send({ type: 'library.startMenu' }); }
@@ -375,93 +409,194 @@
     return st.busy ? `<span class="${cls}${st.percent === null ? ' going' : ''}"><span style="width:${st.percent === null ? 100 : st.percent}%"></span></span>` : '';
   }
 
+  // The library by category (the catalog's, in its order), each under its heading: its apps, then
+  // its websites (their own shorter cards: nothing to install, each opens as its own app). A card
+  // with no category the catalog knows goes last, under Other.
+  function libraryGroups() {
+    const cats = lib.catalog.categories || [];
+    const known = new Set(cats.map((c) => c.id));
+    const of = (c) => (known.has(c.category) ? c.category : '');
+    return [...cats, { id: '', name: 'Other' }].map((g) => ({ ...g,
+      apps: lib.catalog.apps.filter((c) => of(c) === g.id), sites: lib.catalog.sites.filter((c) => of(c) === g.id) }))
+      .filter((g) => g.apps.length || g.sites.length);
+  }
+
   function libraryTabHtml() {
     if (!lib.catalog.apps.length && !lib.catalog.sites.length) return '<p class="at-empty">Loading the library…</p>';
-    const apps = lib.catalog.apps.map((c) => {
+    const app = (c) => {
       const st = cardStatus(c);
       return `<button class="lc-app${st.busy ? ' busy' : ''}${st.failed ? ' failed' : ''}" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}">` +
         `<div class="lc-top">${appIcon(c, 40)}<span class="lc-name">${esc(c.name)}</span>${c.builtin ? '<span class="lc-tag">Built in</span>' : ''}</div>` +
         `<span class="lc-status" style="color:${st.color}">${statusIcon(st, 22)}${esc(st.label)}</span>${progressBar(st, 'lc-bar')}</button>`;
-    }).join('');
-    const sites = lib.catalog.sites.map((c) => {
+    };
+    const site = (c) => {
       const st = cardStatus(c);
       return `<button class="lc-site" data-nav data-id="site-${esc(c.id)}" data-act="sitecard" data-arg="${esc(c.id)}">` +
         appIcon({ ...c, glyph: 'globe' }, 34) +   // without its logo, a site shows as a website
         `<span class="lc-sname"><span class="lc-name">${esc(c.name)}</span></span>` +
         `<span class="lc-sglyph" style="color:${st.color}">${icon(st.glyph, 24, 2.25)}</span></button>`;
-    }).join('');
-    return '<span class="at-label">Apps</span>' + `<div class="lc-grid">${apps}</div>` +
-      '<span class="at-label">Streaming sites · each opens as its own app, no install</span>' + `<div class="lc-grid sites">${sites}</div>`;
+    };
+    return libraryGroups().map((g) => `<section class="lc-group" data-cat="${esc(g.id)}"><span class="at-label">${esc(g.name)}</span>` +
+      (g.apps.length ? `<div class="lc-grid">${g.apps.map(app).join('')}</div>` : '') +
+      (g.sites.length ? `<div class="lc-grid sites">${g.sites.map(site).join('')}</div>` : '') + '</section>').join('');
   }
 
+  // LT / RT in the library: the first card of the category before or after the focused one's (at
+  // either end, the first card of that end's category).
+  function jumpCategory(step, node) {
+    const groups = [...el('addtile').querySelectorAll('.lc-group')];
+    const at = node ? groups.findIndex((g) => g.contains(node)) : -1;
+    const to = groups[Math.max(0, Math.min(groups.length - 1, at + step))];
+    const first = to && to.querySelector('[data-nav]');
+    if (first && first !== node) setFocus(first);
+  }
+
+  // A card in its category's first row: the category's heading shows above it too.
+  function headingInView(node, main) {
+    const group = node.closest('.lc-group'), grid = node.parentElement;
+    if (!group || grid !== group.querySelector('.lc-grid') || node.offsetTop - grid.firstElementChild.offsetTop > 1) return;
+    const head = group.querySelector('.at-label').getBoundingClientRect(), box = main.getBoundingClientRect();
+    const scale = box.height / main.offsetHeight || 1;
+    if (head.top < box.top + 8 * scale) main.scrollTop -= (box.top - head.top) / scale + 8;
+  }
+
+  // Each program with its own icon (its Start menu shortcut's, made and kept by the host in the
+  // background: they fill in as they come), else the glyph.
   function onboxTabHtml() {
     if (!lib.programs.length) return `<p class="at-empty">${hostWaitText('programs', 'Reading what’s installed…', 'The list of programs didn’t come. Switch tabs (LB, RB) to try once more.', 15000)}</p>`;
     const rows = lib.programs.map((p) => {
+      const glyph = appIcon({ glyph: 'app', logo: p.logo }, 40);
       if (!p.launchable)
         return `<button class="ob-row muted" data-nav data-id="ob-${esc(p.name)}" data-act="prognote" data-note="${esc(p.note || '')}">` +
-          `<span style="display:flex">${icon('app', 40)}</span><span class="grow">${esc(p.name)}</span><span class="ob-tag">${esc(p.note || '')}</span></button>`;
+          `${glyph}<span class="grow">${esc(p.name)}</span><span class="ob-tag">${esc(p.note || '')}</span></button>`;
       return `<button class="ob-row${p.onHome ? ' on-home' : ''}" data-nav data-id="ob-${esc(p.name)}" data-act="addprog" data-arg="${esc(p.name)}">` +
-        `<span style="display:flex">${icon('app', 40)}</span><span class="grow">${esc(p.name)}</span>${p.onHome ? '<span class="ob-tag">On home screen</span>' : ''}</button>`;
+        `${glyph}<span class="grow">${esc(p.name)}</span>${p.onHome ? '<span class="ob-tag">On home screen</span>' : ''}</button>`;
     }).join('');
     return '<p class="at-note">Everything installed on this box, A to Z</p>' + `<div class="ob-grid">${rows}</div>`;
   }
 
+  // The address first (the name is optional), then Add tile; the preview beside them. Everything
+  // sits in the top half: the keyboard, up, never covers the field being typed into.
   function websiteTabHtml() {
     const w = lib.website;
-    // Just added (the form cleared for the next one): the card shows it, on the home screen.
-    const added = w.added && !w.name && !w.url;
-    const field = (id, label, value, ph) =>
-      `<button class="ws-field${w.field === id ? ' on' : ''}" data-nav data-id="wf-${id}" data-act="field" data-arg="${id}">` +
-        `<span class="ws-label">${label}</span><span class="ws-value">${esc(value) || `<span class="ws-ph">${ph}</span>`}${w.field === id ? '<span class="rn-caret"></span>' : ''}</span></button>`;
+    const field = (id, label, value, max, placeholder, aria) =>
+      `<div class="lib-field" data-nav data-id="wf-${id}" data-act="field"><span class="lib-label">${label}</span>` +
+        `${fieldHtml(`wf-${id}-input`, id, value, max, placeholder, aria)}</div>`;
     return '<div class="ws-form">' +
       '<div class="ws-fields">' +
-        field('name', 'Name', w.name, 'Optional') +
-        field('url', 'Address', w.url, 'example.com') +
-        '<div class="ws-hint">Opens as its own app window, like an app — no address bar or tabs.</div>' +
+        field('url', 'Address', w.url, 2048, 'example.com', 'Website address') +
+        field('name', 'Name', w.name, 24, 'Optional: its address if left empty', 'Tile name') +
+        `<div class="lib-buttons"><div class="lib-btn primary" data-nav data-id="wf-add" data-act="addsite">${lib.adding ? 'Adding…' : 'Add tile'}</div></div>` +
+        `<p class="lib-note">${icon('keyboard', 28)}Opens as its own app window: no address bar or tabs. Type with the on-screen keyboard (A or R3) or on your phone.</p>` +
       '</div>' +
-      `<div class="ws-preview"><span class="ws-plabel">${added ? 'Added' : 'Preview'}</span>` +
-        `<div class="ws-card"><span style="display:flex;color:#8CC2FF">${icon('globe', 64)}</span>` +
-        `<span class="ws-cname">${esc(added ? w.added : w.name || previewName(w.url))}</span>` +
-        (added ? `<span class="ws-added">${icon(STATUS.home.glyph, 22, 2.25)}${STATUS.home.label}</span>` : '') + '</div></div>' +
-      '</div>' +
-      `<div class="ws-kb">${keyboardHtml('website')}</div>`;
+      `<div class="ws-preview">${previewHtml()}</div>` +
+    '</div>';
+  }
+
+  // Just added (the form cleared for the next one): the card shows it, on the home screen.
+  function previewHtml() {
+    const w = lib.website, added = w.added && !w.name && !w.url;
+    return `<span class="ws-plabel">${added ? 'Added' : 'Preview'}</span>` +
+      `<div class="ws-card"><span style="display:flex;color:#8CC2FF">${icon('globe', 64)}</span>` +
+      `<span class="ws-cname">${esc(added ? w.added : w.name.trim() || previewName(w.url))}</span>` +
+      (added ? `<span class="ws-added">${icon(STATUS.home.glyph, 22, 2.25)}${STATUS.home.label}</span>` : '') + '</div>';
   }
 
   function previewName(url) {
-    if (!url) return 'Website';
-    return url.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0] || 'Website';
+    if (!url.trim()) return 'Website';
+    return url.trim().replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'Website';
   }
 
-  // ---- Website form editing ----------------------------------------------------------------
-
-  function activeField() { return lib.website.field === 'name' ? 'name' : 'url'; }
-  function typeText(text) {
-    const f = activeField();
-    lib.website[f] = (lib.website[f] + text).slice(0, f === 'name' ? 24 : 2048);
-    lib.website.added = null;
-    render();
-  }
-  function typeKey(which) {
-    const f = activeField();
-    lib.website.added = null;
-    if (which === 'del') lib.website[f] = lib.website[f].slice(0, -1);
-    else if (which === 'space' && f === 'name') lib.website[f] = (lib.website[f] + ' ').slice(0, 24);
-    render();
-  }
-  // Adding shows on its key ("Adding…") until the host answers; 15 s without an answer says so.
+  // Adding shows on its button ("Adding…") until the host answers; 15 s without an answer says so.
+  // No address yet: the address field, with the keyboard.
   function saveWebsite() {
     if (lib.adding) return;
+    if (!lib.website.url.trim()) { toast('Type the website’s address first', 'warn'); typeInto(el('addtile').querySelector('[data-id="wf-url"]')); return; }
     lib.adding = setTimeout(() => { lib.adding = null; toast('No answer about the website. Try once more.', 'warn'); if (state.view === 'addtile') render(); }, 15000);
-    send({ type: 'library.addWebsite', name: lib.website.name, url: lib.website.url });
+    send({ type: 'library.addWebsite', name: lib.website.name.trim(), url: lib.website.url.trim() });
     render();
   }
-
-  onAction('field', (node, id) => { lib.website.field = id; render(); });
-  onAction('key', (node, ch) => typeText(ch));
-  onAction('space', () => typeKey('space'));
-  onAction('del', () => typeKey('del'));
-  onAction('dotcom', () => typeText('.com'));
   onAction('addsite', saveWebsite);
+
+  // ---- Text fields (the website's, the tile's new name) ------------------------------------------
+  // As the Wi-Fi password's (wifi.js): real <input>s the on-screen keyboard and the phone type
+  // into (textinput.js). What is typed is kept in lib as it comes, so a field drawn again (patchHtml
+  // makes text fields afresh: the clock, a host push) shows it, with the focus and the caret back
+  // where they were.
+
+  function fieldHtml(id, field, value, max, placeholder, aria) {
+    return `<input id="${id}" data-field="${field}" type="text" value="${esc(value)}" maxlength="${max}" placeholder="${esc(placeholder)}" ` +
+      `aria-label="${esc(aria)}" autocomplete="off" spellcheck="false">`;
+  }
+
+  function drawFields(root, draw) {
+    const was = document.activeElement;
+    const typing = was && was.dataset && was.dataset.field && root.contains(was) ? { id: was.id, from: was.selectionStart, to: was.selectionEnd } : null;
+    draw();
+    for (const input of root.querySelectorAll('input[data-field]')) {
+      if (input.dataset.wired) continue;
+      input.dataset.wired = '1';
+      input.addEventListener('input', () => typed(input));
+      input.addEventListener('textsubmit', () => submitted(input));
+    }
+    const now = typing && document.getElementById(typing.id);
+    if (now && document.activeElement !== now) { now.focus(); now.setSelectionRange(typing.from, typing.to); }
+  }
+
+  // Only what shows what is typed changes: the preview, the count. (setRangeText, which the
+  // keyboard's text goes through, does not keep to maxlength itself.)
+  function typed(input) {
+    const max = Number(input.getAttribute('maxlength')) || 2048;
+    if (input.value.length > max) input.value = input.value.slice(0, max);
+    const f = input.dataset.field;
+    if (f === 'draft') {
+      lib.draft = input.value;
+      const count = el('rename').querySelector('.rn-count');
+      if (count) count.textContent = `${lib.draft.length}/24`;
+      return;
+    }
+    lib.website[f] = input.value;
+    lib.website.added = null;
+    const preview = el('addtile').querySelector('.ws-preview');
+    if (preview) patchHtml(preview, previewHtml());
+  }
+
+  // Enter, from the on-screen keyboard or a real one: the name saved, the website added. The
+  // website's name with no address yet: on to the address, the keyboard up again for it.
+  function submitted(input) {
+    if (input.dataset.field === 'draft') { saveRename(); return; }
+    if (input.dataset.field === 'name' && !lib.website.url.trim()) { typeInto(el('addtile').querySelector('[data-id="wf-url"]')); return; }
+    saveWebsite();
+  }
+
+  // A (or R3) on a field's row: the focus on it, the on-screen keyboard for its field, the caret
+  // after what is there.
+  function typeInto(row) {
+    const input = row && row.querySelector('input[data-field]');
+    if (!input) return;
+    if (focusedEl() !== row) setFocus(row);
+    openKeyboardFor(input);
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+  onAction('field', (node) => typeInto(node));
+
+  // The focus moved off a field's row: the field lets go too (the phone's text, R3, a real
+  // keyboard's keys and the interface sounds are the launcher's again).
+  function letGoOfFields(node) {
+    const f = textField();
+    if (f && f.dataset.field && !node.contains(f)) f.blur();
+  }
+
+  // The fields' screen or tab goes: the keyboard with them, if it was up for one.
+  function closeFields() {
+    const f = textField();
+    if (!f || !f.dataset.field) return;
+    f.blur();
+    textDone();
+  }
+  // ... also when it goes some other way (Home over the rename, an alert's action, the host
+  // showing another view): checked with each render.
+  onHome(() => { if (state.view !== 'rename' && !(state.view === 'addtile' && lib.tab === 'website')) closeFields(); });
 
   // ---- Library card actions ----------------------------------------------------------------
 
@@ -517,7 +652,7 @@
   // The card shows the change at once; the host's catalog, asked for again, confirms it.
   function markCard(id, now) {
     const mark = (c) => (c.id === id ? { ...c, state: now } : c);
-    lib.catalog = { apps: lib.catalog.apps.map(mark), sites: lib.catalog.sites.map(mark) };
+    lib.catalog = { ...lib.catalog, apps: lib.catalog.apps.map(mark), sites: lib.catalog.sites.map(mark) };
     lib.catalogKey = null;                 // the host's next catalog is drawn, even the same as before
     send({ type: 'library.list' });
     render();
@@ -579,10 +714,10 @@
       case 'library.available': state.libraryAvailable = !!msg.available; break;
       case 'library.catalog': {
         // The same catalog again (the host sends it on each look, each logo, each add): nothing to draw.
-        const key = JSON.stringify([msg.apps, msg.sites]), failed = [...lib.failed].join();
+        const key = JSON.stringify([msg.apps, msg.sites, msg.categories]), failed = [...lib.failed].join();
         const same = key === lib.catalogKey;
         lib.catalogKey = key;
-        lib.catalog = { apps: msg.apps || [], sites: msg.sites || [] };
+        lib.catalog = { apps: msg.apps || [], sites: msg.sites || [], categories: msg.categories || [] };
         // Out of the queue and still to install: it did not.
         for (const id of lib.finished) {
           const c = findCard(id);
@@ -615,7 +750,7 @@
       case 'library.websiteResult':
         clearTimeout(lib.adding);
         lib.adding = null;
-        if (msg.ok) { toast(`Added ${msg.name}`); lib.website = { name: '', url: '', field: 'url', added: msg.name }; }
+        if (msg.ok) { toast(`Added ${msg.name}`); lib.website = { name: '', url: '', added: msg.name }; }
         else toast(msg.error || 'That address did not work', 'warn');
         if (state.view === 'addtile') render();
         break;
@@ -638,77 +773,62 @@
     if (first) setFocus(first);
   }
 
-  // ---- Shared on-screen keyboard (rename + website) ----------------------------------------
-
-  function keyboardHtml(mode) {
-    const keyAct = mode === 'rename' ? 'renameKey' : 'key';
-    const rows = KB_ROWS.map((row) =>
-      `<div class="kbi-row">${row.map((c) =>
-        `<button class="kbi-key" data-nav data-id="${mode}-k-${c}" data-act="${keyAct}" data-arg="${c}">${c === '/' ? '&#47;' : esc(c)}</button>`).join('')}</div>`).join('');
-    const extras = mode === 'website' ? [':'] : [];   // '/' is on the row above
-    const doneAct = mode === 'rename' ? 'renameDone' : 'addsite';
-    const spaceAct = mode === 'rename' ? 'renameSpace' : 'space';
-    const delAct = mode === 'rename' ? 'renameDel' : 'del';
-    const bottom = '<div class="kbi-row">' +
-      extras.map((c) => `<button class="kbi-key" data-nav data-id="${mode}-k-${c}" data-act="${keyAct}" data-arg="${c}">${c === '/' ? '&#47;' : esc(c)}</button>`).join('') +
-      (mode === 'website' ? '<button class="kbi-key wide" data-nav data-id="website-dotcom" data-act="dotcom">.com</button>' : '') +
-      `<button class="kbi-key space" data-nav data-id="${mode}-space" data-act="${spaceAct}" aria-label="Space"></button>` +
-      `<button class="kbi-key" data-nav data-id="${mode}-del" data-act="${delAct}" aria-label="Delete">${icon('backspace', 30, 2)}</button>` +
-      `<button class="kbi-key primary" data-nav data-id="${mode}-done" data-act="${doneAct}">${mode === 'rename' ? 'Save' : lib.adding ? 'Adding…' : 'Add'}</button>` +
-      '</div>';
-    return rows + bottom;
-  }
-  onAction('renameDel', () => { lib.draft = lib.draft.slice(0, -1); render(); });
-  onAction('renameSpace', () => typeRename(' '));
-  onAction('renameDone', saveRename);
-
   // ---- Demo data (index.html#addtile, #addtile/website, #tileopts...) -----------------------
+
+  // The real catalog (setup\catalog.json, its 40 apps and sites in their categories) and a box's
+  // worth of programs (about 100, some with long names): the screens are looked at as full as a
+  // box has them.
+  const DEMO_CATEGORIES = [['movies', 'Movies & shows'], ['canada', 'Canadian TV'], ['sports', 'Sports'], ['music', 'Music'],
+    ['games', 'Games'], ['media', 'Your media & tools']].map(([id, name]) => ({ id, name }));
+  const DEMO_CATALOG = [
+    ['youtube', 'YouTube', 'youtube', '#FF5B52', 'app', 'movies', 'home'], ['twitch', 'Twitch', 'chat', '#B08CFF', 'website', 'movies', 'home'],
+    ['stremio', 'Stremio', 'film', '#7C8CFF', 'app', 'movies', 'home'], ['jellyfin', 'Jellyfin', 'library', '#3DC0F0', 'app', 'media', 'home'],
+    ['moonlight', 'Moonlight', 'moon', '#F5D16B', 'app', 'games', 'uninstalling'], ['edge', 'Browser', 'globe', '#3CCB9A', 'app', 'media', 'home'],
+    ['kodi', 'Kodi', 'play', '#5AB0FF', 'app', 'media', 'install'], ['vlc', 'VLC', 'play', '#FF8A1F', 'app', 'media', 'home'],
+    ['plex', 'Plex HTPC', 'play', '#F5B82E', 'app', 'media', 'install'], ['spotify', 'Spotify', 'music', '#1ED760', 'app', 'music', 'installing'],
+    ['feishin', 'Feishin', 'music', '#FF7AB6', 'app', 'music', 'install'], ['steam', 'Steam', 'controller', '#66C0F4', 'app', 'games', 'install'],
+    ['playnite', 'Playnite', 'controller', '#B08CFF', 'app', 'games', 'install'], ['retroarch', 'RetroArch', 'controller', '#5AB0FF', 'app', 'games', 'home'],
+    ['retrobat', 'RetroBat', 'controller', '#F5B82E', 'app', 'games', 'install'], ['netflix', 'Netflix', 'play', '#FF4B55', 'website', 'movies', 'add'],
+    ['disneyplus', 'Disney+', 'play', '#4D8DFF', 'website', 'movies', 'add'], ['primevideo', 'Prime Video', 'play', '#2BB0F5', 'website', 'movies', 'home'],
+    ['crunchyroll', 'Crunchyroll', 'play', '#FF8A2B', 'website', 'movies', 'add'], ['hbomax', 'HBO Max', 'play', '#8A7BFF', 'website', 'movies', 'add'],
+    ['appletv', 'Apple TV+', 'play', '#D9D8D4', 'website', 'movies', 'add'], ['paramountplus', 'Paramount+', 'play', '#3D8BFF', 'website', 'movies', 'add'],
+    ['tubi', 'Tubi', 'play', '#FFD43B', 'website', 'movies', 'add'], ['plutotv', 'Pluto TV', 'tv', '#F5E642', 'website', 'movies', 'add'],
+    ['crave', 'Crave', 'play', '#3FA9F5', 'website', 'movies', 'add'], ['cbcgem', 'CBC Gem', 'play', '#FF4B4B', 'website', 'canada', 'add'],
+    ['toutv', 'ICI TOU.TV', 'play', '#F25F5C', 'website', 'canada', 'home'], ['telequebec', 'Télé-Québec', 'play', '#3DC0F0', 'website', 'canada', 'add'],
+    ['tvaplus', 'TVA+', 'tv', '#6FA8FF', 'website', 'canada', 'add'], ['illicoplus', 'illico+', 'play', '#E6D65A', 'website', 'canada', 'add'],
+    ['onf', 'ONF', 'film', '#FF7A6B', 'website', 'canada', 'add'], ['rds', 'RDS', 'tv', '#FF5A4E', 'website', 'sports', 'add'],
+    ['tsn', 'TSN', 'tv', '#E8485C', 'website', 'sports', 'add'], ['sportsnet', 'Sportsnet+', 'tv', '#2F9BFF', 'website', 'sports', 'add'],
+    ['ohdio', 'OHdio', 'speaker', '#B08CFF', 'website', 'music', 'add'], ['youtubemusic', 'YouTube Music', 'music', '#FF4E45', 'website', 'music', 'add'],
+    ['applemusic', 'Apple Music', 'music', '#FF5A73', 'website', 'music', 'add'], ['geforcenow', 'GeForce NOW', 'controller', '#8CD13C', 'website', 'games', 'add'],
+    ['xboxcloud', 'Xbox Cloud Gaming', 'controller', '#52C443', 'website', 'games', 'add'], ['luna', 'Amazon Luna', 'controller', '#A07CFF', 'website', 'games', 'add'],
+  ].map(([id, name, glyph, color, type, category, state]) => demoLogo({ id, name, glyph, color, type, category, state, canUninstall: type === 'app' && id !== 'edge', builtin: id === 'edge' }));
+  const DEMO_PROGRAMS = ['7-Zip File Manager', 'Adobe Acrobat', 'Amazon Luna', 'Audacity', 'Back to TV', 'Calculator', 'Character Map', 'Command Prompt',
+    'Component Services', 'Computer Management', 'Control Panel', 'dfrgui', 'Discord', 'Disk Cleanup', 'Dolby Access', 'EA app', 'Epic Games Launcher',
+    'Event Viewer', 'File Explorer', 'GIMP 2.10.38', 'GOG GALAXY', 'HandBrake', 'Hyper-V Manager', 'Intel® Graphics Command Center (Arc Control, beta)',
+    'iSCSI Initiator', 'Jellyfin Media Player', 'Kodi', 'LibreOffice Calc', 'LibreOffice Impress', 'LibreOffice Writer', 'LiveCaptions', 'Magnify',
+    'Memory Diagnostics Tool', 'Microsoft Edge', 'Microsoft Visual C++ 2015-2022 Redistributable Diagnostics (x64)', 'Moonlight', 'MPC-HC x64',
+    'Narrator', 'Notepad', 'Notepad++', 'NVIDIA Control Panel', 'OBS Studio', 'ODBC Data Sources (32-bit)', 'ODBC Data Sources (64-bit)',
+    'On-Screen Keyboard', 'Paint', 'Performance Monitor', 'Playnite', 'Plex HTPC', 'Print Management', 'qBittorrent', 'RecoveryDrive', 'Registry Editor',
+    'Remote Desktop Connection', 'Resource Monitor', 'RetroArch', 'RetroArch Website', 'Run', 'Safe Mode', 'Security Configuration Management',
+    'services', 'Snipping Tool', 'Sonarr', 'Steam', 'Steps Recorder', 'Stremio', 'System Configuration', 'System Information', 'Task Manager',
+    'Task Scheduler', 'Ubisoft Connect', 'Uninstall', 'Uninstall Kodi', 'Uninstall RetroArch', 'VacuumTube', 'VLC media player',
+    'VLC media player - reset preferences and cache files', 'VLC media player skinned', 'VMCreate', 'VoiceAccess', 'Windows Defender Firewall with Advanced Security',
+    'Windows Media Player Legacy', 'Windows PowerShell', 'Windows PowerShell (x86)', 'Windows PowerShell ISE', 'Windows PowerShell ISE (x86)', 'WinRAR',
+    'Wireshark', 'WordPad', 'Xbox', 'Xbox Game Bar', 'XnView MP', 'Zoom Workplace', 'Zune Music (an old program with a name long enough to run out of room)',
+    'Adobe Photoshop Elements 2024 Organizer', 'Battle.net', 'Blender 4.2', 'Brave', 'Firefox', 'Google Chrome', 'Spotify']
+    .sort((a, b) => a.localeCompare(b)).map((name) => ({ name, launchable: !/Website|Safe Mode|^Run$|Control Panel/.test(name),
+      onHome: /^(Jellyfin Media Player|Microsoft Edge|Kodi|Moonlight)$/.test(name),
+      note: /Website|Safe Mode/.test(name) ? 'Not a program' : /^Run$|Control Panel/.test(name) ? 'Windows Installer shortcut' : null }));
 
   function demoData() {
     if (lib.catalog.apps.length) return;
-    const C = { youtube: '#FF5B52', stremio: '#7C8CFF', jellyfin: '#3DC0F0', moonlight: '#F5D16B', edge: '#3CCB9A', kodi: '#5AB0FF', vlc: '#FF8A1F', plex: '#F5B82E', spotify: '#1ED760', feishin: '#FF7AB6' };
-    lib.catalog = {
-      apps: [
-        { id: 'youtube', name: 'YouTube', glyph: 'youtube', state: 'home', canUninstall: true },
-        { id: 'stremio', name: 'Stremio', glyph: 'film', state: 'home', canUninstall: true },
-        { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', state: 'home', canUninstall: true },
-        { id: 'moonlight', name: 'Moonlight', glyph: 'moon', state: 'uninstalling', canUninstall: true },
-        { id: 'edge', name: 'Browser', glyph: 'globe', state: 'home', builtin: true },
-        { id: 'kodi', name: 'Kodi', glyph: 'tv', state: 'install', canUninstall: true },
-        { id: 'vlc', name: 'VLC', glyph: 'play', state: 'home', canUninstall: true },
-        { id: 'plex', name: 'Plex HTPC', glyph: 'library', state: 'install', canUninstall: true },
-        { id: 'spotify', name: 'Spotify', glyph: 'music', state: 'installing', canUninstall: true },
-        { id: 'feishin', name: 'Feishin', glyph: 'music', state: 'install', canUninstall: true },
-      ].map((a) => demoLogo(Object.assign(a, { color: C[a.id] || '#F3F2EF' }))),
-      sites: [
-        { id: 'twitch', name: 'Twitch', color: '#9146FF', state: 'home' },
-        { id: 'netflix', name: 'Netflix', color: '#FF4B55', state: 'add' },
-        { id: 'disneyplus', name: 'Disney+', color: '#4D8DFF', state: 'add' },
-        { id: 'primevideo', name: 'Prime Video', color: '#2BB0F5', state: 'add' },
-        { id: 'crunchyroll', name: 'Crunchyroll', color: '#FF8A2B', state: 'add' },
-        { id: 'tubi', name: 'Tubi', color: '#FFD43B', state: 'add' },
-      ].map(demoLogo),
-    };
+    lib.catalog = { categories: DEMO_CATEGORIES, apps: DEMO_CATALOG.filter((a) => a.type === 'app'), sites: DEMO_CATALOG.filter((a) => a.type === 'website') };
     lib.progress = { current: { id: 'spotify', name: 'Spotify', action: 'install', phase: 'download', percent: 62 }, pending: [] };
     lib.queued = new Set(['spotify']);
     lib.failed = new Set(['feishin']);
-    lib.programs = [
-      { name: 'File Explorer', launchable: true, onHome: false },
-      { name: 'Jellyfin Media Player', launchable: true, onHome: true },
-      { name: 'Microsoft Edge', launchable: true, onHome: true },
-      { name: 'Notepad', launchable: true, onHome: false },
-      { name: 'Store app', launchable: false, note: 'Windows app' },
-      { name: 'Task Manager', launchable: true, onHome: false },
-      { name: 'Windows Media Player', launchable: false, note: 'Windows Installer shortcut' },
-    ];
-    // #addtile?many=1, #addtile/onbox?many=1: lists longer than the screen (scrolling, rings).
-    if (/[?&]many=1/.test(location.hash)) {
-      const more = (list, n, f) => Array.from({ length: n }, (_, i) => f(list[i % list.length], i));
-      lib.catalog.apps = lib.catalog.apps.concat(more(lib.catalog.apps, 13, (a, i) =>
-        ({ ...a, id: `${a.id}${i}`, name: `${a.name} ${i + 2}`, state: 'install', canUninstall: true, builtin: false, logo: null })));
-      lib.catalog.sites = lib.catalog.sites.concat(more(lib.catalog.sites, 7, (s, i) => ({ ...s, id: `${s.id}${i}`, name: `${s.name} ${i + 2}`, logo: null })));
-      lib.programs = more(lib.programs, 26, (p, i) => ({ ...p, name: `${p.name} ${i + 1}` }));
-    }
+    lib.programs = DEMO_PROGRAMS;
+    // #addtile/website?long=1: a long name and address typed in.
+    if (/[?&]long=1/.test(location.hash)) lib.website = { name: 'My NAS media server p', url: 'https://www.a-very-long-website-address-for-a-streaming-service.example.com/watch/home?profile=living-room', added: null };
   }
 
   // Demo: index.html#home?installing=1, tiles for an app installing and one that did not.

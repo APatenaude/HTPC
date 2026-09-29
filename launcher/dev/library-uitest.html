@@ -106,13 +106,15 @@ function run() {
   check('drop sends tile.order', !!moved);
   check('youtube moved after twitch', moved && moved.ids.indexOf('twitch') === 0 && moved.ids.indexOf('youtube') === 1);
 
-  // Website form: the inline keyboard builds the model; Add sends the typed url.
+  // Website form: a real field the launcher's keyboard types into (text.insert); Start adds it.
   reset('home'); focus('.tile.add'); press('a');
   press('rb'); press('rb');
   window.__sent.length = 0;
-  'netflix.com'.split('').forEach((ch) => EXT.actions['key'](null, ch));
-  check('typing shows in the Address field', /netflix\.com/.test(document.querySelector('#addtile .ws-fields').textContent));
-  EXT.actions['addsite']();
+  press('a');
+  check('A on the address asks for the on-screen keyboard', !!lastSent('text.keyboard'));
+  feed({ type: 'text.insert', text: 'netflix.com' });
+  check('typing shows in the Address field', document.querySelector('#addtile input[data-field="url"]').value === 'netflix.com');
+  press('start');
   const site = lastSent('library.addWebsite');
   check('Add sends library.addWebsite with the typed url', site && site.url === 'netflix.com');
 

@@ -11,11 +11,14 @@ const send = (msg) => host ? host.postMessage(msg) : console.log('to host', msg)
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const kb = document.getElementById('kb');
-// The 1920x560 band scaled to its window (the screen's width, 560/1080 of its height): by the
+// The band's height on the 1920x1080 stage: keyboard.css #kb, and KeyboardForm.HeightOf1080, the
+// window the launcher gives it (the owner, 29 Sept 2026: it took too much of the screen at 560).
+const BAND = 440;
+// The 1920x440 band scaled to its window (the screen's width, 440/1080 of its height): by the
 // width, or by the height on a screen wider than 16:9 (an ultrawide: centred, the sides its colour).
 function fit() {
-  const s = Math.min(innerWidth / 1920, innerHeight / 560) || innerWidth / 1920;
-  kb.style.transform = `translate(${Math.max(0, (innerWidth - 1920 * s) / 2)}px, ${Math.max(0, innerHeight - 560 * s)}px) scale(${s})`;
+  const s = Math.min(innerWidth / 1920, innerHeight / BAND) || innerWidth / 1920;
+  kb.style.transform = `translate(${Math.max(0, (innerWidth - 1920 * s) / 2)}px, ${Math.max(0, innerHeight - BAND * s)}px) scale(${s})`;
 }
 addEventListener('resize', fit);
 fit();
@@ -83,11 +86,14 @@ function render() {
   if (on) on.classList.add('on');
   document.getElementById('kb-field').textContent = field || 'the app';
   document.getElementById('kb-typed').textContent = password ? (reveal ? typed : '•'.repeat(typed.length)) : '';
-  const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['LT', 'Shift'], ['LB', '←'], ['RB', '→'], ['Start', 'Enter']];
+  // Two buttons for one label where they go together (the triggers, the bumpers): the bar holds
+  // the password's Show too, at every screen width.
+  const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], [['LT', 'RT'], 'Shift · Symbols'], [['LB', 'RB'], 'Cursor'], ['Start', 'Enter']];
   if (password) list.push(['Select', reveal ? 'Hide password' : 'Show password']);
   list.push(['B', 'Close']);
-  document.getElementById('kb-hints').innerHTML = list.map(([btn, label]) =>
-    `<div class="hint"><span class="key${btn.length > 1 ? ' wide' : ''}">${esc(btn)}</span><span>${esc(label)}</span></div>`).join('');
+  document.getElementById('kb-hints').innerHTML = list.map(([btn, label]) => '<div class="hint">' +
+    (Array.isArray(btn) ? btn : [btn]).map((b) => `<span class="key${b.length > 1 ? ' wide' : ''}">${esc(b)}</span>`).join('') +
+    `<span>${esc(label)}</span></div>`).join('');
 }
 
 function flash(r, c) {
@@ -119,11 +125,12 @@ function press(k) {
   }
 }
 
-// Up and down go to the key nearest in the row above or below (rows differ in width).
+// Up and down go to the key nearest in the row above or below (rows differ in width); past the
+// top row, the bottom one, and past the bottom row, the top one (the owner, 29 Sept 2026: the
+// keyboard wraps round, unlike the lists everywhere else).
 function moveVertical(dir) {
   const layout = rows();
-  const target = focus.row + dir;
-  if (target < 0 || target >= layout.length) return;
+  const target = (focus.row + dir + layout.length) % layout.length;
   const from = document.querySelector(`.kb-key[data-r="${focus.row}"][data-c="${focus.col}"]`).getBoundingClientRect();
   const x = from.left + from.width / 2;
   let best = 0, bestDistance = Infinity;
@@ -141,13 +148,14 @@ function onButton(button) {
   switch (button) {
     case 'up': moveVertical(-1); break;
     case 'down': moveVertical(1); break;
-    // Nothing wraps round (as everywhere on the TV): the ends of a row stop the focus.
-    case 'left': focus.col = Math.max(0, focus.col - 1); break;
-    case 'right': focus.col = Math.min(count - 1, focus.col + 1); break;
+    // A row wraps round: left from its first key, its last; right from its last, its first.
+    case 'left': focus.col = (focus.col - 1 + count) % count; break;
+    case 'right': focus.col = (focus.col + 1) % count; break;
     case 'a': flash(focus.row, focus.col); press(layout[focus.row][focus.col]); break;
     case 'x': backspace(); break;
     case 'y': typeText(' '); break;
     case 'lt': cycleShift(); break;
+    case 'rt': symbols = !symbols; break;   // the symbols page and back, as its key (#+= / abc)
     case 'lb': send({ type: 'key', key: 'left' }); break;
     case 'rb': send({ type: 'key', key: 'right' }); break;
     case 'start': send({ type: 'key', key: 'enter' }); break;
@@ -175,7 +183,7 @@ if (host) {
 } else {
   // A normal browser: the keyboard stands in for the controller.
   const keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', Escape: 'b',
-    Backspace: 'x', ' ': 'y', Shift: 'lt', PageUp: 'lb', PageDown: 'rb', F2: 'select', F10: 'start' };
+    Backspace: 'x', ' ': 'y', Shift: 'lt', Control: 'rt', PageUp: 'lb', PageDown: 'rb', F2: 'select', F10: 'start' };
   addEventListener('keydown', (e) => { if (keys[e.key]) { e.preventDefault(); onButton(keys[e.key]); } });
   onHost({ type: 'open', field: 'Password', password: true });
   // keyboard.html#audit (#audit?page=...): the UI audit's keyboard pages (audit.js), loaded

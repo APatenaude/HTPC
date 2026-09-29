@@ -1,7 +1,15 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Htpc.Launcher;
 
 /// <summary>A program found in the Start menu, for the "Add tile &gt; On this box" screen.</summary>
-sealed record InstalledProgram(string Name, string? Target, string? Args, string? WorkingDir, bool Launchable, string? Note);
+/// <param name="Link">Its Start menu shortcut, whose icon it shows (IconId).</param>
+sealed record InstalledProgram(string Name, string Link, string? Target, string? Args, string? WorkingDir, bool Launchable, string? Note)
+{
+    /// <summary>What its icon is kept under with the apps' logos (StartMenuScanner.IconId).</summary>
+    public string IconId => StartMenuScanner.IconId(Link);
+}
 
 /// <summary>
 /// Reads the Start-menu shortcuts (all users and this user) so the "On this box" screen can list
@@ -11,10 +19,22 @@ sealed record InstalledProgram(string Name, string? Target, string? Args, string
 /// target, a document, a UWP link) are listed but marked, with a short note, and cannot be added.
 ///
 /// UWP/Store apps do not appear: they live in Windows' Apps folder, not as .lnk files. That is fine
-/// for this box (the catalog and classic installers cover what it runs).
+/// for this box (the catalog and classic installers cover what it runs; Windows 11 IoT LTSC's
+/// Paint, Notepad and Calculator are classic programs with shortcuts).
 /// </summary>
 static class StartMenuScanner
 {
+    /// <summary>The start of every program icon's id (IconId), among the apps' logos.</summary>
+    public const string IconPrefix = "lnk-";
+
+    /// <summary>
+    /// The id a program's icon is kept under with the apps' logos (AppLogos: logos\&lt;id&gt;.png):
+    /// "lnk-" and a hash of its shortcut's path, whatever its case, so the same shortcut has the
+    /// same id at every start and no id is a catalog app's or an added tile's.
+    /// </summary>
+    public static string IconId(string link) =>
+        IconPrefix + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(link.ToLowerInvariant())))[..16];
+
     /// <summary>
     /// Scan on a thread of its own, not the UI thread (it took 120-410 ms on the box). STA: the
     /// shortcuts are read through WScript.Shell, which lives in one.
@@ -67,12 +87,12 @@ static class StartMenuScanner
             string args = shortcut.Arguments ?? "";
             string workingDir = shortcut.WorkingDirectory ?? "";
             if (string.IsNullOrEmpty(target))
-                return new InstalledProgram(name, null, null, null, false, "Windows Installer shortcut");
+                return new InstalledProgram(name, link, null, null, null, false, "Windows Installer shortcut");
             if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                return new InstalledProgram(name, target, null, null, false, "Not a program");
+                return new InstalledProgram(name, link, target, null, null, false, "Not a program");
             if (!File.Exists(target))
-                return new InstalledProgram(name, target, null, null, false, "Missing");
-            return new InstalledProgram(name, target,
+                return new InstalledProgram(name, link, target, null, null, false, "Missing");
+            return new InstalledProgram(name, link, target,
                 string.IsNullOrWhiteSpace(args) ? null : args,
                 string.IsNullOrWhiteSpace(workingDir) ? Path.GetDirectoryName(target) : workingDir,
                 true, null);
@@ -80,7 +100,7 @@ static class StartMenuScanner
         catch (Exception e)
         {
             Log.Warn($"Shortcut {link}: {e.Message}");
-            return new InstalledProgram(name, null, null, null, false, "Could not read");
+            return new InstalledProgram(name, link, null, null, null, false, "Could not read");
         }
     }
 }

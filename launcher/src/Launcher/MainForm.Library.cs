@@ -102,7 +102,9 @@ sealed partial class MainForm
         EnsureInstalledOnHome();
         var appCards = apps.Catalog.Where(a => !a.IsWebsite).Select(LibraryCard).ToList();
         var siteCards = apps.Catalog.Where(a => a.IsWebsite).Select(LibraryCard).ToList();
-        Post(new { type = "library.catalog", apps = appCards, sites = siteCards, available = library.Available });
+        // The library is shown by category (the catalog's, in its order: library.js).
+        var categories = apps.Categories.Select(c => new { id = c.Id, name = c.Name });
+        Post(new { type = "library.catalog", apps = appCards, sites = siteCards, categories, available = library.Available });
     }
 
     object LibraryCard(CatalogApp a) => new
@@ -113,6 +115,7 @@ sealed partial class MainForm
         color = a.Color,
         logo = logos.Url(a.Id), // MainForm.Logos.cs
         type = a.Type,
+        category = a.Category,
         state = LibraryState(a),
         canUninstall = BoxInstalls(a),
         builtin = a.InstallSource == "builtin" // the Browser: Edge, part of Windows
@@ -139,9 +142,43 @@ sealed partial class MainForm
         catch (Exception e) { Log.Error("Reading the Start menu", e); return; }
         if (clock.ElapsedMilliseconds > 300) Log.Info($"Start menu read in {clock.ElapsedMilliseconds} ms ({scan.Count} programs)");
         lastScan = scan;
+        PostPrograms();
+        RefreshProgramIcons(scan);
+    }
+
+    void PostPrograms()
+    {
         var onHome = new HashSet<string>(apps.Tiles.Where(t => t.Custom).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
-        var list = lastScan.Select(p => new { name = p.Name, launchable = p.Launchable, note = p.Note, onHome = onHome.Contains(p.Name) });
+        var list = lastScan.Select(p => new { name = p.Name, launchable = p.Launchable, note = p.Note, onHome = onHome.Contains(p.Name), logo = programIcons.Url(p.IconId) });
         Post(new { type = "library.programs", list });
+    }
+
+    // Each program in On this box with its own icon (the owner, 29 Sept 2026: "nothing has an
+    // icon"): its Start menu shortcut's, as Explorer shows it (the shortcut's own icon, else its
+    // program's), kept with the apps' logos under the shortcut's IconId. The list goes to the
+    // page at once, with the icons made so far (the rest show the glyph); those still missing are
+    // made in the background, one at a time (AppLogos), and the list goes again as they come, at
+    // most every 400 ms. Made once, again when the shortcut changes (an update); a program no
+    // longer in the Start menu loses its icon. Only for the programs listed.
+    readonly AppLogos programIcons = new();
+    readonly System.Windows.Forms.Timer programIconPush = new() { Interval = 400 };
+    bool programIconsWired;
+
+    void RefreshProgramIcons(List<InstalledProgram> scan)
+    {
+        if (!programIconsWired)
+        {
+            programIconsWired = true;
+            programIconPush.Tick += (_, _) => { programIconPush.Stop(); PostPrograms(); };
+            programIcons.Changed += () => OnUi(() => { programIconPush.Stop(); programIconPush.Start(); });
+        }
+        programIcons.Refresh(scan.Select(p => new LogoSource(p.IconId, null, () => p.Link)).ToList());
+        var keep = scan.Select(p => p.IconId).ToHashSet();
+        _ = Task.Run(() =>
+        {
+            try { if (programIcons.Forget(StartMenuScanner.IconPrefix, keep) is > 0 and var n) Log.Info($"Program icons: {n} removed, their programs gone from the Start menu"); }
+            catch (Exception e) { Log.Warn($"Program icons: {e.Message}"); }
+        });
     }
 
     void AddProgramTile(string name)

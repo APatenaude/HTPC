@@ -9,7 +9,8 @@
 //     centre);
 // and for the page: no text runs out of its card or row, nor is cut off at the side of a pane
 // (auditSpills: what the focus never lands on too); every focusable element is reached; no press
-// wraps round or jumps back (up at the first row, down at the last, stays); B leaves it; exactly
+// wraps round or jumps back (up at the first row, down at the last, stays; but on the on-screen
+// keyboard, whose rows and columns wrap round on purpose); B leaves it; exactly
 // one hint bar shows; every press (press() plus style and layout) takes 50 ms at most. As it
 // walks, it replays the host's periodic messages for the page (the clock and state pushes, the TV
 // search, Wi-Fi scans, install progress...): the focus must stay where it is, and nothing on
@@ -57,7 +58,8 @@ const AUDIT_IO = {
 // name: what the report says. view: the view it opens (state.view; setup: its step). open():
 // stress data, then the page (the focus where a user lands). scope: a selector for the part
 // walked (Settings: the pane; the section list is a page of its own). dirs: the directions walked
-// (none: only the first focus is checked). back: B presses that leave it (0: nothing to leave).
+// (none: only the first focus is checked). wraps: its ends wrap round on purpose (the on-screen
+// keyboard; selftest.js checks where to). back: B presses that leave it (0: nothing to leave).
 // left(): how to tell it was left, when not by the view. hints: hint bars expected. covers: the
 // views or sections it checks. walk: a walk of its own (move mode). tick(): the host's periodic
 // message for it, replayed as it is walked. last: the element to end on for a screenshot.
@@ -121,22 +123,34 @@ function auditFresh() {
   reset('home');
 }
 
+// The catalog's categories (catalog.json), and one the catalog does not know (its cards: Other).
+const AUDIT_CATEGORIES = [['movies', 'Movies & shows'], ['canada', 'Canadian TV'], ['sports', 'Sports'], ['music', 'Music'],
+  ['games', 'Games'], ['media', 'Your media & tools']].map(([id, name]) => ({ id, name }));
+const auditCategory = (i) => (i % 13 === 12 ? 'unknown' : AUDIT_CATEGORIES[i % AUDIT_CATEGORIES.length].id);
+// A 1x1 PNG: a program's or an app's own icon (the host's logos.htpc), which does load.
+const AUDIT_LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+// As big as the real library or bigger: 24 apps and 26 sites in six categories and Other, and a
+// box's 110 programs (On this box), long names in each.
 function auditLibrary() {
-  const apps = Array.from({ length: 20 }, (_, i) => {
+  const apps = Array.from({ length: 24 }, (_, i) => {
     const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
-    return { id: `lib${i}`, name: i === 7 ? `Library app ${AUDIT_LONG}` : `Library app ${i + 1}`, glyph, color, type: 'app',
-      state: ['home', 'uninstalling', 'install', 'install'][i % 4], canUninstall: true };
+    return { id: `lib${i}`, name: i === 7 ? `Library app ${AUDIT_LONG}` : `Library app ${i + 1}`, glyph, color, type: 'app', category: auditCategory(i),
+      state: ['home', 'uninstalling', 'install', 'install'][i % 4], canUninstall: true, logo: i % 3 === 0 ? AUDIT_LOGO : null };
   });
   apps[5].state = 'installing';
   Object.assign(apps[12], { state: 'home', canUninstall: false, builtin: true });   // the Browser: Built in, A asks to remove it from Home
-  const sites = Array.from({ length: 12 }, (_, i) => ({ id: `site${i}`, name: i === 4 ? `Streaming site ${AUDIT_LONG}` : `Site ${i + 1}`, color: '#FF4B55', type: 'website', state: i % 3 === 1 ? 'home' : 'add' }));
+  const sites = Array.from({ length: 26 }, (_, i) => ({ id: `site${i}`, name: i === 4 ? `Streaming site ${AUDIT_LONG}` : `Site ${i + 1}`, color: '#FF4B55',
+    type: 'website', category: auditCategory(i + 3), state: i % 3 === 1 ? 'home' : 'add' }));
   // lib9 went through the queue and is still to install: it did not install.
   onHost({ type: 'library.progress', current: { id: 'lib9', name: 'Library app 10', action: 'install', phase: 'download', percent: 30 }, pending: [] });
   onHost(AUDIT_PROGRESS);
-  onHost({ type: 'library.catalog', apps, sites, available: true });
-  onHost({ type: 'library.programs', list: Array.from({ length: 26 }, (_, i) => ({ name: i === 3 ? `Program ${AUDIT_LONG}` : `Program ${i + 1}`,
-    launchable: i % 6 !== 4, onHome: i % 7 === 2, note: i % 6 === 4 ? 'Windows app' : null })) });
+  onHost({ type: 'library.catalog', apps, sites, categories: AUDIT_CATEGORIES, available: true });
+  onHost({ type: 'library.programs', list: auditPrograms() });
 }
+// Every other one with its own icon (the host makes them in the background: the rest come later).
+const auditPrograms = () => Array.from({ length: 110 }, (_, i) => ({ name: i === 3 ? `Program ${AUDIT_LONG}` : i === 40 ? `Uninstall ${AUDIT_LONG}` : `Program ${i + 1}`,
+  launchable: i % 6 !== 4, onHome: i % 7 === 2, note: i % 6 === 4 ? 'Windows Installer shortcut' : null, logo: i % 2 ? AUDIT_LOGO : null }));
 // The install queue, pushed twice a second while it runs.
 const AUDIT_PROGRESS = { type: 'library.progress', current: { id: 'lib5', name: 'Library app 6', action: 'install', phase: 'download', percent: 62 }, pending: [{ id: 'lib2', action: 'install' }] };
 
@@ -236,8 +250,18 @@ if (AUDIT_PAGE === 'index') {
   auditPage('sleep timer', { view: 'timer', open() { go('timer'); } });
   auditPage('ask (a dialog)', { view: 'ask', open() { go('settings'); ask({ title: `Forget ${AUDIT_LONG}?`, text: `A question ${AUDIT_LONG}.`, yes: 'Forget' }); } });
   auditPage('add tile: library', { view: 'addtile', covers: ['addtile'], tick: () => onHost(AUDIT_PROGRESS), open() { auditLibrary(); EXT.actions.addtile(); auditLibrary(); render(); } });
-  auditPage('add tile: on this box', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rb'); auditLibrary(); render(); } });
+  // The programs' icons arrive as the host makes them: the list is sent again, more with theirs.
+  auditPage('add tile: on this box', { view: 'addtile', tick: () => onHost({ type: 'library.programs', list: auditPrograms().map((p, i) => ({ ...p, logo: i % 3 ? AUDIT_LOGO : null })) }),
+    open() { auditLibrary(); EXT.actions.addtile(); press('rb'); auditLibrary(); render(); } });
   auditPage('add tile: website', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb'); } });
+  // A long address and name typed in (the fields scroll their text; the preview's name wraps inside it).
+  auditPage('add tile: website, a long address typed', { view: 'addtile', covers: [], open() {
+    auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb');
+    const url = $('addtile').querySelector('[data-field="url"]'), name = $('addtile').querySelector('[data-field="name"]');
+    url.focus(); textInsert(`https://www.${'a-very-long-address-'.repeat(8)}example.com/watch?list=${'x'.repeat(200)}`);
+    name.focus(); textInsert(`Site ${AUDIT_LONG}`);
+    name.blur();
+  } });
   auditPage('settings: section list', { view: 'settings', covers: ['settings'], scope: '.snav', dirs: ['up', 'down'], open() { state.section = 'sleep'; reset('settings'); } });
   const sectionData = { tv: auditTv, wifi: () => WifiUI.handle(AUDIT_WIFI), bluetooth: () => onHost(AUDIT_BT), phone: auditPhone,
     sound: () => onHost({ type: 'sound.outputs', canSwitch: true, outputs: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, name: i === 1 ? `Output ${AUDIT_LONG}` : `Output ${i + 1}`, isDefault: i === 0 })) }),
@@ -342,10 +366,12 @@ function auditSetupFresh() {
   if (typeof WifiUI !== 'undefined' && WifiUI.joining) WifiUI.stop();
   Object.assign(state, { tvHint: null, dialog: false, read: null, starting: false, progress: null, result: null, wired: true, controller: true, battery: 'full' });
   state.pressed = new Set(BUTTONS.map(([b]) => b));
-  state.apps = Array.from({ length: 14 }, (_, i) => {
+  // As many as the real catalog gives setup (38) and more, in its categories and one it does not know.
+  state.apps = Array.from({ length: 44 }, (_, i) => {
     const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
-    return { id: `sapp${i}`, name: i === 5 ? `App ${AUDIT_LONG}` : `App ${i + 1}`, glyph, color, default: i < 8 };
+    return { id: `sapp${i}`, name: i === 5 ? `App ${AUDIT_LONG}` : `App ${i + 1}`, glyph, color, default: i < 8, category: auditCategory(i) };
   });
+  state.categories = AUDIT_CATEGORIES;
   state.picked = new Set(state.apps.filter((a) => a.default).map((a) => a.id));
   state.tv = TvUi.demo('roku');
   TvUi.code = '';
@@ -394,13 +420,14 @@ function auditSetupProgress() {
 
 // ---- The on-screen keyboard's pages (keyboard.html) ------------------------------------------------
 
+// Its rows and columns wrap round (the owner, 29 Sept 2026): the walker lets them.
 if (AUDIT_PAGE === 'keyboard') {
-  auditPage('keyboard: letters', { view: 'keyboard', back: 0, open() { onHost({ type: 'open', field: `A field ${AUDIT_LONG}`, password: false }); } });
-  auditPage('keyboard: symbols, shift locked', { view: 'keyboard', covers: [], back: 0, open() {
+  auditPage('keyboard: letters', { view: 'keyboard', back: 0, wraps: true, open() { onHost({ type: 'open', field: `A field ${AUDIT_LONG}`, password: false }); } });
+  auditPage('keyboard: symbols, shift locked', { view: 'keyboard', covers: [], back: 0, wraps: true, open() {
     onHost({ type: 'open', field: 'Search', password: false });
     symbols = true; shift = 'lock'; render();   // eslint-disable-line no-global-assign
   } });
-  auditPage('keyboard: a password', { view: 'keyboard', covers: [], back: 0, open() {
+  auditPage('keyboard: a password', { view: 'keyboard', covers: [], back: 0, wraps: true, open() {
     onHost({ type: 'open', field: 'Password', password: true });
     typed = 'x'.repeat(48); render();   // eslint-disable-line no-global-assign
   } });
@@ -607,7 +634,7 @@ async function auditWalk(page, report) {
       const a = was.getBoundingClientRect(), b = to.getBoundingClientRect();
       const [ax, ay, bx, by] = [a.left + a.width / 2, a.top + a.height / 2, b.left + b.width / 2, b.top + b.height / 2];
       const back = { down: by < ay - 1, up: by > ay + 1, right: bx < ax - 1, left: bx > ax + 1 }[dir];
-      if (back) report(`${dir} from [${id}] wrapped round (or jumped back) to [${to.dataset.id}]`);
+      if (back && !page.wraps) report(`${dir} from [${id}] wrapped round (or jumped back) to [${to.dataset.id}]`);
       look(to);
       if (!seen.has(to.dataset.id)) { seen.add(to.dataset.id); queue.push(to.dataset.id); }
     }

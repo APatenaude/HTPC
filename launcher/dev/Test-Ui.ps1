@@ -70,14 +70,18 @@ function Stop-OwnEdge {
 
 # One DevTools protocol request to the page of the Edge on $userData (started with
 # --remote-debugging-port=0), on a socket of its own: the answer's JSON, or '' if none came within
-# $TimeoutMs (the page busy: it answers between its tasks).
+# $TimeoutMs (the page busy: it answers between its tasks). The page is the file: page among the
+# targets: Edge lists others beside it at times (its built-in extensions' background pages and
+# service worker, on 29 Sept 2026 for the first 30 s or more of a run). PowerShell 5.1 hands a
+# JSON array on as one object (ForEach-Object unrolls it): with a second target, the old
+# filter kept the whole list, never got the page's address, and the run hung until its timeout.
 function Invoke-PageDevTools([string]$userData, [string]$method, [hashtable]$params, [int]$TimeoutMs = 2000) {
     $port = Get-Content (Join-Path $userData 'DevToolsActivePort') -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $port) { return '' }
     $socket = New-Object Net.WebSockets.ClientWebSocket
     try {
-        $target = @(Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5) | Where-Object { $_.type -eq 'page' } |
-            Select-Object -First 1
+        $target = Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5 | ForEach-Object { $_ } |
+            Where-Object { $_.type -eq 'page' -and "$($_.url)".StartsWith('file:') } | Select-Object -First 1
         if (-not $target) { return '' }
         $none = [Threading.CancellationToken]::None
         if (-not $socket.ConnectAsync([Uri]$target.webSocketDebuggerUrl, $none).Wait($TimeoutMs)) { return '' }
@@ -207,12 +211,12 @@ if ($SelfTest) {
     # event: performance.now() moved some 65 s over one such run).
     # --window-size is the window's: headless Edge keeps 40x100 of it for its frame, so each size
     # below is the page's plus that (setup at 1920x1080 and 1280x720, the keyboard's band at
-    # 1920x560 and 2560x560, the launcher at 1920x1080, 1536x864 (4K at 250%), 1280x720,
-    # 2560x1080 and 1920x1200).
+    # 1920x440 and 2560x440, its window's size on those screens, the launcher at 1920x1080,
+    # 1536x864 (4K at 250%), 1280x720, 2560x1080 and 1920x1200).
     $uiDir = Split-Path $Page -Parent
     $runs = @(
         @('setup.html', '1960,1180'), @('setup.html', '1320,820'),
-        @('keyboard.html', '1960,660'), @('keyboard.html', '2600,660'),
+        @('keyboard.html', '1960,540'), @('keyboard.html', '2600,540'),
         @('index.html', '1960,1180'), @('index.html', '1576,964'),
         @('index.html', '1320,820'), @('index.html', '2600,1180'), @('index.html', '1960,1300')
     )

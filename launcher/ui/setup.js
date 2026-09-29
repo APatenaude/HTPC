@@ -31,7 +31,8 @@ const STEP_NAMES = { RestorePoint: 'Restore point', Winget: 'App installer', App
 
 const state = {
   step: 'welcome',
-  apps: [],               // catalog: { id, name, glyph, color, default, type }
+  apps: [],               // catalog: { id, name, glyph, color, default, type, category }
+  categories: [],         // the catalog's: { id, name }, in the order they show
   picked: new Set(),
   pressed: new Set(),     // controller buttons seen on the controller step
   controller: false, battery: null,
@@ -108,15 +109,22 @@ function views() {
     // Windows' permission was asked for once, as the setup exe opened: Install asks nothing more.
     const note = state.starting ? 'Starting…'
       : `${state.picked.size} picked · ${state.canInstall ? 'Install starts right away, with no more questions' : 'installing needs TV Box Setup: open it from its own icon'}`;
+    const app = (a) => {
+      const on = state.picked.has(a.id);
+      return `<div class="su-app${on ? ' on' : ''}" data-nav data-id="app:${esc(a.id)}" role="checkbox" aria-checked="${on}">` +
+        `<span class="su-box">${on ? icon('check', 24, 3) : ''}</span>` +
+        `<span style="display:flex;color:${esc(a.color)}">${icon(a.glyph, 32)}</span><span class="su-name">${esc(a.name)}</span></div>`;
+    };
+    // By category, as in Add a tile's library (the catalog's, in its order; anything else last,
+    // under Other), each under its heading in the list that scrolls.
+    const known = new Set(state.categories.map((c) => c.id));
+    const groups = [...state.categories, { id: '', name: 'Other' }]
+      .map((c) => ({ ...c, apps: state.apps.filter((a) => (known.has(a.category) ? a.category : '') === c.id) })).filter((g) => g.apps.length);
     return {
       main: '<div class="su-col"><div class="su-head"><h1>Pick your apps</h1>' +
         '<p>Ticked apps install now and get a tile on the home screen. The rest stay in the library for later.</p></div>' +
-        `<div class="su-apps">${state.apps.map((a) => {
-          const on = state.picked.has(a.id);
-          return `<div class="su-app${on ? ' on' : ''}" data-nav data-id="app:${esc(a.id)}" role="checkbox" aria-checked="${on}">` +
-            `<span class="su-box">${on ? icon('check', 24, 3) : ''}</span>` +
-            `<span style="display:flex;color:${esc(a.color)}">${icon(a.glyph, 32)}</span><span class="su-name">${esc(a.name)}</span></div>`;
-        }).join('')}</div>` +
+        `<div class="su-apps">${groups.map((g) => `<div class="su-group"><span class="su-cat">${esc(g.name)}</span>` +
+          `<div class="su-grid">${g.apps.map(app).join('')}</div></div>`).join('')}</div>` +
         `<span class="su-note">${esc(note)}</span></div>`,
       buttons: state.starting ? '' : button('back', 'Back') + button('install', 'Install', true),
     };
@@ -341,9 +349,16 @@ function setFocus(el) {
   el.classList.add('focused');
   state.focus = el.dataset.id;
   // The lists that scroll (Wi-Fi networks, the TV dialog's TVs and brands, the Done page's
-  // lines): a row the focus moves to comes into view, ring and all.
+  // lines, the apps): a row the focus moves to comes into view, ring and all; an app in its
+  // category's first row, with the category's heading above it.
   const box = el.closest(SCROLLERS);
   if (box) scrollIntoBox(el, box, 16);
+  const group = el.closest('.su-group');
+  if (box && group && el.offsetTop - group.querySelector('.su-app').offsetTop <= 1) {
+    const head = group.querySelector('.su-cat').getBoundingClientRect(), b = box.getBoundingClientRect();
+    const scale = b.height / box.offsetHeight || 1;
+    if (head.top < b.top + 8 * scale) { box.scrollTop -= (b.top - head.top) / scale + 8; listEdges(box); }
+  }
 }
 
 // The lists that scroll: the Wi-Fi networks (and the Wi-Fi step, for its forms), the TVs found,
@@ -515,6 +530,7 @@ function onHost(m) {
     case 'text.keyboardAt': if (typeof textKeyboardAt === 'function') textKeyboardAt(m.top); break;
     case 'init':
       state.apps = m.apps || [];
+      state.categories = m.categories || [];
       state.picked = new Set(state.apps.filter((a) => a.default).map((a) => a.id));
       if (m.tv) state.tv = m.tv;
       if ('wired' in m) state.wired = m.wired;
@@ -555,23 +571,32 @@ if (host) {
   // starting=1 (apps), restart=1 (done).
   const [name, query] = location.hash.slice(1).split('?');
   const q = new URLSearchParams(query || '');
-  onHost({ type: 'init', controller: true, battery: 'full', wired: q.get('wired') !== '0', apps: [
-    { id: 'youtube', name: 'YouTube', glyph: 'youtube', color: '#FF5B52', default: true },
-    { id: 'twitch', name: 'Twitch', glyph: 'chat', color: '#B08CFF', default: true },
-    { id: 'stremio', name: 'Stremio', glyph: 'film', color: '#7C8CFF', default: true },
-    { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', color: '#3DC0F0', default: true },
-    { id: 'moonlight', name: 'Moonlight', glyph: 'moon', color: '#F5D16B', default: true },
-    { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A', default: true },
-    { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF' },
-    { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F' },
-    // The rest of the real catalog (41 in all): more than one screen, as on a box, so the audit
-    // walks a list that has to scroll (a list of 8 hid that it didn't).
-    ...['Plex HTPC', 'Spotify', 'Feishin', 'Steam', 'Playnite', 'RetroArch', 'RetroBat', 'Netflix', 'Disney+',
-      'Prime Video', 'Crunchyroll', 'HBO Max', 'Apple TV+', 'Paramount+', 'Tubi', 'Pluto TV', 'Crave', 'CBC Gem',
-      'ICI TOU.TV', 'Télé-Québec', 'TVA+', 'illico+', 'ONF', 'RDS', 'TSN', 'Sportsnet+', 'OHdio', 'YouTube Music',
-      'Apple Music', 'YouTube Kids', 'GeForce NOW', 'Xbox Cloud Gaming', 'Amazon Luna'].map((name, i) =>
-      ({ id: `demo${i}`, name, glyph: i < 7 ? 'app' : 'globe', color: '#8E9199' })),
-  ], tv: TvUi.demo(q.get('demo') || 'roku') });
+  // The real catalog as setup gets it (38: all but Spotify and RetroBat, which install only from
+  // the library), in its categories: more than one screen, as on a box, so the audit walks a list
+  // that has to scroll (a list of 8 hid that it didn't).
+  const categories = [['movies', 'Movies & shows'], ['canada', 'Canadian TV'], ['sports', 'Sports'], ['music', 'Music'],
+    ['games', 'Games'], ['media', 'Your media & tools']].map(([id, name]) => ({ id, name }));
+  const apps = [
+    ['youtube', 'YouTube', 'youtube', '#FF5B52', 'movies', true], ['twitch', 'Twitch', 'chat', '#B08CFF', 'movies', true],
+    ['stremio', 'Stremio', 'film', '#7C8CFF', 'movies', true], ['jellyfin', 'Jellyfin', 'library', '#3DC0F0', 'media', true],
+    ['moonlight', 'Moonlight', 'moon', '#F5D16B', 'games', true], ['edge', 'Browser', 'globe', '#3CCB9A', 'media', true],
+    ['kodi', 'Kodi', 'play', '#5AB0FF', 'media'], ['vlc', 'VLC', 'play', '#FF8A1F', 'media'], ['plex', 'Plex HTPC', 'play', '#F5B82E', 'media'],
+    ['feishin', 'Feishin', 'music', '#FF7AB6', 'music'], ['steam', 'Steam', 'controller', '#66C0F4', 'games'],
+    ['playnite', 'Playnite', 'controller', '#B08CFF', 'games'], ['retroarch', 'RetroArch', 'controller', '#5AB0FF', 'games'],
+    ['netflix', 'Netflix', 'play', '#FF4B55', 'movies'], ['disneyplus', 'Disney+', 'play', '#4D8DFF', 'movies'],
+    ['primevideo', 'Prime Video', 'play', '#2BB0F5', 'movies'], ['crunchyroll', 'Crunchyroll', 'play', '#FF8A2B', 'movies'],
+    ['hbomax', 'HBO Max', 'play', '#8A7BFF', 'movies'], ['appletv', 'Apple TV+', 'play', '#D9D8D4', 'movies'],
+    ['paramountplus', 'Paramount+', 'play', '#3D8BFF', 'movies'], ['tubi', 'Tubi', 'play', '#FFD43B', 'movies'],
+    ['plutotv', 'Pluto TV', 'tv', '#F5E642', 'movies'], ['crave', 'Crave', 'play', '#3FA9F5', 'movies'],
+    ['cbcgem', 'CBC Gem', 'play', '#FF4B4B', 'canada'], ['toutv', 'ICI TOU.TV', 'play', '#F25F5C', 'canada'],
+    ['telequebec', 'Télé-Québec', 'play', '#3DC0F0', 'canada'], ['tvaplus', 'TVA+', 'tv', '#6FA8FF', 'canada'],
+    ['illicoplus', 'illico+', 'play', '#E6D65A', 'canada'], ['onf', 'ONF', 'film', '#FF7A6B', 'canada'],
+    ['rds', 'RDS', 'tv', '#FF5A4E', 'sports'], ['tsn', 'TSN', 'tv', '#E8485C', 'sports'], ['sportsnet', 'Sportsnet+', 'tv', '#2F9BFF', 'sports'],
+    ['ohdio', 'OHdio', 'speaker', '#B08CFF', 'music'], ['youtubemusic', 'YouTube Music', 'music', '#FF4E45', 'music'],
+    ['applemusic', 'Apple Music', 'music', '#FF5A73', 'music'], ['geforcenow', 'GeForce NOW', 'controller', '#8CD13C', 'games'],
+    ['xboxcloud', 'Xbox Cloud Gaming', 'controller', '#52C443', 'games'], ['luna', 'Amazon Luna', 'controller', '#A07CFF', 'games'],
+  ].map(([id, name, glyph, color, category, dflt]) => ({ id, name, glyph, color, category, default: !!dflt }));
+  onHost({ type: 'init', controller: true, battery: 'full', wired: q.get('wired') !== '0', apps, categories, tv: TvUi.demo(q.get('demo') || 'roku') });
   // setup.html#audit (#audit?page=...): the UI audit's setup pages (audit.js), loaded before the
   // page's load event, which waits for it.
   if (name && name.startsWith('audit')) {

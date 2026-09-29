@@ -17,8 +17,12 @@ sealed class KeyboardForm : Form
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     const int WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
 
-    /// <summary>Its height: 560 of the screen's 1080 (the page's stage), at any resolution.</summary>
-    const int HeightOf1080 = 560;
+    /// <summary>
+    /// Its height: 440 of the screen's 1080 (the page's stage), at any resolution; the page's band
+    /// is as high (keyboard.css #kb, keyboard.js BAND). It was 560, half the screen (the owner,
+    /// 29 Sept 2026: "make it a little bit shorter").
+    /// </summary>
+    internal const int HeightOf1080 = 440;
 
     /// <summary>Where it starts, as a share of the screen's height from the top (textinput.js lifts fields above it).</summary>
     public const double TopShare = 1 - HeightOf1080 / 1080.0;
