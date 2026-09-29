@@ -149,6 +149,13 @@ static class ElevationTests
         Check(up.SequenceEqual(["--setup", "--no-tv", "--windowed", "--elevated"]), "the elevated copy: --setup, --no-tv and --windowed only (no --dev, --ui, --catalog), then --elevated: " + string.Join(" | ", up));
         Check(SetupElevation.ElevatedArgs(up).Count(a => a == "--elevated") == 1 && SetupElevation.ElevatedArgs(up).Count(a => a == "--setup") == 1, "--setup and --elevated once when asked again");
         Check(SetupElevation.ElevatedArgs([]).SequenceEqual(["--setup", "--elevated"]), "no arguments: --setup --elevated");
+        var tv = SetupElevation.ElevatedArgs(["--setup", SetupElevation.DesktopFlag, "--dev"]);
+        Check(tv.SequenceEqual(["--setup", "--desktop-for-setup", "--elevated"]), "from TV mode: the elevated copy is told setup opened the desktop (it closes it as it ends): " + string.Join(" | ", tv));
+        Check(SetupElevation.ElevatedArgs(tv).Count(a => a == SetupElevation.DesktopFlag) == 1, "... once, when started again");
+        Check(SetupElevation.HomeArgs(["--elevated", SetupElevation.DesktopFlag, "--no-tv"]).SequenceEqual(["--no-tv", "--home"]), "the home screen after setup: not told about setup's desktop");
+        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))).Contains("open Power › Desktop mode, then start TV Box Setup again"),
+            "WebView2's \"Element not found\" (no Windows desktop, TV mode): the screen says to open desktop mode, then start setup again");
+        Check(!SetupElevation.CannotShowBody(new COMException("Class not registered", unchecked((int)0x80040154))).Contains("Desktop mode"), "... any other failure: try again or restart, as before");
 
         // The command processor's line that puts setup in Program Files and starts it there.
         const string pf = @"C:\Program Files\HTPC\Setup";
@@ -201,6 +208,9 @@ static class ElevationTests
         Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", null);
         Check(SetupElevation.Trampoline(@"C:\x\TV Box Setup.exe", [], pf, "x&calc") is null, "a suffix that is not letters and digits: refused");
         var home = SetupElevation.HomeArgs(["--setup", "--dev", "--elevated", "--no-tv", "--home"]);
+        Check(SetupElevation.Trampoline(odd, SetupElevation.ElevatedArgs(["--setup", SetupElevation.DesktopFlag]), pf, "a1b2c3") is { } withDesktop
+            && withDesktop.Contains($"start \"\" /d \"{pf}\" \"{pf}\\TV Box Setup.exe\" --setup --desktop-for-setup --elevated\""),
+            "from TV mode: the trampoline passes --desktop-for-setup to the copy it starts");
         Check(home.SequenceEqual(["--dev", "--no-tv", "--home"]), "the home screen: setup's own dropped, --home once: " + string.Join(" | ", home));
 
         // What CommandLine writes, Windows splits back into the same list.

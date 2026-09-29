@@ -167,14 +167,16 @@ sealed partial class MainForm
 
     /// <summary>
     /// Setup's screens could not show (no WebView2): a screen of setup's own instead of a black one
-    /// or a browser dialog only a mouse closes. A starts setup again (a new copy, through the
-    /// trusted start: SetupElevation.StartAgain), B quits; nothing was changed either way.
+    /// or a browser dialog only a mouse closes, saying what to do (SetupElevation.CannotShowBody:
+    /// with no Windows desktop, desktop mode first). A starts setup again (a new copy, through the
+    /// trusted start, with a desktop: SetupElevation.StartAgain), B quits; nothing was changed
+    /// either way.
     /// </summary>
     void SetupCannotShow(Exception ex)
     {
         using var screen = new AdminNeededForm($"Windows' web view (WebView2) did not start: {ex.Message}", SetupElevation.StartAgain,
             heading: "Setup could not show its screens",
-            body: "Nothing was changed. Try again; if it happens again, restart the box and start TV Box Setup once more.");
+            body: SetupElevation.CannotShowBody(ex));
         screen.ShowDialog(this);
         Log.Info(screen.HandedOver ? "Setup: started again after WebView2 failed" : "Setup: quit after WebView2 failed");
         Close();

@@ -12,6 +12,10 @@ namespace Htpc.Launcher;
 /// It never traps a window that needs someone: after any mouse or keyboard input (the controller
 /// does not count, it is read directly) the guard stands back for a minute, TopMost off, and a
 /// window that comes back in front after being sent behind three times is left in front.
+///
+/// When setup opened the Windows desktop for itself (TV mode: SetupElevation.OwnDesktop) the guard
+/// runs the whole time, not only while installing: Explorer's desktop, taskbar and what it starts
+/// at sign-in stay behind the wizard.
 /// </summary>
 sealed partial class MainForm
 {
@@ -31,16 +35,18 @@ sealed partial class MainForm
     /// <summary>Every 200 ms (the mouse watch).</summary>
     void GuardSetup()
     {
-        var installing = setupMode && setup is { Running: true };
-        var someoneAtIt = installing && SinceMouseOrKeyboard() < TimeSpan.FromMinutes(1);
-        var onTop = installing && !someoneAtIt;
+        var guarding = setupMode && (setup is { Running: true } || SetupElevation.OwnDesktop);
+        var someoneAtIt = guarding && SinceMouseOrKeyboard() < TimeSpan.FromMinutes(1);
+        var onTop = guarding && !someoneAtIt;
         if (TopMost != onTop) TopMost = onTop;
-        if (!installing) { setupReveals.Clear(); return; }
+        if (!guarding) { setupReveals.Clear(); return; }
         if (someoneAtIt || LauncherActive || Environment.TickCount64 < nextSetupReveal) return;
         var window = Native.GetForegroundWindow();
         if (window == IntPtr.Zero) return;
+        var pid = Native.ProcessOf(window);
+        if (pid == Environment.ProcessId) return; // setup's own screens ("could not show its screens")
         string name;
-        try { name = System.Diagnostics.Process.GetProcessById((int)Native.ProcessOf(window)).ProcessName; }
+        try { name = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
         catch (Exception) { return; }
         if (name.Equals("consent", StringComparison.OrdinalIgnoreCase)) return;
         setupReveals.TryGetValue(window, out var times);

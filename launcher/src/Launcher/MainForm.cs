@@ -671,10 +671,12 @@ sealed partial class MainForm : Form
     /// to be pulled out), started as the signed-in user: this window is elevated. Without an
     /// installed copy (a dev build, or the Launcher step failed) this program becomes the home
     /// screen, as a copy started the same way (SetupElevation.AfterSetup); in place only when this
-    /// one is not elevated.
+    /// one is not elevated. A desktop setup opened for itself (TV mode) closes first: the launcher
+    /// comes back in TV mode, and the watchdog is found to be the shell again.
     /// </summary>
     void FinishSetup()
     {
+        SetupElevation.CloseOwnDesktop();
         var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
         var elevated = Rights.SetupElevated;
         var next = SetupElevation.AfterSetup(installed, File.Exists(installed), File.Exists(Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe")),
