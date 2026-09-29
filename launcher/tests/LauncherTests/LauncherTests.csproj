@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Checks for the button maps, PadMapper, the video-end detector, the sleep timer, the logos, the
-       decode-check parser, the alerts overlay, the autostart guard, setup's elevation and the
-       WebViews' recovery: dotnet run (in this folder). -->
+       decode-check parser, the alerts overlay, the autostart guard, setup's elevation, the
+       WebViews' recovery and desktop mode's tray icon: dotnet run (in this folder). -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -14,6 +14,6 @@
     <Src>..\..\src\Launcher\</Src>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(Src)ButtonMap.cs;$(Src)ButtonMapStore.cs;$(Src)PadMapper.cs;$(Src)MediaWatcher.cs;$(Src)SleepTimer.cs;$(Src)DecodeCheck.cs;$(Src)SetupRunner.cs;$(Src)Standby.cs;$(Src)ControllerService.cs;$(Src)SystemControls.cs;$(Src)AudioOutputs.cs;$(Src)SoundSwitch.cs;$(Src)Native.cs;$(Src)Tv\TvModel.cs;$(Src)AlertsForm.cs;$(Src)VolumeOsd.cs;$(Src)TileStore.cs;$(Src)PhonePointer.cs;$(Src)LogoSources.cs;$(Src)AppLogos.cs;$(Src)EdgeSiteApp.cs;$(Src)ScreenCapture.cs;$(Src)AutostartGuard.cs;$(Src)AppManager.cs;$(Src)Shell.cs;$(Src)AppExits.cs;$(Src)SetupElevation.cs;$(Src)TextFieldWatcher.cs;$(Src)WebViewRecovery.cs;$(Src)LauncherOrigin.cs;$(Src)SoakLog.cs;$(Src)UpdateRules.cs;$(Src)Rights.cs" />
+    <Compile Include="$(Src)ButtonMap.cs;$(Src)ButtonMapStore.cs;$(Src)PadMapper.cs;$(Src)MediaWatcher.cs;$(Src)SleepTimer.cs;$(Src)DecodeCheck.cs;$(Src)SetupRunner.cs;$(Src)Standby.cs;$(Src)ControllerService.cs;$(Src)SystemControls.cs;$(Src)AudioOutputs.cs;$(Src)SoundSwitch.cs;$(Src)Native.cs;$(Src)Tv\TvModel.cs;$(Src)AlertsForm.cs;$(Src)VolumeOsd.cs;$(Src)TileStore.cs;$(Src)PhonePointer.cs;$(Src)LogoSources.cs;$(Src)AppLogos.cs;$(Src)EdgeSiteApp.cs;$(Src)ScreenCapture.cs;$(Src)AutostartGuard.cs;$(Src)AppManager.cs;$(Src)Shell.cs;$(Src)DesktopTray.cs;$(Src)AppExits.cs;$(Src)SetupElevation.cs;$(Src)TextFieldWatcher.cs;$(Src)WebViewRecovery.cs;$(Src)LauncherOrigin.cs;$(Src)SoakLog.cs;$(Src)UpdateRules.cs;$(Src)Rights.cs" />
   </ItemGroup>
 </Project>

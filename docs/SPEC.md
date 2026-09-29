@@ -28,7 +28,8 @@ user) are folded into the items below; what was dropped is listed under "Not now
   launcher if ever wanted). The watchdog restarts the launcher after a crash, a kill or a 60 s
   hang; after repeated fast exits it restarts the box once, then gives the desktop with a
   message and tries again later. Desktop mode (Power menu, one confirmation) opens Explorer for
-  maintenance; Back to TV closes it. The sign-in screen and desktop are in the home screen's
+  maintenance; Back to TV closes it (Home menu, Power menu, the desktop shortcut, or the TV box
+  icon in the taskbar for a mouse or keyboard). The sign-in screen and desktop are in the home screen's
   colour. Catalog apps never start by themselves (the autostart guard: their Run and RunOnce
   values, Startup shortcuts and tasks, and the services the catalog names), and their own
   updaters are off where they can be.

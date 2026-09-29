@@ -259,7 +259,8 @@ Log: `%LOCALAPPDATA%\HTPC\logs\watchdog.log`.
 
 Desktop mode (Power menu, one confirmation) starts Explorer: desktop, taskbar, Start menu. The
 launcher stays behind it; Home still opens the menu over the desktop. Back to TV (Power menu,
-or the "Back to TV" shortcut on the desktop and in Start) closes Explorer and its windows.
+the "Back to TV" shortcut on the desktop and in Start, or the launcher's "TV box: back to TV"
+icon in the taskbar) closes Explorer and its windows.
 
 Without Explorer: no tray icons or notifications; the Win key and Win+ shortcuts do nothing;
 programs in Run/RunOnce and the Startup folder do not start (desktop mode runs them); Settings
