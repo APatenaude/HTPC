@@ -41,31 +41,69 @@ static class Native
     /// VLC's own window, Moonlight's, Spotify, Feishin: "fill" in the catalog). Windows then
     /// treats it as a full-screen app: the taskbar stays out of the way.
     /// </summary>
+    /// <param name="cropTop">The app's own title strip (catalog launch.cropTop, pixels at 100 %
+    /// scaling): the window goes that much above the screen, so the strip is off it (FillRect).</param>
     /// <returns>False when it already filled the screen and was left untouched.</returns>
-    public static bool FillScreen(IntPtr hWnd)
+    public static bool FillScreen(IntPtr hWnd, int cropTop = 0)
     {
         const int GWL_STYLE = -16, SW_RESTORE = 9;
         const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_SYSMENU = 0x00080000,
             WS_MINIMIZEBOX = 0x00020000, WS_MAXIMIZEBOX = 0x00010000;
         const uint SWP_NOZORDER = 0x4, SWP_NOOWNERZORDER = 0x200, SWP_FRAMECHANGED = 0x20;
-        if (Fills(hWnd)) return false; // already
+        if (Fills(hWnd, cropTop)) return false; // already
         var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
-        var screen = Screen.FromHandle(hWnd).Bounds;
+        var target = FillTarget(hWnd, cropTop);
         if (IsIconic(hWnd) || (style & 0x01000000) != 0) ShowWindow(hWnd, SW_RESTORE); // minimized or maximized: normal first
         SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)(style & ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)));
-        SetWindowPos(hWnd, IntPtr.Zero, screen.X, screen.Y, screen.Width, screen.Height, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        SetWindowPos(hWnd, IntPtr.Zero, target.X, target.Y, target.Width, target.Height, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
         return true;
     }
 
-    /// <summary>Whether the window covers its screen with no frame showing (FillsScreen), minimized not.</summary>
-    public static bool Fills(IntPtr hWnd) =>
-        !IsIconic(hWnd) && GetWindowRect(hWnd, out var r) && FillsScreen((long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */), r, Screen.FromHandle(hWnd).Bounds);
+    /// <summary>Whether the window covers its screen with no frame showing (FillsScreen), its strip cropped, minimized not.</summary>
+    public static bool Fills(IntPtr hWnd, int cropTop = 0) =>
+        !IsIconic(hWnd) && GetWindowRect(hWnd, out var r) && FillsScreen((long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */), r, FillTarget(hWnd, cropTop));
+
+    static Rectangle FillTarget(IntPtr hWnd, int cropTop) =>
+        FillRect(Screen.FromHandle(hWnd).Bounds, cropTop, cropTop > 0 ? DpiOf(hWnd) : 96);
 
     /// <summary>
-    /// A window that covers the screen exactly with nothing of a frame showing (no caption, no
-    /// sizing border) fills it, maximized or not: it is left alone. Restoring and restyling it
-    /// each time the app came back in front (Stremio, fill) made it leave full screen and enter
-    /// it again behind the Home menu.
+    /// Where a filled window goes: its screen, or with a strip to crop (launch.cropTop, pixels at
+    /// 100 %) that strip scaled to the screen's DPI and put above the screen's top edge:
+    /// y = -strip, height = screen + strip. The rest of the window shows whole.
+    /// </summary>
+    public static Rectangle FillRect(Rectangle screen, int cropTop, uint dpi)
+    {
+        if (cropTop <= 0) return screen;
+        var strip = (int)Math.Round(cropTop * (dpi == 0 ? 96 : dpi) / 96.0, MidpointRounding.AwayFromZero);
+        return new Rectangle(screen.X, screen.Y - strip, screen.Width, screen.Height + strip);
+    }
+
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+
+    /// <summary>
+    /// The DPI a window is drawn at: its screen's (Windows' scaling for it, 96 = 100 %). The same
+    /// as the window's own for a per-monitor aware app (Electron's, Feishin), and what Windows
+    /// stretches an unaware one to.
+    /// </summary>
+    static uint DpiOf(IntPtr hWnd) =>
+        GetDpiForMonitor(MonitorFromWindow(hWnd, 2 /* MONITOR_DEFAULTTONEAREST */), 0 /* MDT_EFFECTIVE_DPI */, out var x, out _) == 0 && x > 0 ? x : 96;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int size);
+
+    /// <summary>A window's class name (Moonlight's menus: Qt's "Qt6…QWindow…", its stream: SDL's "SDL_app"); null if none.</summary>
+    public static string? ClassOf(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero) return null;
+        var name = new System.Text.StringBuilder(256);
+        return GetClassName(hWnd, name, name.Capacity) > 0 ? name.ToString() : null;
+    }
+
+    /// <summary>
+    /// A window that covers the screen exactly (screen: FillRect's, its strip above the screen
+    /// for a cropTop app) with nothing of a frame showing (no caption, no sizing border) fills
+    /// it, maximized or not: it is left alone. Restoring and restyling it each time the app came
+    /// back in front (Stremio, fill) made it leave full screen and enter it again behind the Home menu.
     /// </summary>
     public static bool FillsScreen(long style, Rect r, Rectangle screen)
     {
