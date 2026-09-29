@@ -31,6 +31,16 @@
       -TestPassword (answer ISO only) makes a random password and writes it to credentials.txt
       next to the ISO, for signing in to the VM before setup clears it. It is never printed.
 
+    Test VM access (answer ISO only, never on a box's media; the USB target has no such switch):
+      -TestAccess -SshPublicKey <file.pub> adds <root>\htpc-test\ (setup\test\Enable-TestAccess.ps1
+      and the key as administrators_authorized_keys) and a first FirstLogonCommands entry that runs
+      it before the HTPC bootstrap: the virtio-win drivers and the Incus agent from attached CDs,
+      permanent automatic sign-in and no sleep, UAC elevating administrators without the consent
+      prompt, and OpenSSH Server with key authentication only. For the Incus test VM
+      (setup\test\New-IncusTestVM.ps1 builds its answer ISO this way).
+      -SkipFirstLogonSetup (with -TestAccess) leaves the HTPC bootstrap out of the first logon, so
+      the VM ends on a plain Windows desktop; htpc\ stays on the ISO to run by hand.
+
     Image (the edition that gets installed):
       -ImageIndex N picks image N of sources\install.wim. Without it:
         USB  the WIM/ESD header on the stick is read directly (no DISM, no admin): a single image is
@@ -44,6 +54,9 @@
     substituted drive holding a fake multi-image WIM header (edition pick, -ImageIndex,
     -ProductKey); the FirstLogonCommands line run against a stub setup.ps1. Not yet tested: a real
     USB stick; the setup exe on the media (27 Sept 2026) not yet in the VM.
+    29 Sept 2026: -IsoPath -TestPassword -TestAccess -SkipFirstLogonSetup in the Incus test VM
+    (Windows 11 IoT Enterprise LTSC 2024 evaluation, Secure Boot, vTPM): unattended install, the
+    test-access step at the first logon, SSH with the key; then TV Box Setup 1.0.4 from Downloads.
 
 .PARAMETER UsbDrive
     Drive letter of the Windows install stick, such as E: (not the system drive).
@@ -54,6 +67,15 @@
 
 .PARAMETER TestPassword
     Answer ISO only: random password, saved to credentials.txt next to the ISO.
+
+.PARAMETER TestAccess
+    Answer ISO only, test VM only: remote access for the dev machine (see "Test VM access" above).
+
+.PARAMETER SshPublicKey
+    With -TestAccess: the OpenSSH public key file (one line, ssh-ed25519 ...) allowed to sign in.
+
+.PARAMETER SkipFirstLogonSetup
+    With -TestAccess: the first logon does not start htpc\Start-HtpcSetup.cmd.
 
 .PARAMETER AskPassword
     Ask for an account password instead of leaving it blank.
@@ -91,6 +113,15 @@ param(
     [Parameter(ParameterSetName = 'Iso')]
     [switch]$TestPassword,
 
+    [Parameter(ParameterSetName = 'Iso')]
+    [switch]$TestAccess,
+
+    [Parameter(ParameterSetName = 'Iso')]
+    [string]$SshPublicKey,
+
+    [Parameter(ParameterSetName = 'Iso')]
+    [switch]$SkipFirstLogonSetup,
+
     [switch]$AskPassword,
 
     [Security.SecureString]$Password,
@@ -117,6 +148,11 @@ $accountName = 'user'
 if (-not $LauncherExe) { $LauncherExe = Join-Path $repoRoot 'launcher\dist\TV Box Setup.exe' }
 # The name it has on the media: "setup" in it opens the wizard (SetupElevation.IsSetupMode).
 $launcherName = 'TV Box Setup.exe'
+# Test VM only (-TestAccess): the first-logon step and where it goes on the answer ISO.
+$testAccessScript = Join-Path $setupDir 'test\Enable-TestAccess.ps1'
+$testAccessMediaPath = 'htpc-test\Enable-TestAccess.ps1'
+$testAccessCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"`$d = [IO.DriveInfo]::GetDrives() | Where-Object { `$_.IsReady -and (Test-Path -LiteralPath (`$_.Name + '$testAccessMediaPath')) } | Select-Object -First 1; if (`$d) { & (`$d.Name + '$testAccessMediaPath'); exit `$LASTEXITCODE }; exit 1`""
+$sshKeyLine = $null
 
 # ---------------------------------------------------------------------------------------------
 # Helpers
@@ -290,6 +326,26 @@ function New-AnswerFileXml([string]$PlainPassword, [int]$Index) {
         Remove-XmlElement $keyElement
     }
 
+    if ($TestAccess) {
+        # Test VM only: the test-access step first (Order 1), then the HTPC bootstrap (Order 2),
+        # or no bootstrap with -SkipFirstLogonSetup.
+        $bootstrap = Select-OneNode $doc "//u:settings[@pass='oobeSystem']//u:FirstLogonCommands/u:SynchronousCommand" $ns
+        $test = $bootstrap.CloneNode($true)
+        (Select-OneNode $test 'u:CommandLine' $ns).InnerText = $testAccessCommand
+        (Select-OneNode $test 'u:Description' $ns).InnerText = 'HTPC TEST VM ONLY: virtio drivers, Incus agent, OpenSSH Server (key only), UAC without the consent prompt'
+        (Select-OneNode $test 'u:Order' $ns).InnerText = '1'
+        $indent = $bootstrap.PreviousSibling
+        [void]$bootstrap.ParentNode.InsertBefore($test, $bootstrap)
+        if ($indent -and $indent.NodeType -eq 'Whitespace') {
+            [void]$bootstrap.ParentNode.InsertBefore($indent.CloneNode($false), $bootstrap)
+        }
+        if ($SkipFirstLogonSetup) {
+            Remove-XmlElement $bootstrap
+        } else {
+            (Select-OneNode $bootstrap 'u:Order' $ns).InnerText = '2'
+        }
+    }
+
     $writer = New-Object IO.StringWriter
     $doc.Save($writer)
     # A StringWriter makes the declaration say utf-16; the file is written as UTF-8.
@@ -328,6 +384,17 @@ function Assert-AnswerFile([string]$Text, [string]$PlainPassword, [int]$Index) {
     foreach ($node in $doc.SelectNodes('//u:SynchronousCommand/u:CommandLine', $ns)) {
         if ($node.InnerText.Length -ge 1024) { throw "FirstLogonCommands line too long ($($node.InnerText.Length))" }
     }
+
+    # The test-access step only on test media, and the HTPC bootstrap unless it was left out on purpose.
+    $commands = @($doc.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand', $ns))
+    $testCommands = @($commands | Where-Object { $_.CommandLine -like "*$testAccessMediaPath*" })
+    $htpcCommands = @($commands | Where-Object { $_.CommandLine -like '*htpc\Start-HtpcSetup.cmd*' })
+    if ($testCommands.Count -ne [int][bool]$TestAccess) { throw "Test-access step: expected $([int][bool]$TestAccess), found $($testCommands.Count)" }
+    $expectedHtpc = [int](-not $SkipFirstLogonSetup)
+    if ($htpcCommands.Count -ne $expectedHtpc) { throw "HTPC bootstrap: expected $expectedHtpc, found $($htpcCommands.Count)" }
+    $orders = @($commands | ForEach-Object { [int]$_.Order })
+    if (@($orders | Select-Object -Unique).Count -ne $orders.Count) { throw "FirstLogonCommands orders repeat: $($orders -join ', ')" }
+    if ($TestAccess -and [int]$testCommands[0].Order -ne 1) { throw 'The test-access step must run first' }
 }
 
 # Copies the media layout (without autounattend.xml) into $Root.
@@ -343,6 +410,12 @@ function Copy-HtpcFiles([string]$Root) {
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force }
     $clips = Join-Path $dest 'tools\hwdecode-clips'
     if (Test-Path -LiteralPath $clips) { Remove-Item -LiteralPath $clips -Recurse -Force }
+    if ($TestAccess) {
+        $testDir = Join-Path $Root (Split-Path $testAccessMediaPath -Parent)
+        New-Item -ItemType Directory -Force $testDir | Out-Null
+        Copy-Item -LiteralPath $testAccessScript -Destination (Join-Path $Root $testAccessMediaPath)
+        [IO.File]::WriteAllText((Join-Path $testDir 'administrators_authorized_keys'), "$sshKeyLine`r`n", (New-Object Text.ASCIIEncoding))
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $dest 'setup.ps1'))) {
         Write-Warning "setup\setup.ps1 is not in the repo yet; the first logon will stop at 'no drive holds htpc\setup\setup.ps1'."
     }
@@ -413,6 +486,20 @@ if (-not (Test-Path -LiteralPath $LauncherExe -PathType Leaf)) {
 Write-Host "Setup exe: $LauncherExe ($([math]::Round((Get-Item -LiteralPath $LauncherExe).Length / 1MB)) MB, version $((Get-Item -LiteralPath $LauncherExe).VersionInfo.ProductVersion))"
 if (@($TestPassword.IsPresent, [bool]$Password, $AskPassword.IsPresent) -eq $true | Select-Object -Skip 1) {
     throw 'Use only one of -TestPassword, -Password and -AskPassword.'
+}
+if ($SkipFirstLogonSetup -and -not $TestAccess) { throw '-SkipFirstLogonSetup is for test media only: use it with -TestAccess.' }
+if ([bool]$SshPublicKey -ne $TestAccess.IsPresent) { throw '-TestAccess and -SshPublicKey go together.' }
+if ($TestAccess) {
+    if (-not (Test-Path -LiteralPath $testAccessScript)) { throw "Missing $testAccessScript" }
+    if (-not (Test-Path -LiteralPath $SshPublicKey -PathType Leaf)) { throw "No public key at $SshPublicKey" }
+    $keyText = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $SshPublicKey).ProviderPath)
+    if ($keyText -match 'PRIVATE KEY') { throw "$SshPublicKey is a private key; pass the .pub file." }
+    $keyLines = @($keyText -split "`r?`n" | Where-Object { $_.Trim() })
+    if ($keyLines.Count -ne 1 -or $keyLines[0] -notmatch '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+|sk-\S+) [A-Za-z0-9+/=]+( .*)?$') {
+        throw "$SshPublicKey is not a one-line OpenSSH public key."
+    }
+    $sshKeyLine = $keyLines[0].Trim()
+    Write-Host "TEST VM media: OpenSSH Server with the key in $SshPublicKey, UAC without the consent prompt$(if ($SkipFirstLogonSetup) { ', no HTPC bootstrap at the first logon' })"
 }
 
 $mediaRoot = $null

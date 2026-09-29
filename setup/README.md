@@ -300,7 +300,8 @@ setup exe, the release's setup.zip or the USB media).
 
 `autounattend/` holds the answer file template and `New-InstallMedia.ps1`, which writes a
 USB stick (asks for the password) or an answer ISO for the VM. `test/` builds and drives the
-Hyper-V test VM. See `autounattend/README.md`.
+test VM, in Hyper-V or on an Incus server (`test/*-IncusTestVM*.ps1`; docs/DEVELOPMENT.md,
+"The test VM"). See `autounattend/README.md`.
 
 ## Dev tools (not in the finished box)
 
