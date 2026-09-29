@@ -60,7 +60,6 @@
 .lc-app.focused { background: var(--tile-focus); }
 .lc-top { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .lc-name { min-width: 0; font-family: var(--display); font-weight: 600; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* long names: one line */
-.lc-desc { font-size: 22px; line-height: 1.35; max-height: 2.7em; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .lc-app .lc-status { margin-top: auto; }   /* at the bottom of the card, however long the description */
 .lc-status { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; }
 /* Installing (or waiting to): a dashed blue edge (as its home tile), the app's icon dimmed, a
@@ -69,7 +68,6 @@
 .lc-app.busy { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .lc-app.busy .lc-top > span:first-child { opacity: 0.45; }
 .lc-app.failed { outline: 2px dashed var(--warn); outline-offset: -2px; }
-.lc-app.failed .lc-desc { -webkit-line-clamp: 1; max-height: 1.35em; }   /* its two-line status needs the room */
 .lc-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--track); }
 .lc-bar span, .pbar span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
 .lc-bar.going span, .pbar.going span { animation: going 1.4s ease-in-out infinite; }

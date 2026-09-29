@@ -125,7 +125,6 @@ function auditLibrary() {
   const apps = Array.from({ length: 20 }, (_, i) => {
     const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
     return { id: `lib${i}`, name: i === 7 ? `Library app ${AUDIT_LONG}` : `Library app ${i + 1}`, glyph, color, type: 'app',
-      desc: i % 3 ? 'Plays what is on your network' : `A description ${AUDIT_LONG}, and then some more words`,
       state: ['home', 'uninstalling', 'install', 'install'][i % 4], canUninstall: true };
   });
   apps[5].state = 'installing';

@@ -66,9 +66,9 @@ function run() {
   check('A on "+" opens Add tile', document.getElementById('addtile').classList.contains('on'));
   check('library.list requested', !!lastSent('library.list'));
   feed({ type: 'library.catalog', apps: [
-    { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: 'x', type: 'app', state: 'install', canUninstall: true },
-    { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F', desc: 'x', type: 'app', state: 'installed', canUninstall: true },
-  ], sites: [ { id: 'netflix', name: 'Netflix', color: '#FF4B55', desc: '', type: 'website', state: 'add' } ] });
+    { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', type: 'app', state: 'install', canUninstall: true },
+    { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F', type: 'app', state: 'installed', canUninstall: true },
+  ], sites: [ { id: 'netflix', name: 'Netflix', color: '#FF4B55', type: 'website', state: 'add' } ] });
   check('Library tab shows app cards', document.querySelectorAll('#addtile .lc-app').length === 2);
 
   // Tabs switch with RB / LB.

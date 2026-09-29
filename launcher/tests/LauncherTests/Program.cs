@@ -853,6 +853,15 @@ Console.WriteLine("== Keys for an app's own menus (menuKeys)");
     var others = apps.Catalog.Where(a => a.MenuKeys is not null).Select(a => a.Id).ToList();
     Check(others.SequenceEqual(["moonlight"]), $"only Moonlight has menu keys ({string.Join(", ", others)})");
     Check(apps.Catalog.Where(a => a.MenuKeys is not null).All(a => a.Preset == "controller"), "menu keys only for apps on the Controller preset");
+    // Apps that own the controller, Home included: a tap on Home is theirs, holding it opens the menu.
+    var ownersOfPad = apps.Catalog.Where(a => a.OwnController).Select(a => a.Id).OrderBy(id => id).ToList();
+    Check(ownersOfPad.SequenceEqual(["moonlight", "steam"]), $"Moonlight and Steam own the controller, Home included ({string.Join(", ", ownersOfPad)})");
+    var underMenu = apps.Catalog.Where(a => a.MinimizeUnderMenu).Select(a => a.Id).ToList();
+    Check(underMenu.SequenceEqual(["steam"]) && apps.Get("steam")!.OwnProcesses is { Count: > 0 }, $"Steam goes down under the Home menu, its own windows only ({string.Join(", ", underMenu)})");
+    Check(apps.Get("retrobat")?.LogoExe is { } logoExe && logoExe.EndsWith(@"\RetroBat.exe", StringComparison.OrdinalIgnoreCase)
+        && logoExe.StartsWith(Path.GetDirectoryName(apps.Get("retrobat")!.Exe!)![..3], StringComparison.OrdinalIgnoreCase),
+        "RetroBat's logo from RetroBat.exe, not the EmulationStation its tile runs");
+    Check(apps.Get("youtubekids") is null, "no YouTube Kids (not offered in Canada; a kid profile in YouTube instead)");
     JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
     Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab" }""")) is null, "no whileClass: no menu keys (never to a window not meant for them)");
     Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "whileClass": "*" }""")) is null, "a whileClass that matches everything: refused");

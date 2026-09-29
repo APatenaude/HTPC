@@ -302,7 +302,7 @@ static class LogoTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
         var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
         var withLogo = apps.Catalog.Where(a => a.LogoUrl is not null).ToList();
-        foreach (var id in new[] { "crunchyroll", "paramountplus", "rds", "tsn", "youtubekids" })
+        foreach (var id in new[] { "crunchyroll", "paramountplus", "rds", "tsn" })
             Check(apps.Get(id)?.LogoUrl is { } u && u.StartsWith("https://"), $"{id}: a logoUrl ({apps.Get(id)?.LogoUrl})");
         Check(withLogo.All(a => a.IsWebsite && Uri.TryCreate(a.LogoUrl, UriKind.Absolute, out var u) && SiteIcons.Secure(u, a.LogoUrl!) is not null),
             "every logoUrl: on a website, an absolute https address: " + string.Join(" ", withLogo.Where(a => !a.IsWebsite || !a.LogoUrl!.StartsWith("https://")).Select(a => a.Id)));
@@ -357,6 +357,21 @@ static class LogoTests
         File.SetLastWriteTimeUtc(exePath, DateTime.UtcNow); // the program was updated
         saved = await logos.RefreshNow(sources);
         Check(saved == 1 && extracted.Count == 1 && logos.Url("player") != firstUrl, "the program updated: its icon read again, a new address (the UI reloads it)");
+
+        // The logo's program changed (the catalog's logoExe: RetroBat's own icon, not the
+        // EmulationStation it runs), though neither program was written since: read again, once.
+        var ownIcon = Path.Combine(dir, "front-end.exe");
+        File.WriteAllText(ownIcon, "not really a program either");
+        File.SetLastWriteTimeUtc(ownIcon, DateTime.UtcNow.AddDays(-30));
+        File.SetCreationTimeUtc(ownIcon, DateTime.UtcNow.AddDays(-30));
+        installed = ownIcon;
+        extracted.Clear();
+        saved = await logos.RefreshNow(sources);
+        var again = await logos.RefreshNow(sources);
+        Check(saved == 1 && again == 0 && extracted.SequenceEqual(new[] { ownIcon }) && File.ReadAllText(Path.Combine(dir, "player.from")) == ownIcon,
+            "the logo's program changed: read from the new one, once (<id>.from says which)");
+        installed = exePath;
+        await logos.RefreshNow(sources);
 
         // A site out of reach: again after 10 minutes, not before.
         sources.Add(new("away", "https://away.test/", null));

@@ -134,14 +134,15 @@ sealed partial class MainForm
 
     /// <summary>
     /// Start + D-pad (StartChord): the volume over any app, the launcher included. Not in
-    /// standby, nor in Moonlight, whose buttons all belong to the game PC (its Home tap too).
+    /// standby, nor in an app that owns the controller (catalog ownController: Moonlight, whose
+    /// buttons all belong to the game PC, its Home tap too; Steam and its games).
     /// Apps on the Controller preset (VacuumTube, Jellyfin, Kodi...) read the controller
     /// themselves: they see Start and the D-pad as well, which the launcher cannot hold back.
     /// </summary>
     void OnChord(string command, bool repeat)
     {
         if (setupMode || standby.Active) return;
-        if (!LauncherActive && foregroundApp?.Id == "moonlight") return;
+        if (!LauncherActive && foregroundApp?.OwnController == true) return;
         if (!repeat) Log.Info($"Start + D-pad: {command}");
         Volume(command, step: 2);
     }

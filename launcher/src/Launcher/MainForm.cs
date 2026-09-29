@@ -426,7 +426,8 @@ sealed partial class MainForm : Form
     {
         id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, logo = LogoFor(t), logoUrl = logos.Url(t.Id),
         running = apps.IsRunning(t.Id), custom = t.Custom, website = t.IsWebsite,
-        uninstall = BoxInstalls(t) && apps.IsInstalled(t.Id)
+        uninstall = BoxInstalls(t) && apps.IsInstalled(t.Id),
+        ownController = t.OwnController // Home is the app's, hold it for the menu (buttons.js)
     }).ToList();
 
     object StateObject() => new
@@ -534,19 +535,21 @@ sealed partial class MainForm : Form
         var app = active ? null : apps.ForegroundApp();
         // The controller is in use: no mouse pointer on the TV, unless a preset moves it.
         if (mapper.Map is null) cursor.Hide();
-        // Inside Moonlight a tap on Home belongs to the game PC; a 1 s hold opens our menu.
-        var moonlight = app?.Id == "moonlight";
+        // An app that owns the controller (catalog ownController: Moonlight, whose Home tap belongs
+        // to the game PC; Steam, whose Home opens its own overlay, in its games too): a tap on Home
+        // is the app's, a 0.5 s hold opens our menu.
+        var ownsPad = app?.OwnController == true;
         // An alert that takes Home (the sleep timer's last minute: +15 min) gets it first.
-        if ((pad == Pad.Home && !moonlight || pad == Pad.HomeHold && moonlight) && alerts.ClaimsHome()) return;
+        if ((pad == Pad.Home && !ownsPad || pad == Pad.HomeHold && ownsPad) && alerts.ClaimsHome()) return;
 
         switch (pad)
         {
             case Pad.Home:
-                if (moonlight) return;
+                if (ownsPad) return;
                 if (active) Post(new { type = "input", button = "home" }); else ShowOver(app, "menu");
                 return;
             case Pad.HomeHold:
-                if (moonlight) ShowOver(app, "menu");
+                if (ownsPad) ShowOver(app, "menu");
                 else if (active) Post(new { type = "input", button = "homeHold" });
                 else ShowOver(app, "power");
                 return;
@@ -556,9 +559,9 @@ sealed partial class MainForm : Form
         if (!active && RunMappedCommand(pad, app)) return;
 
         // R3 in apps without a map (Controller preset): the on-screen keyboard, for the text
-        // field that has the focus (not in Moonlight: R3 is a game button there). Where there
-        // is a map, R3 does what the map says (the keyboard unless changed).
-        if (pad == Pad.R3 && !active && !moonlight && mapper.Map is null)
+        // field that has the focus (not in an app that owns the controller: R3 is a game button
+        // there). Where there is a map, R3 does what the map says (the keyboard unless changed).
+        if (pad == Pad.R3 && !active && !ownsPad && mapper.Map is null)
         {
             var field = lastField is { } f && f.ProcessId == Native.ProcessOf(Native.GetForegroundWindow()) ? f : null;
             OpenKeyboard(field, auto: false);
@@ -960,6 +963,8 @@ sealed partial class MainForm : Form
         web.Focus();
         var ms = clock.ElapsedMilliseconds;
         launcherComingUntil = 0; // up: UpdateMapper keeps UI Automation off while it is in front
+        // Over Steam: its windows down, or its Big Picture moves under the menu with every press.
+        if (menuOver is { } over) apps.MinimizeOwnWindows(over);
         if (shown || how != "already" || homeAt != 0)
             Log.Info($"Launcher up in {ms} ms ({(shown ? $"shown {showMs} ms, " : "")}foreground {how} {foregroundMs - showMs} ms, " +
                 $"pointer {pointerMs - foregroundMs} ms, focus {ms - pointerMs} ms)" +
@@ -1047,7 +1052,7 @@ sealed partial class MainForm : Form
     {
         if (setupMode || LauncherActive) return;
         var app = apps.ForegroundApp();
-        if (app is null ? !(desktop.Active || InstallerInFront()) : app.Id == "moonlight") return;
+        if (app is null ? !(desktop.Active || InstallerInFront()) : app.OwnController) return;
         LauncherComes();
         if (keyboard.Visible) return;
         earlyAt = Environment.TickCount64;

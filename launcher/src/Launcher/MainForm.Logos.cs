@@ -31,7 +31,10 @@ sealed partial class MainForm
     /// <summary>Every app the launcher knows (the library's too), in the background.</summary>
     void RefreshLogos()
     {
-        var sources = apps.All.Select(a => new LogoSource(a.Id, a.IsWebsite ? a.Url : null, a.IsWebsite ? null : () => apps.ProgramPath(a.Id),
+        // A program's logo from its own icon, or from the catalog's logoExe (RetroBat's own, not
+        // EmulationStation's, which its tile runs), once the app is installed.
+        var sources = apps.All.Select(a => new LogoSource(a.Id, a.IsWebsite ? a.Url : null,
+            a.IsWebsite ? null : () => apps.ProgramPath(a.Id) is { } exe ? (a.LogoExe is { } logoExe ? Environment.ExpandEnvironmentVariables(logoExe) : exe) : null,
             a.IsWebsite ? a.LogoUrl : null)).ToList();
         logos.Refresh(sources);
     }

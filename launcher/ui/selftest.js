@@ -583,7 +583,7 @@
   // Install from Add tile: A asks "Install Kodi?" (on Cancel); Yes starts it and Add tile stays up
   // with the focus on its card, which shows the progress; home shows a tile installing it, then
   // that it did not.
-  const kodi = { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', desc: '', type: 'app', state: 'install', canUninstall: true };
+  const kodi = { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF', type: 'app', state: 'install', canUninstall: true };
   state.libraryAvailable = true;
   EXT.actions.addtile();
   onHost({ type: 'library.catalog', apps: [kodi], sites: [] });

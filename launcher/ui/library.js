@@ -381,7 +381,6 @@
       const st = cardStatus(c);
       return `<button class="lc-app${st.busy ? ' busy' : ''}${st.failed ? ' failed' : ''}" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}">` +
         `<div class="lc-top">${appIcon(c, 40)}<span class="lc-name">${esc(c.name)}</span>${c.builtin ? '<span class="lc-tag">Built in</span>' : ''}</div>` +
-        `<span class="lc-desc">${esc(c.desc)}</span>` +
         `<span class="lc-status" style="color:${st.color}">${statusIcon(st, 22)}${esc(st.label)}</span>${progressBar(st, 'lc-bar')}</button>`;
     }).join('');
     const sites = lib.catalog.sites.map((c) => {
@@ -670,16 +669,16 @@
     const C = { youtube: '#FF5B52', stremio: '#7C8CFF', jellyfin: '#3DC0F0', moonlight: '#F5D16B', edge: '#3CCB9A', kodi: '#5AB0FF', vlc: '#FF8A1F', plex: '#F5B82E', spotify: '#1ED760', feishin: '#FF7AB6' };
     lib.catalog = {
       apps: [
-        { id: 'youtube', name: 'YouTube', glyph: 'youtube', desc: 'YouTube’s TV interface, without ads', state: 'home', canUninstall: true },
-        { id: 'stremio', name: 'Stremio', glyph: 'film', desc: 'Movies and shows through add-ons', state: 'home', canUninstall: true },
-        { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', desc: 'Your Jellyfin library, TV layout', state: 'home', canUninstall: true },
-        { id: 'moonlight', name: 'Moonlight', glyph: 'moon', desc: 'Play games streamed from your PC', state: 'uninstalling', canUninstall: true },
-        { id: 'edge', name: 'Browser', glyph: 'globe', desc: 'The web, with tabs and an address bar', state: 'home', builtin: true },
-        { id: 'kodi', name: 'Kodi', glyph: 'tv', desc: 'Media center for files on your network', state: 'install', canUninstall: true },
-        { id: 'vlc', name: 'VLC', glyph: 'play', desc: 'Plays almost any video or audio file', state: 'home', canUninstall: true },
-        { id: 'plex', name: 'Plex HTPC', glyph: 'library', desc: 'Plex’s app made for TVs', state: 'install', canUninstall: true },
-        { id: 'spotify', name: 'Spotify', glyph: 'music', desc: 'Music streaming', state: 'installing', canUninstall: true },
-        { id: 'feishin', name: 'Feishin', glyph: 'music', desc: 'Music from your Navidrome server', state: 'install', canUninstall: true },
+        { id: 'youtube', name: 'YouTube', glyph: 'youtube', state: 'home', canUninstall: true },
+        { id: 'stremio', name: 'Stremio', glyph: 'film', state: 'home', canUninstall: true },
+        { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', state: 'home', canUninstall: true },
+        { id: 'moonlight', name: 'Moonlight', glyph: 'moon', state: 'uninstalling', canUninstall: true },
+        { id: 'edge', name: 'Browser', glyph: 'globe', state: 'home', builtin: true },
+        { id: 'kodi', name: 'Kodi', glyph: 'tv', state: 'install', canUninstall: true },
+        { id: 'vlc', name: 'VLC', glyph: 'play', state: 'home', canUninstall: true },
+        { id: 'plex', name: 'Plex HTPC', glyph: 'library', state: 'install', canUninstall: true },
+        { id: 'spotify', name: 'Spotify', glyph: 'music', state: 'installing', canUninstall: true },
+        { id: 'feishin', name: 'Feishin', glyph: 'music', state: 'install', canUninstall: true },
       ].map((a) => demoLogo(Object.assign(a, { color: C[a.id] || '#F3F2EF' }))),
       sites: [
         { id: 'twitch', name: 'Twitch', color: '#9146FF', state: 'home' },

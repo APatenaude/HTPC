@@ -179,7 +179,9 @@ function menuAppCard() {
   let rows, how;
   if (app.map.preset === 'controller') {
     how = `${app.name} reads the controller itself`;
+    // An app that owns the controller (Moonlight, Steam): Home is its own, held it is this menu.
     rows = id === 'moonlight' ? [['Home', 'To the game PC'], ['Hold Home', 'This menu']]
+      : tile.ownController ? [['Home', `${app.name}’s own menu`], ['Hold Home', 'This menu']]
       : [['Home', 'This menu'], ['Hold Home', 'Power'], ['R3', 'On-screen keyboard']];
   } else {
     how = `${PRESET_NAMES[app.map.preset] || app.map.preset} preset${Object.keys(app.map.changes).length ? ', changed' : ''}`;
@@ -228,19 +230,22 @@ function stepFocus(el, dir) {
 
 function editorRows(app) {
   const controller = app.map.preset === 'controller';
-  const moonlight = app.id === 'moonlight';
+  const tile = state.tiles.find((t) => t.id === app.id);
+  const ownsPad = app.id === 'moonlight' || !!(tile && tile.ownController);   // R3 is the app's (a game button)
   const rows = MAP_CONTROLS.map(([control, badge]) => {
     const value = valueOf(app, control);
     const changed = app.map.changes[control] !== undefined;
     let does = actionLabel(control, value);
-    if (controller) does = control === 'r3' && !moonlight ? 'On-screen keyboard' : 'To the app';
+    if (controller) does = control === 'r3' && !ownsPad ? 'On-screen keyboard' : 'To the app';
     const editing = maps.picking === control;
     const nav = controller || maps.picking || maps.choosingPreset ? '' : ` data-nav data-id="b-${control}" data-control="${control}"`;
     return `<div class="brow${editing ? ' editing' : ''}${controller ? ' fixed' : ''}"${nav}>` +
       `<span class="bkey${badge.length > 1 ? ' wide' : ''}">${esc(badge)}</span>` +
       `<span class="bdoes">${esc(does)}</span>${changed ? '<span class="bdot" aria-label="Changed"></span>' : ''}</div>`;
   });
-  rows.push('<div class="brow fixed"><span class="bkey wide">Home</span><span class="bdoes">Home menu (fixed)</span></div>');
+  rows.push(ownsPad ? '<div class="brow fixed"><span class="bkey wide">Home</span><span class="bdoes">To the app</span></div>' +
+      '<div class="brow fixed"><span class="bkey wide">Hold Home</span><span class="bdoes">Home menu (fixed)</span></div>'
+    : '<div class="brow fixed"><span class="bkey wide">Home</span><span class="bdoes">Home menu (fixed)</span></div>');
   return rows.join('');
 }
 

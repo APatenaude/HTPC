@@ -95,14 +95,14 @@ sealed partial class MainForm
     void UpdateAlertPlace()
     {
         if (standby is null || setupMode) return;
-        var moonlight = false;
+        var holdHome = false;
         AlertPlace place;
         if (standby.Active) place = AlertPlace.Standby;
         else if (LauncherActive) place = AlertPlace.Launcher;
         else
         {
             place = AlertPlace.App;
-            moonlight = foregroundApp?.Id == "moonlight";
+            holdHome = foregroundApp?.OwnController == true; // Home there is "Hold Home" (Moonlight, Steam)
             if (foregroundApp is { } front) { lastFrontApp = front.Id; lastFrontSeen = DateTime.UtcNow; }
         }
         if (place != alertPlace)
@@ -113,7 +113,7 @@ sealed partial class MainForm
             WifiPlaceChanged(); // MainForm.Wifi.cs: scans only with the launcher in front
             BluetoothPlaceChanged();
         }
-        alertCenter.SetPlace(place, moonlight);
+        alertCenter.SetPlace(place, holdHome);
     }
 
     // Back from standby: the network gets a minute, and what waited shows once the TV is on

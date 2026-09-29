@@ -48,11 +48,16 @@ sealed partial class MainForm
     static bool BoxInstalls(CatalogApp a) => a.Installable && a.InstallSource != "builtin";
 
     /// <summary>
-    /// The owner's rule: if it's installed, it's on the home screen. A catalog app the box installs
-    /// that is installed with no tile (installed outside the launcher, by setup without its tile,
-    /// or from before this rule) gets its tile at the end of the row: at start and each time the
-    /// library looks at what is installed. Not for an app with a job queued (installing adds its
-    /// tile when it is done, uninstalling takes it away). Not in TV Box Setup.
+    /// The owner's rule: if it's installed, it's on the home screen, and if it isn't, it isn't. A
+    /// catalog app the box installs that is installed with no tile (installed outside the launcher,
+    /// by setup without its tile, or from before this rule) gets its tile at the end of the row;
+    /// one with a tile that is not installed (uninstalled outside the launcher, or its uninstall
+    /// ended while the launcher was restarting, so OnJobFinished never took its tile away) loses
+    /// it. At start and each time the library looks at what is installed. Not for an app with a job
+    /// queued (installing adds its tile when it is done, uninstalling takes it away; a failed
+    /// install has library.js's own "Didn't install" tile, not one of these). Tiles are taken away
+    /// only while no job runs at all: an app update can leave the program missing for a moment, and
+    /// a tile taken away then would come back at the end of the row. Not in TV Box Setup.
     /// </summary>
     void EnsureInstalledOnHome()
     {
@@ -60,13 +65,18 @@ sealed partial class MainForm
         var missing = apps.Catalog
             .Where(a => BoxInstalls(a) && !apps.Tiles.Any(t => t.Id == a.Id) && !library.IsQueued(a.Id) && apps.IsInstalled(a.Id))
             .Select(a => a.Id).ToList();
-        if (missing.Count == 0) return;
+        var gone = library.Busy ? new List<string>() : apps.Tiles
+            .Where(t => !t.Custom && BoxInstalls(t) && !apps.IsInstalled(t.Id))
+            .Select(t => t.Id).ToList();
+        if (missing.Count == 0 && gone.Count == 0) return;
         EnsureTiles();
         settings.Tiles!.AddRange(missing);
+        settings.Tiles.RemoveAll(gone.Contains);
         settings.Save();
         apps.SetTiles(settings.Tiles);
         PushTiles();
-        Log.Info($"Library: installed, so on the home screen: {string.Join(", ", missing)}");
+        if (missing.Count > 0) Log.Info($"Library: installed, so on the home screen: {string.Join(", ", missing)}");
+        if (gone.Count > 0) Log.Info($"Library: not installed, so off the home screen: {string.Join(", ", gone)}");
     }
 
     void PushTiles() => Post(new { type = "tiles", tiles = TileList() });
@@ -102,7 +112,6 @@ sealed partial class MainForm
         glyph = a.Glyph,
         color = a.Color,
         logo = logos.Url(a.Id), // MainForm.Logos.cs
-        desc = a.Desc ?? "",
         type = a.Type,
         state = LibraryState(a),
         canUninstall = BoxInstalls(a),

@@ -21,13 +21,22 @@ namespace Htpc.Launcher;
 /// <param name="OwnProcesses">launch.ownProcesses: the app's own programs besides launch.exe (Steam's
 /// steamwebhelper.exe); anything else in its process tree is one it started (a game), and it is
 /// not quit while one runs. Null: not declared, only windows count.</param>
+/// <param name="OwnController">ownController: the app uses every button itself, Home included
+/// (Moonlight: the game PC's; Steam: its own overlay, in its games too, which run in its process
+/// tree). There a tap on Home is the app's and holding it opens the Home menu; R3 and Start + D-pad
+/// are the app's too (MainForm.OnPad, OnChord; Alerts' chips say "Hold Home").</param>
+/// <param name="LogoExe">logoExe: the program whose icon is the app's logo, when launch.exe is a
+/// front end with an icon of its own (RetroBat runs EmulationStation).</param>
+/// <param name="MinimizeUnderMenu">launch.minimizeUnderMenu: its own windows are minimized while the
+/// Home menu is over it (Steam's Big Picture reads the controller even in the background).</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
-    string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
+    string? WingetScope = null, string? InstallSource = null, bool Custom = false,
     bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false,
     string? LogoUrl = null,
     bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
-    int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null)
+    int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null,
+    bool OwnController = false, string? LogoExe = null, bool MinimizeUnderMenu = false)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -163,7 +172,6 @@ sealed class AppManager
             installable,
             installable ? Str(install, "scope") ?? "machine" : "machine",
             launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("fill", out var fill) && fill.ValueKind == JsonValueKind.True,
-            Str(a, "desc"),
             installable ? Str(install, "wingetScope") : null,
             installable ? Str(install, "source") : null,
             Custom: false,
@@ -176,7 +184,10 @@ sealed class AppManager
             MenuKeys: a.TryGetProperty("menuKeys", out var mk) ? MenuKeys.Parse(mk) : null,
             QuitWhenWindowless: launch.ValueKind == JsonValueKind.Object ? QuitWhenWindowlessOf(launch) : 0,
             QuitArgs: launch.ValueKind == JsonValueKind.Object ? QuitArgsOf(launch) : null,
-            OwnProcesses: launch.ValueKind == JsonValueKind.Object ? OwnProcessesOf(launch) : null);
+            OwnProcesses: launch.ValueKind == JsonValueKind.Object ? OwnProcessesOf(launch) : null,
+            OwnController: a.TryGetProperty("ownController", out var oc) && oc.ValueKind == JsonValueKind.True,
+            LogoExe: Str(a, "logoExe"),
+            MinimizeUnderMenu: launch.ValueKind == JsonValueKind.Object && launch.TryGetProperty("minimizeUnderMenu", out var mu) && mu.ValueKind == JsonValueKind.True);
     }
 
     /// <summary>launch.quitWhenWindowless: whole seconds, 30 to 3600; else 0 (off).</summary>
@@ -666,6 +677,36 @@ sealed class AppManager
             }
             catch (Exception e) { Log.Warn($"{id}: looking for its window: {e.Message}"); }
         }
+    }
+
+    /// <summary>
+    /// launch.minimizeUnderMenu (Steam): the Home menu has come up over the app, and its own
+    /// windows (its program's and launch.ownProcesses', never a game's it started) go down to the
+    /// taskbar, without taking the focus from the launcher. Steam's Big Picture reads the
+    /// controller even when another window is in front, so under the menu it moved with every
+    /// press. Going back to it restores them (Native.ForceForeground). On the UI thread: a process
+    /// snapshot and a window list, as CheckWindowless.
+    /// </summary>
+    public void MinimizeOwnWindows(string id)
+    {
+        Process? p;
+        lock (running) running.TryGetValue(id, out p);
+        if (p is null || Get(id) is not { MinimizeUnderMenu: true } app) return;
+        try
+        {
+            if (p.HasExited) return;
+            var root = (uint)p.Id;
+            var tree = Native.ProcessTreeNames(root);
+            var rootName = tree.GetValueOrDefault(root);
+            var own = tree.Where(t => t.Key == root || (rootName is not null && t.Value.Equals(rootName, StringComparison.OrdinalIgnoreCase))
+                    || (app.OwnProcesses?.Any(rx => rx.IsMatch(t.Value)) ?? false))
+                .Select(t => t.Key).ToHashSet();
+            var down = 0;
+            foreach (var w in Native.TopLevelWindows(own))
+                if (!Native.IsIconic(w)) { Native.ShowWindow(w, 7 /* SW_SHOWMINNOACTIVE */); down++; }
+            if (down > 0) Log.Info($"{id}: {down} window(s) minimized under the Home menu (it reads the controller in the background)");
+        }
+        catch (Exception e) { Log.Warn($"{id}: minimizing under the Home menu: {e.Message}"); }
     }
 
     /// <summary>

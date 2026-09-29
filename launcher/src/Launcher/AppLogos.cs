@@ -127,10 +127,14 @@ sealed class AppLogos
         var exe = s.Exe?.Invoke();
         if (exe is null || !File.Exists(exe)) return false; // not installed (yet): looked at again next time
         // Up to date unless the program was written since (an update; an installer may keep the
-        // file's own date, so its creation counts too).
+        // file's own date, so its creation counts too), or the logo came from another program
+        // (the catalog's logoExe changed it: RetroBat's own, not EmulationStation's). <id>.from
+        // says which; a logo from before it is taken again once.
         var png = new FileInfo(PathOf(s.Id));
+        var from = Path.Combine(dir, s.Id + ".from");
         var changed = new[] { File.GetLastWriteTimeUtc(exe), File.GetCreationTimeUtc(exe) }.Max();
-        if (png.Exists && png.Length > 0 && png.LastWriteTimeUtc >= changed) return false;
+        var sameProgram = File.Exists(from) && string.Equals(File.ReadAllText(from).Trim(), exe, StringComparison.OrdinalIgnoreCase);
+        if (png.Exists && png.Length > 0 && png.LastWriteTimeUtc >= changed && sameProgram) return false;
         var (data, why) = exeIcon(exe, 48);
         if (data is null)
         {
@@ -139,6 +143,7 @@ sealed class AppLogos
             return false;
         }
         Save(s.Id, data);
+        File.WriteAllText(from, exe);
         Log.Info($"Logo {s.Id}: from {Path.GetFileName(exe)}");
         return true;
     }
