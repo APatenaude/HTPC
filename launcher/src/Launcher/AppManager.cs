@@ -9,15 +9,57 @@ namespace Htpc.Launcher;
 /// (AppLogos tries it before the site's page).</param>
 /// <param name="OwnKeyboard">ownKeyboard: the app has its own on-screen keyboard (Plex HTPC), so the
 /// launcher's never pops up by itself there, whatever its preset (MainForm.UpdateMapper); R3 still opens it.</param>
+/// <param name="CropTop">launch.cropTop: a fill app's own title strip, in pixels at 100 % scaling
+/// (Feishin's window bar): filled, its window goes that much above the screen (Native.FillRect).</param>
+/// <param name="MenuKeys">menuKeys: keys for buttons the app's own menus leave unused, only while
+/// its menu window is in front (Moonlight: Select = Shift+Tab, to reach its toolbar).</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
     bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false,
     string? LogoUrl = null,
-    bool OwnKeyboard = false)
+    bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
+}
+
+/// <summary>
+/// catalog.json "menuKeys": { "select": "key:Shift+Tab", "whileClass": "Qt*QWindow*" }. For an
+/// app on the Controller preset (it reads the pad itself, the launcher sends nothing), a key the
+/// launcher types when one of the named buttons goes down, only while the window in front is of
+/// the whileClass window class (* a wildcard): its menus, never its other windows. Moonlight's
+/// menus (Qt Quick) cannot move the focus up to their toolbar (Add PC, Help, Settings), which
+/// only Tab and Shift+Tab reach, and ignore Select; its stream is an SDL window ("SDL_app"),
+/// never touched. Buttons: a b x y lb rb lt rt select start l3 r3; keys as in a button map
+/// ("key:..."). No whileClass, no menuKeys: nothing may go to a window not meant for it.
+/// </summary>
+sealed record MenuKeys(IReadOnlyDictionary<Pad, KeyAction> Keys, System.Text.RegularExpressions.Regex WhileClass)
+{
+    /// <summary>The key to type for this press with a window of this class in front; null for none.</summary>
+    public KeyAction? KeyFor(Pad pad, string? windowClass) =>
+        windowClass is not null && WhileClass.IsMatch(windowClass) && Keys.TryGetValue(pad, out var key) ? key : null;
+
+    /// <summary>The catalog's menuKeys; null when missing, without a usable whileClass, or with no key.</summary>
+    public static MenuKeys? Parse(JsonElement e)
+    {
+        if (e.ValueKind != JsonValueKind.Object) return null;
+        if (!e.TryGetProperty("whileClass", out var w) || w.ValueKind != JsonValueKind.String
+            || AutostartGuard.NamePattern(w.GetString()!) is not { } whileClass) return null;
+        var keys = new Dictionary<Pad, KeyAction>();
+        foreach (var p in e.EnumerateObject())
+        {
+            Pad? pad = p.Name switch
+            {
+                "a" => Pad.A, "b" => Pad.B, "x" => Pad.X, "y" => Pad.Y, "lb" => Pad.LB, "rb" => Pad.RB,
+                "lt" => Pad.LT, "rt" => Pad.RT, "select" => Pad.Select, "start" => Pad.Start, "l3" => Pad.L3, "r3" => Pad.R3,
+                _ => null,
+            };
+            if (pad is { } b && p.Value.ValueKind == JsonValueKind.String && ButtonMapStore.ParseAction(p.Value.GetString()!) is KeyAction key)
+                keys[b] = key;
+        }
+        return keys.Count > 0 ? new MenuKeys(keys, whileClass) : null;
+    }
 }
 
 /// <summary>
@@ -109,8 +151,16 @@ sealed class AppManager
             Env: launch.ValueKind == JsonValueKind.Object ? LaunchEnv(launch) : null,
             InstallInteractive: installable && install.TryGetProperty("interactive", out var ia) && ia.ValueKind == JsonValueKind.True,
             LogoUrl: Str(a, "logoUrl"),
-            OwnKeyboard: a.TryGetProperty("ownKeyboard", out var ok) && ok.ValueKind == JsonValueKind.True);
+            OwnKeyboard: a.TryGetProperty("ownKeyboard", out var ok) && ok.ValueKind == JsonValueKind.True,
+            CropTop: launch.ValueKind == JsonValueKind.Object ? CropTopOf(launch) : 0,
+            MenuKeys: a.TryGetProperty("menuKeys", out var mk) ? MenuKeys.Parse(mk) : null);
     }
+
+    /// <summary>launch.cropTop: pixels at 100 % scaling, for a fill app only; 0 to 100 (a strip, not a page).</summary>
+    internal static int CropTopOf(JsonElement launch) =>
+        launch.TryGetProperty("fill", out var f) && f.ValueKind == JsonValueKind.True
+        && launch.TryGetProperty("cropTop", out var c) && c.ValueKind == JsonValueKind.Number
+        && c.TryGetInt32(out var px) && px is > 0 and <= 100 ? px : 0;
 
     /// <summary>
     /// launch.env: variables the app is started with, where that is how its own background work

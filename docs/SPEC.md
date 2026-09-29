@@ -42,7 +42,8 @@ user) are folded into the items below; what was dropped is listed under "Not now
 - **N3 Apps picked in first-run setup.** Six come pre-ticked: YouTube (VacuumTube), Twitch
   (twitch.tv in its own Edge app window, for its extensions), Stremio 5, Jellyfin Desktop,
   Moonlight, and Browser (Edge only, opening on Google, new tabs too). Everything else lives in
-  the library. Every app opens filling the screen. Website tiles are separate Edge app windows,
+  the library. Every app opens filling the screen (Feishin with its own title strip just above
+  the screen's edge, the owner, 29 Sept 2026: catalog `launch.cropTop`). Website tiles are separate Edge app windows,
   each with its own profile and sign-in and no address bar; links they open in a new window
   open in another app window. Extensions in every Edge profile, force-installed by policy:
   uBlock Origin Lite (not full uBlock Origin: Edge ends MV2 support by about April 2027),
@@ -177,7 +178,9 @@ September; Edge draws dark pages itself) · a default playback speed for VacuumT
 
 Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power (in standby: wake) · in
 Moonlight a tap goes to the game PC, a hold of 0.5 s is our menu · R3 = on-screen keyboard
-(not in Moonlight; configurable) · Start + D-pad = volume (not in Moonlight).
+(not in Moonlight; configurable) · Start + D-pad = volume (not in Moonlight) · in Moonlight's
+menus (the PC and app grids, not while it streams), Select = Shift+Tab, which reaches their
+toolbar (Add PC, Help, Settings); the owner, 29 Sept 2026 (catalog `menuKeys`).
 
 Launcher & menus: D-pad/L stick move · A select (held 0.5 s on a home tile: move it; let go after moving drops it) · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
 

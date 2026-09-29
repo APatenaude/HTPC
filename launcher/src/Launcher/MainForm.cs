@@ -562,6 +562,19 @@ sealed partial class MainForm : Form
             return;
         }
 
+        // A key for a button the app's own menus leave unused (catalog menuKeys), while no map
+        // drives it (it reads the pad itself, which sees the press too) and only while its menu
+        // window is in front: in Moonlight, Select = Shift+Tab reaches the toolbar of the PC
+        // and app grids (Add PC, Help, Settings), which the controller's own moves cannot. Its
+        // stream is another window (SDL's), which never gets anything. One press, one key.
+        if (!active && !repeat && mapper.Map is null && app?.MenuKeys is { } menuKeys
+            && menuKeys.KeyFor(pad, Native.ClassOf(Native.GetForegroundWindow())) is { } menuKey)
+        {
+            Input.Tap(menuKey.Keys);
+            Log.Info($"{pad} in {app.Id}'s menu: {ButtonMapStore.Format(menuKey)}");
+            return;
+        }
+
         if (!active) return; // the app reads the pad itself (Controller preset) or the button map drives it
         // The controller's A says its release will follow (aUp, above): the page can tell a tap
         // from a hold. The phone's and the keyboard's A have no release: they act at once.
@@ -792,8 +805,9 @@ sealed partial class MainForm : Form
                 Log.Info($"{id} window up after {waited + 250} ms: left behind the launcher (Home or B while it opened)");
                 return;
             }
-            var fill = apps.Get(id)?.Fill == true;
-            var filled = fill && Native.FillScreen(window);
+            var fillApp = apps.Get(id) is { Fill: true } a ? a : null;
+            var fill = fillApp is not null;
+            var filled = fillApp is not null && Native.FillScreen(window, fillApp.CropTop);
             var how = Native.ForceForeground(window);
             StepAside(id);
             Post(new { type = "opened", id, ok = true });
@@ -815,13 +829,14 @@ sealed partial class MainForm : Form
     async Task SettleFilled(string id)
     {
         var again = 0;
+        var cropTop = apps.Get(id)?.CropTop ?? 0;
         for (var waited = 500; waited <= 10_000; waited += 500)
         {
             await Task.Delay(500);
             if (!apps.IsRunning(id)) return;
             if (setupMode || standby is not { Active: false } || LauncherActive || LauncherComing) continue;
             var window = apps.MainWindow(id);
-            if (window == IntPtr.Zero || window != Native.GetForegroundWindow() || !Native.FillScreen(window)) continue;
+            if (window == IntPtr.Zero || window != Native.GetForegroundWindow() || !Native.FillScreen(window, cropTop)) continue;
             if (again++ == 0) Log.Info($"{id} stopped filling the screen {waited} ms after it opened: filled again");
         }
         if (again > 1) Log.Info($"{id} filled again {again} times while it opened");
@@ -846,7 +861,7 @@ sealed partial class MainForm : Form
         // front, unless B came right after the launcher did.
         if (!waited && !textFields.Quiet) { _ = WhenTextFieldsQuiet(() => SwitchTo(id, waited: true)); return; }
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var filled = apps.Get(id)?.Fill == true && Native.FillScreen(window);
+        var filled = apps.Get(id) is { Fill: true } app && Native.FillScreen(window, app.CropTop);
         var how = Native.ForceForeground(window);
         Log.Info($"Back to {id}: foreground {how}{(filled ? ", made to fill the screen" : "")} ({clock.ElapsedMilliseconds} ms)");
         StepAside(id);
@@ -866,10 +881,10 @@ sealed partial class MainForm : Form
         var app = foregroundApp;
         if (setupMode || standby is not { Active: false } || desktop.Active || LauncherActive || app is not { Fill: true }) { unfilledFor = 0; return; }
         var window = apps.MainWindow(app.Id);
-        if (window == IntPtr.Zero || window != Native.GetForegroundWindow() || Native.Fills(window)) { unfilledFor = 0; return; }
+        if (window == IntPtr.Zero || window != Native.GetForegroundWindow() || Native.Fills(window, app.CropTop)) { unfilledFor = 0; return; }
         if (++unfilledFor < 2) return;
         unfilledFor = 0;
-        if (Native.FillScreen(window)) Log.Info($"{app.Id} no longer filled the screen: filled again");
+        if (Native.FillScreen(window, app.CropTop)) Log.Info($"{app.Id} no longer filled the screen: filled again");
     }
 
     // While an app is in front the launcher hides (Home brings it back): hidden, it costs

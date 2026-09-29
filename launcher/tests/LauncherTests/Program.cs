@@ -804,6 +804,63 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
         "website tiles: their own profile folder, the address as one argument of its own");
 }
 
+// ---------------------------------------------------------------- A fill app's own title strip (launch.cropTop)
+// Feishin draws its own - [] x bar (30 CSS px) even full screen: filled, it sits just above the screen.
+Console.WriteLine("== Fill: an app's own title strip above the screen (launch.cropTop)");
+{
+    var tv4k = new Rectangle(0, 0, 3840, 2160);
+    var hd = new Rectangle(0, 0, 1920, 1080);
+    Check(Native.FillRect(tv4k, 0, 240) == tv4k, "no cropTop: the screen itself");
+    Check(Native.FillRect(hd, 30, 96) == new Rectangle(0, -30, 1920, 1110), "100 %: y = -30, height = screen + 30");
+    Check(Native.FillRect(tv4k, 30, 144) == new Rectangle(0, -45, 3840, 2205), "150 %: the strip is 45 px");
+    Check(Native.FillRect(tv4k, 30, 240) == new Rectangle(0, -75, 3840, 2235), "250 % (a 4K TV): the strip is 75 px");
+    Check(Native.FillRect(new Rectangle(1920, 0, 1920, 1080), 30, 96) == new Rectangle(1920, -30, 1920, 1110), "a second screen: its own left edge kept");
+    Check(Native.FillRect(hd, 30, 0) == new Rectangle(0, -30, 1920, 1110), "DPI unknown: 100 %");
+    Native.Rect R(int l, int t, int r, int b) => new() { Left = l, Top = t, Right = r, Bottom = b };
+    const long Popup = 0x80000000L, Visible = 0x10000000L;
+    var cropped = Native.FillRect(tv4k, 30, 240);
+    Check(Native.FillsScreen(Popup | Visible, R(0, -75, 3840, 2160), cropped), "cropped already: left alone");
+    Check(!Native.FillsScreen(Popup | Visible, R(0, 0, 3840, 2160), cropped), "exactly on the screen, its strip showing: filled again, cropped");
+
+    var root = new DirectoryInfo(AppContext.BaseDirectory);
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
+    var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
+    Check(apps.Get("feishin") is { Fill: true, CropTop: 30 }, "Feishin: filled, its 30 px window bar cropped");
+    var withCrop = apps.Catalog.Where(a => a.CropTop != 0).Select(a => a.Id).ToList();
+    Check(withCrop.SequenceEqual(["feishin"]), $"only Feishin is cropped ({string.Join(", ", withCrop)})");
+    JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    Check(AppManager.CropTopOf(L("""{ "cropTop": 30 }""")) == 0, "cropTop without fill: nothing (the app fills the screen itself)");
+    Check(AppManager.CropTopOf(L("""{ "fill": true, "cropTop": "30" }""")) == 0 && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": 500 }""")) == 0
+        && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": -5 }""")) == 0 && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": 12.5 }""")) == 0,
+        "cropTop: a whole number of pixels up to 100, else nothing");
+}
+
+// ---------------------------------------------------------------- Keys for an app's own menus (menuKeys)
+// Moonlight's menus (Qt) reach their toolbar only with Shift+Tab; Select, unused there, sends it.
+// Its stream is an SDL window: nothing, ever.
+Console.WriteLine("== Keys for an app's own menus (menuKeys)");
+{
+    var root = new DirectoryInfo(AppContext.BaseDirectory);
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
+    var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
+    var moonlight = apps.Get("moonlight")?.MenuKeys;
+    Check(moonlight is not null, "Moonlight has menu keys");
+    Check(moonlight?.KeyFor(Pad.Select, "Qt683QWindowIcon") is KeyAction { Keys: [0x10, 0x09] }, "its menu window (Qt): Select = Shift+Tab");
+    Check(moonlight?.KeyFor(Pad.Select, "Qt6100QWindowOwnDCIcon") is KeyAction { Keys: [0x10, 0x09] }, "another Qt version or surface: still its menu");
+    Check(moonlight?.KeyFor(Pad.Select, "SDL_app") is null, "its stream (SDL): nothing");
+    Check(moonlight?.KeyFor(Pad.Select, null) is null && moonlight?.KeyFor(Pad.Select, "") is null, "no window in front: nothing");
+    Check(moonlight?.KeyFor(Pad.Start, "Qt683QWindowIcon") is null && moonlight?.KeyFor(Pad.B, "Qt683QWindowIcon") is null, "other buttons: nothing (Moonlight's own)");
+    var others = apps.Catalog.Where(a => a.MenuKeys is not null).Select(a => a.Id).ToList();
+    Check(others.SequenceEqual(["moonlight"]), $"only Moonlight has menu keys ({string.Join(", ", others)})");
+    Check(apps.Catalog.Where(a => a.MenuKeys is not null).All(a => a.Preset == "controller"), "menu keys only for apps on the Controller preset");
+    JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab" }""")) is null, "no whileClass: no menu keys (never to a window not meant for them)");
+    Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "whileClass": "*" }""")) is null, "a whileClass that matches everything: refused");
+    var odd = MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "start": "mouse:left", "home": "key:Esc", "y": "key:NoSuchKey", "b": 5, "whileClass": "Qt*QWindow*" }"""));
+    Check(odd is { Keys.Count: 1 } && odd.Keys.ContainsKey(Pad.Select), "only keys, only real buttons, never Home");
+    Check(MenuKeys.Parse(L("""{ "start": "do:menu", "whileClass": "Qt*QWindow*" }""")) is null, "no key left: no menu keys");
+}
+
 // ---------------------------------------------------------------- An installer finished on screen
 Console.WriteLine("== Catalog: an installer the user finishes on screen (install.interactive)");
 {
