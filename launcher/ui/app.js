@@ -786,7 +786,9 @@ function listEdges(box) {
 //                                    a <section id="maps" class="view"> of its own; go('maps')
 //   onAction('wifi-join', (el, arg) => ...)   data-act="wifi-join" on a data-nav element
 //   hostMessage('wifi.', (msg) => ...)        host messages by type, or by prefix ("wifi.")
-//   ask({ title, text, yes, onYes })          the shared yes / cancel dialog, over any view
+//   ask({ title, text, notes, yes, onYes })   the shared yes / cancel dialog, over any view; notes
+//                                             (html, a release's notes): more to read under the
+//                                             text, in a box Up and Down scroll when it is long
 //   onHome(fn)                                runs with each render, to draw an extra on the home
 //                                             screen (the phone remote card, phone-card.js)
 //   onTiles(() => [{ id, cls, act, arg, x, label, html, hints }])
@@ -833,23 +835,52 @@ function sectionHooks(unders = []) {
   if (EXT.sections[now] && EXT.sections[now].shown) EXT.sections[now].shown();
 }
 
-// The shared dialog: A on the first button runs onYes; B or Cancel closes it.
+// The shared dialog: A on the first button runs onYes; B or Cancel closes it. Its notes (a
+// release's) are in a box of their own under the text, which scrolls when they are longer than
+// its room: the buttons are side by side, so Up and Down scroll it, the focus staying on them.
 let asking = null;
+let askNew = false;       // a question just asked: its notes start at the top
+let askScrolls = false;   // its notes are longer than their box: the hints say Up/Down scroll them
 // Always on Cancel, never where the last question's focus was left: after one Yes, the next
 // question (Shut down) would otherwise open on Yes.
-function ask(q) { asking = q; state.memory.ask = null; go('ask'); }
+function ask(q) { asking = q; askNew = true; state.memory.ask = null; go('ask'); }
+function askNotes() { return $('ask').querySelector('.dialog > .notes'); }
+function askHints() { return [...(askScrolls ? [['↑↓', 'Scroll']] : []), ['A', 'Select'], ['B', 'Cancel']]; }
 addView('ask', {
   overlay: true,
   render() {
     const q = asking || {};
-    // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time.
+    // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time
+    // (and the notes kept where they were scrolled to). data-scroll: sounds.js hears them scroll.
     patchHtml($('ask'), '<div class="dialog">' +
       `<h2>${esc(q.title || '')}</h2>${q.text ? `<p>${esc(q.text)}</p>` : ''}` +
+      (q.notes ? `<div class="notes" data-scroll>${q.notes}</div>` : '') +
       '<div class="buttons">' +
         `<div class="button" data-nav data-id="ask-yes" data-act="ask-yes">${esc(q.yes || 'OK')}</div>` +
         '<div class="button" data-nav data-id="ask-no" data-act="cancel">Cancel</div>' +
       '</div>' +
-      `<div class="hints" style="padding:0;height:64px">${hints([['A', 'Select'], ['B', 'Cancel']])}</div></div>`);
+      `<div class="hints" style="padding:0;height:64px">${hints(askHints())}</div></div>`);
+  },
+  // On screen, laid out: whether the notes are longer than their box (only then do the hints say
+  // Up/Down scroll them), and their ends fade where there is more (listEdges).
+  layout() {
+    const box = askNotes();
+    if (box && askNew) box.scrollTop = 0;
+    askNew = false;
+    const scrolls = !!box && box.scrollHeight > box.clientHeight + 2;
+    if (box) listEdges(box);
+    if (scrolls === askScrolls) return;
+    askScrolls = scrolls;
+    patchHtml($('ask').querySelector('.dialog > .hints'), hints(askHints()));
+  },
+  // Up and Down scroll the notes three lines at a time (held, they repeat), and stop at their
+  // ends; with nothing to scroll they move the focus as anywhere (nothing is above or below it).
+  press(button) {
+    const box = askNotes();
+    if (!box || !askScrolls || (button !== 'up' && button !== 'down')) return false;
+    box.scrollTop += (button === 'down' ? 3 : -3) * parseFloat(getComputedStyle(box).lineHeight);
+    listEdges(box);
+    return true;
   },
   focus: (list) => list.find((e) => e.dataset.id === 'ask-no'),
 });

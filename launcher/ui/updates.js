@@ -10,11 +10,11 @@
 //   From the host: updates.state (UpdateService.Describe)  updates.restarting {version}
 //                  updates.stay (the launcher update stopped before its restart)
 //
-// Demo (a plain browser): index.html#settings/updates, a launcher update ready (1.0.2 to 1.0.3,
-// with 1.0.3's own notes), and ?upd=<state> for the other states (uptodate, checking, running,
-// failed, downloading and waiting: the launcher's update, setup: a release that needs TV Box
-// Setup (its minimumFrom), longnotes and longerrors: the longest text each place can get,
-// winfound, winscan, wininstall, winrestart, wintonight, winstuck, restarting).
+// Demo (a plain browser): index.html#settings/updates, a launcher update ready (1.0.6 to 1.0.7,
+// with 1.0.7's own notes, a line per point), and ?upd=<state> for the other states (uptodate,
+// checking, running, failed, downloading and waiting: the launcher's update, setup: a release
+// that needs TV Box Setup (its minimumFrom), longnotes and longerrors: the longest text each
+// place can get, winfound, winscan, wininstall, winrestart, wintonight, winstuck, restarting).
 
 const upd = { s: null, restarting: null };
 
@@ -35,14 +35,32 @@ function updDate(iso) {
   return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// A release's notes as shown: on one line (they wrap), cut at a word to max characters. update.json
-// may hold 256 KB of them; the launcher's row shows 4 lines, the question A asks a few more.
-function updNotes(text, max) {
+// A release's notes as shown (html): line by line as written, a "- " or "* " at a line's start
+// drawn as a bullet (updates.css), empty lines left out. At most max characters, and as many
+// lines as asked (the row: 4), cut at a word, with "…" after when there is more. update.json may
+// hold 256 KB of them: the launcher's row shows its first 4 lines (updates.css clamps a line that
+// wraps too), the question A asks all of them up to a sane length, in a box that scrolls (app.js
+// ask's notes).
+function updNotes(text, max, lines = Infinity) {
   const all = String(text || '');
-  const t = all.slice(0, 4 * max).replace(/\s+/g, ' ').trim();
-  if (t.length <= max && all.length <= 4 * max) return t;
-  const cut = t.slice(0, max), at = cut.lastIndexOf(' ');
-  return `${(at > max * 0.7 ? cut.slice(0, at) : cut).replace(/[\s.,;:·-]+$/, '')}…`;
+  const rows = all.slice(0, 4 * max).split(/\r\n?|\n/).map((r) => r.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const out = [];
+  let left = max, more = all.length > 4 * max;
+  for (const row of rows) {
+    if (out.length === lines || left <= 0) { more = true; break; }
+    const bullet = /^[-*•] /.test(row);
+    const t = bullet ? row.slice(2) : row;
+    if (t.length > left) {
+      const cut = t.slice(0, left), at = cut.lastIndexOf(' ');
+      out.push({ t: at > left * 0.7 ? cut.slice(0, at) : cut, bullet });
+      more = true;
+      break;
+    }
+    left -= t.length;
+    out.push({ t, bullet });
+  }
+  if (more && out.length) out[out.length - 1].t = `${out[out.length - 1].t.replace(/[\s.,;:·-]+$/, '')}…`;
+  return out.map((l) => `<span class="upd-note${l.bullet ? ' bullet' : ''}">${esc(l.t)}</span>`).join('');
 }
 
 function updBar(percent) { return `<div class="upd-bar"><span style="width:${Math.max(2, Math.min(100, percent || 0))}%"></span></div>`; }
@@ -95,9 +113,10 @@ function renderUpdatesSection() {
 
   const list = [];
   const L = s.launcher;
+  const notes = L.update ? updNotes(L.notes, 300, 4) : '';
   list.push(updRow('launcher', 'app', '#8CC2FF', 'TV launcher',
     L.update ? `${L.installed} → ${L.latest}${L.skipped ? ' · did not start here last time' : ''}` : L.installed, { update: L.update, skipped: L.skipped, job: L.job },
-    L.update && L.notes ? `<span class="notes">${esc(updNotes(L.notes, 300))}</span>` : ''));
+    notes ? `<span class="notes">${notes}</span>` : ''));
   for (const a of s.apps) list.push(updRow(a.id, a.id === 'winget' ? 'download' : a.glyph, a.id === 'winget' ? '#B3B5BC' : a.color, a.name, updVersions(a), a));
   const self = (id, glyph, color, name, version) =>
     // data-noa: A does nothing here (no A in the hints, no select sound).
@@ -194,7 +213,9 @@ onAction('upd-row', (el, id) => {
     ask({
       title: `${L.skipped ? 'Try' : 'Update'} the TV launcher ${L.skipped ? 'again ' : ''}to ${L.latest}?`,
       text: (L.skipped ? `Last time ${L.latest} did not start here and the box went back to ${L.installed}. ` : '') +
-        'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.' + (L.notes ? ` New: ${updNotes(L.notes, 320)}` : ''),
+        'It downloads now; the launcher restarts by itself once you are back at Home, never over an app. Open apps keep running.',
+      // What is new in it, all of it (to 20 000 characters), in a box Up and Down scroll.
+      notes: updNotes(L.notes, 20000),
       yes: 'Update', onYes: () => send({ type: 'updates.app', id: 'launcher' }),
     });
     return;
@@ -269,13 +290,23 @@ addView('updrestart', {
 
 // ---- Demo data (a plain browser) -------------------------------------------------------------
 
-// Release 1.0.3's notes, as its update.json has them.
-const UPD_DEMO_NOTES = 'Uninstalling now leaves its log and a copy of setup in Documents\\HTPC logs, as it says it does. Boxes on 0.1.x: run TV Box Setup to get it.';
+// Release 1.0.7's notes, as its update.json has them: a line per point.
+const UPD_DEMO_NOTES = [
+  '- The Home menu shows what the box is busy with: CPU, memory, disk, network and the three programs using the most, which you can close from there.',
+  '- Steam: a tap on Home is Steam\'s own menu, holding Home opens this one; Steam steps aside under the menu and quits when left with no window.',
+  '- Add a tile: apps and sites grouped by category (LT and RT jump between them), program icons in On this box, programs added from there open full screen, and the Website form and Rename use the on-screen keyboard.',
+  '- The on-screen keyboard is shorter, wraps around at its edges, and RT switches to the symbols.',
+  '- Windows a website opens come up maximized; the home screen is quicker with many tiles; an app that is no longer installed leaves the home screen.',
+  '- RetroBat and YouTube Kids are no longer offered (a box that has RetroBat keeps it; On this box can put it back on the home screen).',
+].join('\n');
 // Text with no place to break a line: a path, a word longer than a row.
 const UPD_DEMO_UNBROKEN = 'C:\\Users\\television\\Documents\\HTPC\\logs\\' + 'uninstall-and-a-copy-of-setup-'.repeat(6) + 'log';
 // The longest notes a release can have: update.json is read up to 256 KB (UpdateService, UpdateCore).
-const UPD_DEMO_LONG_NOTES = `Unbroken first: ${UPD_DEMO_UNBROKEN}. ` +
-  `${UPD_DEMO_NOTES} Also a path with backslashes, Documents\\HTPC logs\\setup, then a great deal more. `.repeat(1800).slice(0, 260000);
+// Line by line, with Windows' line ends (the release workflow writes the tag's message with them),
+// a line with no place to break first, a line with no bullet, and empty lines.
+const UPD_DEMO_LONG_NOTES = [`- Unbroken first: ${UPD_DEMO_UNBROKEN}.`,
+  'Then a line with no bullet and a path with backslashes, Documents\\HTPC logs\\setup, and a great deal more after it.', '',
+  ...UPD_DEMO_NOTES.split('\n'), ''].join('\r\n').repeat(250).slice(0, 260000);
 
 function updDemo(kindArg) {
   const kind = kindArg || new URLSearchParams(location.search).get('upd') || 'ready';
@@ -283,7 +314,7 @@ function updDemo(kindArg) {
   const app = (id, name, glyph, color, installed, available, update, job) => ({ id, name, glyph, color, installed, available, update, job: job || null });
   const s = {
     type: 'updates.state', checking: false, checkedAt: Date.now() - 2 * hour, checkError: null,
-    launcher: { installed: '1.0.2', latest: '1.0.3', update: true, notes: UPD_DEMO_NOTES, job: null },
+    launcher: { installed: '1.0.6', latest: '1.0.7', update: true, notes: UPD_DEMO_NOTES, job: null },
     apps: [
       app('youtube', 'YouTube', 'youtube', '#FF5B52', '1.8.2', '1.8.3', true),
       app('stremio', 'Stremio', 'film', '#7C8CFF', '5.0.26', '5.0.27', true),
@@ -313,7 +344,7 @@ function updDemo(kindArg) {
     // The launcher's own update (UpdateService.Describe, LauncherUpdate.ps1's progress): it
     // downloads, then waits for Home; a release whose minimumFrom is newer than this box needs setup.
     case 'downloading':
-      L.job = { status: 'running', percent: 38, message: 'Downloading version 1.0.3 (21 of 55 MB)' };
+      L.job = { status: 'running', percent: 38, message: 'Downloading version 1.0.7 (21 of 55 MB)' };
       s.lane = updating(38, L.job.message);
       break;
     case 'waiting':
@@ -321,13 +352,13 @@ function updDemo(kindArg) {
       s.lane = updating(90, L.job.message);
       break;
     case 'setup':
-      L.job = { status: 'failed', percent: 100, message: 'Version 1.0.3 needs setup to run again (it updates launchers from 1.0.3 on)' };
+      L.job = { status: 'failed', percent: 100, message: 'Version 1.0.7 needs setup to run again (it updates launchers from 1.0.7 on)' };
       break;
     case 'longnotes': L.notes = UPD_DEMO_LONG_NOTES; break;
     // Every message as long as it gets, with a path or a word that has no place to break.
     case 'longerrors':
       L.skipped = true;
-      L.job = { status: 'failed', percent: 100, message: `The update stopped: ${UPD_DEMO_UNBROKEN} could not be replaced, it is in use by another program. Back on version 1.0.2.` };
+      L.job = { status: 'failed', percent: 100, message: `The update stopped: ${UPD_DEMO_UNBROKEN} could not be replaced, it is in use by another program. Back on version 1.0.6.` };
       s.apps[1].name = `Stremio ${UPD_DEMO_UNBROKEN}`;
       s.apps[1].job = { status: 'failed', percent: 100, message: `The update asked for admin rights; stopped. ${UPD_DEMO_UNBROKEN}` };
       s.apps[3].error = `Not checked: ${UPD_DEMO_UNBROKEN}`;
@@ -343,7 +374,7 @@ function updDemo(kindArg) {
       s.lane = { label: 'Updating Stremio', percent: 45, message: 'Downloading 5.0.27' };
       break;
     case 'failed':
-      L.job = { status: 'failed', percent: 100, message: 'Not enough free disk space for version 1.0.3: 312 MB free, 668 MB needed' };
+      L.job = { status: 'failed', percent: 100, message: 'Not enough free disk space for version 1.0.7: 312 MB free, 668 MB needed' };
       s.apps[1].job = { status: 'failed', percent: 100, message: 'The update asked for admin rights; stopped' };
       s.checkError = 'GitHub is limiting requests from this box; try again later';
       break;

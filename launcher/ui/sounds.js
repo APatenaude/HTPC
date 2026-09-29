@@ -198,8 +198,10 @@ function soundsDo(name, now = performance.now()) {
 function soundsLook() {
   const el = focusedEl();
   const toggle = el && el.querySelector('.toggle');
+  // A box Up and Down scroll with the focus left where it is (a question's notes, app.js ask).
+  const box = viewEl().querySelector('[data-scroll]');
   return {
-    view: state.view, depth: state.stack.length, el, id: el ? el.dataset.id : null,
+    view: state.view, depth: state.stack.length, el, id: el ? el.dataset.id : null, scroll: box ? box.scrollTop : 0,
     // A value stepped, a toggle flipped, a tile moved: the focused element itself changed.
     sig: el ? el.style.order + '|' + el.innerHTML : '',
     editing, act: el ? el.dataset.act : null, noA: !!el && el.dataset.noa !== undefined, toggle: toggle ? toggle.classList.contains('on') : null,
@@ -213,7 +215,7 @@ function soundsLook() {
 function soundFor(button, was, now) {
   if (was.testing) return null;
   const changed = now.view !== was.view || now.depth !== was.depth || now.el !== was.el || now.id !== was.id ||
-    now.sig !== was.sig || now.editing !== was.editing;
+    now.sig !== was.sig || now.editing !== was.editing || now.scroll !== was.scroll;
   if (now.opening && !was.opening) return 'open';   // an app starting (its tile, Reopen)
   switch (button) {
     case 'up': case 'down': case 'left': case 'right': return changed ? 'move' : 'bump';

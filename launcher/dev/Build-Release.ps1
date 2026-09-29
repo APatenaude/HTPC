@@ -26,7 +26,7 @@
 .PARAMETER Tag
     The git tag being released (v1.2.3). Without it: a dry run named after the version.
 .PARAMETER NotesFile
-    Release notes (the tag's message in the workflow); short, shown on the TV.
+    Release notes (the tag's message in the workflow), shown on the TV line by line (New-Release's -Notes).
 .PARAMETER MinimumFrom
     The oldest launcher that may update to this release by itself (older ones: run setup again).
     Default: Directory.Build.props' UpdateMinimumFrom, else 0.1.0.
