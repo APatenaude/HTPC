@@ -110,6 +110,11 @@ routine, scripted in `launcher\dev\Merge-Branch.ps1`:
 
 ## 6. The test VM
 
+Since 29 Sept 2026 the test VM lives on the owner's Incus server ("The test VM on an Incus server"
+below); the Hyper-V VM on the TV box was deleted, to keep its load off the box. The Hyper-V tools
+still work on any dev PC with Hyper-V. Use the VM only for changes a real setup run must show
+(setup steps, elevation, the shell, uninstall, install paths): one run of the fixed build, no more.
+
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots
 it; `Send-VMKeys.ps1` types into it and `Get-VMScreenshot.ps1` shows its screen; `Copy-VMFile`
