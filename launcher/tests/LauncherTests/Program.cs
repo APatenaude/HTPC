@@ -858,6 +858,14 @@ Console.WriteLine("== Keys for an app's own menus (menuKeys)");
     Check(ownersOfPad.SequenceEqual(["moonlight"]), $"Moonlight owns the controller, Home included ({string.Join(", ", ownersOfPad)})");
     Check(apps.Get("steam") is null, "no Steam (slow and laggy at 4K on the box: removed, the owner's call, 29 Sept 2026)");
     Check(apps.Get("youtubekids") is null, "no YouTube Kids (not offered in Canada; a kid profile in YouTube instead)");
+    Check(apps.Get("playnite")?.ClearBeforeStart is [@"%APPDATA%\Playnite\safestart.flag"], "Playnite: its safe-start marker cleared before it starts (else it stops to ask about safe mode)");
+    Check(apps.Catalog.Where(a => a.ClearBeforeStart is not null).Select(a => a.Id).SequenceEqual(["playnite"]), "only Playnite clears files before it starts");
+    Check(AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", "%LOCALAPPDATA%\\Y\\b.lock" ] }""")) is { Count: 2 }, "clearBeforeStart: files in the user's own folders are read");
+    Check(AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "C:\\Windows\\x.flag" ] }""")) is null
+        && AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\X\\*.flag" ] }""")) is null
+        && AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\..\\..\\x.flag" ] }""")) is null
+        && AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", 5 ] }""")) is null,
+        "clearBeforeStart refused: outside the user's folders, a wildcard, a '..', anything not a string");
     Check(apps.Get("retrobat") is null, "no RetroBat (its installer needs administrator rights, whose prompt the controller cannot answer: dropped, the owner's call)");
     JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
     Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab" }""")) is null, "no whileClass: no menu keys (never to a window not meant for them)");

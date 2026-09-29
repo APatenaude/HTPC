@@ -36,7 +36,8 @@ sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool 
     string? LogoUrl = null,
     bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
     int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null,
-    bool OwnController = false, string? LogoExe = null, string? Category = null)
+    bool OwnController = false, string? LogoExe = null, string? Category = null,
+    IReadOnlyList<string>? ClearBeforeStart = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -194,7 +195,8 @@ sealed class AppManager
             OwnProcesses: launch.ValueKind == JsonValueKind.Object ? OwnProcessesOf(launch) : null,
             OwnController: a.TryGetProperty("ownController", out var oc) && oc.ValueKind == JsonValueKind.True,
             LogoExe: Str(a, "logoExe"),
-            Category: Str(a, "category"));
+            Category: Str(a, "category"),
+            ClearBeforeStart: launch.ValueKind == JsonValueKind.Object ? ClearBeforeStartOf(launch) : null);
     }
 
     /// <summary>The catalog's "categories", each with an id and a name, the first of an id kept; none: an empty list.</summary>
@@ -262,6 +264,49 @@ sealed class AppManager
             if (v.Value.ValueKind == JsonValueKind.String && System.Text.RegularExpressions.Regex.IsMatch(v.Name, "^[A-Za-z_][A-Za-z0-9_]{0,63}$"))
                 vars[v.Name] = v.Value.GetString()!;
         return vars.Count > 0 ? vars : null;
+    }
+
+    /// <summary>
+    /// launch.clearBeforeStart: files an app leaves behind when it was ended rather than quit,
+    /// which make its next start stop and ask (Playnite's safestart.flag: "Playnite did not start
+    /// properly last time, start in safe mode?", a question no one sees on the TV, so it looked
+    /// like a crash). Its installer's own start, which the install job closes, left one on the
+    /// owner's box (29 Sept 2026). Taken away just before the app starts, only when no copy of it
+    /// runs (Launch returns before this for a running one). Never a link.
+    /// </summary>
+    static void ClearStaleFiles(CatalogApp app)
+    {
+        foreach (var file in app.ClearBeforeStart ?? [])
+        {
+            try
+            {
+                var path = Environment.ExpandEnvironmentVariables(file);
+                var info = new FileInfo(path);
+                if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                info.Delete();
+                Log.Info($"{app.Id}: removed {path} before starting it (left by a start that was ended)");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log.Warn($"{app.Id}: could not remove {file}: {e.Message}"); }
+        }
+    }
+
+    /// <summary>
+    /// launch.clearBeforeStart: at most eight files in the user's own folders (%APPDATA% or
+    /// %LOCALAPPDATA%, which the launcher runs as), each a plain name, no wildcard, no "..";
+    /// null when missing or any entry is not.
+    /// </summary>
+    internal static IReadOnlyList<string>? ClearBeforeStartOf(JsonElement launch)
+    {
+        if (!launch.TryGetProperty("clearBeforeStart", out var c) || c.ValueKind != JsonValueKind.Array) return null;
+        var files = new List<string>();
+        foreach (var v in c.EnumerateArray())
+        {
+            if (v.ValueKind != JsonValueKind.String || v.GetString() is not { Length: > 0 and <= 200 } f) return null;
+            if (!(f.StartsWith(@"%APPDATA%\", StringComparison.OrdinalIgnoreCase) || f.StartsWith(@"%LOCALAPPDATA%\", StringComparison.OrdinalIgnoreCase))) return null;
+            if (f.IndexOfAny(['*', '?', '"', '<', '>', '|', ':']) >= 0 || f.Split('\\').Any(part => part is "" or "." or "..")) return null;
+            files.Add(f);
+        }
+        return files.Count is > 0 and <= 8 ? files : null;
     }
 
     static void ApplyEnv(CatalogApp app, ProcessStartInfo psi)
@@ -500,6 +545,7 @@ sealed class AppManager
         psi.WorkingDirectory = Path.GetDirectoryName(psi.FileName)!;
         UserEnvironment.Apply(psi); // PATH and variables as they are now, not as at sign-in
         ApplyEnv(app, psi);
+        ClearStaleFiles(app);
 
         try
         {
