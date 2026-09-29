@@ -140,7 +140,16 @@
   setFocus($('menu').querySelector('[data-close="youtube"]'));
   press('x');
   check('menu: X on an app row still asks to close that app', state.view === 'confirm' && state.confirm.id === 'youtube', state.view);
-  back();
+  // Close: its menu row and its tile say "Closing…" until the host no longer lists it running.
+  setFocus($('confirm').querySelector('[data-id="confirm-close"]'));
+  press('a');
+  const ytRow = () => $('menu').querySelector('[data-close="youtube"]');
+  check('Close: the app row says Closing… until it is gone', lastSent('close') && lastSent('close').id === 'youtube' && ytRow() && /Closing/.test(ytRow().textContent), ytRow() && ytRow().textContent);
+  check('Close: so does its tile', /Closing/.test($('tiles').querySelector('[data-id="tile:youtube"]').textContent));
+  onHost({ type: 'state', running: tiles.filter((t) => t.id !== 'youtube').map((t) => t.id) });
+  check('Close: gone once the host says so', !ytRow() && !/Closing/.test($('tiles').querySelector('[data-id="tile:youtube"]').textContent));
+  for (const t of tiles) t.running = true;
+  render();
 
   // The crowded menu: 6 apps and an alert row fit without scrolling.
   const panel = $('menu-panel'), rowsBox = panel.querySelector('.panel-scroll');

@@ -98,6 +98,18 @@ function renderStatus() {
     '</div>');
 }
 
+// Apps asked to close and not gone yet (id -> a timer that gives up saying so after 20 s).
+const closing = new Map();
+function markClosing(id) {
+  clearTimeout(closing.get(id));
+  closing.set(id, setTimeout(() => doneClosing(id), 20000));
+  render();
+}
+function doneClosing(id) {
+  clearTimeout(closing.get(id));
+  if (closing.delete(id)) render();
+}
+
 // Tiles are updated in place, by id: a change on one tile (an app closing, a rename) redraws
 // that tile only. Redrawing them all replayed every tile's entrance and flashed the home screen.
 // Their order is CSS order, so a tile that moves (Tile options > Move) never leaves the page
@@ -105,7 +117,8 @@ function renderStatus() {
 function renderTiles() {
   const want = state.tiles.map((t) => ({
     id: `tile:${t.id}`, cls: state.moving === t.id ? 'tile moving' : 'tile', act: 'launch', arg: t.id,
-    html: (t.running ? '<span class="badge">Running</span>' : '') + appIcon(t, 88) + `<span class="name">${esc(t.name)}</span>`,
+    html: (closing.has(t.id) ? '<span class="badge closing">Closing…</span>' : t.running ? '<span class="badge">Running</span>' : '') +
+      appIcon(t, 88) + `<span class="name">${esc(t.name)}</span>`,
   }));
   for (const f of EXT.tiles) want.push(...f());   // apps being installed (library.js)
   // The "+" tile is always last (SPEC decision): A opens the library / add-tile screen. While a
@@ -186,7 +199,7 @@ function renderMenu() {
     ? running.map((t) =>
         `<div class="row" data-nav data-id="app:${esc(t.id)}" data-act="switch" data-arg="${esc(t.id)}" data-close="${esc(t.id)}">` +
           appIcon(t, 36) + `<span class="grow">${esc(t.name)}</span>` +
-          (t.id === state.current ? '<span class="tag">Now</span>' : '') +
+          (closing.has(t.id) ? '<span class="tag">Closing…</span>' : t.id === state.current ? '<span class="tag">Now</span>' : '') +
         '</div>').join('')
     : '<div class="empty">No apps open</div>';
   // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
@@ -893,7 +906,16 @@ function activate(el) {
       else send({ type: 'power', action: arg });
       break;
     case 'timer': setTimer(TIMER[Number(arg)]); break;
-    case 'confirm-close': send({ type: 'close', id: state.confirm.id }); back(); break;
+    case 'confirm-close': {
+      // Closing can take seconds (an app asked nicely first, then ended): its tile and its menu row
+      // say "Closing…" until the host's state no longer lists it running.
+      const { id, name } = state.confirm;
+      send({ type: 'close', id });
+      markClosing(id);
+      back();
+      toast(`Closing ${name}…`);
+      break;
+    }
     case 'cancel': back(); break;
     // Settings opens on its section list (restoreFocus), not where the focus was last time.
     case 'settings': state.memory.settings = null; go('settings'); break;
@@ -1051,6 +1073,7 @@ function onHost(msg) {
     case 'state':
       if (msg.running) {
         for (const t of state.tiles) t.running = msg.running.includes(t.id);
+        for (const id of [...closing.keys()]) if (!msg.running.includes(id)) doneClosing(id);
         // The app the menu was opened over has closed: B and Home now lead home, not to it (not
         // the desktop, nor an installer finished on screen: the host takes B there, or home).
         if (state.current && state.current !== 'desktop' && state.current !== 'installer' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }

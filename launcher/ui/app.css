@@ -123,6 +123,9 @@ html:has(#stage.blank) { background: var(--bg) !important; }
 .appicon.has-logo > svg { display: none; }
 .tile .badge { position: absolute; top: 22px; right: 24px; display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
 .tile .badge::before { content: ''; width: 12px; height: 12px; border-radius: 6px; background: var(--accent); }
+/* Asked to close, not gone yet: the dot turns amber and breathes. */
+.tile .badge.closing::before { background: var(--warn, #F2B24C); animation: closing-pulse 1s ease-in-out infinite alternate; }
+@keyframes closing-pulse { from { opacity: 1; } to { opacity: 0.3; } }
 
 /* Focus ring shared by everything that can be selected: the ring alone, a spread with no blur,
    cheap to grow in at 4K. The soft shadow of a tile or a card lifting is a pseudo-element faded

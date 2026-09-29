@@ -234,6 +234,33 @@ sealed partial class MainForm : Form
         Native.ForceForeground(Handle);
     }
 
+    /// <summary>
+    /// A press answers at once even while the box is busy (an install, an app in front, a build):
+    /// the launcher and its WebView2 processes (browser, renderer, GPU: what draws the screens)
+    /// run above normal priority, never throttled for power (EcoQoS). The controller thread is at
+    /// Highest within it already (ControllerService). WebView2 starts new processes as it needs
+    /// them (a renderer again after a crash): each gets the same when it appears. Best effort.
+    /// </summary>
+    static void Responsive(CoreWebView2Environment env)
+    {
+        static void Boost(System.Diagnostics.Process p)
+        {
+            try { p.PriorityClass = System.Diagnostics.ProcessPriorityClass.AboveNormal; Native.SetEcoQos(p.Handle, false); }
+            catch (Exception) { } // gone already, or not ours to change
+        }
+        using (var self = System.Diagnostics.Process.GetCurrentProcess()) Boost(self);
+        void All()
+        {
+            foreach (var info in env.GetProcessInfos())
+            {
+                try { using var p = System.Diagnostics.Process.GetProcessById(info.ProcessId); Boost(p); }
+                catch (ArgumentException) { } // it ended
+            }
+        }
+        All();
+        env.ProcessInfosChanged += (_, _) => All();
+    }
+
     async Task InitWebView()
     {
         // Setup (elevated) has a profile of its own, new each run: SetupElevation.WebViewFolder.
@@ -245,6 +272,7 @@ sealed partial class MainForm : Form
         var env = await CoreWebView2Environment.CreateAsync(null, dataDir,
             new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--autoplay-policy=no-user-gesture-required --noerrdialogs" });
         await web.EnsureCoreWebView2Async(env);
+        Responsive(env);
         var core = web.CoreWebView2;
         core.Settings.AreDevToolsEnabled = options.Dev;
         core.Settings.AreDefaultContextMenusEnabled = options.Dev;
