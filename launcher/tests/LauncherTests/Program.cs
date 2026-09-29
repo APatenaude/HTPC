@@ -745,7 +745,8 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     var catalog = Path.Combine(root!.FullName, "setup", "catalog.json");
     using var doc = JsonDocument.Parse(File.ReadAllText(catalog));
     // --start-maximized: the Browser, which fills the screen with the launcher as the shell (no taskbar).
-    string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen", "--start-maximized" };
+    // -gamepadui: Steam straight into Big Picture; --fullscreen-borderless: RetroBat's EmulationStation.
+    string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen", "--start-maximized", "-gamepadui", "--fullscreen-borderless" };
     foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
     {
         var id = a.GetProperty("id").GetString();

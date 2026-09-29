@@ -113,12 +113,13 @@ sealed class AutostartGuard
     /// <summary>
     /// Whether "runs from this folder" can mean "this app": not a drive, Program Files, the Windows
     /// folder, ProgramData or the profile's AppData itself (nor a parent of one), nothing in the
-    /// Windows folder or in Program Files\HTPC.
+    /// Windows folder or in Program Files\HTPC. A folder of its own at the root of a drive is one
+    /// (RetroArch's C:\RetroArch-Win64: its installer's default).
     /// </summary>
     public static bool NarrowEnough(string folder)
     {
         var f = folder.TrimEnd('\\');
-        if (!Regex.IsMatch(f, @"^[A-Za-z]:\\[^\\]+\\[^\\]+")) return false;
+        if (!Regex.IsMatch(f, @"^[A-Za-z]:\\[^\\]+")) return false;
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         string[] broad =
         {

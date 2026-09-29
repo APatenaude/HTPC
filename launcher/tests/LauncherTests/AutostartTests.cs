@@ -152,6 +152,8 @@ static class AutostartTests
         Check(!AutostartGuard.NarrowEnough(Pf) && !AutostartGuard.NarrowEnough(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData))
             && !AutostartGuard.NarrowEnough(@"C:\") && !AutostartGuard.NarrowEnough(Path.Combine(Win, "System32", "x")) && AutostartGuard.NarrowEnough(Path.Combine(Pf, "VideoLAN", "VLC")),
             "folders too broad (Program Files, AppData, a drive, the Windows folder) are never used; VLC's is");
+        Check(AutostartGuard.NarrowEnough(@"C:\RetroArch-Win64") && !AutostartGuard.NarrowEnough(Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))!),
+            "a folder of its own at the root of a drive is used (RetroArch's C:\\RetroArch-Win64); the folder of the profiles is not");
     }
 
     static void Prefs()

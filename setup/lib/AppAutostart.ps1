@@ -129,11 +129,12 @@ function Test-UnderFolder([string]$Path, [string]$Folder) {
 
 # Whether a folder is narrow enough to say "what runs from here is this app": not a drive, not
 # Program Files, the Windows folder, ProgramData or a profile's AppData itself (nor one of their
-# parents), nothing in the Windows folder or in Program Files\HTPC.
+# parents), nothing in the Windows folder or in Program Files\HTPC. A folder of its own at the
+# root of a drive is one (RetroArch's C:\RetroArch-Win64: its installer's default).
 function Test-AppFolder([string]$Folder, [string]$UserProfile) {
     if (-not $Folder) { return $false }
     $f = $Folder.TrimEnd('\')
-    if ($f -notmatch '^[A-Za-z]:\\[^\\]+\\[^\\]+') { return $false }
+    if ($f -notmatch '^[A-Za-z]:\\[^\\]+') { return $false }
     $broad = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:SystemRoot, (Join-Path $env:ProgramFiles 'HTPC')) +
         @('%USERPROFILE%', '%APPDATA%', '%LOCALAPPDATA%', '%LOCALAPPDATA%\Programs' | ForEach-Object { Expand-UserPath $_ $UserProfile })
     foreach ($b in @($broad | Where-Object { $_ })) {
