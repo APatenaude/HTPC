@@ -59,8 +59,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
   app opens: the Home menu over an app shows what its buttons do. It also shows what the box is
   busy with (the owner, 29 Sept 2026: "sometimes it's really slow and I wonder why"): CPU,
   memory, disk and network, and the three programs using the most, measured only while the menu
-  is open and never slowing it; A on one asks, then closes it (an app, as X does) or ends it (any
-  other program), never Windows' own or the launcher. Any change of the volume,
+  is open and never slowing it; X on one asks, then closes it (an app, as its tile's X does) or
+  ends it (any other program), never Windows' own or the launcher; A does nothing there. The
+  menu's column is in three parts, a line between them: the open apps (and the way home), the
+  controls (volume, brightness, Buttons, Timer, Settings, Power), then this monitor, small, so
+  that all of it fits over an app with two apps open and an alert. Any change of the volume,
   from anywhere, shows a small indicator for 2 s (with the output's name when sound moves).
 - **N5 Hardware video decoding everywhere**, whatever the GPU's maker, with a check in
   Settings › Display that asks the graphics driver (H.264, HEVC, VP9, AV1) and plays no clips.

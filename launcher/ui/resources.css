@@ -1,35 +1,39 @@
-/* The Home menu's resource view (resources.js): in the menu's column, under the quick buttons,
-   the menu's own look (its section labels and rows), a little tighter. Nothing until the host's
-   first numbers (no room kept, no gap), then it fades in under the rest, which does not move. */
-#menu-res:empty { display: none; }
-.rs-view { display: flex; flex-direction: column; gap: 10px; animation: rs-in 0.2s ease-out; }
+/* The Home menu's resource view (resources.js): the last part of the menu's column, under the
+   quick buttons, in the menu's own look (its rows), small (the owner, 29 Sept 2026: "still too
+   big"). Nothing until the host's first numbers (empty, it is not drawn: no room kept, no gap,
+   no line over it; app.css .menu-part), then it fades in under the rest, which does not move:
+   from display none, the animation starts then. */
+#menu-res { animation: rs-in 0.2s ease-out; }
 @keyframes rs-in { from { opacity: 0; } to { opacity: 1; } }
-#stage.blank .rs-view { animation: none; }   /* built under the blank stage: it fades in once shown */
+#stage.blank #menu-res { animation: none; }   /* built under the blank stage: it fades in once shown */
+.rs-view { display: flex; flex-direction: column; gap: 12px; }
 
-/* CPU, memory, disk, network, two by two: a label and the number (its unit smaller) on one line,
-   under them a bar or a second line */
-.rs-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; }
-.rs-meter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* CPU and RAM, then Disk and Net, two by two: a short label and the number (its unit smaller) on
+   one line, a thin bar under CPU and RAM. The second column wider: the network's two ways. */
+.rs-meters { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 10px 28px; }
+.rs-meter { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .rs-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .rs-label { font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 /* Its height set: the unit's other font would make the line taller than the dash before the numbers */
-.rs-value { height: 34px; font-family: var(--display); font-weight: 600; font-size: 28px; letter-spacing: -0.01em; line-height: 34px; white-space: nowrap; }
-.rs-value small { font-family: 'Atkinson Hyperlegible', sans-serif; font-weight: 400; font-size: 19px; letter-spacing: 0; color: var(--text-2); }
-.rs-sub { height: 20px; font-size: 18px; line-height: 20px; text-align: right; color: var(--text-2); white-space: nowrap; }
-.rs-meter .track { height: 8px; margin: 6px 0; border-radius: 4px; background: var(--track); }
-.rs-meter .fill { height: 8px; border-radius: 4px; background: var(--accent); }
+.rs-value { height: 26px; font-family: var(--display); font-weight: 600; font-size: 22px; line-height: 26px; white-space: nowrap; }
+.rs-value small { font-family: 'Atkinson Hyperlegible', sans-serif; font-weight: 400; font-size: 18px; letter-spacing: 0; color: var(--text-2); }
+/* The network's arrows, down and up: in the units' font, a little apart */
+.rs-way { margin-right: 3px; font-family: 'Atkinson Hyperlegible', sans-serif; font-weight: 700; color: var(--text-2); }
+.rs-way ~ .rs-way { margin-left: 8px; }
+.rs-meter .track { height: 4px; border-radius: 2px; background: var(--track); }
+.rs-meter .fill { height: 4px; border-radius: 2px; background: var(--accent); }
 /* Near the top (CPU 85 %, memory 90 %): amber, as a warning is */
 .rs-meter.high .rs-value, .rs-meter.high .rs-value small { color: var(--warn); }
 .rs-meter.high .fill { background: var(--warn); }
 
-/* The three programs: the menu's rows, shorter; the name gives way to the numbers. Room for three
-   whether or not they are all there: the view keeps its height as they come and go. */
-.rs-rows { display: flex; flex-direction: column; gap: 6px; min-height: 162px; }
-.row.rs-row { height: 50px; padding: 0 18px; gap: 14px; border-radius: 16px; font-size: 24px; }
+/* The three programs: the menu's rows, short, on one line; the name gives way to the numbers.
+   Room for three whether or not they are all there: the view keeps its height as they come and go. */
+.rs-rows { display: flex; flex-direction: column; gap: 6px; min-height: 126px; }
+.row.rs-row { height: 38px; padding: 0 16px; gap: 12px; border-radius: 12px; font-size: 21px; }
 .rs-row .grow { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.rs-row .tag { flex-shrink: 0; }
-.rs-row .rs-cpu { flex-shrink: 0; width: 72px; text-align: right; font-weight: 700; }
-.rs-row .rs-mem { flex-shrink: 0; width: 96px; text-align: right; color: var(--text-2); }
+.rs-row .tag { flex-shrink: 0; padding: 3px 10px; font-size: 18px; }
+.rs-row .rs-cpu { flex-shrink: 0; width: 60px; text-align: right; font-weight: 700; }
+.rs-row .rs-mem { flex-shrink: 0; width: 84px; text-align: right; color: var(--text-2); }
 .rs-glyph { color: var(--muted); }
 /* Windows' own and the launcher: shown, never stopped from here (no focus) */
 .rs-row.fixed .grow { color: var(--text-2); }
