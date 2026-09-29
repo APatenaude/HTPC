@@ -185,7 +185,9 @@ Console.WriteLine("== PadMapper");
     Input.Clear();
     mapper.Speed = new PadMapper.Speeds(2.0, 0.5, 1.5);
     now = 1200;
-    for (var i = 0; i < 30; i++) { mapper.Update(new PadState(0, 0, 0, 30000, 0, 0, 0), now += 8, true); Thread.Sleep(8); }
+    // Held until the frame thread has moved it (up to 3 s): on a busy runner it may not have run
+    // within a fixed 240 ms (the check failed at random on GitHub).
+    for (var i = 0; i < 30 || (i < 375 && !Input.Snapshot().Contains("move")); i++) { mapper.Update(new PadState(0, 0, 0, 30000, 0, 0, 0), now += 8, true); Thread.Sleep(8); }
     mapper.Update(S(), now += 8, true);
     Thread.Sleep(50);
     Check(Input.Snapshot().Contains("move"), "left stick moves the pointer on the frame thread");
