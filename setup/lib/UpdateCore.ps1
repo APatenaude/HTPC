@@ -605,7 +605,10 @@ function New-VerifiedRestorePoint([string]$Description) {
 # runs at low priority so a video can keep playing.
 function Enter-UpdateJob {
     Initialize-UpdateNative
-    [void][HtpcUpdate.Native]::SetThreadExecutionState(0x80000001)   # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED. The 'L': PowerShell reads a bare 0x80000001 as the Int32
+    # -2147483647, which the uint parameter refuses ("Cannot convert argument flags"): every update
+    # from 1.0.0 to 1.0.4 stopped here before it began.
+    [void][HtpcUpdate.Native]::SetThreadExecutionState(0x80000001L)
     Set-LowPriority
 }
 

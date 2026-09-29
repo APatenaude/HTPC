@@ -565,6 +565,10 @@ New-Item -ItemType Directory -Force $bin | Out-Null
 try {
     if (Section 'Core') {
         Write-Host 'Core'
+        # The start of every update job, as the real jobs call it (the fake jobs below skip it): a bare
+        # 0x80000001 there stopped every update from 1.0.0 to 1.0.4 before it began.
+        $enter = (& { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$lib\UpdateCore.ps1'; try { Enter-UpdateJob; 'entered' } catch { `$_.Exception.Message }" 2>&1 | Out-String }).Trim()
+        Check ($enter -eq 'entered') "an update job starts: keep-awake and low priority ($enter)"
         # The slow parts start first, side by side, and are checked below in their turn: the job
         # runner's and the bootstrap's own dry runs (a PowerShell each; a bad token is refused with
         # an error on stderr, and an exit code), and the real watchdog's compile (further down).

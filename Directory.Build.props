@@ -14,8 +14,10 @@
       TV Box Setup again (launcher\dev\Build-Release.ps1 writes it into update.json). 1.0.0: the
       0.1.x boxes' own update code lacks 1.0's protections, and 1.0 brings setup steps an update
       cannot apply (drivers, the phone certificate in the machine store, the sign-in colour).
+      1.0.5: the update jobs of 1.0.0 to 1.0.4 stop at their first step (a keep-awake flag PowerShell
+      passed as a negative number), so those boxes cannot update themselves at all.
     -->
-    <UpdateMinimumFrom>1.0.0</UpdateMinimumFrom>
+    <UpdateMinimumFrom>1.0.5</UpdateMinimumFrom>
   </PropertyGroup>
 
 </Project>
