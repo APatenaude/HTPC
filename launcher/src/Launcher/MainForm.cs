@@ -508,6 +508,13 @@ sealed partial class MainForm : Form
             return;
         }
         if (pad == Pad.HomeDown) { CaptureEarly(); return; }
+        // A held and let go: for the home screen only (hold A on a tile to move it, app.js),
+        // never the keyboard, an app or setup.
+        if (pad is Pad.AHold or Pad.AUp)
+        {
+            if (!setupMode && !keyboard.Visible && LauncherActive) Post(new { type = "input", button = pad == Pad.AHold ? "aHold" : "aUp" });
+            return;
+        }
         if (keyboard.Visible)
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
@@ -554,7 +561,10 @@ sealed partial class MainForm : Form
         }
 
         if (!active) return; // the app reads the pad itself (Controller preset) or the button map drives it
-        if (ButtonName(pad) is { } button) Post(new { type = "input", button });
+        // The controller's A says its release will follow (aUp, above): the page can tell a tap
+        // from a hold. The phone's and the keyboard's A have no release: they act at once.
+        if (pad == Pad.A) Post(new { type = "input", button = "a", held = true });
+        else if (ButtonName(pad) is { } button) Post(new { type = "input", button });
     }
 
     static string? ButtonName(Pad pad) => pad switch

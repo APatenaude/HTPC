@@ -61,10 +61,17 @@
   onAction('tile-options', (node, id) => { lib.target = id; state.memory.tileopts = null; go('tileopts'); });
   onAction('tile-move', (node, button) => moveButton(button));
 
+  // A held on a home tile (app.js): move mode at once, with a light buzz on the controller.
+  // heldMove, while that A is still down: whether the tile has moved since. Let go after a move,
+  // it drops there; without one, move mode stays (A drops, B cancels).
+  let heldMove = null;
+  onAction('tile-hold', (node, id) => { lib.target = id; startMove(); heldMove = { moved: false }; send({ type: 'controller.buzz' }); });
+
   function moveButton(button) {
     switch (button) {
       case 'up': case 'down': case 'left': case 'right': moveTile(button); return true;
       case 'a': case 'start': dropTile(); return true;
+      case 'aUp': { const moved = heldMove && heldMove.moved; heldMove = null; if (moved) dropTile(); return true; }
       case 'b': cancelMove(); return true;
       case 'home': case 'homeHold': cancelMove(); return false;   // then app opens the menu / power
       default: return true;                                       // swallow everything else while moving
@@ -73,6 +80,7 @@
 
   function startMove() {
     lib.moveOrigin = state.tiles.map((t) => t.id);
+    heldMove = null;
     state.moving = lib.target;
     reset('home');
     focusMoving();
@@ -87,6 +95,7 @@
     if (dir === 'down' && j >= arr.length && Math.floor(i / COLS) < Math.floor((arr.length - 1) / COLS)) j = arr.length - 1;
     if (j < 0 || j >= arr.length || j === i) return;
     [arr[i], arr[j]] = [arr[j], arr[i]];
+    if (heldMove) heldMove.moved = true;
     render();
     focusMoving();
   }
@@ -97,10 +106,12 @@
   function dropTile() {
     send({ type: 'tile.order', ids: state.tiles.map((t) => t.id) });
     state.moving = null;
+    heldMove = null;
     render();
     toast('Moved');
   }
   function cancelMove() {
+    heldMove = null;
     if (lib.moveOrigin) {
       const byId = Object.fromEntries(state.tiles.map((t) => [t.id, t]));
       state.tiles = lib.moveOrigin.map((id) => byId[id]).filter(Boolean);

@@ -178,7 +178,7 @@ Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power (in standby: 
 Moonlight a tap goes to the game PC, a hold of 0.5 s is our menu · R3 = on-screen keyboard
 (not in Moonlight; configurable) · Start + D-pad = volume (not in Moonlight).
 
-Launcher & menus: D-pad/L stick move · A select · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
+Launcher & menus: D-pad/L stick move · A select (held 0.5 s on a home tile: move it; let go after moving drops it) · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
 
 | Button | Controller preset | Mouse preset (Browser, Twitch, Stremio, websites) | Keyboard preset |
 |---|---|---|---|

@@ -209,6 +209,27 @@ Console.WriteLine("== PadMapper");
     Check(presses == 1, $"R3 held 0.7 s raises one press (got {presses})");
 }
 
+// A: A as it goes down (as ever), then AHold at 0.5 s and AUp when let go (hold A on a home tile
+// to move it). A tap: A, AUp, no AHold.
+{
+    var controller = new ControllerService();
+    var pads = new List<Pad>();
+    controller.Pressed += (pad, repeat) => { lock (pads) pads.Add(pad); };
+    PadState P(ushort b) => new(b, 0, 0, 0, 0, 0, 0);
+    controller.Inject(P(0));
+    controller.Start();
+    Thread.Sleep(60);
+    controller.Inject(P(0x1000)); Thread.Sleep(100);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    lock (pads) Check(pads.SequenceEqual(new[] { Pad.A, Pad.AUp }), "A tapped: A, then AUp, no AHold: " + string.Join(",", pads));
+    lock (pads) pads.Clear();
+    controller.Inject(P(0x1000)); Thread.Sleep(800);
+    lock (pads) Check(pads.SequenceEqual(new[] { Pad.A, Pad.AHold }), "A held 0.8 s: A, then one AHold while still down: " + string.Join(",", pads));
+    controller.Inject(P(0)); Thread.Sleep(60);
+    controller.Dispose();
+    lock (pads) Check(pads.SequenceEqual(new[] { Pad.A, Pad.AHold, Pad.AUp }), "... let go: AUp: " + string.Join(",", pads));
+}
+
 // ---------------------------------------------------------------- Start + D-pad: the volume
 Console.WriteLine("== Start + D-pad (StartChord)");
 {

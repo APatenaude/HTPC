@@ -31,7 +31,8 @@ sealed partial class MainForm
         };
     }
 
-    /// <summary>controller.test {on}: the button test (raw state 30 times a second); controller.rumble.</summary>
+    /// <summary>controller.test {on}: the button test (raw state 30 times a second); controller.rumble;
+    /// controller.buzz (a light tick: a home tile picked up to move).</summary>
     [UiMessages("controller.")]
     void OnControllerMessage(string type, JsonElement m)
     {
@@ -41,6 +42,7 @@ sealed partial class MainForm
                 if (m.GetProperty("on").GetBoolean()) padTest.Start(); else padTest.Stop();
                 break;
             case "controller.rumble": controller.RumbleWake(); break;
+            case "controller.buzz": controller.Buzz(); break;
         }
     }
 
