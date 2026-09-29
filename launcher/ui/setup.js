@@ -348,7 +348,7 @@ function setFocus(el) {
 
 // The lists that scroll: the Wi-Fi networks (and the Wi-Fi step, for its forms), the TVs found,
 // the TV dialog's list, the Done page's lines.
-const SCROLLERS = '.wifi-scroll, .tv-list, .su-summary, .su-tvlist, #su-wifi';
+const SCROLLERS = '.wifi-scroll, .tv-list, .su-summary, .su-tvlist, #su-wifi, .su-apps';
 
 function move(dir) {
   const cur = document.querySelector('[data-nav].focused');
@@ -564,6 +564,13 @@ if (host) {
     { id: 'edge', name: 'Browser', glyph: 'globe', color: '#3CCB9A', default: true },
     { id: 'kodi', name: 'Kodi', glyph: 'tv', color: '#5AB0FF' },
     { id: 'vlc', name: 'VLC', glyph: 'play', color: '#FF8A1F' },
+    // The rest of the real catalog (41 in all): more than one screen, as on a box, so the audit
+    // walks a list that has to scroll (a list of 8 hid that it didn't).
+    ...['Plex HTPC', 'Spotify', 'Feishin', 'Steam', 'Playnite', 'RetroArch', 'RetroBat', 'Netflix', 'Disney+',
+      'Prime Video', 'Crunchyroll', 'HBO Max', 'Apple TV+', 'Paramount+', 'Tubi', 'Pluto TV', 'Crave', 'CBC Gem',
+      'ICI TOU.TV', 'Télé-Québec', 'TVA+', 'illico+', 'ONF', 'RDS', 'TSN', 'Sportsnet+', 'OHdio', 'YouTube Music',
+      'Apple Music', 'YouTube Kids', 'GeForce NOW', 'Xbox Cloud Gaming', 'Amazon Luna'].map((name, i) =>
+      ({ id: `demo${i}`, name, glyph: i < 7 ? 'app' : 'globe', color: '#8E9199' })),
   ], tv: TvUi.demo(q.get('demo') || 'roku') });
   // setup.html#audit (#audit?page=...): the UI audit's setup pages (audit.js), loaded before the
   // page's load event, which waits for it.
