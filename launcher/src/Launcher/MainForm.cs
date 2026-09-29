@@ -389,10 +389,12 @@ sealed partial class MainForm : Form
     }
 
     // logo: shown instead of the glyph (MainForm.Logos.cs); logoUrl: the app's logo, shown or not (Change icon offers it).
+    // uninstall: an installed app the box installs, so removing its tile uninstalls it (MainForm.Library.cs).
     object TileList() => apps.Tiles.Select(t => new
     {
         id = t.Id, name = t.Name, glyph = t.Glyph, color = t.Color, logo = LogoFor(t), logoUrl = logos.Url(t.Id),
-        running = apps.IsRunning(t.Id), custom = t.Custom, website = t.IsWebsite
+        running = apps.IsRunning(t.Id), custom = t.Custom, website = t.IsWebsite,
+        uninstall = BoxInstalls(t) && apps.IsInstalled(t.Id)
     }).ToList();
 
     object StateObject() => new

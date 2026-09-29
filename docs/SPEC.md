@@ -143,7 +143,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   library: Kodi, VLC, Plex HTPC, Spotify, Feishin (plus the six), and streaming sites that open
   in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi,
   Pluto TV, Kick, Crave, CBC Gem). Install and uninstall from the TV (not from the Browser),
-  keeping app data; installs start right away at low priority.
+  keeping app data; installs start right away at low priority. If it's installed, it's on the
+  home screen (29 September): installing adds the tile, taking the tile away uninstalls (asked
+  first); sites and the Browser, which install nothing, come and go from Home freely.
 
 ## Not now
 

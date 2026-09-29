@@ -11,16 +11,23 @@
 // Adding stays on Add tile (the owner adds several in a row): what was just added shows as on
 // the home screen where it is, the focus left on it. An app to install starts at once, with no
 // dialog: its card and its home tile show the progress, and that it did not install.
+//
+// The owner's rule: if it's installed, it's on the home screen. An app the box installs is
+// Install, installing, or "On home screen" (the host gives an installed app its tile), and
+// taking it off Home is uninstalling it (X on its card, Remove on its tile, both asked first).
+// A website and the Browser (Edge, built into Windows) install nothing: A adds the tile, X
+// takes it away.
 
 (function () {
   const COLS = 4;
 
   const STATUS = {
-    home: { label: 'On home screen', glyph: 'home', color: '#8E9199' },
-    installed: { label: 'Installed', glyph: 'check', color: '#7FD1AE' },
+    home: { label: 'On home screen', glyph: 'home', color: '#7FD1AE' },
     install: { label: 'Install', glyph: 'download', color: '#8CC2FF' },
     add: { label: 'Add tile', glyph: 'plus', color: '#8CC2FF' },
   };
+  const REMOVE = { uninstall: 'Uninstall', home: 'Remove from Home' };   // what X does on a card on Home
+  const UNINSTALL_TEXT = 'Its tile goes too. Your sign-in and settings are kept.';
 
   // Icon-picker choices (kept in step with TileStore.IconChoices / ColorChoices host-side).
   const ICONS = ['play', 'film', 'library', 'music', 'tv', 'globe', 'chat', 'youtube', 'moon',
@@ -116,12 +123,13 @@
       if (!t) { back(); return; }
       const rows = [['opt-move', 'move', 'Move'], ['opt-rename', 'pencil', 'Rename'], ['opt-icon', 'image', 'Change icon']];
       // In place (patchHtml): redrawn by the clock and host pushes, it popped in again each time.
+      // An installed app's tile goes only with the app (the host's tile.uninstall).
       patchHtml(el('tileopts'),
         '<aside class="to-panel">' +
           `<div class="to-head">${appIcon(t, 40)}<span class="to-name">${esc(t.name)}</span></div>` +
           rows.map(([act, glyph, label]) => `<button class="to-item" data-nav data-id="${act}" data-act="${act}">${icon(glyph, 32, 2)}${label}</button>`).join('') +
           '<div class="to-sep"></div>' +
-          `<button class="to-item danger" data-nav data-id="opt-remove" data-act="opt-remove">${icon('trash', 32, 2)}Remove from home</button>` +
+          `<button class="to-item danger" data-nav data-id="opt-remove" data-act="opt-remove">${icon('trash', 32, 2)}${t.uninstall ? 'Uninstall' : 'Remove from home'}</button>` +
         '</aside>' +
         `<footer class="hints">${hints([['A', 'Select'], ['B', 'Close']])}</footer>`);
     },
@@ -148,6 +156,13 @@
   function removeTarget() {
     const t = targetTile();
     if (!t) return;
+    // An installed app is on the home screen as long as it is installed: removing its tile is
+    // uninstalling it (asked first; the host takes the tile away once it is done).
+    if (t.uninstall) {
+      if (!state.libraryAvailable) { toast('Uninstalling from the TV isn’t set up yet. Run setup once more.', 'warn'); return; }
+      ask({ title: `Uninstall ${t.name}?`, text: UNINSTALL_TEXT, yes: 'Uninstall', onYes: () => { uninstallApp(t.id, t.name); reset('home'); } });
+      return;
+    }
     // A custom tile (added website or program) keeps its details only here, so ask first (SPEC
     // decision); a catalog app can always be re-added from the library, so it goes at once.
     if (t.custom) {
@@ -251,7 +266,13 @@
       // updated in place (patchHtml), their logos not loaded again, the list's scroll and the
       // focus left be. Another tab is drawn afresh.
       const old = el('addtile').querySelector('.at-main');
-      if (old && el('addtile').dataset.tab === lib.tab) { patchHtml(old, body); return; }
+      if (old && el('addtile').dataset.tab === lib.tab) {
+        patchHtml(old, body);
+        // The focused card may have changed (installing, uninstalling, added): so have its hints.
+        const f = focusedEl(), bar = el('addtile').querySelector('footer.hints');
+        if (bar && f && old.contains(f)) patchHtml(bar, hints(tabHints(f)));
+        return;
+      }
       el('addtile').innerHTML =
         '<header class="at-header"><h1>Add a tile</h1>' + `<nav class="at-tabs" aria-label="Tile source">${tabs}</nav></header>` +
         `<main class="at-main">${body}</main>` +
@@ -274,13 +295,13 @@
         if (button === 'y') { typeKey('space'); return true; }
         if (button === 'start') { saveWebsite(); return true; }
       }
-      if (lib.tab === 'library' && button === 'x') { uninstallFocused(node); return true; }
+      if (lib.tab === 'library' && button === 'x') { removeFocused(node); return true; }
       return false;
     },
   });
 
-  // The hints for the focused card or row: A only where it does something, X Uninstall only on
-  // an installed app that can be uninstalled (not a site, not an app to install).
+  // The hints for the focused card or row: A only where it does something; X on a card on the
+  // home screen: Uninstall for an installed app, Remove from Home for a site or the Browser.
   function tabHints(node) {
     const tabs = [['LB', 'Prev tab'], ['RB', 'Next tab'], ['B', 'Back']];
     if (lib.tab === 'website') return [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['Start', 'Add tile'], ...tabs];
@@ -290,9 +311,17 @@
     }
     const card = node && node.dataset.arg ? findCard(node.dataset.arg) : null;
     if (!card) return [['A', 'Install or add'], ...tabs];
-    const a = card.state === 'install' ? (lib.failed.has(card.id) ? 'Try again' : 'Install') : card.state === 'installed' || card.state === 'add' ? 'Add tile' : null;
-    const x = node.dataset.uninstall === '1' && (card.state === 'installed' || card.state === 'home');
-    return [...(a ? [['A', a]] : []), ...(x ? [['X', 'Uninstall']] : []), ...tabs];
+    const a = card.state === 'install' ? (lib.failed.has(card.id) ? 'Try again' : 'Install') : card.state === 'add' ? 'Add tile' : null;
+    const x = REMOVE[removeKind(card)];
+    return [...(a ? [['A', a]] : []), ...(x ? [['X', x]] : []), ...tabs];
+  }
+
+  // What X does on a card: only on one on the home screen. An app the box installs is there
+  // because it is installed, so it is uninstalled; a site or the Browser just leaves Home.
+  function removeKind(card) { return card.state !== 'home' ? '' : card.canUninstall ? 'uninstall' : 'home'; }
+  // Shown on the focused card itself (library.css), not only in the hints.
+  function removeChip(kind) {
+    return kind ? `<span class="lc-x ${kind}"><span class="key">X</span>${REMOVE[kind]}</span>` : '';
   }
 
   function openAddTile() {
@@ -316,6 +345,11 @@
   // What a card (and a tile being installed) says. Installing looks nothing like "Install": a
   // spinner, the progress, a bar; one that did not install says so in amber.
   function cardStatus(card) {
+    if (card.state === 'uninstalling') {
+      const p = lib.progress.current;
+      return !p || p.id === card.id ? { label: 'Uninstalling…', spin: true, color: '#8CC2FF', busy: true, percent: null }
+        : { label: 'Waiting to uninstall', glyph: 'timer', color: '#B3B5BC', busy: true, percent: 0 };
+    }
     if (card.state === 'installing') {
       const p = lib.progress.current;
       // Nothing running yet: just asked, it starts (the host's progress follows).
@@ -340,18 +374,18 @@
   function libraryTabHtml() {
     if (!lib.catalog.apps.length && !lib.catalog.sites.length) return '<p class="at-empty">Loading the library…</p>';
     const apps = lib.catalog.apps.map((c) => {
-      const st = cardStatus(c);
-      return `<button class="lc-app${st.busy ? ' busy' : ''}${st.failed ? ' failed' : ''}" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}" data-uninstall="${c.canUninstall ? 1 : 0}">` +
-        `<div class="lc-top">${appIcon(c, 40)}<span class="lc-name">${esc(c.name)}</span></div>` +
+      const st = cardStatus(c), rm = removeKind(c);
+      return `<button class="lc-app${st.busy ? ' busy' : ''}${st.failed ? ' failed' : ''}${rm ? ' removable' : ''}" data-nav data-id="app-${esc(c.id)}" data-act="libcard" data-arg="${esc(c.id)}" data-remove="${rm}">` +
+        `<div class="lc-top">${appIcon(c, 40)}<span class="lc-name">${esc(c.name)}</span>${c.builtin ? '<span class="lc-tag">Built in</span>' : ''}</div>` +
         `<span class="lc-desc">${esc(c.desc)}</span>` +
-        `<span class="lc-status" style="color:${st.color}">${statusIcon(st, 22)}${esc(st.label)}</span>${progressBar(st, 'lc-bar')}</button>`;
+        `<span class="lc-status" style="color:${st.color}">${statusIcon(st, 22)}${esc(st.label)}</span>${removeChip(rm)}${progressBar(st, 'lc-bar')}</button>`;
     }).join('');
     const sites = lib.catalog.sites.map((c) => {
-      const st = cardStatus(c);
-      return `<button class="lc-site" data-nav data-id="site-${esc(c.id)}" data-act="sitecard" data-arg="${esc(c.id)}">` +
+      const st = cardStatus(c), rm = removeKind(c);
+      return `<button class="lc-site${rm ? ' removable' : ''}" data-nav data-id="site-${esc(c.id)}" data-act="sitecard" data-arg="${esc(c.id)}" data-remove="${rm}">` +
         appIcon({ ...c, glyph: 'globe' }, 34) +   // without its logo, a site shows as a website
-        `<span class="lc-name grow">${esc(c.name)}</span>` +
-        `<span style="display:flex;color:${st.color}">${icon(st.glyph, 24, 2.25)}</span></button>`;
+        `<span class="lc-sname"><span class="lc-name">${esc(c.name)}</span>${removeChip(rm)}</span>` +
+        `<span class="lc-sglyph" style="color:${st.color}">${icon(st.glyph, 24, 2.25)}</span></button>`;
     }).join('');
     return '<span class="at-label">Apps</span>' + `<div class="lc-grid">${apps}</div>` +
       '<span class="at-label">Streaming sites · each opens as its own app, no install</span>' + `<div class="lc-grid sites">${sites}</div>`;
@@ -446,6 +480,7 @@
     const card = findCard(id);
     if (!card) return;
     if (card.state === 'installing') { toast(`${card.name} is installing…`); return; }
+    if (card.state === 'uninstalling') { toast(`${card.name} is being uninstalled…`); return; }
     if (card.state === 'home') { toast(`${card.name} is already on your home screen`); return; }
     let now = 'home';
     if (card.state === 'install') {
@@ -453,9 +488,14 @@
       installApp(id);                      // no dialog: its card and its home tile show the progress
       now = 'installing';
     } else {
-      addToHome(id);                       // an installed app or a website
+      addToHome(id);                       // a website or the Browser
       toast(`Added ${card.name}`);
     }
+    markCard(id, now);
+  }
+
+  // The card shows the change at once; the host's catalog, asked for again, confirms it.
+  function markCard(id, now) {
     const mark = (c) => (c.id === id ? { ...c, state: now } : c);
     lib.catalog = { apps: lib.catalog.apps.map(mark), sites: lib.catalog.sites.map(mark) };
     lib.catalogKey = null;                 // the host's next catalog is drawn, even the same as before
@@ -469,17 +509,24 @@
     send({ type: 'tile.order', ids });
   }
 
-  function uninstallFocused(node) {
-    if (!node || node.dataset.uninstall !== '1') return;
-    const card = findCard(node.dataset.arg);
-    if (!card || (card.state !== 'installed' && card.state !== 'home')) { toast('That app is not installed'); return; }
-    if (!state.libraryAvailable) { toast('Installing from the TV isn’t set up yet', 'warn'); return; }
-    ask({
-      title: `Uninstall ${card.name}?`,
-      text: 'It is removed from the box. Your sign-in and settings are kept.',
-      yes: 'Uninstall',
-      onYes: () => { send({ type: 'library.uninstall', id: card.id }); toast(`Uninstalling ${card.name}…`); },
-    });
+  // X on a card on the home screen, asked first: an installed app is uninstalled (its tile goes
+  // when it is done, the card goes back to Install); a site or the Browser leaves Home.
+  function removeFocused(node) {
+    const card = node && node.dataset.remove ? findCard(node.dataset.arg) : null;
+    const kind = card ? removeKind(card) : '';
+    if (kind === 'uninstall') {
+      if (!state.libraryAvailable) { toast('Uninstalling from the TV isn’t set up yet. Run setup once more.', 'warn'); return; }
+      ask({ title: `Uninstall ${card.name}?`, text: UNINSTALL_TEXT, yes: 'Uninstall',
+        onYes: () => { uninstallApp(card.id, card.name); markCard(card.id, 'uninstalling'); } });
+    } else if (kind === 'home') {
+      ask({ title: `Remove ${card.name} from Home?`, text: 'You can add it again here.', yes: 'Remove',
+        onYes: () => { send({ type: 'tile.remove', id: card.id }); toast(`${card.name} removed from Home`); markCard(card.id, 'add'); } });
+    }
+  }
+
+  function uninstallApp(id, name) {
+    send({ type: 'library.uninstall', id });
+    toast(`Uninstalling ${name}…`);
   }
 
   // ---- Installing ---------------------------------------------------------------------------
@@ -610,20 +657,22 @@
 
   function demoData() {
     if (lib.catalog.apps.length) return;
-    const C = { youtube: '#FF5B52', stremio: '#7C8CFF', jellyfin: '#3DC0F0', moonlight: '#F5D16B', kodi: '#5AB0FF', vlc: '#FF8A1F', plex: '#F5B82E', spotify: '#1ED760', feishin: '#FF7AB6' };
+    const C = { youtube: '#FF5B52', stremio: '#7C8CFF', jellyfin: '#3DC0F0', moonlight: '#F5D16B', edge: '#3CCB9A', kodi: '#5AB0FF', vlc: '#FF8A1F', plex: '#F5B82E', spotify: '#1ED760', feishin: '#FF7AB6' };
     lib.catalog = {
       apps: [
-        { id: 'youtube', name: 'YouTube', glyph: 'youtube', desc: 'YouTube’s TV interface, without ads', state: 'home' },
-        { id: 'stremio', name: 'Stremio', glyph: 'film', desc: 'Movies and shows through add-ons', state: 'home' },
-        { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', desc: 'Your Jellyfin library, TV layout', state: 'home' },
-        { id: 'moonlight', name: 'Moonlight', glyph: 'moon', desc: 'Play games streamed from your PC', state: 'home' },
+        { id: 'youtube', name: 'YouTube', glyph: 'youtube', desc: 'YouTube’s TV interface, without ads', state: 'home', canUninstall: true },
+        { id: 'stremio', name: 'Stremio', glyph: 'film', desc: 'Movies and shows through add-ons', state: 'home', canUninstall: true },
+        { id: 'jellyfin', name: 'Jellyfin', glyph: 'library', desc: 'Your Jellyfin library, TV layout', state: 'home', canUninstall: true },
+        { id: 'moonlight', name: 'Moonlight', glyph: 'moon', desc: 'Play games streamed from your PC', state: 'uninstalling', canUninstall: true },
+        { id: 'edge', name: 'Browser', glyph: 'globe', desc: 'The web, with tabs and an address bar', state: 'home', builtin: true },
         { id: 'kodi', name: 'Kodi', glyph: 'tv', desc: 'Media center for files on your network', state: 'install', canUninstall: true },
-        { id: 'vlc', name: 'VLC', glyph: 'play', desc: 'Plays almost any video or audio file', state: 'installed', canUninstall: true },
+        { id: 'vlc', name: 'VLC', glyph: 'play', desc: 'Plays almost any video or audio file', state: 'home', canUninstall: true },
         { id: 'plex', name: 'Plex HTPC', glyph: 'library', desc: 'Plex’s app made for TVs', state: 'install', canUninstall: true },
         { id: 'spotify', name: 'Spotify', glyph: 'music', desc: 'Music streaming', state: 'installing', canUninstall: true },
         { id: 'feishin', name: 'Feishin', glyph: 'music', desc: 'Music from your Navidrome server', state: 'install', canUninstall: true },
       ].map((a) => demoLogo(Object.assign(a, { color: C[a.id] || '#F3F2EF' }))),
       sites: [
+        { id: 'twitch', name: 'Twitch', color: '#9146FF', state: 'home' },
         { id: 'netflix', name: 'Netflix', color: '#FF4B55', state: 'add' },
         { id: 'disneyplus', name: 'Disney+', color: '#4D8DFF', state: 'add' },
         { id: 'primevideo', name: 'Prime Video', color: '#2BB0F5', state: 'add' },
@@ -647,7 +696,7 @@
     if (/[?&]many=1/.test(location.hash)) {
       const more = (list, n, f) => Array.from({ length: n }, (_, i) => f(list[i % list.length], i));
       lib.catalog.apps = lib.catalog.apps.concat(more(lib.catalog.apps, 13, (a, i) =>
-        ({ ...a, id: `${a.id}${i}`, name: `${a.name} ${i + 2}`, state: 'install', logo: null })));
+        ({ ...a, id: `${a.id}${i}`, name: `${a.name} ${i + 2}`, state: 'install', canUninstall: true, builtin: false, logo: null })));
       lib.catalog.sites = lib.catalog.sites.concat(more(lib.catalog.sites, 7, (s, i) => ({ ...s, id: `${s.id}${i}`, name: `${s.name} ${i + 2}`, logo: null })));
       lib.programs = more(lib.programs, 26, (p, i) => ({ ...p, name: `${p.name} ${i + 1}` }));
     }
