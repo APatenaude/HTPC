@@ -740,7 +740,7 @@
     EXT.actions.addtile();
     press('rb');
     const programs = (calcLogo) => [{ name: 'Calculator', launchable: true, logo: calcLogo }, { name: 'Paint', launchable: true, logo: PNG1 },
-      { name: 'Run', launchable: false, note: 'Windows Installer shortcut', logo: PNG1 }];
+      { name: 'Run', launchable: false, note: 'No program file', logo: PNG1 }];
     onHost({ type: 'library.programs', list: programs(null) });
     await new Promise((r) => setTimeout(r, 100));   // the icons load
     const icon = (name) => at(`ob-${name}`) && at(`ob-${name}`).querySelector('.appicon');

@@ -150,7 +150,7 @@ function auditLibrary() {
 }
 // Every other one with its own icon (the host makes them in the background: the rest come later).
 const auditPrograms = () => Array.from({ length: 110 }, (_, i) => ({ name: i === 3 ? `Program ${AUDIT_LONG}` : i === 40 ? `Uninstall ${AUDIT_LONG}` : `Program ${i + 1}`,
-  launchable: i % 6 !== 4, onHome: i % 7 === 2, note: i % 6 === 4 ? 'Windows Installer shortcut' : null, logo: i % 2 ? AUDIT_LOGO : null }));
+  launchable: i % 6 !== 4, onHome: i % 7 === 2, note: i % 6 === 4 ? 'No program file' : null, logo: i % 2 ? AUDIT_LOGO : null }));
 // The install queue, pushed twice a second while it runs.
 const AUDIT_PROGRESS = { type: 'library.progress', current: { id: 'lib5', name: 'Library app 6', action: 'install', phase: 'download', percent: 62 }, pending: [{ id: 'lib2', action: 'install' }] };
 

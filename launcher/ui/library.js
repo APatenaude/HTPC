@@ -818,7 +818,7 @@
     'Adobe Photoshop Elements 2024 Organizer', 'Battle.net', 'Blender 4.2', 'Brave', 'Firefox', 'Google Chrome', 'Spotify']
     .sort((a, b) => a.localeCompare(b)).map((name) => ({ name, launchable: !/Website|Safe Mode|^Run$|Control Panel/.test(name),
       onHome: /^(Jellyfin Media Player|Microsoft Edge|Kodi|Moonlight)$/.test(name),
-      note: /Website|Safe Mode/.test(name) ? 'Not a program' : /^Run$|Control Panel/.test(name) ? 'Windows Installer shortcut' : null }));
+      note: /Website|Safe Mode/.test(name) ? 'Not a program' : /^Run$|Control Panel/.test(name) ? 'No program file' : null }));
 
   function demoData() {
     if (lib.catalog.apps.length) return;

@@ -87,7 +87,9 @@ static class StartMenuScanner
             string args = shortcut.Arguments ?? "";
             string workingDir = shortcut.WorkingDirectory ?? "";
             if (string.IsNullOrEmpty(target))
-                return new InstalledProgram(name, link, null, null, null, false, "Windows Installer shortcut");
+                // A Windows view (File Explorer, Control Panel, Run: a shell item, no file) or a Windows
+                // Installer "advertised" shortcut: no program file to start either way.
+                return new InstalledProgram(name, link, null, null, null, false, "No program file");
             if (!target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 return new InstalledProgram(name, link, target, null, null, false, "Not a program");
             if (!File.Exists(target))
