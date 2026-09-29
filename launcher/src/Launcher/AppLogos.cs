@@ -150,7 +150,10 @@ sealed class AppLogos
 
     async Task<bool> FromSite(LogoSource s)
     {
-        if (File.Exists(PathOf(s.Id))) return false; // fetched once, kept
+        // Fetched once, kept; but a logo taken from a program (<id>.from) is replaced once the
+        // catalog names the app's own icon (logoUrl: YouTube's, not VacuumTube's).
+        var from = Path.Combine(dir, s.Id + ".from");
+        if (File.Exists(PathOf(s.Id)) && !File.Exists(from)) return false;
         if (!Uri.TryCreate(s.Url, UriKind.Absolute, out var page) || page.Scheme is not ("http" or "https")) return false;
         try
         {
@@ -161,6 +164,7 @@ sealed class AppLogos
                 return false;
             }
             Save(s.Id, found.Png);
+            File.Delete(from);
             Log.Info($"Logo {s.Id}: {found.From.Source} {found.From.Url.Host}{found.From.Url.AbsolutePath}");
             return true;
         }

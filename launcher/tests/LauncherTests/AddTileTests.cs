@@ -5,8 +5,8 @@ using Htpc.Launcher;
 
 /// <summary>
 /// The owner's list of 29 Sept 2026, the host's side: On this box's programs with their own icons
-/// (their shortcut's, made once and kept, gone with the program), a program tile opening filling
-/// the screen (a window that cannot be sized: in the middle of it), the catalog's categories, and
+/// (their shortcut's, made once and kept, gone with the program), a program tile not filled (its
+/// window maximized instead, MainForm.MaximizeOpenedWindow; one that cannot be sized: FixedSize), the catalog's categories, and
 /// the on-screen keyboard's window as high as its page. The pages' side: ui\selftest.js.
 /// </summary>
 static class AddTileTests
@@ -20,7 +20,7 @@ static class AddTileTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
         Console.WriteLine("== Add tile: a program's icon in On this box");
         await ProgramIcons();
-        Console.WriteLine("== Add tile: a program tile fills the screen");
+        Console.WriteLine("== Add tile: a program tile is maximized, not filled");
         ProgramFills(root!.FullName);
         Console.WriteLine("== Catalog: categories");
         Categories(root.FullName);
@@ -96,17 +96,17 @@ static class AddTileTests
     {
         var paint = new CustomTile { Id = "app-12345678", Kind = "program", Name = "Paint", Exe = @"C:\Windows\System32\mspaint.exe", Glyph = "app" };
         var site = new CustomTile { Id = "web-12345678", Kind = "website", Name = "A site", Url = "https://example.com/" };
-        Check(AppManager.FromCustom(paint) is { Fill: true, CropTop: 0, Custom: true, Type: "app" }, "a program added from On this box opens filling the screen");
+        Check(AppManager.FromCustom(paint) is { Fill: false, CropTop: 0, Custom: true, Type: "app" }, "a program added from On this box is not filled (maximized when its window comes up: its title bar kept; filled, Paint had a gap at the top)");
         Check(AppManager.FromCustom(site) is { Fill: false, IsWebsite: true }, "an added website: not filled (its Edge app window is full screen by itself)");
-        // Tiles added before this: read from settings.json as they were, they fill too.
+        // Tiles added before this: read from settings.json as they were, the same.
         var apps = new AppManager(Path.Combine(root, "setup", "catalog.json"));
         var stored = JsonSerializer.Deserialize<CustomTile>("""{ "Id": "app-87654321", "Kind": "program", "Name": "Notepad", "Exe": "C:\\Windows\\notepad.exe", "Glyph": "app", "Color": "#8CC2FF", "Preset": "mouse" }""")!;
         apps.SetCustom([stored], new Dictionary<string, TileEdit> { ["app-87654321"] = new TileEdit { Name = "Notes" } });
-        Check(apps.Get("app-87654321") is { Fill: true, Name: "Notes" }, "a program tile added before: it fills too, renamed or not");
+        Check(apps.Get("app-87654321") is { Fill: false, Name: "Notes" }, "a program tile added before: not filled either, renamed or not");
 
         const long Caption = 0x00C00000L, SizingBorder = 0x00040000L, SysMenu = 0x00080000L, MinBox = 0x00020000L, MaxBox = 0x00010000L, Popup = 0x80000000L, Visible = 0x10000000L;
         Check(Native.FixedSize(Visible | Caption | SysMenu | MinBox), "Calculator's window (a title bar, no sizing border): fixed, not stretched");
-        Check(!Native.FixedSize(Visible | Caption | SizingBorder | SysMenu | MinBox | MaxBox), "Paint's window (a sizing border): filled");
+        Check(!Native.FixedSize(Visible | Caption | SizingBorder | SysMenu | MinBox | MaxBox), "Paint's window (a sizing border): can be sized");
         Check(!Native.FixedSize(Popup | Visible), "a frameless window (filled already, a splash): not fixed");
         var tv4k = new Rectangle(0, 0, 3840, 2160);
         Check(Native.CentredRect(tv4k, new Size(500, 640)) == new Rectangle(1670, 760, 500, 640), "a fixed window goes to the middle of the screen, at its own size");

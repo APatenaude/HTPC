@@ -16,6 +16,7 @@ sealed partial class MainForm
     readonly System.Windows.Forms.Timer refit = new() { Interval = 500 };
     Rectangle fittedTo;          // the screen as last fitted
     string refitWhy = "";
+    string? lastSignal;          // DisplayState.Describe as last logged
 
     /// <summary>Constructor: display changes are watched from the start.</summary>
     void InitScreen()
@@ -43,6 +44,15 @@ sealed partial class MainForm
         var screen = primary.Bounds;
         if (screen != fittedTo)
             Log.Info($"Screen now {screen.Width}x{screen.Height} at ({screen.X}, {screen.Y}), {DeviceDpi} dpi ({refitWhy}): the launcher and its layers fitted to it");
+        // The signal too, and what was in front: a change that is not a new size (HDR switched on
+        // for a video, another refresh rate) blanks a TV for a second or two, and was never logged.
+        var signal = DisplayState.Describe();
+        if (signal != lastSignal)
+        {
+            var front = LauncherActive ? "the launcher" : foregroundApp?.Id ?? "another window";
+            Log.Info($"Display signal: {signal ?? "unknown"} ({refitWhy}; {front} in front){(lastSignal is null ? "" : $", was {lastSignal}")}");
+            lastSignal = signal;
+        }
         fittedTo = screen;
         phoneScreenHeight = screen.Height; // the phone's touchpad speed (MainForm.Phone.cs)
         ScreenCapture.ScreenChanged();     // the Home menu's backdrop: the new screen's output

@@ -272,16 +272,16 @@ sealed class AppManager
 
     /// <summary>
     /// A custom tile (added website or program) as a CatalogApp, so it launches like any app. A
-    /// program added from On this box opens filling the screen, as the catalog's fill apps do
-    /// (the owner, 29 Sept 2026: Paint came up in a window): it has no switch the launcher knows.
-    /// Read each time the tiles are loaded, so the tiles added before this fill too.
+    /// program added from On this box is not filled (with its title bar gone, Paint came up with a
+    /// gap at the top): its window is maximized, as every plain window is when it first comes in
+    /// front (MainForm.MaximizeOpenedWindow; the owner, 29 Sept 2026).
     /// </summary>
     internal static CatalogApp FromCustom(CustomTile t) => new(
         t.Id, t.Name, t.Kind == "program" ? "app" : "website",
         t.Kind == "website" ? t.Url : null,
         false, t.Preset, t.Glyph, t.Color,
         t.Kind == "program" ? t.Exe : null, t.Args,
-        Installable: false, Scope: "machine", Fill: t.Kind == "program", Custom: true);
+        Installable: false, Scope: "machine", Fill: false, Custom: true);
 
     /// <summary>
     /// Merges the user's added tiles and per-tile edits (rename, icon) into the app list. Called on

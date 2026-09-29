@@ -302,10 +302,10 @@ static class LogoTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
         var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
         var withLogo = apps.Catalog.Where(a => a.LogoUrl is not null).ToList();
-        foreach (var id in new[] { "crunchyroll", "paramountplus", "rds", "tsn" })
+        foreach (var id in new[] { "crunchyroll", "paramountplus", "rds", "tsn", "youtube" })
             Check(apps.Get(id)?.LogoUrl is { } u && u.StartsWith("https://"), $"{id}: a logoUrl ({apps.Get(id)?.LogoUrl})");
-        Check(withLogo.All(a => a.IsWebsite && Uri.TryCreate(a.LogoUrl, UriKind.Absolute, out var u) && SiteIcons.Secure(u, a.LogoUrl!) is not null),
-            "every logoUrl: on a website, an absolute https address: " + string.Join(" ", withLogo.Where(a => !a.IsWebsite || !a.LogoUrl!.StartsWith("https://")).Select(a => a.Id)));
+        Check(withLogo.All(a => Uri.TryCreate(a.LogoUrl, UriKind.Absolute, out var u) && SiteIcons.Secure(u, a.LogoUrl!) is not null),
+            "every logoUrl (a website's, or an app's own icon: YouTube's): an absolute https address: " + string.Join(" ", withLogo.Where(a => !a.LogoUrl!.StartsWith("https://")).Select(a => a.Id)));
     }
 
     // --- The cache ------------------------------------------------------------------------------------
@@ -372,6 +372,16 @@ static class LogoTests
             "the logo's program changed: read from the new one, once (<id>.from says which)");
         installed = exePath;
         await logos.RefreshNow(sources);
+
+        // The catalog now names the app's own icon (logoUrl: YouTube's, not VacuumTube's): the logo
+        // taken from its program is replaced, once; after that it is kept as a website's is.
+        web.Files["https://icons.test/app-512.png"] = Png(512, 512, Color.Red);
+        var byUrl = new List<LogoSource> { new("player", "https://icons.test/app-512.png", null, "https://icons.test/app-512.png") };
+        var before = logos.Url("player");
+        saved = await logos.RefreshNow(byUrl);
+        again = await logos.RefreshNow(byUrl);
+        Check(saved == 1 && again == 0 && logos.Url("player") != before && !File.Exists(Path.Combine(dir, "player.from")),
+            "an app's logoUrl replaces the logo taken from its program, once");
 
         // A site out of reach: again after 10 minutes, not before.
         sources.Add(new("away", "https://away.test/", null));
