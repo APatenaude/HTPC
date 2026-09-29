@@ -21,7 +21,7 @@
 .to-confirm { margin: 0 20px 8px; font-size: 24px; line-height: 1.4; color: var(--text-2); }
 
 /* Overlay views keep their hints at the bottom (like Power and Sleep timer). */
-#tileopts .hints, #installing .hints { position: absolute; left: 0; bottom: 0; }
+#tileopts .hints { position: absolute; left: 0; bottom: 0; }
 
 /* Full-screen library views are opaque (the dimmed home must not show through) and stack their
    content above a bottom hint bar. */
@@ -70,6 +70,7 @@
 .lc-app.busy { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .lc-app.busy .lc-top > span:first-child { opacity: 0.45; }
 .lc-app.failed { outline: 2px dashed var(--warn); outline-offset: -2px; }
+.lc-app.failed .lc-desc { -webkit-line-clamp: 1; max-height: 1.35em; }   /* its two-line status needs the room */
 .lc-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--track); }
 .lc-bar span, .pbar span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
 .lc-bar.going span, .pbar.going span { animation: going 1.4s ease-in-out infinite; }
@@ -114,9 +115,11 @@
 .ws-plabel { font-size: 22px; color: var(--muted); }
 .ws-card {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
-  height: 210px; border-radius: 26px; background: #191B20; box-shadow: inset 0 0 0 2px var(--tile-edge);
+  min-height: 210px; box-sizing: border-box; padding: 20px 24px; text-align: center;   /* a long name wraps inside it */
+  border-radius: 26px; background: #191B20; box-shadow: inset 0 0 0 2px var(--tile-edge);
 }
 .ws-cname { font-family: var(--display); font-weight: 600; font-size: 30px; }
+.ws-added { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; color: #8E9199; }   /* as a card on the home screen */
 .ws-kb { margin-top: 20px; }
 
 /* Inline on-screen keyboard (rename + website) */
@@ -160,37 +163,6 @@
 .ci-color span { width: 44px; height: 44px; border-radius: 22px; }
 .ci-color.on { box-shadow: inset 0 0 0 3px var(--text); }
 .ci-color.focused { box-shadow: 0 0 0 4px var(--accent); }
-
-/* Installing dialog */
-#installing { background: rgba(13, 14, 17, 0.55); align-items: center; justify-content: center; }
-.il-dialog {
-  width: 900px; box-sizing: border-box; padding: 56px; border-radius: 32px; background: var(--row);
-  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6), inset 0 0 0 1px var(--track);
-  display: flex; flex-direction: column; gap: 28px; animation: pop 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-}
-.il-head { display: flex; align-items: center; gap: 28px; }
-.il-icon { display: flex; align-items: center; justify-content: center; width: 128px; height: 128px; border-radius: 28px; background: var(--panel); }
-.il-text { display: flex; flex-direction: column; gap: 8px; }
-.il-name { font-family: var(--display); font-weight: 600; font-size: 48px; letter-spacing: -0.02em; }
-.il-desc { font-size: 24px; color: var(--text-2); }
-.il-buttons { display: flex; gap: 20px; }
-.il-primary, .il-secondary {
-  height: 84px; padding: 0 40px; border: 0; border-radius: 24px; font-family: 'Atkinson Hyperlegible', sans-serif;
-  font-size: 28px; cursor: pointer;
-}
-.il-primary { background: var(--accent); color: var(--bg); font-weight: 700; }
-.il-secondary { background: var(--track); color: var(--text); }
-.il-primary.focused, .il-secondary.focused { box-shadow: 0 0 0 4px var(--accent), 0 0 0 8px var(--row); }
-.il-progress { display: flex; flex-direction: column; gap: 14px; }
-.il-prow { display: flex; justify-content: space-between; font-size: 26px; }
-.il-phase { font-weight: 700; }
-.il-pct { color: var(--text-2); }
-.il-bar { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
-.il-fill { height: 12px; border-radius: 6px; background: var(--accent); transition: width 0.3s ease; }
-.il-fill.going { animation: going 1.4s ease-in-out infinite; }   /* no percentage: the bar breathes */
-.il-phase.warn { color: var(--warn); }
-.il-phase.ok { color: #7FD1AE; }
-.il-note { font-size: 22px; color: var(--muted); }
 
 /* A home tile for an app being installed (library.js onTiles): dashed blue edge, its icon
    dimmed, what it is doing at the top, a bar at the bottom; amber when it did not install. */

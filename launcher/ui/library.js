@@ -5,8 +5,12 @@
 // and drives them through the shared helpers (state, send, go, back, reset, render, toast...).
 //
 // Screens: addtile (Library / On this box / Website tabs), tileopts (Start on a home tile),
-// rename, changeicon, installing. Home-screen bits (the "+" tile, Start = Tile options, moving a
-// tile) are wired through onAction hooks app.js calls.
+// rename, changeicon. Home-screen bits (the "+" tile, Start = Tile options, moving a tile) are
+// wired through onAction hooks app.js calls.
+//
+// Adding stays on Add tile (the owner adds several in a row): what was just added shows as on
+// the home screen where it is, the focus left on it. An app to install starts at once, with no
+// dialog: its card and its home tile show the progress, and that it did not install.
 
 (function () {
   const COLS = 4;
@@ -32,12 +36,11 @@
     programs: [],
     progress: { current: null, pending: [] },
     target: null,          // tile id being edited (tileopts / rename / changeicon)
-    install: null,         // card for the Install dialog
-    installing: false,     // the dialog has started a job
-    website: { name: '', url: '', field: 'url' },
+    website: { name: '', url: '', field: 'url', added: null },   // added: the site just added, till typing starts
+    addingProgram: null,   // the On this box row whose tile the host is adding
     moveOrigin: null,      // tile order to restore if a move is cancelled
     draft: '',             // the name being typed in the rename view
-    // Installs: the ids asked with "Install and add to home" (a tile shows them installing),
+    // Installs: the ids asked to install (their home tile shows them installing),
     // those queued or running, those just out of the queue (the catalog that follows says
     // whether they installed), and those that did not.
     homeBound: new Set(), queued: new Set(), finished: new Set(), failed: new Set(),
@@ -294,7 +297,7 @@
 
   function openAddTile() {
     lib.tab = 'library';
-    lib.website = { name: '', url: '', field: 'url' };
+    lib.website = { name: '', url: '', field: 'url', added: null };
     go('addtile');
     send({ type: 'library.list' });
   }
@@ -315,8 +318,9 @@
   function cardStatus(card) {
     if (card.state === 'installing') {
       const p = lib.progress.current;
-      if (p && p.id === card.id) {
-        const pct = p.phase === 'download' && p.percent != null ? p.percent : null;
+      // Nothing running yet: just asked, it starts (the host's progress follows).
+      if (!p || p.id === card.id) {
+        const pct = p && p.phase === 'download' && p.percent != null ? p.percent : null;
         return { label: pct !== null ? `Downloading… ${pct}%` : 'Installing…', spin: true, color: '#8CC2FF', busy: true, percent: pct };
       }
       return { label: 'Waiting to install', glyph: 'timer', color: '#B3B5BC', busy: true, percent: 0 };
@@ -367,6 +371,8 @@
 
   function websiteTabHtml() {
     const w = lib.website;
+    // Just added (the form cleared for the next one): the card shows it, on the home screen.
+    const added = w.added && !w.name && !w.url;
     const field = (id, label, value, ph) =>
       `<button class="ws-field${w.field === id ? ' on' : ''}" data-nav data-id="wf-${id}" data-act="field" data-arg="${id}">` +
         `<span class="ws-label">${label}</span><span class="ws-value">${esc(value) || `<span class="ws-ph">${ph}</span>`}${w.field === id ? '<span class="rn-caret"></span>' : ''}</span></button>`;
@@ -376,9 +382,10 @@
         field('url', 'Address', w.url, 'example.com') +
         '<div class="ws-hint">Opens as its own app window, like an app — no address bar or tabs.</div>' +
       '</div>' +
-      '<div class="ws-preview"><span class="ws-plabel">Preview</span>' +
+      `<div class="ws-preview"><span class="ws-plabel">${added ? 'Added' : 'Preview'}</span>` +
         `<div class="ws-card"><span style="display:flex;color:#8CC2FF">${icon('globe', 64)}</span>` +
-        `<span class="ws-cname">${esc(w.name) || esc(previewName(w.url))}</span></div></div>` +
+        `<span class="ws-cname">${esc(added ? w.added : w.name || previewName(w.url))}</span>` +
+        (added ? `<span class="ws-added">${icon(STATUS.home.glyph, 22, 2.25)}${STATUS.home.label}</span>` : '') + '</div></div>' +
       '</div>' +
       `<div class="ws-kb">${keyboardHtml('website')}</div>`;
   }
@@ -394,10 +401,12 @@
   function typeText(text) {
     const f = activeField();
     lib.website[f] = (lib.website[f] + text).slice(0, f === 'name' ? 24 : 2048);
+    lib.website.added = null;
     render();
   }
   function typeKey(which) {
     const f = activeField();
+    lib.website.added = null;
     if (which === 'del') lib.website[f] = lib.website[f].slice(0, -1);
     else if (which === 'space' && f === 'name') lib.website[f] = (lib.website[f] + ' ').slice(0, 24);
     render();
@@ -423,18 +432,35 @@
 
   onAction('libcard', (node, id) => cardAction(id));
   onAction('sitecard', (node, id) => cardAction(id));
-  onAction('addprog', (node, name) => send({ type: 'library.addProgram', name }));
+  onAction('addprog', (node, name) => {
+    const p = lib.programs.find((x) => x.name === name);
+    if (p && p.onHome) { toast(`${name} is already on your home screen`); return; }
+    lib.addingProgram = name;
+    send({ type: 'library.addProgram', name });
+  });
   onAction('prognote', (node) => toast(node && node.dataset.note ? node.dataset.note : 'That can’t be added'));
 
+  // The card changes where it is (on the home screen, or installing) and the focus stays on it;
+  // the host's catalog, asked for again, confirms it (or puts it back: an install it refused).
   function cardAction(id) {
     const card = findCard(id);
     if (!card) return;
     if (card.state === 'installing') { toast(`${card.name} is installing…`); return; }
     if (card.state === 'home') { toast(`${card.name} is already on your home screen`); return; }
-    if (card.state === 'install') { openInstall(card); return; }
-    addToHome(id);                       // an installed app or a website
-    toast(`Added ${card.name}`);
-    reset('home');
+    let now = 'home';
+    if (card.state === 'install') {
+      if (!state.libraryAvailable) { toast('Installing from the TV isn’t set up yet. Run setup once more.', 'warn'); return; }
+      installApp(id);                      // no dialog: its card and its home tile show the progress
+      now = 'installing';
+    } else {
+      addToHome(id);                       // an installed app or a website
+      toast(`Added ${card.name}`);
+    }
+    const mark = (c) => (c.id === id ? { ...c, state: now } : c);
+    lib.catalog = { apps: lib.catalog.apps.map(mark), sites: lib.catalog.sites.map(mark) };
+    lib.catalogKey = null;                 // the host's next catalog is drawn, even the same as before
+    send({ type: 'library.list' });
+    render();
   }
 
   function addToHome(id) {
@@ -456,91 +482,18 @@
     });
   }
 
-  // ---- Install dialog ----------------------------------------------------------------------
+  // ---- Installing ---------------------------------------------------------------------------
+  // Asked from Add tile, an app is always for the home screen: its tile shows it installing.
 
-  addView('installing', {
-    overlay: true,
-    // #installing: the choice; #installing/running, /waiting, /done, /failed: after A.
-    demo(arg) {
-      demoData();
-      lib.install = lib.catalog.apps.find((c) => c.state === (arg === 'running' || arg === 'waiting' ? 'installing' : arg === 'done' ? 'installed' : 'install'));
-      lib.installing = !!arg;
-      lib.installHome = true;
-      if (arg === 'waiting') lib.progress = { current: { id: 'vlc', action: 'install', phase: 'install' }, pending: [{ id: 'spotify', action: 'install' }] };
-      if (arg === 'failed') lib.failed.add(lib.install.id);
-    },
-    // Updated in place (patchHtml): the host sends the progress twice a second, and a dialog
-    // drawn afresh each time played its entrance again (a flicker) and lost its focus.
-    render() {
-      if (!lib.install) { back(); return; }
-      const c = findCard(lib.install.id) || lib.install;
-      let action, hintList = [['A', 'Select'], ['B', 'Cancel']];
-      if (!lib.installing) {
-        action = '<div class="il-buttons">' +
-          '<button class="il-primary" data-nav data-id="il-home" data-act="installBtn" data-arg="home">Install and add to home</button>' +
-          '<button class="il-secondary" data-nav data-id="il-only" data-act="installBtn" data-arg="only">Install only</button></div>';
-      } else {
-        const st = installState(c);
-        const bar = st.bar ? `<div class="il-bar"><div class="il-fill${st.pct === null ? ' going' : ''}" style="width:${st.pct !== null ? st.pct : 100}%"></div></div>` : '';
-        action = '<div class="il-progress">' +
-          `<div class="il-prow"><span class="il-phase${st.cls ? ' ' + st.cls : ''}">${esc(st.label)}</span>${st.pct !== null ? `<span class="il-pct">${st.pct}%</span>` : ''}</div>` +
-          bar + `<span class="il-note">${esc(st.note)}</span></div>` +
-          (st.failed ? '<div class="il-buttons"><button class="il-primary" data-nav data-id="il-retry" data-act="installBtn" data-arg="retry">Try again</button></div>' : '');
-        hintList = st.failed ? [['A', 'Try again'], ['B', 'Back to library']] : [['B', 'Back to library']];
-      }
-      patchHtml(el('installing'),
-        '<div class="il-dialog">' +
-          '<div class="il-head">' +
-            `<span class="il-icon">${appIcon({ ...c, color: '' }, 72, 1.5)}</span>` +
-            `<div class="il-text"><span class="il-name">${esc(c.name)}</span><span class="il-desc">${esc(c.desc || '')}</span></div>` +
-          '</div>' + action +
-        '</div>' +
-        `<footer class="hints">${hints(hintList)}</footer>`);
-    },
-  });
-
-  // What the dialog says once A has started the install: running (downloading, installing),
-  // waiting behind another app, just out of the queue (the catalog that follows says how it
-  // went: starting still), done, or not installed.
-  function installState(c) {
-    const p = lib.progress.current && lib.progress.current.id === c.id ? lib.progress.current : null;
-    const note = 'Keep using the TV. The tile appears when it’s done.';
-    if (p) {
-      const pct = p.phase === 'download' && p.percent != null ? p.percent : null;
-      return { label: p.phase === 'download' ? 'Downloading' : 'Installing', pct, bar: true, note };
-    }
-    if (lib.failed.has(c.id) && !lib.queued.has(c.id))
-      return { label: 'Didn’t install', cls: 'warn', pct: null, failed: true, note: 'Check the network, then try again.' };
-    if (lib.queued.has(c.id)) return { label: 'Waiting', pct: null, bar: true, note: 'Another app is installing first. Keep using the TV.' };
-    if (c.state === 'installed' || c.state === 'home')
-      return { label: 'Done', cls: 'ok', pct: null, note: lib.installHome ? 'Its tile is on the home screen.' : 'Add its tile from the library any time.' };
-    return { label: 'Installing', pct: null, bar: true, note };
-  }
-
-  function openInstall(card) {
-    if (!state.libraryAvailable) { toast('Installing from the TV isn’t set up yet. Run setup once more.', 'warn'); return; }
-    lib.install = card;
-    lib.installing = false;
-    go('installing');
-  }
-  onAction('installBtn', (node, arg) => {
-    if (!lib.install) return;
-    if (arg !== 'retry') lib.installHome = arg === 'home';   // Try again: as asked the first time
-    lib.installing = true;
-    installApp(lib.install.id, lib.installHome);
-    render();
-  });
-
-  function installApp(id, addToHome) {
+  function installApp(id) {
     lib.failed.delete(id);
-    if (addToHome) lib.homeBound.add(id);
-    send({ type: 'library.install', id, addToHome });
+    lib.homeBound.add(id);
+    send({ type: 'library.install', id, addToHome: true });
   }
 
   // ---- Apps being installed, on the home screen ----------------------------------------------
-  // "Install and add to home": until the app's own tile arrives, a tile says it is installing
-  // (dimmed, a dashed edge, the progress); if it did not install, it says so (A tries again, X
-  // takes it away).
+  // Until the app's own tile arrives, a tile says it is installing (dimmed, a dashed edge, the
+  // progress); if it did not install, it says so (A tries again, X takes it away).
 
   onTiles(() => {
     for (const id of lib.homeBound) if (state.tiles.some((t) => t.id === id)) lib.homeBound.delete(id);
@@ -560,7 +513,7 @@
     });
   });
   onAction('pending-info', (node, id) => { const c = findCard(id); toast(`${c ? c.name : 'The app'} is installing. Its tile opens once it’s ready.`); });
-  onAction('pending-retry', (node, id) => { installApp(id, true); render(); });
+  onAction('pending-retry', (node, id) => { installApp(id); render(); });
   onAction('pending-remove', (node, id) => { lib.failed.delete(id); lib.homeBound.delete(id); render(); });
 
   // ---- Host messages -----------------------------------------------------------------------
@@ -582,7 +535,7 @@
         lib.finished.clear();
         if (same && failed === [...lib.failed].join()) break;
         if (state.view === 'addtile' && lib.tab === 'library') { render(); focusBodyIfNeeded(); }
-        else if (state.view === 'installing' || state.view === 'home') render();
+        else if (state.view === 'home') render();
         break;
       }
       case 'library.programs':
@@ -597,17 +550,27 @@
           ...lib.progress.pending.filter((j) => j.action === 'install').map((j) => j.id)]);
         for (const id of lib.queued) if (!now.has(id)) lib.finished.add(id);
         lib.queued = now;
-        // The progress shows on the cards, the dialog and the tiles being installed.
-        if (state.view === 'installing' || (state.view === 'addtile' && lib.tab === 'library') || (state.view === 'home' && lib.homeBound.size)) render();
+        // The progress shows on the cards and the tiles being installed.
+        if ((state.view === 'addtile' && lib.tab === 'library') || (state.view === 'home' && lib.homeBound.size)) render();
         break;
       }
+      // Added: Add tile stays up. The website form is cleared for the next one, its card showing
+      // the one just added; a program's row says it is on the home screen.
       case 'library.websiteResult':
         clearTimeout(lib.adding);
         lib.adding = null;
-        if (msg.ok) { toast(`Added ${msg.name}`); reset('home'); }
+        if (msg.ok) { toast(`Added ${msg.name}`); lib.website = { name: '', url: '', field: 'url', added: msg.name }; }
         else toast(msg.error || 'That address did not work', 'warn');
+        if (state.view === 'addtile') render();
         break;
-      case 'library.programAdded': toast(`Added ${msg.name}`); reset('home'); break;
+      case 'library.programAdded': {
+        toast(`Added ${msg.name}`);
+        const p = lib.programs.find((x) => x.name === lib.addingProgram);
+        if (p) p.onHome = true;
+        lib.addingProgram = null;
+        if (state.view === 'addtile' && lib.tab === 'onbox') render();
+        break;
+      }
     }
   });
 

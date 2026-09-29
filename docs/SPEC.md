@@ -246,7 +246,7 @@ All four phases are built (1.0):
 
 ## Screens
 
-- **TV:** Home · Tile options · App library · Installing · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · Volume indicator · First-run setup (incl. Wi-Fi, the TV and its input, pick your apps)
+- **TV:** Home · Tile options · App library (an install shows on its card and its tile) · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · Volume indicator · First-run setup (incl. Wi-Fi, the TV and its input, pick your apps)
 - **Settings:** Sleep & power · TV (profiles) · How the box controls a TV · Controller · Button maps · Button map editor · Phone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
 - **Phone:** Remote (touchpad) · Remote (arrows) · Type · Playing (+ sleep timer) · Send link · Send to TV from other apps
 
