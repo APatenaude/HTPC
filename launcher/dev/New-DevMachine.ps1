@@ -12,7 +12,8 @@
       dotnet-install.ps1 from https://dot.net/v1/dotnet-install.ps1);
     - Microsoft Edge (for the headless UI and phone tests; present on Windows);
     - optional: Hyper-V (Windows Pro/Enterprise) for the test VM (setup\test\New-TestVM.ps1);
-    - optional: the GitHub CLI (winget GitHub.cli) for releases and repo settings.
+    - optional: the GitHub CLI (winget GitHub.cli) for releases and repo settings;
+    - optional: the Incus client (winget LinuxContainers.Incus) for a test VM on an Incus server.
     Without -Install it only reports. Nothing here changes Windows settings.
 
 .PARAMETER Path
@@ -84,6 +85,10 @@ if (Test-Path $edge) { 'Edge: present' } else { $missing += 'Microsoft Edge (the
 if (Have gh) { "GitHub CLI: $((gh --version | Select-Object -First 1))" } else { 'GitHub CLI: not installed (optional: winget install GitHub.cli)' }
 $hv = Get-Command Get-VM -ErrorAction SilentlyContinue
 "Hyper-V: $(if ($hv) { 'available (test VM: setup\test\New-TestVM.ps1)' } else { 'not available (optional; Windows Pro/Enterprise)' })"
+# The test VM can also live on an Incus server on the network (off the dev machine): its client.
+if (Have incus) { "Incus client: $((incus version 2>&1 | Select-Object -First 1))" }
+elseif ($Install) { Winget-Install 'LinuxContainers.Incus' }
+else { 'Incus client: not installed (optional, for a test VM on an Incus server: winget install LinuxContainers.Incus)' }
 
 if ($missing) { ''; 'Missing:'; $missing | ForEach-Object { "  - $_" }; 'Run again with -Install, or install them by hand.'; exit 1 }
 
