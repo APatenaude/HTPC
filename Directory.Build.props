@@ -8,7 +8,7 @@
     Plain numeric SemVer (major.minor.patch): boxes compare the numbers, so 0.10.0 > 0.9.0.
   -->
   <PropertyGroup>
-    <Version>1.0.6</Version>
+    <Version>1.0.7</Version>
     <!--
       The oldest launcher that may update to this release by itself; older boxes are told to run
       TV Box Setup again (launcher\dev\Build-Release.ps1 writes it into update.json). 1.0.0: the
