@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog, App library). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = glyph and colour shown until the app's own logo is cached (the launcher takes it from the installed program or the website: AppLogos). desc = one line on the library card. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window. Every app opens filling the screen: through its own switch where it has one (args; the Browser's is --start-maximized, the whole screen with the launcher as the shell and no taskbar, its tabs and address bar showing), else launch.fill = the launcher makes its window cover the screen without a frame, and again whenever it stops doing so while in front. install.scope = how the launcher installs it from the TV: machine (through the elevated \\HTPC\\Jobs task) or user (the launcher runs winget without elevation). install.wingetScope = the --scope handed to winget when it differs from install.scope (Kodi ships only a user-scoped installer but writes to Program Files, so it is installed as machine with --scope user). install.elevated = false marks an app that refuses to install elevated (Spotify): setup's Apps step skips it and it is offered only from the library, never in the setup pick list. autostart = what the app sets up to start or run by itself, beyond what runs from its launch.exe folder (found anyway): run (Run/RunOnce value names), startup (Startup-folder file names), tasks (scheduled task names, \\ first for a full path) and services (set to Manual; only these, never others) take * as a wildcard; prefs = key=value lines (in an .ini section when given) set in its own settings file, as the user, so it does not start itself again or update itself in the background (setup/lib/AppAutostart.ps1, launcher AutostartGuard.cs). launch.env = variables it is started with, for the same (Feishin's updater).",
+  "about": "One list drives setup's app picks and the launcher (SPEC: App catalog, App library). default = pre-ticked in first-run setup and a home tile. preset = default button map (SPEC: Controller map). icon = glyph and colour shown until the app's own logo is cached (the launcher takes it from the installed program or the website: AppLogos). desc = one line on the library card. launch = how the launcher starts it (environment variables expanded); websites open in their own Edge app window. Every app opens filling the screen: through its own switch where it has one (args; the Browser's is --start-maximized, the whole screen with the launcher as the shell and no taskbar, its tabs and address bar showing), else launch.fill = the launcher makes its window cover the screen without a frame, and again whenever it stops doing so while in front. install.scope = how the launcher installs it from the TV: machine (through the elevated \\HTPC\\Jobs task) or user (the launcher runs winget without elevation). install.wingetScope = the --scope handed to winget when it differs from install.scope (Kodi ships only a user-scoped installer but writes to Program Files, so it is installed as machine with --scope user). install.elevated = false marks an app that refuses to install elevated (Spotify): setup's Apps step skips it and it is offered only from the library, never in the setup pick list. autostart = what the app sets up to start or run by itself, beyond what runs from its launch.exe folder (found anyway): run (Run/RunOnce value names), startup (Startup-folder file names), tasks (scheduled task names, \\ first for a full path) and services (set to Manual; only these, never others) take * as a wildcard; prefs = key=value lines (in an .ini section when given) set in its own settings file, as the user, so it does not start itself again or update itself in the background (setup/lib/AppAutostart.ps1, launcher AutostartGuard.cs). launch.env = variables it is started with, for the same (Feishin's updater). An app with no install (RetroBat: its setup has no silent mode) is set up by hand: setup does not offer it, the library cannot install it, and its tile works once it is there.",
   "apps": [
     {
       "id": "youtube",
@@ -151,6 +151,52 @@
       "launch": { "exe": "%LOCALAPPDATA%\\Programs\\feishin\\Feishin.exe", "fill": true, "env": { "DISABLE_AUTO_UPDATES": "1" } },
       "install": { "source": "winget", "scope": "user", "id": "jeffvli.Feishin" }
     },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "type": "app",
+      "default": false,
+      "preset": "controller",
+      "desc": "Your Steam games in Big Picture, made for the TV",
+      "icon": { "glyph": "controller", "color": "#66C0F4" },
+      "launch": { "exe": "%ProgramFiles(x86)%\\Steam\\steam.exe", "args": "-gamepadui" },
+      "install": { "source": "winget", "scope": "machine", "id": "Valve.Steam", "allowInbound": [ "%ProgramFiles(x86)%\\Steam\\steam.exe" ] },
+      "autostart": { "run": [ "Steam" ] }
+    },
+    {
+      "id": "playnite",
+      "name": "Playnite",
+      "type": "app",
+      "default": false,
+      "preset": "controller",
+      "desc": "All your game libraries in one TV menu",
+      "icon": { "glyph": "controller", "color": "#B08CFF" },
+      "launch": { "exe": "%LOCALAPPDATA%\\Playnite\\Playnite.FullscreenApp.exe", "args": "--hidesplashscreen", "fill": true },
+      "install": { "source": "winget", "scope": "user", "id": "Playnite.Playnite" },
+      "autostart": { "startup": [ "Playnite.lnk" ] }
+    },
+    {
+      "id": "retroarch",
+      "name": "RetroArch",
+      "type": "app",
+      "default": false,
+      "preset": "controller",
+      "desc": "Classic console games through emulators",
+      "icon": { "glyph": "controller", "color": "#5AB0FF" },
+      "launch": { "exe": "C:\\RetroArch-Win64\\retroarch.exe", "args": "--fullscreen" },
+      "install": { "source": "winget", "scope": "machine", "id": "Libretro.RetroArch" }
+    },
+    {
+      "id": "retrobat",
+      "name": "RetroBat",
+      "type": "app",
+      "default": false,
+      "preset": "controller",
+      "desc": "Retro consoles in one menu; 2 GB, own updater, set up from retrobat.org",
+      "icon": { "glyph": "controller", "color": "#F5B82E" },
+      "launch": { "exe": "C:\\RetroBat\\emulationstation\\emulationstation.exe", "args": "--fullscreen-borderless --home C:\\RetroBat\\emulationstation" },
+      "autostart": { "run": [ "RetroBat" ], "startup": [ "RetroBat.bat" ] }
+    },
     { "id": "netflix", "name": "Netflix", "type": "website", "url": "https://www.netflix.com", "default": false, "preset": "mouse", "desc": "Films and series", "icon": { "glyph": "play", "color": "#FF4B55" } },
     { "id": "disneyplus", "name": "Disney+", "type": "website", "url": "https://www.disneyplus.com", "default": false, "preset": "mouse", "desc": "Disney, Pixar, Marvel and Star Wars", "icon": { "glyph": "play", "color": "#4D8DFF" } },
     { "id": "primevideo", "name": "Prime Video", "type": "website", "url": "https://www.primevideo.com", "default": false, "preset": "mouse", "desc": "Amazon's films and series", "icon": { "glyph": "play", "color": "#2BB0F5" } },
@@ -160,8 +206,22 @@
     { "id": "paramountplus", "name": "Paramount+", "type": "website", "url": "https://www.paramountplus.com", "default": false, "preset": "mouse", "desc": "Paramount films and shows", "icon": { "glyph": "play", "color": "#3D8BFF" } },
     { "id": "tubi", "name": "Tubi", "type": "website", "url": "https://tubitv.com", "default": false, "preset": "mouse", "desc": "Free films and TV with ads", "icon": { "glyph": "play", "color": "#FFD43B" } },
     { "id": "plutotv", "name": "Pluto TV", "type": "website", "url": "https://pluto.tv", "default": false, "preset": "mouse", "desc": "Free live channels", "icon": { "glyph": "tv", "color": "#F5E642" } },
-    { "id": "kick", "name": "Kick", "type": "website", "url": "https://kick.com", "default": false, "preset": "mouse", "desc": "Live streaming", "icon": { "glyph": "chat", "color": "#53FC18" } },
     { "id": "crave", "name": "Crave", "type": "website", "url": "https://www.crave.ca", "default": false, "preset": "mouse", "desc": "Canadian streaming", "icon": { "glyph": "play", "color": "#3FA9F5" } },
-    { "id": "cbcgem", "name": "CBC Gem", "type": "website", "url": "https://gem.cbc.ca", "default": false, "preset": "mouse", "desc": "CBC live and on demand", "icon": { "glyph": "play", "color": "#FF4B4B" } }
+    { "id": "cbcgem", "name": "CBC Gem", "type": "website", "url": "https://gem.cbc.ca", "default": false, "preset": "mouse", "desc": "CBC live and on demand", "icon": { "glyph": "play", "color": "#FF4B4B" } },
+    { "id": "toutv", "name": "ICI TOU.TV", "type": "website", "url": "https://ici.tou.tv", "default": false, "preset": "mouse", "desc": "Radio-Canada series, films and shows, in French", "icon": { "glyph": "play", "color": "#F25F5C" } },
+    { "id": "telequebec", "name": "T\u00e9l\u00e9-Qu\u00e9bec", "type": "website", "url": "https://telequebec.tv", "default": false, "preset": "mouse", "desc": "Qu\u00e9bec culture and kids' shows on demand", "icon": { "glyph": "play", "color": "#3DC0F0" } },
+    { "id": "tvaplus", "name": "TVA+", "type": "website", "url": "https://www.tvaplus.ca", "default": false, "preset": "mouse", "desc": "TVA live and on demand; sign in with QUB", "icon": { "glyph": "tv", "color": "#6FA8FF" } },
+    { "id": "illicoplus", "name": "illico+", "type": "website", "url": "https://www.illicoplus.ca", "default": false, "preset": "mouse", "desc": "Vid\u00e9otron's series and films, with a subscription", "icon": { "glyph": "play", "color": "#E6D65A" } },
+    { "id": "onf", "name": "ONF", "type": "website", "url": "https://www.onf.ca", "default": false, "preset": "mouse", "desc": "National Film Board films, free, in French", "icon": { "glyph": "film", "color": "#FF7A6B" } },
+    { "id": "rds", "name": "RDS", "type": "website", "url": "https://www.rds.ca", "default": false, "preset": "mouse", "desc": "Sports in French, live and replays", "icon": { "glyph": "tv", "color": "#FF5A4E" } },
+    { "id": "tsn", "name": "TSN", "type": "website", "url": "https://www.tsn.ca", "default": false, "preset": "mouse", "desc": "Sports, live and on demand", "icon": { "glyph": "tv", "color": "#E8485C" } },
+    { "id": "sportsnet", "name": "Sportsnet+", "type": "website", "url": "https://watch.sportsnet.ca", "default": false, "preset": "mouse", "desc": "Sportsnet's live sports, with a subscription", "icon": { "glyph": "tv", "color": "#2F9BFF" } },
+    { "id": "ohdio", "name": "OHdio", "type": "website", "url": "https://ici.radio-canada.ca/ohdio", "default": false, "preset": "mouse", "desc": "Radio-Canada radio, podcasts and music", "icon": { "glyph": "speaker", "color": "#B08CFF" } },
+    { "id": "youtubemusic", "name": "YouTube Music", "type": "website", "url": "https://music.youtube.com", "default": false, "preset": "mouse", "desc": "Music and music videos from YouTube", "icon": { "glyph": "music", "color": "#FF4E45" } },
+    { "id": "applemusic", "name": "Apple Music", "type": "website", "url": "https://music.apple.com", "default": false, "preset": "mouse", "desc": "Apple's music streaming, in the browser", "icon": { "glyph": "music", "color": "#FF5A73" } },
+    { "id": "youtubekids", "name": "YouTube Kids", "type": "website", "url": "https://www.youtubekids.com", "default": false, "preset": "mouse", "desc": "YouTube made for children", "icon": { "glyph": "youtube", "color": "#FF6F4F" } },
+    { "id": "geforcenow", "name": "GeForce NOW", "type": "website", "url": "https://play.geforcenow.com", "default": false, "preset": "controller", "desc": "Your PC games streamed from NVIDIA's cloud", "icon": { "glyph": "controller", "color": "#8CD13C" } },
+    { "id": "xboxcloud", "name": "Xbox Cloud Gaming", "type": "website", "url": "https://www.xbox.com/play", "default": false, "preset": "controller", "desc": "Game Pass games streamed from the cloud", "icon": { "glyph": "controller", "color": "#52C443" } },
+    { "id": "luna", "name": "Amazon Luna", "type": "website", "url": "https://luna.amazon.ca", "default": false, "preset": "controller", "desc": "Amazon's cloud gaming", "icon": { "glyph": "controller", "color": "#A07CFF" } }
   ]
 }

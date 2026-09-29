@@ -140,16 +140,20 @@ user) are folded into the items below; what was dropped is listed under "Not now
 - **W4 First-run setup.** Welcome, controller check, Wi-Fi (only without a cable), find the TV,
   the TV's input, pick apps, install, done. The phone remote is not a step.
 - **W5 App library.** Client apps only, from one catalog file that drives setup and the
-  library: Kodi, VLC, Plex HTPC, Spotify, Feishin (plus the six), and streaming sites that open
-  in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max, Apple TV+, Paramount+, Tubi,
-  Pluto TV, Kick, Crave, CBC Gem). Install and uninstall from the TV (not from the Browser),
-  keeping app data; installs start right away at low priority.
+  library: Kodi, VLC, Plex HTPC, Spotify, Feishin, the games (Steam in Big Picture, Playnite
+  full screen, RetroArch; RetroBat, whose setup cannot run unattended, is set up by hand) (plus
+  the six), and sites that open in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max,
+  Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, Télé-Québec, TVA+, illico+,
+  ONF, RDS, TSN, Sportsnet+, OHdio, YouTube Music, Apple Music, YouTube Kids; cloud gaming with
+  the controller passed to the page: GeForce NOW, Xbox Cloud Gaming, Amazon Luna). Install and
+  uninstall from the TV (not from the Browser), keeping app data; installs start right away at
+  low priority.
 
 ## Not now
 
 Content rows ("Live now", "Continue watching") · HDR · surround passthrough · AirPlay
-mirroring · HDMI-CEC · per-TV display settings · profiles · Steam and games · Firefox (Edge
-only by choice) · servers, games and utilities in the library · managing the box from the
+mirroring · HDMI-CEC · per-TV display settings · profiles · Firefox (Edge only by choice) ·
+servers and utilities in the library · managing the box from the
 phone · waking the box from real sleep with the phone.
 
 Dropped along the way: the button hint when an app opens (27 September) · the link player,

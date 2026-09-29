@@ -112,7 +112,7 @@ reaches a command:
 - as SYSTEM the job stages downloads in a fresh admin-only folder, resolves `winget.exe` from its
   signed package, checks the GitHub SHA-256, and reads or writes nothing user-writable.
 
-Per-user apps (Stremio, Feishin, Spotify: winget only offers a per-user installer) install without
+Per-user apps (Stremio, Feishin, Spotify, Playnite: winget only offers a per-user installer) install without
 elevation, run by the launcher itself; their firewall Block rules still need elevation, so a
 `firewall:<id>` job adds them through the task first (resolving the interactive user's profile so
 `%LOCALAPPDATA%` points at the real user, not SYSTEM). `Invoke-AppJob.ps1 -DryRun -Catalog <path>`
@@ -174,7 +174,8 @@ Never touched, whatever the catalog says: ours (`HTPC launcher`, tasks under `\H
 `HTPC...`, anything in `Program Files\HTPC`), Windows' own (`SecurityHealth`, tasks under
 `\Microsoft\`, programs in the Windows folder) and Edge's updater (`\MicrosoftEdgeUpdateTask*`,
 the user's choice). A service is changed only when the catalog names it. A folder too broad to
-mean one app (Program Files itself, AppData itself) is never used, nor a declared name with fewer
+mean one app (Program Files itself, AppData itself) is never used (a folder of its own at the
+root of a drive is not too broad: RetroArch's `C:\RetroArch-Win64`), nor a declared name with fewer
 than 4 characters besides `*`. What no catalog app claims is left alone and logged.
 
 It runs:
@@ -212,6 +213,10 @@ done about it:
 | Kodi (NSIS) | Start-menu shortcuts only, settings in HKCU; its version-check add-on only shows a notice | nothing |
 | Feishin (per user, electron-builder) | a desktop shortcut; a tray icon while it runs (closing still quits); its updater downloads new versions and installs them when it quits | started with `DISABLE_AUTO_UPDATES=1` (`launch.env`), which turns its updater off |
 | YouTube (VacuumTube, zip) | its updater (electron-updater) looks at every start | `install.selfUpdate`: `resources\app-update.yml` removed |
+| Steam (machine, NSIS) | HKCU Run `Steam` = `steam.exe -silent` (its "Run Steam when my computer starts", written back while it runs); updates itself at each start; after Big Picture is left it keeps running with no window (no tray without Explorer); listens on the home network for Remote Play | Run value removed (`autostart.run`, again after it ends); the launcher's Close ends it after 4 s; its self-update left (Steam needs a current client); `install.allowInbound` for steam.exe (not tried: not installed on this box) |
+| Playnite (per user, Inno) | its "start with Windows" option (off by default) puts `Playnite.lnk` in the user's Startup folder; looks for a newer version at start and says so | the shortcut removed (`autostart.startup`, and by folder) |
+| RetroArch (machine, NSIS, `C:\RetroArch-Win64`) | none known; updates only from its Online Updater menu | nothing |
+| RetroBat (by hand: its setup has no silent mode) | `retrobat.ini` `Autostart=1` / `2` writes `RetroBat.bat` in the user's Startup folder / HKCU Run `RetroBat` (off by default); RetroBat.exe exits once EmulationStation is up; its own updater (`es-update.exe`) from its menu | both names declared (`autostart.run`, `autostart.startup`); the tile starts EmulationStation itself (`--fullscreen-borderless`, as RetroBat.exe does), so the launcher follows the app that stays |
 
 Not from catalog apps, left for the user to decide: `IntelGraphicsSoftwareService` (Intel Arc
 Software, a Store app, automatic and running). Desktop shortcuts only show in desktop mode.

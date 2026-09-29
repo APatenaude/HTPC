@@ -176,6 +176,7 @@ try {
         Check (& $is (& $owner 'run' 'b' "`"$pf\broad.exe`" /x") 'broad') 'an app right in Program Files: its exe still counts'
         Check ((& $owner 'run' 'c' "`"$pf\somethingelse\x.exe`"").Verdict -eq 'none') '... but not the whole of Program Files'
         Check ($null -eq ($rules | Where-Object Id -eq 'broad').Folder -and $null -eq ($rules | Where-Object Id -eq 'netflix').Folder) 'no folder for an app in Program Files itself, nor for a website'
+        Check ((Test-AppFolder 'C:\RetroArch-Win64' $fakeProfile) -and -not (Test-AppFolder 'C:\' $fakeProfile) -and -not (Test-AppFolder (Split-Path $fakeProfile -Parent) $fakeProfile)) 'a folder of its own at the root of a drive is used (C:\RetroArch-Win64); a drive or the folder of the profiles is not'
 
         # Never touched, whatever the catalog declares (the careless entry claims all of these).
         Check ((& $owner 'run' 'HTPC launcher' "`"$pf\HTPC\Launcher\HtpcWatchdog.exe`"").Verdict -eq 'keep') 'HTPC launcher: never touched'
