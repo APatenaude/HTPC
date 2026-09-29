@@ -153,8 +153,8 @@ user) are folded into the items below; what was dropped is listed under "Not now
   the TV's input, pick apps, install, done. The phone remote is not a step.
 - **W5 App library.** Client apps only, from one catalog file that drives setup and the
   library: Kodi, VLC, Plex HTPC, Spotify, Feishin, the games (Steam in Big Picture, Playnite
-  full screen, RetroArch; RetroBat, whose setup cannot run unattended: the library starts it on
-  screen, over the TV with the controller as a mouse, and the user finishes it) (plus
+  full screen, RetroArch; RetroBat was dropped on 29 Sept 2026: its setup needs administrator rights,
+  whose prompt the controller cannot answer) (plus
   the six), and sites that open in Edge (Netflix, Disney+, Prime Video, Crunchyroll, HBO Max,
   Apple TV+, Paramount+, Tubi, Pluto TV, Crave, CBC Gem, ICI TOU.TV, Télé-Québec, TVA+, illico+,
   ONF, RDS, TSN, Sportsnet+, OHdio, YouTube Music, Apple Music; cloud gaming with

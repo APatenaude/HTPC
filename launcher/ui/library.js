@@ -788,7 +788,7 @@
     ['plex', 'Plex HTPC', 'play', '#F5B82E', 'app', 'media', 'install'], ['spotify', 'Spotify', 'music', '#1ED760', 'app', 'music', 'installing'],
     ['feishin', 'Feishin', 'music', '#FF7AB6', 'app', 'music', 'install'], ['steam', 'Steam', 'controller', '#66C0F4', 'app', 'games', 'install'],
     ['playnite', 'Playnite', 'controller', '#B08CFF', 'app', 'games', 'install'], ['retroarch', 'RetroArch', 'controller', '#5AB0FF', 'app', 'games', 'home'],
-    ['retrobat', 'RetroBat', 'controller', '#F5B82E', 'app', 'games', 'install'], ['netflix', 'Netflix', 'play', '#FF4B55', 'website', 'movies', 'add'],
+    ['netflix', 'Netflix', 'play', '#FF4B55', 'website', 'movies', 'add'],
     ['disneyplus', 'Disney+', 'play', '#4D8DFF', 'website', 'movies', 'add'], ['primevideo', 'Prime Video', 'play', '#2BB0F5', 'website', 'movies', 'home'],
     ['crunchyroll', 'Crunchyroll', 'play', '#FF8A2B', 'website', 'movies', 'add'], ['hbomax', 'HBO Max', 'play', '#8A7BFF', 'website', 'movies', 'add'],
     ['appletv', 'Apple TV+', 'play', '#D9D8D4', 'website', 'movies', 'add'], ['paramountplus', 'Paramount+', 'play', '#3D8BFF', 'website', 'movies', 'add'],

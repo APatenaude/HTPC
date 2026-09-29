@@ -126,7 +126,7 @@ static class AddTileTests
         Check(without.Count == 0, $"every catalog entry has a known category ({string.Join(", ", without)})");
         Check(ids.All(c => apps.Catalog.Any(a => a.Category == c)), "no category is empty");
         Check(apps.Get("youtube")?.Category == "movies" && apps.Get("twitch")?.Category == "movies" && apps.Get("toutv")?.Category == "canada"
-            && apps.Get("tsn")?.Category == "sports" && apps.Get("ohdio")?.Category == "music" && apps.Get("retrobat")?.Category == "games"
+            && apps.Get("tsn")?.Category == "sports" && apps.Get("ohdio")?.Category == "music" && apps.Get("retroarch")?.Category == "games"
             && apps.Get("edge")?.Category == "media", "the owner's groups (spot checks)");
         Check(File.ReadAllBytes(path).All(b => b < 128), "catalog.json stays ASCII (PowerShell 5.1 reads it too)");
         JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();

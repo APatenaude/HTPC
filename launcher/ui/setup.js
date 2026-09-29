@@ -571,7 +571,7 @@ if (host) {
   // starting=1 (apps), restart=1 (done).
   const [name, query] = location.hash.slice(1).split('?');
   const q = new URLSearchParams(query || '');
-  // The real catalog as setup gets it (38: all but Spotify and RetroBat, which install only from
+  // The real catalog as setup gets it (38: all but Spotify, which installs only from
   // the library), in its categories: more than one screen, as on a box, so the audit walks a list
   // that has to scroll (a list of 8 hid that it didn't).
   const categories = [['movies', 'Movies & shows'], ['canada', 'Canadian TV'], ['sports', 'Sports'], ['music', 'Music'],

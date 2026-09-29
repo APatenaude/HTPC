@@ -766,7 +766,7 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
     var catalog = Path.Combine(root!.FullName, "setup", "catalog.json");
     using var doc = JsonDocument.Parse(File.ReadAllText(catalog));
     // --start-maximized: the Browser, which fills the screen with the launcher as the shell (no taskbar).
-    // -gamepadui: Steam straight into Big Picture; --fullscreen-borderless: RetroBat's EmulationStation.
+    // -gamepadui: Steam straight into Big Picture.
     string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen", "--start-maximized", "-gamepadui", "--fullscreen-borderless" };
     foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
     {
@@ -858,10 +858,8 @@ Console.WriteLine("== Keys for an app's own menus (menuKeys)");
     Check(ownersOfPad.SequenceEqual(["moonlight", "steam"]), $"Moonlight and Steam own the controller, Home included ({string.Join(", ", ownersOfPad)})");
     var underMenu = apps.Catalog.Where(a => a.MinimizeUnderMenu).Select(a => a.Id).ToList();
     Check(underMenu.SequenceEqual(["steam"]) && apps.Get("steam")!.OwnProcesses is { Count: > 0 }, $"Steam goes down under the Home menu, its own windows only ({string.Join(", ", underMenu)})");
-    Check(apps.Get("retrobat")?.LogoExe is { } logoExe && logoExe.EndsWith(@"\RetroBat.exe", StringComparison.OrdinalIgnoreCase)
-        && logoExe.StartsWith(Path.GetDirectoryName(apps.Get("retrobat")!.Exe!)![..3], StringComparison.OrdinalIgnoreCase),
-        "RetroBat's logo from RetroBat.exe, not the EmulationStation its tile runs");
     Check(apps.Get("youtubekids") is null, "no YouTube Kids (not offered in Canada; a kid profile in YouTube instead)");
+    Check(apps.Get("retrobat") is null, "no RetroBat (its installer needs administrator rights, whose prompt the controller cannot answer: dropped, the owner's call)");
     JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
     Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab" }""")) is null, "no whileClass: no menu keys (never to a window not meant for them)");
     Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "whileClass": "*" }""")) is null, "a whileClass that matches everything: refused");
@@ -877,21 +875,23 @@ Console.WriteLine("== Catalog: an installer the user finishes on screen (install
     while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
     var catalogPath = Path.Combine(root!.FullName, "setup", "catalog.json");
     var catalogApps = new AppManager(catalogPath);
-    var retrobat = catalogApps.Get("retrobat");
-    Check(retrobat is { Installable: true, InstallInteractive: true, Scope: "user", InstallSource: "github" },
-        "RetroBat: a GitHub installer finished on screen, as the user (not through the SYSTEM task)");
     Check(catalogApps.Catalog.Where(a => a.InstallInteractive).All(a => a.Scope == "user" && !a.IsWebsite),
         "every installer finished on screen runs as the user (SYSTEM has no screen)");
     Check(catalogApps.Get("vlc") is { InstallInteractive: false }, "a winget app is not interactive");
-    using var doc = JsonDocument.Parse(File.ReadAllText(catalogPath));
-    var install = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "retrobat").GetProperty("install");
-    var folder = install.GetProperty("folder").GetString()!;
-    Check(retrobat!.Exe!.StartsWith(folder + "\\", StringComparison.OrdinalIgnoreCase), $"RetroBat: its install.folder ({folder}) holds its launch exe");
-    var keep = install.GetProperty("keep").EnumerateArray().Select(k => k.GetString()).ToList();
-    Check(keep.Contains("roms") && keep.Contains("saves") && keep.Contains("bios"), "RetroBat: its uninstall keeps the games, saves and BIOS files");
-    Check(System.Text.RegularExpressions.Regex.IsMatch("RetroBat-v8.2.1-stable-win64-setup.exe", install.GetProperty("asset").GetString()!)
-        && !System.Text.RegularExpressions.Regex.IsMatch("RetroBat-v8.2.1-stable-win64-setup.exe.sha256.txt", install.GetProperty("asset").GetString()!),
-        "RetroBat: the asset pattern takes the setup exe, not the .sha256.txt beside it");
+    // The catalog has none since RetroBat went (29 Sept 2026): one made up here, as RetroBat's was.
+    var interactiveCatalog = Path.Combine(Path.GetTempPath(), $"htpc-interactive-{Environment.ProcessId}.json");
+    File.WriteAllText(interactiveCatalog, """
+        { "apps": [ { "id": "wizard", "name": "Wizard", "type": "app", "preset": "controller",
+          "launch": { "exe": "C:\\Wizard\\wizard.exe" },
+          "install": { "source": "github", "scope": "user", "repo": "example/wizard", "asset": "^Wizard-setup\\.exe$",
+                       "interactive": true, "folder": "C:\\Wizard", "keep": [ "saves" ] } } ] }
+        """);
+    try
+    {
+        Check(new AppManager(interactiveCatalog).Get("wizard") is { Installable: true, InstallInteractive: true, Scope: "user", InstallSource: "github" },
+            "install.interactive read: a GitHub installer finished on screen, as the user (not through the SYSTEM task)");
+    }
+    finally { File.Delete(interactiveCatalog); }
 
     // While it is in front the controller is on the plain Mouse preset, whatever Other windows'
     // map says, and nothing can edit that.
