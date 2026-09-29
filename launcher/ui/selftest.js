@@ -7,9 +7,11 @@
 // X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
 // its quick buttons in the order of the home screen's top bar (Settings, then Power),
 // Power's Restart and Shut down asking first, moving around Settings and changing a value there only once A has picked its row, the
-// interface sounds (rendered offline; which sound a press picks; none while hidden); Add a tile (On this box's
-// icons, the Website form and Rename typing with the launcher's keyboard, the library by category), setup's
-// apps by category and the on-screen keyboard's own page (both in a frame).
+// Home menu's resource view (sampled only while the menu shows, patched in place, its rows kept
+// under the focus, asking before it stops anything), the interface sounds (rendered offline;
+// which sound a press picks; none while hidden); Add a tile (On this box's icons, the Website form
+// and Rename typing with the launcher's keyboard, the library by category), setup's apps by
+// category and the on-screen keyboard's own page (both in a frame).
 
 (async function () {
   const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -655,6 +657,82 @@
   go('menu');
   check('Menu over the home screen: no app card', $('menu-app').textContent === '');
   reset('home');
+
+  // ---- The Home menu's resource view (resources.js) ------------------------------------------------
+  // The host samples only while the menu is on screen; the card comes with the menu, dashes first,
+  // then the numbers, patched in place; the rows stay under the focus; A asks before stopping
+  // anything; Windows' own rows never take the focus.
+  const rNode = (key) => $('menu-res').querySelector(`[data-id="res:${key}"]`);
+  const resData = (top, extra) => ({ type: 'res.data', cpu: 42.4, memUsed: 5120, memTotal: 8192, disk: 12.5e6, down: 45.2e6, up: 1.2e6, top, held: [], ...extra });
+  const RJ = { key: 'app:jellyfin', name: 'Jellyfin', app: 'jellyfin', cpu: 30.2, mem: 900, stop: true };
+  const RX = { key: 'exe:long.exe', name: `Program ${'with a very long name '.repeat(3)}.exe`, app: null, cpu: 7.25, mem: 2048, stop: true };
+  const RW = { key: 'win:windows-update', name: 'Windows Update', app: null, cpu: 3, mem: 120, stop: false };
+  check('Resources: the numbers read as the owner reads them',
+    [resPercent(0), resPercent(0.04), resPercent(0.4), resPercent(9.94), resPercent(9.96), resPercent(100)].join(' ') === '0% 0% 0.4% 9.9% 10% 100%'
+    && [resMemory(356), resMemory(999), resMemory(1843), resMemory(12406)].join(' ') === '356 MB 999 MB 1.8 GB 12.1 GB'
+    && JSON.stringify([resRate(0, 'B'), resRate(845.3e6, 'B'), resRate(4.24e6, 'b'), resRate(1.2e9, 'b'), resRate(null, 'b')]) === '[["0","KB/s"],["845","MB/s"],["4.2","Mb/s"],["1.2","Gb/s"],null]');
+  sent.length = 0;
+  reset('home');
+  check('Resources: nothing asked for on the home screen', !sent.some((m) => m.type === 'res.watch' && m.on));
+  for (const t of state.tiles) t.running = t.id === 'jellyfin' || t.id === 'twitch';
+  state.current = 'twitch';
+  go('menu');
+  check('Resources: the menu on screen asks the host to sample', lastSent('res.watch') && lastSent('res.watch').on === true);
+  res.data = null;
+  render();
+  check('Resources: no card before the numbers (the menu\'s first frame as it was without it)', $('menu-res').innerHTML === '');
+  const panelRow = $('menu-panel').querySelector('[data-id="home"]');
+  setFocus(panelRow);
+  onHost(resData([RJ, RX, RW], { cpu: 3 }));
+  const cardEl = $('menu-res').firstElementChild;
+  check('Resources: the card comes with the first numbers, the focus left where it was', cardEl && /3%/.test(cardEl.textContent) && focusedEl() === panelRow);
+  onHost(resData([RJ, RX, RW]));
+  check('Resources: the numbers patch the card in place, the menu and its focus untouched',
+    $('menu-res').firstElementChild === cardEl && $('menu-panel').querySelector('[data-id="home"]') === panelRow && focusedEl() === panelRow
+    && /42%/.test($('menu-res').textContent) && /5\.0 \/ 8\.0 GB/.test($('menu-res').textContent) && /13 MB\/s/.test($('menu-res').textContent)
+    && /↓ 45 Mb\/s/.test($('menu-res').textContent) && /↑ 1\.2 Mb\/s/.test($('menu-res').textContent), $('menu-res').textContent.slice(0, 120));
+  check('Resources: the card sits above the app\'s buttons (every button mapped: its tallest)',
+    $('menu-res').getBoundingClientRect().bottom + 16 * s <= $('menu-app').firstElementChild.getBoundingClientRect().top,
+    `${$('menu-res').getBoundingClientRect().bottom} ${$('menu-app').firstElementChild.getBoundingClientRect().top}`);
+  check('Resources: Windows\' own row shows but takes no focus', rNode(RW.key) && !rNode(RW.key).hasAttribute('data-nav') && rNode(RX.key).hasAttribute('data-nav'));
+  press('right');
+  check('Resources: right from the rows beside it goes into the card', focusedEl() === rNode(RJ.key), focusedEl() && focusedEl().dataset.id);
+  check('Resources: ... the host keeps these rows for it', JSON.stringify(lastSent('res.watch').hold) === JSON.stringify([RJ.key, RX.key, RW.key]), JSON.stringify(lastSent('res.watch')));
+  press('down');
+  const onLong = focusedEl();
+  press('down');
+  check('Resources: down to the last row it can stop, and stays (not out of the card)', onLong === rNode(RX.key) && focusedEl() === onLong, focusedEl() && focusedEl().dataset.id);
+  check('Resources: its hints: A ends the program', /End program/.test($('menu-panel').querySelector('footer.hints').textContent));
+  onHost(resData([RW, { ...RX, cpu: 55 }, RJ]));
+  check('Resources: a new ranking under the focus: the rows stay where they are, their numbers change',
+    focusedEl() === onLong && rNode(RJ.key) === $('menu-res').querySelectorAll('.rs-row')[0] && /55%/.test(onLong.textContent), $('menu-res').textContent.slice(-120));
+  press('a');
+  check('Resources: A asks before ending a program, on Cancel', state.view === 'ask' && /^End Program/.test(asking.title) && focusedEl().dataset.id === 'ask-no', asking && asking.title);
+  sent.length = 0;
+  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
+  press('a');
+  check('Resources: yes: the host ends it, back on its row', lastSent('res.stop') && lastSent('res.stop').key === RX.key && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === `res:${RX.key}`);
+  onHost(resData([RJ, RW], { held: [{ key: RX.key, gone: true }] }));
+  check('Resources: ended: its row stays under the focus, says so, and offers nothing more',
+    focusedEl() === rNode(RX.key) && /Ended/.test(rNode(RX.key).textContent) && !/End program/.test($('menu-panel').querySelector('footer.hints').textContent));
+  press('left');
+  check('Resources: left goes back to the panel; the rows follow the host again', !focusedEl().closest('#menu-res') && !rNode(RX.key) && lastSent('res.watch').hold.length === 0);
+  press('right');
+  press('x');
+  check('Resources: X on an app\'s row asks too (Close)', state.view === 'ask' && asking.title === 'Close Jellyfin?');
+  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
+  press('a');
+  check('Resources: yes: the host closes it; its rows say Closing…', lastSent('res.stop').key === RJ.key && /Closing/.test(rNode(RJ.key).textContent)
+    && /Closing/.test($('menu-panel').querySelector('[data-close="jellyfin"]').textContent));
+  doneClosing('jellyfin');
+  onHost({ type: 'blank' });
+  check('Resources: the launcher blank (an app in front, standby): sampling stops, the numbers go', lastSent('res.watch').on === false && res.data === null);
+  onHost({ type: 'show', view: 'menu', current: 'twitch' });
+  check('Resources: the menu back: sampling again', lastSent('res.watch').on === true);
+  reset('home');
+  check('Resources: the menu left: sampling stops', lastSent('res.watch').on === false);
+  state.current = null;
+  for (const t of state.tiles) t.running = t.id === 'jellyfin';
 
   // The Home menu coming over an app: built at once under the blank stage while its backdrop
   // decodes, shown then, and 'shown' said to the host once drawn (it shows its window on that).

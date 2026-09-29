@@ -935,6 +935,9 @@ WindowlessQuitTests.Run((ok, what) => Check(ok, what));
 // ---------------------------------------------------------------- Add a tile, the keyboard: the owner's 29 Sept list (AddTileTests.cs)
 AddTileTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
 
+// ---------------------------------------------------------------- The Home menu's resource view (ResourceTests.cs)
+ResourceTests.Run((ok, what) => Check(ok, what));
+
 // ---------------------------------------------------------------- The Home menu's backdrop
 // ScreenCapture's own part: sizes, scaling (the GPU halves a 4K screen; this is what 2560 wide
 // and the GDI fallback get) and the JPEG. The screen itself is not captured here.

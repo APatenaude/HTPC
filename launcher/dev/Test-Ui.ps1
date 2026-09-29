@@ -80,6 +80,10 @@ function Invoke-PageDevTools([string]$userData, [string]$method, [hashtable]$par
     if (-not $port) { return '' }
     $socket = New-Object Net.WebSockets.ClientWebSocket
     try {
+        # Unrolled (ForEach-Object): PowerShell 5.1's Invoke-RestMethod hands a JSON array on as one
+        # object, so with Edge's own component extensions listed beside the page (7 targets on the
+        # box) "the first page" was the whole list and every look came back empty: the self-test
+        # "gave no output in 300 s" though it had finished. Only the test page, a file: address.
         $target = Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5 | ForEach-Object { $_ } |
             Where-Object { $_.type -eq 'page' -and "$($_.url)".StartsWith('file:') } | Select-Object -First 1
         if (-not $target) { return '' }

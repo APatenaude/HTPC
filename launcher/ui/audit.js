@@ -162,6 +162,18 @@ function auditMaps() {
 }
 const auditMapsTick = () => EXT.host['maps.data'](auditClone(maps.data));
 
+// The Home menu's resource view at its widest: every number as long as it gets, names that run
+// out of their row, a row of Windows' own. The host sends it every 2 s, in another order each time.
+function auditRes() {
+  AUDIT.resFlip = !AUDIT.resFlip;
+  const top = [
+    { key: 'app:app1', name: `App 2 ${AUDIT_LONG}`, app: 'app1', cpu: 100, mem: 31999, stop: true },
+    { key: 'exe:program.exe', name: `Program ${AUDIT_LONG}.exe`, app: null, cpu: 88.8, mem: 12406, stop: true },
+    { key: 'win:windows-update', name: `Windows Update ${AUDIT_LONG}`, app: null, cpu: 9.9, mem: 999, stop: false },
+  ];
+  onHost({ type: 'res.data', cpu: 100, memUsed: 65100, memTotal: 65400, disk: 9.99e9, down: 9.99e9, up: 999.4e6, top: AUDIT.resFlip ? top : top.reverse(), held: [] });
+}
+
 function auditSettings(section) {
   state.section = section;
   reset('settings');
@@ -230,19 +242,22 @@ if (AUDIT_PAGE === 'index') {
   auditPage('rename', { view: 'rename', open() { setFocus($('tiles').querySelector('[data-id="tile:app3"]')); press('start'); EXT.actions['opt-rename'](); } });
   auditPage('change icon', { view: 'changeicon', open() { setFocus($('tiles').querySelector('[data-id="tile:app3"]')); press('start'); EXT.actions['opt-icon'](); } });
   // B over an app goes back to it: the host brings the app forward (resume), the page stays up.
-  auditPage('home menu over an app', { view: 'menu', covers: ['menu'], tick: auditMapsTick, left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
+  // With its resource view (resources.js), its numbers pushed again as it is walked.
+  auditPage('home menu over an app', { view: 'menu', covers: ['menu'], tick: () => { auditMapsTick(); auditRes(); }, left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
     for (const t of state.tiles.slice(0, 7)) t.running = true;
     auditMaps();
     onHost({ type: 'show', view: 'menu', current: 'app1' });
     noticeUpdate({ toasts: [], pills: [], rows: [
       { id: 'app:app2', title: `App 3 closed unexpectedly, ${AUDIT_LONG}`, body: 'It stopped working and closed.', glyph: 'warn', tone: 'bad', action: 'Reopen' },
       { id: 'tv', title: 'Can’t reach the TV', body: 'Is it on the network? Settings › TV can find it again.', glyph: 'tv', tone: 'bad', action: 'TV settings' }] });
+    auditRes();
   } });
-  auditPage('home menu over the home screen', { view: 'menu', open() { press('home'); } });
+  auditPage('home menu over the home screen', { view: 'menu', tick: auditRes, open() { press('home'); auditRes(); } });
   // Over the Windows desktop (desktop mode): Back to TV first; B goes back to the desktop.
-  auditPage('home menu in desktop mode', { view: 'menu', left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
+  auditPage('home menu in desktop mode', { view: 'menu', tick: auditRes, left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
     onHost({ type: 'state', desktop: true });
     onHost({ type: 'show', view: 'menu', current: 'desktop' });
+    auditRes();
   } });
   auditPage('confirm (close an app)', { view: 'confirm', open() { setFocus($('tiles').querySelector('[data-id="tile:app1"]')); press('x'); } });
   auditPage('power', { view: 'power', open() { go('power'); } });

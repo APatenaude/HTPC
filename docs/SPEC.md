@@ -56,7 +56,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
 - **N4 Home button over any app.** A tap opens the Home menu over a dimmed capture of the app,
   which keeps running; its row takes you back, X closes it. A hold (0.5 s everywhere) is the
   Power menu. In Moonlight a tap goes to the game PC and a hold opens our menu. No hint when an
-  app opens: the Home menu over an app shows what its buttons do. Any change of the volume,
+  app opens: the Home menu over an app shows what its buttons do. It also shows what the box is
+  busy with (the owner, 29 Sept 2026: "sometimes it's really slow and I wonder why"): CPU,
+  memory, disk and network, and the three programs using the most, measured only while the menu
+  is open and never slowing it; A on one asks, then closes it (an app, as X does) or ends it (any
+  other program), never Windows' own or the launcher. Any change of the volume,
   from anywhere, shows a small indicator for 2 s (with the output's name when sound moves).
 - **N5 Hardware video decoding everywhere**, whatever the GPU's maker, with a check in
   Settings › Display that asks the graphics driver (H.264, HEVC, VP9, AV1) and plays no clips.
@@ -270,7 +274,7 @@ All four phases are built (1.0):
 
 ## Screens
 
-- **TV:** Home · Tile options · App library (an install shows on its card and its tile) · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Home menu (volume, brightness, buttons, timer, power, settings) · Power · Sleep timer · Alerts · Volume indicator · First-run setup (incl. Wi-Fi, the TV and its input, pick your apps)
+- **TV:** Home · Tile options · App library (an install shows on its card and its tile) · Add tile (on this box) · Add tile (website + keyboard) · Keyboard over a website · Opening an app · Home menu (volume, brightness, buttons, timer, power, settings, what the box is busy with) · Power · Sleep timer · Alerts · Volume indicator · First-run setup (incl. Wi-Fi, the TV and its input, pick your apps)
 - **Settings:** Sleep & power · TV (profiles) · How the box controls a TV · Controller · Button maps · Button map editor · Phone remote · Wi-Fi · Bluetooth · Display · Sound · Updates · About & Desktop mode
 - **Phone:** Remote (touchpad) · Remote (arrows) · Type · Playing (+ sleep timer) · Send link · Send to TV from other apps
 

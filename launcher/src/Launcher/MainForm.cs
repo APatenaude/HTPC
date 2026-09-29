@@ -530,7 +530,9 @@ sealed partial class MainForm : Form
             if (pad == Pad.HomeHold) standby.Wake("controller Home held"); // it has buzzed already
             return;
         }
-        if (pad == Pad.HomeDown) { CaptureEarly(); return; }
+        // Home going down: the Home menu's resource view takes its first sample (MainForm.Resources.cs)
+        // and the backdrop's capture starts, both off this thread.
+        if (pad == Pad.HomeDown) { PrimeResources(); CaptureEarly(); return; }
         // A held and let go: for the home screen only (hold A on a tile to move it, app.js),
         // never the keyboard, an app or setup.
         if (pad is Pad.AHold or Pad.AUp)
@@ -995,6 +997,7 @@ sealed partial class MainForm : Form
     {
         var asked = Environment.TickCount64;
         LauncherComes(); // from Home's press already (CaptureEarly), or a button map's Home menu
+        if (view == "menu") PrimeResources(); // taken at Home's press already, unless a button map or the phone asked
         var focus = LauncherComingForward(view); // the alerts' cards leave the app for the launcher's own
         var overDesktop = app is null && desktop.Active; // desktop mode: B goes back to it
         var current = app?.Id ?? (overDesktop ? DesktopMode.Id : InstallerInFront() ? InstallerId : null);

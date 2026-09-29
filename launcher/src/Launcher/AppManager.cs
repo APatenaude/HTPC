@@ -359,6 +359,12 @@ sealed class AppManager
         lock (running) return running.Where(r => !r.Value.HasExited).Select(r => r.Key).ToList();
     }
 
+    /// <summary>Each open app's tracked process (the root of its tree), for the Home menu's resource view.</summary>
+    public List<(string Id, uint Pid)> RunningProcesses()
+    {
+        lock (running) return running.Where(r => !r.Value.HasExited).Select(r => (r.Key, (uint)r.Value.Id)).ToList();
+    }
+
     // Edge profile folder of a website tile, or the one in an app's --user-data-dir argument.
     static string? EdgeProfile(CatalogApp app)
     {

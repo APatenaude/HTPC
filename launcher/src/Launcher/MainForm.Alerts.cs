@@ -45,7 +45,7 @@ sealed partial class MainForm
         Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
         {
             // Windows sleep is standby too as far as alerts go; waking from it is a wake.
-            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; WifiPlaceChanged(); BluetoothPlaceChanged(); });
+            if (e.Mode == Microsoft.Win32.PowerModes.Suspend) OnUiQueued(() => { internet.Paused = true; alertCenter.SetPlace(AlertPlace.Standby); alertPlace = AlertPlace.Standby; WifiPlaceChanged(); BluetoothPlaceChanged(); ResourcesPlaceChanged(); });
             if (e.Mode == Microsoft.Win32.PowerModes.Resume) OnUiQueued(() => internetRules.Woke(DateTime.UtcNow));
         };
         Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => apps.MarkAllClosing("Windows is signing out or shutting down");
@@ -112,6 +112,7 @@ sealed partial class MainForm
             alertPlace = place;
             WifiPlaceChanged(); // MainForm.Wifi.cs: scans only with the launcher in front
             BluetoothPlaceChanged();
+            ResourcesPlaceChanged(); // MainForm.Resources.cs: the Home menu's resource view, likewise
         }
         alertCenter.SetPlace(place, holdHome);
     }
@@ -139,6 +140,7 @@ sealed partial class MainForm
         alertPlace = AlertPlace.Launcher;
         WifiPlaceChanged();
         BluetoothPlaceChanged();
+        ResourcesPlaceChanged();
         alertOverlay.ClearForCapture();
         return focus;
     }
