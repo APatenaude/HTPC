@@ -76,8 +76,12 @@ function Invoke-PageDevTools([string]$userData, [string]$method, [hashtable]$par
     if (-not $port) { return '' }
     $socket = New-Object Net.WebSockets.ClientWebSocket
     try {
-        $target = @(Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5) | Where-Object { $_.type -eq 'page' } |
-            Select-Object -First 1
+        # Into a variable first: PowerShell 5.1's Invoke-RestMethod hands a JSON array on as one
+        # object, so with Edge's own component extensions listed beside the page (7 targets on the
+        # box) "the first page" was the whole list, its URL no URL, and every look came back empty:
+        # the self-test "gave no output in 300 s" though it had finished.
+        $targets = Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5
+        $target = $targets | Where-Object { $_.type -eq 'page' } | Select-Object -First 1
         if (-not $target) { return '' }
         $none = [Threading.CancellationToken]::None
         if (-not $socket.ConnectAsync([Uri]$target.webSocketDebuggerUrl, $none).Wait($TimeoutMs)) { return '' }
