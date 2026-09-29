@@ -13,12 +13,21 @@ namespace Htpc.Launcher;
 /// (Feishin's window bar): filled, its window goes that much above the screen (Native.FillRect).</param>
 /// <param name="MenuKeys">menuKeys: keys for buttons the app's own menus leave unused, only while
 /// its menu window is in front (Moonlight: Select = Shift+Tab, to reach its toolbar).</param>
+/// <param name="QuitWhenWindowless">launch.quitWhenWindowless: seconds with no window after which an
+/// app that outlives its window (Steam after Exit Big Picture) is asked to quit, then ended; 0 off
+/// (WindowlessQuit, AppManager.CheckWindowless).</param>
+/// <param name="QuitArgs">launch.quitArgs: its program run with these asks the running copy to quit
+/// (Steam: -shutdown); the launcher's Close uses them too, before anything is ended.</param>
+/// <param name="OwnProcesses">launch.ownProcesses: the app's own programs besides launch.exe (Steam's
+/// steamwebhelper.exe); anything else in its process tree is one it started (a game), and it is
+/// not quit while one runs. Null: not declared, only windows count.</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
     bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false,
     string? LogoUrl = null,
-    bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null)
+    bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
+    int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -99,6 +108,9 @@ sealed class AppManager
     readonly Dictionary<string, string> closing = new();
     // When each tracked process started, and whether it was adopted rather than started here.
     readonly Dictionary<Process, (DateTime Started, bool Adopted)> started = new();
+    // The tracked processes of apps that may linger with no window (launch.quitWhenWindowless),
+    // each with its watch; gone once it ends or the launcher closes it some other way.
+    readonly Dictionary<Process, WindowlessQuit> windowless = new();
 
     /// <summary>
     /// The launcher is about to end this app on purpose (the library uninstalling it, an update,
@@ -106,13 +118,21 @@ sealed class AppManager
     /// </summary>
     public void MarkClosing(string id, string why)
     {
-        lock (running) closing[id] = why;
+        lock (running)
+        {
+            closing[id] = why;
+            if (running.TryGetValue(id, out var p)) windowless.Remove(p); // ended elsewhere: not asked to quit on top of it
+        }
     }
 
     /// <summary>Restart, shut down, the session ending: every app's end is expected.</summary>
     public void MarkAllClosing(string why)
     {
-        lock (running) foreach (var id in running.Keys) closing[id] = why;
+        lock (running)
+        {
+            foreach (var id in running.Keys) closing[id] = why;
+            windowless.Clear();
+        }
     }
 
     public AppManager(string catalogPath, IReadOnlyList<string>? tileIds = null)
@@ -153,7 +173,45 @@ sealed class AppManager
             LogoUrl: Str(a, "logoUrl"),
             OwnKeyboard: a.TryGetProperty("ownKeyboard", out var ok) && ok.ValueKind == JsonValueKind.True,
             CropTop: launch.ValueKind == JsonValueKind.Object ? CropTopOf(launch) : 0,
-            MenuKeys: a.TryGetProperty("menuKeys", out var mk) ? MenuKeys.Parse(mk) : null);
+            MenuKeys: a.TryGetProperty("menuKeys", out var mk) ? MenuKeys.Parse(mk) : null,
+            QuitWhenWindowless: launch.ValueKind == JsonValueKind.Object ? QuitWhenWindowlessOf(launch) : 0,
+            QuitArgs: launch.ValueKind == JsonValueKind.Object ? QuitArgsOf(launch) : null,
+            OwnProcesses: launch.ValueKind == JsonValueKind.Object ? OwnProcessesOf(launch) : null);
+    }
+
+    /// <summary>launch.quitWhenWindowless: whole seconds, 30 to 3600; else 0 (off).</summary>
+    internal static int QuitWhenWindowlessOf(JsonElement launch) =>
+        launch.TryGetProperty("quitWhenWindowless", out var q) && q.ValueKind == JsonValueKind.Number
+        && q.TryGetInt32(out var s) && s is >= 30 and <= 3600 ? s : 0;
+
+    /// <summary>
+    /// launch.quitArgs: one to eight arguments, each a plain string (no control characters, 128 at
+    /// most), handed one by one (ArgumentList); null when missing or any of them is not.
+    /// </summary>
+    internal static IReadOnlyList<string>? QuitArgsOf(JsonElement launch)
+    {
+        if (!launch.TryGetProperty("quitArgs", out var a) || a.ValueKind != JsonValueKind.Array) return null;
+        var args = new List<string>();
+        foreach (var v in a.EnumerateArray())
+        {
+            if (v.ValueKind != JsonValueKind.String || v.GetString() is not { Length: > 0 and <= 128 } arg || arg.Any(char.IsControl)) return null;
+            args.Add(arg);
+        }
+        return args.Count is > 0 and <= 8 ? args : null;
+    }
+
+    /// <summary>
+    /// launch.ownProcesses: program file names ending in .exe, * a wildcard, with 4 characters at
+    /// least besides * and .exe ("*.exe" would claim any game). A name that is not is left out, so
+    /// that program counts as one the app started: it keeps the app running, never quits it
+    /// wrongly. Null when not declared.
+    /// </summary>
+    internal static IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcessesOf(JsonElement launch)
+    {
+        if (!launch.TryGetProperty("ownProcesses", out var o) || o.ValueKind != JsonValueKind.Array) return null;
+        return o.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!)
+            .Where(n => n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && n[..^4].Replace("*", "").Length >= 4)
+            .Select(AutostartGuard.NamePattern).OfType<System.Text.RegularExpressions.Regex>().ToList();
     }
 
     /// <summary>launch.cropTop: pixels at 100 % scaling, for a fill app only; 0 to 100 (a strip, not a page).</summary>
@@ -336,6 +394,7 @@ sealed class AppManager
                 if (!running.ContainsKey(id)) closing.Remove(id);
                 info = started.GetValueOrDefault(process, (since, adopted));
                 started.Remove(process);
+                windowless.Remove(process);
             }
             RunningChanged?.Invoke(id, false);
             Exited?.Invoke(new AppExit(id, ExitCodeOf(process), closedBy, DateTime.UtcNow - info.Started, info.Adopted));
@@ -345,6 +404,10 @@ sealed class AppManager
             running[id] = process;
             started[process] = (since, adopted);
             closing.Remove(id); // a new copy: any earlier "closing" was about the old one
+            // Watched from now, started here or taken over: a copy found already without a window
+            // is left alone until the launcher has seen one (it may be starting, or updating).
+            if (Get(id) is { QuitWhenWindowless: > 0 } app)
+                windowless[process] = new WindowlessQuit(Environment.TickCount64, TimeSpan.FromSeconds(app.QuitWhenWindowless), app.QuitArgs is not null);
         }
     }
 
@@ -528,12 +591,26 @@ sealed class AppManager
         {
             if (!running.TryGetValue(id, out p) || p.HasExited) return;
             closing.TryAdd(id, "closed from the launcher");
+            windowless.Remove(p); // closed here: its windowless watch does not ask it again
         }
+        var app = Get(id);
         Log.Info($"Closing {id}");
         Task.Run(() =>
         {
             try
             {
+                // An app that outlives its window (Steam: Big Picture closes, Steam stays) is asked
+                // to quit its own way first (launch.quitArgs: steam.exe -shutdown), and ended only
+                // if it is still there after the grace period.
+                if (app is { QuitArgs: not null } && AskToQuit(id, p, app))
+                {
+                    if (!p.WaitForExit(WindowlessQuit.Grace))
+                    {
+                        Log.Warn($"{id} did not quit within {WindowlessQuit.Grace.TotalSeconds:0} s of being asked; ending it");
+                        p.Kill(entireProcessTree: true);
+                    }
+                    return;
+                }
                 p.CloseMainWindow();
                 if (!p.WaitForExit(4000))
                 {
@@ -543,6 +620,112 @@ sealed class AppManager
             }
             catch (Exception e) { Log.Error($"Closing {id}", e); }
         });
+    }
+
+    /// <summary>
+    /// Every 5 s (MainForm's clock, not in setup): the apps that may linger with no window
+    /// (launch.quitWhenWindowless) are looked at, and asked to quit or ended as WindowlessQuit
+    /// decides, each step logged. What it looks at: windows of the whole process tree (the app's
+    /// own, or a game's it started), programs in the tree that are not its own (a game, with or
+    /// without a window yet), another program covering the screen in front (a game outside the
+    /// tree), and the Home menu over the app (homeMenuOver). On the UI thread: a process snapshot
+    /// and a window list per watched app; asking and ending go to the thread pool.
+    /// </summary>
+    public void CheckWindowless(Func<string, bool> homeMenuOver)
+    {
+        List<(string Id, Process Process, WindowlessQuit Watch)> watched;
+        lock (running)
+            watched = running.Where(r => windowless.ContainsKey(r.Value)).Select(r => (r.Key, r.Value, windowless[r.Value])).ToList();
+        var now = Environment.TickCount64;
+        foreach (var (id, p, watch) in watched)
+        {
+            try
+            {
+                if (p.HasExited || Get(id) is not { } app) continue;
+                var root = (uint)p.Id;
+                var tree = Native.ProcessTreeNames(root);
+                var look = Native.TopLevelWindows(tree.Keys.ToHashSet()).Count > 0 ? new AppLook(Window: true)
+                    : new AppLook(false, WindowlessQuit.StartedProgram(tree, root, app.OwnProcesses), OtherProgramInFront(), homeMenuOver(id));
+                var (step, note) = watch.Tick(now, look);
+                if (note is not null) Log.Info($"{id} (pid {p.Id}): {note}");
+                var why = $"it had no window for {app.QuitWhenWindowless} s";
+                switch (step)
+                {
+                    case QuitStep.Ask:
+                        lock (running) closing[id] = why; // its end is no crash
+                        Task.Run(() => AskToQuit(id, p, app));
+                        break;
+                    case QuitStep.End:
+                        lock (running) { closing[id] = why; windowless.Remove(p); }
+                        Task.Run(() => EndTree(id, p));
+                        break;
+                    case QuitStep.Kept:
+                        lock (running) if (closing.GetValueOrDefault(id) == why) closing.Remove(id);
+                        break;
+                }
+            }
+            catch (Exception e) { Log.Warn($"{id}: looking for its window: {e.Message}"); }
+        }
+    }
+
+    /// <summary>
+    /// Asks the running app to quit its own way: its program (the running one's, else where the
+    /// catalog says) with launch.quitArgs, one by one; that copy hands the request over and ends
+    /// (Steam: steam.exe -shutdown). Never left behind: ended if still there after the grace
+    /// period. False when there is nothing to run or it did not start.
+    /// </summary>
+    bool AskToQuit(string id, Process p, CatalogApp app)
+    {
+        if (app.QuitArgs is not { Count: > 0 } args) return false;
+        try
+        {
+            var exe = Native.ProcessInfo(p.Id).Path ?? ProgramPath(id);
+            if (exe is null || !File.Exists(exe)) { Log.Warn($"{id}: its program was not found, cannot ask it to quit"); return false; }
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            UserEnvironment.Apply(psi);
+            ApplyEnv(app, psi);
+            var asker = Process.Start(psi);
+            Log.Info($"{id}: asked to quit: {exe} {string.Join(' ', args)}{(asker is null ? "" : $" (pid {asker.Id})")}");
+            if (asker is not null)
+                Task.Run(() =>
+                {
+                    using (asker)
+                        try { if (!asker.WaitForExit(WindowlessQuit.Grace)) asker.Kill(entireProcessTree: true); }
+                        catch (Exception) { } // ended meanwhile
+                });
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Asking {id} to quit", e);
+            return false;
+        }
+    }
+
+    static void EndTree(string id, Process p)
+    {
+        try
+        {
+            if (p.HasExited) return;
+            p.Kill(entireProcessTree: true);
+            Log.Info($"{id}: its processes were ended");
+        }
+        catch (Exception e) { Log.Error($"Ending {id}", e); }
+    }
+
+    /// <summary>
+    /// A visible window of another program covers the screen in front: not the launcher's, nor
+    /// any open app's. A game Steam started through another store's launcher that was already
+    /// running is that launcher's child, outside Steam's tree; a desktop program beside the
+    /// taskbar (desktop mode) or a small installer window does not count.
+    /// </summary>
+    bool OtherProgramInFront()
+    {
+        var window = Native.GetForegroundWindow();
+        if (window == IntPtr.Zero || !Native.IsWindowVisible(window) || Native.IsIconic(window) || !Native.CoversScreen(window)) return false;
+        var pid = Native.ProcessOf(window);
+        return pid != 0 && pid != Environment.ProcessId && ForegroundApp() is null;
     }
 
     /// <summary>

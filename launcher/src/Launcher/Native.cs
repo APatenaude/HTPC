@@ -240,16 +240,37 @@ static class Native
     public static HashSet<uint> ProcessTree(uint root) => Descendants(new[] { root }, ProcessParents().Children);
 
     /// <summary>
+    /// The process and all its descendants, each with its program's file name (steamwebhelper.exe;
+    /// empty for a root that is not running), from one snapshot.
+    /// </summary>
+    public static Dictionary<uint, string> ProcessTreeNames(uint root)
+    {
+        var (children, _, names) = ProcessParents(withNames: true);
+        return Descendants(new[] { root }, children).ToDictionary(pid => pid, pid => names!.GetValueOrDefault(pid, ""));
+    }
+
+    /// <summary>
     /// The given processes and their descendants that are running now. A root that has ended still
     /// leads to the children it left (Windows keeps their parent's id): an installer that starts
     /// itself again and exits is followed through its new copy.
     /// </summary>
     public static HashSet<uint> ProcessTree(IEnumerable<uint> roots)
     {
-        var (children, running) = ProcessParents();
+        var (children, running, _) = ProcessParents();
         var tree = Descendants(roots, children);
         tree.IntersectWith(running);
         return tree;
+    }
+
+    /// <summary>
+    /// Whether a window covers its whole screen: a game full screen or borderless, anything
+    /// maximized where there is no taskbar; not a window maximized beside the desktop's taskbar.
+    /// </summary>
+    public static bool CoversScreen(IntPtr hWnd)
+    {
+        if (!GetWindowRect(hWnd, out var r)) return false;
+        var s = Screen.FromHandle(hWnd).Bounds;
+        return r.Left <= s.Left && r.Top <= s.Top && r.Right >= s.Right && r.Bottom >= s.Bottom;
     }
 
     static HashSet<uint> Descendants(IEnumerable<uint> roots, Dictionary<uint, List<uint>> children)
@@ -263,11 +284,12 @@ static class Native
         return tree;
     }
 
-    // Every process now: each parent's children, and the ids running.
-    static (Dictionary<uint, List<uint>> Children, HashSet<uint> Running) ProcessParents()
+    // Every process now: each parent's children, the ids running and, when asked, each one's program file name.
+    static (Dictionary<uint, List<uint>> Children, HashSet<uint> Running, Dictionary<uint, string>? Names) ProcessParents(bool withNames = false)
     {
         var children = new Dictionary<uint, List<uint>>();
         var running = new HashSet<uint>();
+        var names = withNames ? new Dictionary<uint, string>() : null;
         var snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
         if (snapshot != new IntPtr(-1))
         {
@@ -279,10 +301,11 @@ static class Native
                     if (!children.TryGetValue(entry.th32ParentProcessID, out var list)) children[entry.th32ParentProcessID] = list = new();
                     list.Add(entry.th32ProcessID);
                     running.Add(entry.th32ProcessID);
+                    if (names is not null) names[entry.th32ProcessID] = entry.szExeFile ?? "";
                 }
             }
             finally { CloseHandle(snapshot); }
         }
-        return (children, running);
+        return (children, running, names);
     }
 }
