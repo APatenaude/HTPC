@@ -5,10 +5,12 @@
 // once its title says it is done).
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
 // X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
-// its quick buttons in the order of the home screen's top bar (Settings, then Power),
+// its quick buttons in the order of the home screen's top bar (Settings, then Power), the home
+// grid (38 tiles: three whole rows, a sliver of the next, a row at a time),
 // Power's Restart and Shut down asking first, moving around Settings and changing a value there only once A has picked its row, the
-// Home menu's resource view (sampled only while the menu shows, patched in place, its rows kept
-// under the focus, asking before it stops anything), the interface sounds (rendered offline;
+// Home menu's resource view (in its column, sampled only while the menu shows, patched in place,
+// its rows kept under the focus, the D-pad in and out of it, asking before it stops anything),
+// the interface sounds (rendered offline;
 // which sound a press picks; none while hidden); Add a tile (On this box's icons, the Website form
 // and Rename typing with the launcher's keyboard, the library by category), setup's apps by
 // category and the on-screen keyboard's own page (both in a frame); a release's notes (line by
@@ -158,12 +160,20 @@
   for (const t of tiles) t.running = true;
   render();
 
-  // The crowded menu: 6 apps and an alert row fit without scrolling.
+  // The crowded menu: 6 apps and an alert row fit down to the quick buttons without scrolling;
+  // the resource view under them comes into view with the focus.
   const panel = $('menu-panel'), rowsBox = panel.querySelector('.panel-scroll');
-  check('menu: 6 apps + an alert row fit', rowsBox.scrollHeight <= rowsBox.clientHeight + 1, `${rowsBox.scrollHeight} > ${rowsBox.clientHeight}`);
   const quicks = [...panel.querySelectorAll('.quicks [data-nav]')];
   const hintsBox = panel.querySelector('.hints').getBoundingClientRect();
-  check('menu: the last row is above the button hints', quicks[quicks.length - 1].getBoundingClientRect().bottom <= hintsBox.top + 1);
+  setFocus(panel.querySelector('[data-nav]'));   // the first: the column at its top
+  check('menu: 6 apps + an alert row fit, down to the quick buttons', rowsBox.scrollTop === 0 && quicks[quicks.length - 1].getBoundingClientRect().bottom <= rowsBox.getBoundingClientRect().bottom,
+    `${quicks[quicks.length - 1].getBoundingClientRect().bottom} > ${rowsBox.getBoundingClientRect().bottom}`);
+  check('menu: the quick buttons are above the button hints', quicks[quicks.length - 1].getBoundingClientRect().bottom <= hintsBox.top + 1);
+  setFocus(panel.querySelector('[data-id="q-timer"]'));
+  press('down');
+  const lowRow = focusedEl(), lowBox = rowsBox.getBoundingClientRect();
+  check('menu: crowded, down from the quick buttons to a program: the column scrolls, the row shows whole', lowRow && lowRow.closest('#menu-res') && rowsBox.scrollTop > 0
+    && lowRow.getBoundingClientRect().bottom <= lowBox.bottom && lowRow.getBoundingClientRect().top >= lowBox.top, `${focusedEl() && focusedEl().dataset.id}, ${rowsBox.scrollTop}`);
 
   // Its quick buttons: Settings, then Power, as on the home screen's top bar. The D-pad goes along
   // them in that order and stops at the end; A opens each, and B from there comes back to it.
@@ -217,6 +227,54 @@
   check('cards: the page\'s own message shows too', [...$('toasts').children].some((c) => c.textContent.includes('A message from the page')));
   reset('home');
   check('status bar: the pill shows', $('status').textContent.includes('4 updates'));
+
+  // ---- Home: three whole rows, a sliver of the next ---------------------------------------------
+  // The owner's 38 tiles: three rows show whole, the focused one among them, and a sliver of the
+  // next row (a tenth of a tile or so) where there are more, below and, once scrolled, above; the
+  // grid scrolls a whole row at a time. Nothing drawn over its ends. By layout offsets (the
+  // stage's pixels), as keepTileInView places them: the zoom of a tile just left still eases out.
+  {
+    const own = state.tiles;
+    const gridFocus = () => focusedEl() && focusedEl().dataset.id;
+    state.tiles = Array.from({ length: 38 }, (_, i) => ({ ...own[i % own.length], id: `grid${i}`, name: `Tile ${i + 1}`, running: false }));
+    state.memory.home = null;
+    reset('home');
+    const wrap = $('home').querySelector('.tiles-wrap');
+    const shown = [...$('tiles').children].filter((e) => e.classList.contains('tile')).sort((a, b) => a.style.order - b.style.order);
+    const tileH = shown[0].offsetHeight, step = shown[4].offsetTop - shown[0].offsetTop;
+    // How much of each row shows, as a share of a tile: 1 whole, 0 none.
+    const rowsShown = () => Array.from({ length: Math.ceil(shown.length / 4) }, (_, i) => {
+      const top = shown[i * 4].offsetTop, from = Math.max(top, wrap.scrollTop), to = Math.min(top + tileH, wrap.scrollTop + wrap.clientHeight);
+      return Math.round(Math.max(0, to - from) / tileH * 100) / 100;
+    });
+    const sliver = (v) => v >= 0.08 && v <= 0.16;
+    const pseudo = (p) => getComputedStyle(wrap, p).content;
+    check('Home: nothing drawn over the grid\'s ends (no fade, no mask)', ['::before', '::after'].every((p) => pseudo(p) === 'none' || pseudo(p) === 'normal')
+      && getComputedStyle(wrap).maskImage === 'none', `${pseudo('::before')} ${pseudo('::after')} ${getComputedStyle(wrap).maskImage}`);
+    check(`Home: tiles as big as they were (${shown[0].offsetWidth} x ${tileH}, were 396 x 248)`, shown[0].offsetWidth >= 396 && tileH >= 236, `${shown[0].offsetWidth} x ${tileH}`);
+    let seen = rowsShown();
+    check('Home, 38 tiles: rows 1 to 3 whole, a sliver of row 4 below, nothing above', wrap.scrollTop === 0 && seen.slice(0, 3).every((v) => v === 1) && sliver(seen[3])
+      && seen.slice(4).every((v) => v === 0), seen.join(' '));
+    press('down'); press('down');
+    check('Home: down to row 3: nothing scrolls', focusedEl() === shown[8] && wrap.scrollTop === 0, `${gridFocus()} ${wrap.scrollTop}`);
+    press('down');
+    seen = rowsShown();
+    check('Home: down to row 4: one row further, rows 2 to 4 whole, a sliver of rows 1 and 5', focusedEl() === shown[12] && wrap.scrollTop === step
+      && sliver(seen[0]) && seen.slice(1, 4).every((v) => v === 1) && sliver(seen[4]) && seen.slice(5).every((v) => v === 0), `${wrap.scrollTop} / ${step}: ${seen.join(' ')}`);
+    press('up'); press('up');
+    check('Home: up to row 2: nothing scrolls', focusedEl() === shown[4] && wrap.scrollTop === step, `${gridFocus()} ${wrap.scrollTop}`);
+    press('up');
+    check('Home: up to row 1: back to the top', focusedEl() === shown[0] && wrap.scrollTop === 0, `${gridFocus()} ${wrap.scrollTop}`);
+    for (let i = 0; i < 12; i++) press('down');
+    seen = rowsShown();
+    const last = seen.length - 1;
+    check('Home: down to the last row (the "+" tile\'s): the last three whole, a sliver above, nothing below', /^tile:\+add$|^tile:grid3[67]$/.test(gridFocus())
+      && seen.slice(last - 2).every((v) => v === 1) && sliver(seen[last - 3]) && seen.slice(0, last - 3).every((v) => v === 0) && wrap.scrollTop % step === 0,
+      `${gridFocus()} ${wrap.scrollTop}: ${seen.join(' ')}`);
+    state.tiles = own;
+    state.memory.home = null;
+    reset('home');
+  }
 
   // ---- Wi-Fi (wifi.js) ------------------------------------------------------------------------------
   const asked = [], toasts = [];
@@ -661,10 +719,17 @@
   reset('home');
 
   // ---- The Home menu's resource view (resources.js) ------------------------------------------------
-  // The host samples only while the menu is on screen; the card comes with the menu, dashes first,
-  // then the numbers, patched in place; the rows stay under the focus; A asks before stopping
-  // anything; Windows' own rows never take the focus.
+  // The host samples only while the menu is on screen; the view comes with the numbers, in the
+  // menu's column under the quick buttons, patched in place; the rows stay under the focus; A asks
+  // before stopping anything; Windows' own rows never take the focus. The D-pad goes into it and
+  // out of it along the column, with real presses, over the home screen with nothing open and
+  // over an app (in its old card the focus was stuck on the TV).
   const rNode = (key) => $('menu-res').querySelector(`[data-id="res:${key}"]`);
+  const menuNode = (id) => $('menu-panel').querySelector(`[data-id="${id}"]`);
+  const menuIds = () => [...$('menu-panel').querySelectorAll('[data-nav]')].map((e) => e.dataset.id);
+  const menuColumn = () => $('menu-panel').querySelector('.panel-scroll');
+  const fits = () => menuColumn().scrollHeight <= menuColumn().clientHeight + 1;
+  const presses = (buttons) => buttons.map((b) => { press(b); return focusId(); }).join(',');
   const resData = (top, extra) => ({ type: 'res.data', cpu: 42.4, memUsed: 5120, memTotal: 8192, disk: 12.5e6, down: 45.2e6, up: 1.2e6, top, held: [], ...extra });
   const RJ = { key: 'app:jellyfin', name: 'Jellyfin', app: 'jellyfin', cpu: 30.2, mem: 900, stop: true };
   const RX = { key: 'exe:long.exe', name: `Program ${'with a very long name '.repeat(3)}.exe`, app: null, cpu: 7.25, mem: 2048, stop: true };
@@ -676,34 +741,62 @@
   sent.length = 0;
   reset('home');
   check('Resources: nothing asked for on the home screen', !sent.some((m) => m.type === 'res.watch' && m.on));
-  for (const t of state.tiles) t.running = t.id === 'jellyfin' || t.id === 'twitch';
-  state.current = 'twitch';
-  go('menu');
+
+  // Over the home screen with nothing open: neither the Home screen row nor Open apps, the
+  // focus on the volume; all of the column fits. The box's usual top three: the launcher,
+  // Windows' own, and one program it may stop.
+  for (const t of state.tiles) t.running = false;
+  state.memory.menu = null;
+  press('home');
   check('Resources: the menu on screen asks the host to sample', lastSent('res.watch') && lastSent('res.watch').on === true);
   res.data = null;
   render();
-  check('Resources: no card before the numbers (the menu\'s first frame as it was without it)', $('menu-res').innerHTML === '');
-  const panelRow = $('menu-panel').querySelector('[data-id="home"]');
+  check('Resources: no view before the numbers (the menu\'s first frame as it was without it)', $('menu-res').innerHTML === '');
+  check('Menu over the home screen, nothing open: no Home screen row, no Open apps, the focus on the volume',
+    !menuIds().includes('home') && !/Open apps/i.test($('menu-panel').textContent) && focusId() === 'volume', `${menuIds().join(',')} on ${focusId()}`);
+  const RL = { key: 'self', name: 'TV launcher', app: null, cpu: 14, mem: 620, stop: false };
+  onHost(resData([RL, RW, RX]));
+  const quickBottom = () => menuNode('q-power').getBoundingClientRect().bottom;
+  check('Resources: in the menu\'s column, under the quick buttons; all of it fits, no scrolling',
+    $('menu-res').closest('#menu-panel .panel-scroll') && $('menu-res').getBoundingClientRect().top >= quickBottom() && fits(),
+    `${$('menu-res').getBoundingClientRect().top} / ${quickBottom()}; ${menuColumn().scrollHeight} in ${menuColumn().clientHeight}`);
+  const inHome = presses(['down', 'down', 'down']);
+  check('Resources, over the home screen: down from the volume, the brightness, a quick button, then the one program it can stop',
+    new RegExp(`^brightness,q-\\w+,res:${RX.key.replace('.', '\\.')}$`).test(inHome), inHome);
+  const stuckHome = presses(['down', 'left', 'right']);
+  check('Resources: ... on the last it can stop, down, left and right leave the focus there', stuckHome === [1, 2, 3].map(() => `res:${RX.key}`).join(','), stuckHome);
+  const outHome = presses(['up', 'up']);
+  check('Resources: ... up: out of it to a quick button, then the brightness; the rows follow the host again',
+    /^q-\w+,brightness$/.test(outHome) && lastSent('res.watch').hold.length === 0, `${outHome}; ${JSON.stringify(lastSent('res.watch'))}`);
+  reset('home');
+
+  // Over an app, two open: the Home screen row and the open apps; all of it fits too.
+  for (const t of state.tiles) t.running = t.id === 'jellyfin' || t.id === 'twitch';
+  state.current = 'twitch';
+  go('menu');
+  res.data = null;
+  render();
+  const panelRow = menuNode('home');
   setFocus(panelRow);
   onHost(resData([RJ, RX, RW], { cpu: 3 }));
   const cardEl = $('menu-res').firstElementChild;
-  check('Resources: the card comes with the first numbers, the focus left where it was', cardEl && /3%/.test(cardEl.textContent) && focusedEl() === panelRow);
+  check('Resources: the view comes with the first numbers, the focus left where it was', cardEl && /3%/.test(cardEl.textContent) && focusedEl() === panelRow);
   onHost(resData([RJ, RX, RW]));
-  check('Resources: the numbers patch the card in place, the menu and its focus untouched',
-    $('menu-res').firstElementChild === cardEl && $('menu-panel').querySelector('[data-id="home"]') === panelRow && focusedEl() === panelRow
+  check('Resources: the numbers patch the view in place, the menu and its focus untouched',
+    $('menu-res').firstElementChild === cardEl && menuNode('home') === panelRow && focusedEl() === panelRow
     && /42%/.test($('menu-res').textContent) && /5\.0 \/ 8\.0 GB/.test($('menu-res').textContent) && /13 MB\/s/.test($('menu-res').textContent)
     && /↓ 45 Mb\/s/.test($('menu-res').textContent) && /↑ 1\.2 Mb\/s/.test($('menu-res').textContent), $('menu-res').textContent.slice(0, 120));
-  check('Resources: the card sits above the app\'s buttons (every button mapped: its tallest)',
-    $('menu-res').getBoundingClientRect().bottom + 16 * s <= $('menu-app').firstElementChild.getBoundingClientRect().top,
-    `${$('menu-res').getBoundingClientRect().bottom} ${$('menu-app').firstElementChild.getBoundingClientRect().top}`);
+  check('Menu over an app, two open: the Home screen row and both apps; all of it fits, no scrolling',
+    ['home', 'app:twitch', 'app:jellyfin'].every((id) => menuIds().includes(id)) && fits(), `${menuIds().join(',')}; ${menuColumn().scrollHeight} in ${menuColumn().clientHeight}`);
   check('Resources: Windows\' own row shows but takes no focus', rNode(RW.key) && !rNode(RW.key).hasAttribute('data-nav') && rNode(RX.key).hasAttribute('data-nav'));
-  press('right');
-  check('Resources: right from the rows beside it goes into the card', focusedEl() === rNode(RJ.key), focusedEl() && focusedEl().dataset.id);
+  const inApp = presses(['down', 'down', 'down', 'down', 'down', 'down']);
+  check('Resources, over an app: down the column from Home screen, into the view on its first program',
+    /^app:twitch,app:jellyfin,volume,brightness,q-\w+,res:app:jellyfin$/.test(inApp), inApp);
   check('Resources: ... the host keeps these rows for it', JSON.stringify(lastSent('res.watch').hold) === JSON.stringify([RJ.key, RX.key, RW.key]), JSON.stringify(lastSent('res.watch')));
   press('down');
   const onLong = focusedEl();
   press('down');
-  check('Resources: down to the last row it can stop, and stays (not out of the card)', onLong === rNode(RX.key) && focusedEl() === onLong, focusedEl() && focusedEl().dataset.id);
+  check('Resources: down to the last row it can stop, and stays there', onLong === rNode(RX.key) && focusedEl() === onLong, focusedEl() && focusedEl().dataset.id);
   check('Resources: its hints: A ends the program', /End program/.test($('menu-panel').querySelector('footer.hints').textContent));
   onHost(resData([RW, { ...RX, cpu: 55 }, RJ]));
   check('Resources: a new ranking under the focus: the rows stay where they are, their numbers change',
@@ -717,9 +810,10 @@
   onHost(resData([RJ, RW], { held: [{ key: RX.key, gone: true }] }));
   check('Resources: ended: its row stays under the focus, says so, and offers nothing more',
     focusedEl() === rNode(RX.key) && /Ended/.test(rNode(RX.key).textContent) && !/End program/.test($('menu-panel').querySelector('footer.hints').textContent));
-  press('left');
-  check('Resources: left goes back to the panel; the rows follow the host again', !focusedEl().closest('#menu-res') && !rNode(RX.key) && lastSent('res.watch').hold.length === 0);
-  press('right');
+  const outApp = presses(['left', 'up', 'up']);
+  check('Resources: left stays; up to the program above, then out to a quick button; the rows follow the host again',
+    /^res:exe:long\.exe,res:app:jellyfin,q-\w+$/.test(outApp) && !rNode(RX.key) && lastSent('res.watch').hold.length === 0, outApp);
+  press('down');
   press('x');
   check('Resources: X on an app\'s row asks too (Close)', state.view === 'ask' && asking.title === 'Close Jellyfin?');
   setFocus($('ask').querySelector('[data-id="ask-yes"]'));
@@ -852,10 +946,12 @@
     check('Website: the keyboard up at the bottom: the address is above it, nothing lifted', !document.querySelector('[data-kb-lift]')
       && at('wf-add').getBoundingClientRect().bottom <= kbTop(), `${at('wf-add').getBoundingClientRect().bottom} > ${kbTop()}`);
     textKeyboardAt(null);
-    const parts = ['.at-header', '.lib-field[data-id="wf-url"]', '.lib-field[data-id="wf-name"]', '.lib-buttons', '.lib-note', '.ws-preview', 'footer.hints']
+    const parts = ['.at-header', '.lib-field[data-id="wf-url"]', '.lib-field[data-id="wf-name"]', '.lib-buttons', '.ws-preview', 'footer.hints']
       .map((s) => [s, $('addtile').querySelector(s).getBoundingClientRect()]);
     const clash = parts.flatMap(([s, r], i) => parts.slice(i + 1).filter(([, q]) => overlap(r, q)).map(([t]) => `${s} / ${t}`));
     check('Website: nothing in the form overlaps anything else', !clash.length, clash.join(', '));
+    check('Website: no line on how to bring the keyboard up (the hints say Type)', !/R3|keyboard/i.test($('addtile').querySelector('.ws-form').textContent)
+      && /Type/.test($('addtile').querySelector('footer.hints').textContent), $('addtile').querySelector('.ws-form').textContent);
     sent.length = 0;
     textKey('enter');                                 // Enter on the keyboard
     check('Website: Enter adds it (the address typed, trimmed)', lastSent('library.addWebsite') && lastSent('library.addWebsite').url === 'example.org/tv', JSON.stringify(lastSent('library.addWebsite')));
@@ -997,8 +1093,12 @@
       await resize(kf, w, h);
       kw.fit();
       const hints = kd.getElementById('kb-hints'), band = kd.getElementById('kb').getBoundingClientRect(), s = w / 1920;
-      check(`Keyboard at ${w} wide: every hint fits, LT RT as one (a password's Show too)`, hints.scrollWidth <= hints.clientWidth && /LT\s*RT\s*Shift · Symbols/.test(hints.textContent)
-        && /Show password/.test(hints.textContent), `${hints.scrollWidth} > ${hints.clientWidth}`);
+      // Each hint's buttons and label, as the bar shows them: LT and RT each their own, LB RB one.
+      const chips = [...hints.children].map((c) => c.textContent);
+      const lastRight = hints.lastElementChild.getBoundingClientRect().right;
+      check(`Keyboard at ${w} wide: every hint fits (a password's Show too): LT Shift, RT Symbols, LB RB Cursor`, hints.scrollWidth <= hints.clientWidth
+        && lastRight <= band.right - 96 * s + 1 && ['LTShift', 'RTSymbols', 'LBRBCursor', 'SelectShow password'].every((c) => chips.includes(c)),
+        `${hints.scrollWidth} > ${hints.clientWidth}, ${lastRight} / ${band.right - 96 * s}: ${chips.join(' | ')}`);
       const keyH = kRow(1)[0].getBoundingClientRect().height, lowest = kRow(rows - 1)[0].getBoundingClientRect(), bar = hints.getBoundingClientRect();
       check(`Keyboard at ${w} wide: 440/1080 of the screen (was 560), keys ${Math.round(keyH / s)} px`, Math.abs(band.height - 440 * s) < 1 && keyH >= 46 * s
         && lowest.bottom + 4 * s <= bar.top, `${band.height} px, keys ${keyH}, last row ${lowest.bottom} / hints ${bar.top}`);

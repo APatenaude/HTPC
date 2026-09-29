@@ -86,9 +86,9 @@ function render() {
   if (on) on.classList.add('on');
   document.getElementById('kb-field').textContent = field || 'the app';
   document.getElementById('kb-typed').textContent = password ? (reveal ? typed : '•'.repeat(typed.length)) : '';
-  // Two buttons for one label where they go together (the triggers, the bumpers): the bar holds
-  // the password's Show too, at every screen width.
-  const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], [['LT', 'RT'], 'Shift · Symbols'], [['LB', 'RB'], 'Cursor'], ['Start', 'Enter']];
+  // The triggers each their own (the owner, 29 Sept 2026: LT is Shift, RT the symbols); the
+  // bumpers, which go together, one: the bar holds the password's Show too, at every screen width.
+  const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['LT', 'Shift'], ['RT', 'Symbols'], [['LB', 'RB'], 'Cursor'], ['Start', 'Enter']];
   if (password) list.push(['Select', reveal ? 'Hide password' : 'Show password']);
   list.push(['B', 'Close']);
   document.getElementById('kb-hints').innerHTML = list.map(([btn, label]) => '<div class="hint">' +

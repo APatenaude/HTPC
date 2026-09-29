@@ -29,10 +29,10 @@
 .notice .action .key.wide { padding: 0 14px; font-size: 18px; }
 
 /* Home menu: alerts with something to do, at the top */
-.row.alert-row { height: auto; min-height: 88px; padding: 12px 24px; gap: 18px; font-size: 26px; }
+.row.alert-row { height: auto; min-height: 76px; padding: 10px 22px; gap: 16px; font-size: 25px; }
 .alert-row .badge {
-  display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; flex-shrink: 0;
-  border-radius: 24px; background: var(--accent-bg); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0;
+  border-radius: 22px; background: var(--accent-bg); color: var(--accent);
 }
 .alert-row.warn .badge { background: var(--warn-bg); color: var(--warn); }
 .alert-row.bad .badge { background: var(--bad-bg); color: var(--bad); }
@@ -45,14 +45,13 @@
 /* Many open apps (and alert rows): two columns of shorter rows, and the panel's rows scroll if
    they still do not fit (.panel-scroll, app.css), with the button hints kept at the bottom. */
 #menu-panel { overflow: hidden; }
-#menu-panel .apps { display: flex; flex-direction: column; gap: 14px; }
-#menu-panel.crowded .apps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-#menu-panel.crowded .apps .row { height: 72px; padding: 0 20px; gap: 14px; font-size: 26px; }
+#menu-panel .apps { display: flex; flex-direction: column; gap: 10px; }
+#menu-panel.crowded .apps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#menu-panel.crowded .apps .row { height: 56px; padding: 0 18px; gap: 12px; font-size: 24px; }
 #menu-panel.crowded .apps .row .grow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#menu-panel.crowded .quick-label { display: none; }
-#menu-panel.crowded .row.big { height: 76px; }
-#menu-panel.crowded .row.slider { height: 72px; }
-#menu-panel.crowded .quick { height: 96px; }
+#menu-panel.crowded .row.big { height: 60px; }
+#menu-panel.crowded .row.slider { height: 56px; }
+#menu-panel.crowded .quick { height: 76px; }
 #menu-panel .hints { flex-shrink: 0; }
 
 /* Status bar pills */
