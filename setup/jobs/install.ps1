@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 # Job verb: install:<id>. Dot-sourced by lib\Invoke-AppJob.ps1 (Common, AppCore, UpdateCore,
-# Job-Common are already loaded). Machine-scope apps run here as SYSTEM; per-user apps run non-elevated.
+# Job-Common are already loaded). Machine-scope apps run here as SYSTEM; per-user apps run non-elevated,
+# among them an installer the user finishes on screen (install.interactive: AppCore's Install-AppInteractive).
 param([string]$Arg)
 
 $app = Get-JobApp $Arg

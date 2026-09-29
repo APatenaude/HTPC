@@ -3,10 +3,12 @@ using System.Text.Json;
 
 namespace Htpc.Launcher;
 
+/// <param name="InstallInteractive">install.interactive: an installer with a wizard that the user
+/// finishes on screen (RetroBat), from the library only, never in setup (LibraryService, MainForm.Library.cs).</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? Desc = null, string? WingetScope = null, string? InstallSource = null, bool Custom = false,
-    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null)
+    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -98,7 +100,8 @@ sealed class AppManager
             installable ? Str(install, "source") : null,
             Custom: false,
             InstallElevated: !(installable && install.TryGetProperty("elevated", out var el) && el.ValueKind == JsonValueKind.False),
-            Env: launch.ValueKind == JsonValueKind.Object ? LaunchEnv(launch) : null);
+            Env: launch.ValueKind == JsonValueKind.Object ? LaunchEnv(launch) : null,
+            InstallInteractive: installable && install.TryGetProperty("interactive", out var ia) && ia.ValueKind == JsonValueKind.True);
     }
 
     /// <summary>

@@ -354,6 +354,8 @@
       const p = lib.progress.current;
       // Nothing running yet: just asked, it starts (the host's progress follows).
       if (!p || p.id === card.id) {
+        // An installer the user finishes on screen (RetroBat's): A brings it up again.
+        if (p && p.phase === 'wizard') return { label: 'Finish the installer', spin: true, color: '#8CC2FF', busy: true, percent: null, wizard: true };
         const pct = p && p.phase === 'download' && p.percent != null ? p.percent : null;
         return { label: pct !== null ? `Downloading… ${pct}%` : 'Installing…', spin: true, color: '#8CC2FF', busy: true, percent: pct };
       }
@@ -479,7 +481,7 @@
   function cardAction(id) {
     const card = findCard(id);
     if (!card) return;
-    if (card.state === 'installing') { toast(`${card.name} is installing…`); return; }
+    if (card.state === 'installing') { if (cardStatus(card).wizard) send({ type: 'library.showInstaller' }); else toast(`${card.name} is installing…`); return; }
     if (card.state === 'uninstalling') { toast(`${card.name} is being uninstalled…`); return; }
     if (card.state === 'home') { toast(`${card.name} is already on your home screen`); return; }
     let now = 'home';
@@ -552,14 +554,18 @@
         : lib.queued.has(id) ? cardStatus({ ...c, state: 'installing' }) : { label: 'Installing…', spin: true, busy: true, percent: null };
       return {
         id: `tile:~${id}`, cls: `tile pending${failed ? ' failed' : ''}`, act: failed ? 'pending-retry' : 'pending-info', arg: id,
-        x: failed ? 'pending-remove' : null, hints: failed ? [['A', 'Try again'], ['X', 'Remove']] : [],
+        x: failed ? 'pending-remove' : null, hints: failed ? [['A', 'Try again'], ['X', 'Remove']] : st.wizard ? [['A', 'Show the installer']] : [],
         html: `<span class="pbadge">${statusIcon(st, 22)}${esc(st.label)}</span>` +
           `<span class="pglyph">${appIcon(c, 88)}</span><span class="name">${esc(c.name)}</span>` +
           progressBar(st, 'pbar'),
       };
     });
   });
-  onAction('pending-info', (node, id) => { const c = findCard(id); toast(`${c ? c.name : 'The app'} is installing. Its tile opens once it’s ready.`); });
+  onAction('pending-info', (node, id) => {
+    const p = lib.progress.current;
+    if (p && p.id === id && p.phase === 'wizard') { send({ type: 'library.showInstaller' }); return; }   // its installer, up again
+    const c = findCard(id); toast(`${c ? c.name : 'The app'} is installing. Its tile opens once it’s ready.`);
+  });
   onAction('pending-retry', (node, id) => { installApp(id); render(); });
   onAction('pending-remove', (node, id) => { lib.failed.delete(id); lib.homeBound.delete(id); render(); });
 

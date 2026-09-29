@@ -74,6 +74,7 @@ sealed partial class MainForm : Form
         library = new LibraryService(apps, settings, options.CatalogPath);
         library.Changed += () => OnUi(PushLibraryProgress);
         library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
+        library.Progress += (job, p) => { if (p.Phase == "wizard") OnUi(() => OnInstallerUp(job)); }; // MainForm.Library.cs
         controller.Mapper = mapper;
         keyboard.Message += OnKeyboardMessage;
         keyboard.Broken += why => ExitForRestart($"the on-screen keyboard: {why}");
@@ -420,12 +421,14 @@ sealed partial class MainForm : Form
     IntPtr lastForeground;
     CatalogApp? foregroundApp;
     bool foregroundIsOurs;
+    bool foregroundIsInstaller;
 
     /// <summary>
     /// Picks the button map for the app in front (its tile's map: preset and changes). None
     /// while the launcher is in front or in standby. A window that belongs to none of the
     /// catalog's apps (the desktop, a window an app opened) gets Other windows' map (Mouse
-    /// unless changed), so it can still be used.
+    /// unless changed), so it can still be used; an installer the user finishes on screen
+    /// (RetroBat's, MainForm.Library.cs) the plain Mouse preset.
     /// </summary>
     void UpdateMapper()
     {
@@ -441,11 +444,12 @@ sealed partial class MainForm : Form
                 lastForeground = window;
                 foregroundApp = apps.ForegroundApp();
                 foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
+                foregroundIsInstaller = foregroundApp is null && library.IsInstallerProcess(Native.ProcessOf(window));
             }
             if (window != IntPtr.Zero && !foregroundIsOurs)
             {
-                map = MapFor(foregroundApp);
-                preset = PresetFor(foregroundApp);
+                map = foregroundIsInstaller ? maps.For(ButtonMapStore.Installer, "mouse") : MapFor(foregroundApp);
+                preset = foregroundIsInstaller ? "mouse" : PresetFor(foregroundApp);
             }
         }
         // Text fields are watched (for the keyboard to pop up) only while a Mouse or Keyboard
@@ -617,9 +621,9 @@ sealed partial class MainForm : Form
 
     void PostSetupInit()
     {
-        // Apps setup can install (Spotify refuses to install elevated: later, from the library) and
-        // websites (nothing to install, just a tile).
-        var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated) || a.IsWebsite)
+        // Apps setup can install (Spotify refuses to install elevated, RetroBat's installer is
+        // finished on screen: later, from the library) and websites (nothing to install, just a tile).
+        var list = apps.Catalog.Where(a => (a.Installable && a.InstallElevated && !a.InstallInteractive) || a.IsWebsite)
             // Ticked to start with: the tiles already on the home screen (setup run again), else the catalog's picks.
             .Select(a => new { id = a.Id, name = a.Name, glyph = a.Glyph, color = a.Color, @default = settings.Tiles?.Contains(a.Id) ?? a.Default, type = a.Type });
         Post(new { type = "init", apps = list, tv = TvUiState.Describe(tv), controller = controller.Connected, battery = controller.BatteryLevel,
@@ -714,6 +718,7 @@ sealed partial class MainForm : Form
     void Open(string id)
     {
         launchDismissed.Remove(id);
+        if (installerShown is not null) installerSetAside = true; // MainForm.Library.cs
         apps.Adopt(id); // already open without our knowing: switch to it, no second copy
         if (apps.IsRunning(id)) { SwitchTo(id); return; }
         var name = apps.Get(id)?.Name ?? id;
@@ -758,6 +763,8 @@ sealed partial class MainForm : Form
     void SwitchTo(string id, bool waited = false)
     {
         if (id == DesktopMode.Id) { ShowDesktop(); return; } // B in the menu opened over the desktop
+        if (id == InstallerId) { BackToInstaller(); return; } // ... or over an installer (MainForm.Library.cs)
+        if (installerShown is not null) installerSetAside = true;
         var window = apps.MainWindow(id);
         if (window == IntPtr.Zero)
         {
@@ -879,7 +886,7 @@ sealed partial class MainForm : Form
         LauncherComes(); // from Home's press already (CaptureEarly), or a button map's Home menu
         var focus = LauncherComingForward(view); // the alerts' cards leave the app for the launcher's own
         var overDesktop = app is null && desktop.Active; // desktop mode: B goes back to it
-        var current = app?.Id ?? (overDesktop ? DesktopMode.Id : null);
+        var current = app?.Id ?? (overDesktop ? DesktopMode.Id : InstallerInFront() ? InstallerId : null);
         var turn = ++showOverTurn;
         string? backdrop = null;
         if (current is not null)
@@ -948,7 +955,7 @@ sealed partial class MainForm : Form
     {
         if (setupMode || LauncherActive) return;
         var app = apps.ForegroundApp();
-        if (app is null ? !desktop.Active : app.Id == "moonlight") return;
+        if (app is null ? !(desktop.Active || InstallerInFront()) : app.Id == "moonlight") return;
         LauncherComes();
         if (keyboard.Visible) return;
         earlyAt = Environment.TickCount64;
