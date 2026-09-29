@@ -1,7 +1,7 @@
 /* The home screen's "Add the remote to your phone" card (phone-card.js): two tiles wide, after
-   the tiles (order: the tiles are placed by CSS order), the tiles' look. As tall as its content
-   with room all round: on a row of its own it is shorter than a tile, so the grid still clears
-   the hint bar; next to tiles it takes their height, its content centred. */
+   the tiles (order: the tiles are placed by CSS order), the tiles' look. A tile tall, as every
+   row of the grid is (app.css .tiles), its content centred: the grid scrolls by whole rows with
+   it too (app.js keepTileInView), and three rows still show whole. */
 #phone-card {
   order: 9999; grid-column: span 2; display: flex; align-items: center; gap: 28px; min-width: 0;
   padding: 20px 32px 20px 20px; box-sizing: border-box;

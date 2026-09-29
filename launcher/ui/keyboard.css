@@ -41,5 +41,5 @@ html, body { background: var(--panel); }   /* the band's colour, also beside it 
 .kb-key .icon { flex-shrink: 0; }
 
 /* The hints under the keys, clear of the last row's rings: a lower bar, a little closer together
-   than the launcher's (eight of them with a password's Show). */
+   than the launcher's (nine of them with a password's Show: LT and RT each their own). */
 #kb .hints { margin-top: auto; height: 60px; flex-shrink: 0; gap: 32px; }

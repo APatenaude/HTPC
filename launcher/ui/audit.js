@@ -1,8 +1,9 @@
 'use strict';
-// The UI audit, a "focus walker": every page of the launcher is set up in a stress state (24
-// tiles, 20 library apps, 15 Wi-Fi networks, 10 Bluetooth devices, 8 phones and 4 keys, long
-// names...) and walked with the D-pad through press(), the path the controller takes, from the
-// first focus to every element it can reach. At each focus it checks that the element, its focus
+// The UI audit, a "focus walker": every page of the launcher is set up in a stress state (40
+// tiles, more than the owner's 38, 20 library apps, 15 Wi-Fi networks, 10 Bluetooth devices, 8
+// phones and 4 keys, long names...) and walked with the D-pad through press(), the path the
+// controller takes, from the first focus to every element it can reach. At each focus it checks
+// that the element, its focus
 // ring (its own width, read from its style) and its zoom:
 //   - are whole inside every box that clips them (a list that scrolls, a pane), and on screen;
 //   - are not under a hint bar, nor covered by anything (elementFromPoint at the corners and the
@@ -119,7 +120,7 @@ function auditFresh() {
   hideOpening();
   notices.own = [];
   noticeUpdate({ toasts: [], rows: [], pills: [] });
-  state.tiles = auditTiles(24);
+  state.tiles = auditTiles(40);
   reset('home');
 }
 
@@ -253,6 +254,12 @@ if (AUDIT_PAGE === 'index') {
     auditRes();
   } });
   auditPage('home menu over the home screen', { view: 'menu', tick: auditRes, open() { press('home'); auditRes(); } });
+  // Nothing open: no Home screen row, no Open apps; the sliders first.
+  auditPage('home menu over the home screen, nothing open', { view: 'menu', covers: [], tick: auditRes, open() {
+    for (const t of state.tiles) t.running = false;
+    press('home');
+    auditRes();
+  } });
   // Over the Windows desktop (desktop mode): Back to TV first; B goes back to the desktop.
   auditPage('home menu in desktop mode', { view: 'menu', tick: auditRes, left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
     onHost({ type: 'state', desktop: true });

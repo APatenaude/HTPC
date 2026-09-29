@@ -1,9 +1,11 @@
 'use strict';
 // The Home menu's resource view: the box's CPU, memory, disk and network use, and the three
-// programs using the most, in a card at the top right of the menu (the app's buttons' card is at
-// the bottom right). The host samples only while the page shows the menu (MainForm.Resources.cs,
-// ResourceWatch.cs): the menu opens as fast as ever, the card comes with the first numbers a
-// moment later, and every 2 s only its numbers change (patchHtml), never the menu around it.
+// programs using the most, in the menu's column under its sliders and quick buttons (the owner,
+// 29 Sept 2026: there, not in a card on the right). The host samples only while the page shows
+// the menu (MainForm.Resources.cs, ResourceWatch.cs): the menu opens as fast as ever, the view
+// comes with the first numbers a moment later, and every 2 s only its numbers change
+// (patchHtml), never the menu around it. Down from the quick buttons goes to its programs, up
+// from them back (app.js move, as anywhere in the column).
 // A (or X) on a program's row asks, then stops it: an app is closed as its tile's X closes it,
 // another program ended. Windows' own and the launcher's rows show, but never take the focus.
 // While the focus is on a row, the rows stay where they are (their numbers still change): what
@@ -14,7 +16,7 @@
 
 const res = {
   on: false,     // the host was told the menu is on screen
-  data: null,    // its last res.data (none yet: no card)
+  data: null,    // its last res.data (none yet: no view)
   hold: null,    // the rows' keys kept in place while the focus is on one of them
   rows: [],      // the rows shown
 };
@@ -51,9 +53,10 @@ function resRows() {
   }).filter(Boolean);
 }
 
+// A label and its number on one line, a bar or a second line under them.
 function resMeter(label, value, detail, high) {
-  return `<div class="rs-meter${high ? ' high' : ''}"><span class="rs-label">${label}</span>` +
-    `<span class="rs-value">${value}</span>${detail}</div>`;
+  return `<div class="rs-meter${high ? ' high' : ''}"><div class="rs-top"><span class="rs-label">${label}</span>` +
+    `<span class="rs-value">${value}</span></div>${detail}</div>`;
 }
 
 function resBar(percent) {
@@ -67,7 +70,7 @@ function resRowHtml(r) {
   const tile = r.app && state.tiles.find((t) => t.id === r.app);
   // The launcher itself, Windows' own programs, any other program: a glyph of their own.
   const glyph = r.key === 'self' ? 'tv' : r.key.startsWith('win:') ? 'desktop' : 'app';
-  const pic = tile ? appIcon(tile, 32) : `<span class="appicon rs-glyph">${icon(glyph, 32)}</span>`;
+  const pic = tile ? appIcon(tile, 28) : `<span class="appicon rs-glyph">${icon(glyph, 28)}</span>`;
   const tag = r.gone ? '<span class="tag">Ended</span>' : r.app && closing.has(r.app) ? '<span class="tag">Closing…</span>' : '';
   const numbers = r.gone ? '' : `<span class="rs-cpu">${resPercent(r.cpu)}</span><span class="rs-mem">${resMemory(r.mem)}</span>`;
   // Only what may be stopped takes the focus (a held row that ended keeps it until the focus leaves).
@@ -76,32 +79,31 @@ function resRowHtml(r) {
     `<span class="grow">${esc(r.name)}</span>${tag}${numbers}</div>`;
 }
 
-// The card (app.js's renderMenu draws it into #menu-res; the host's numbers patch it in place).
-// None until the first numbers: the menu's first frame is what it was without it, and the card
-// comes in with them (its entrance, as the app's buttons' card has), a moment after.
-function resCardHtml() {
+// The view (app.js's renderMenu draws it into #menu-res, at the bottom of the menu's column; the
+// host's numbers patch it in place). None until the first numbers: the menu's first frame is
+// what it was without it, and the view fades in with them, a moment after, under the rest.
+function resViewHtml() {
   const d = res.data;
   res.rows = resRows();
   if (!d) return '';
   const memory = d.memTotal ? d.memUsed / d.memTotal * 100 : null;
   const down = resRate(d.down, 'b'), up = resRate(d.up, 'b');
-  // A column of its own (app.js move): up and down stay in it; right goes into it from beside it.
-  return '<div class="ma-card rs-card" data-column><div class="rs-meters">' +
+  return '<div class="rs-view"><span class="section">System</span><div class="rs-meters">' +
       resMeter('CPU', `${Math.round(d.cpu)}<small>%</small>`, resBar(d.cpu), d.cpu >= 85) +
       resMeter('Memory', `${(d.memUsed / 1024).toFixed(1)}<small> / ${(d.memTotal / 1024).toFixed(1)} GB</small>`, resBar(memory), memory >= 90) +
       resMeter('Disk', resAmount(resRate(d.disk, 'B')), '<span class="rs-sub">read and written</span>') +
       resMeter('Network', down ? `↓ ${resAmount(down)}` : '–', `<span class="rs-sub">${up ? `↑ ${esc(up[0])} ${esc(up[1])}` : '&nbsp;'}</span>`) +
     '</div>' +
-    '<span class="section rs-section">Using the most</span>' +
+    '<span class="section">Using the most</span>' +
     `<div class="rs-rows">${res.rows.length ? res.rows.map(resRowHtml).join('') : '<span class="empty">Nothing running</span>'}</div>` +
   '</div>';
 }
 
-// The card again with what is known now (the host's numbers, the focus leaving the rows), and
+// The view again with what is known now (the host's numbers, the focus leaving the rows), and
 // the hints if the focus is on a row that changed (one that ended: A no longer stops it).
 function resPatch() {
   if (!res.on || !$('menu-res')) return;
-  patchHtml($('menu-res'), resCardHtml());
+  patchHtml($('menu-res'), resViewHtml());
   const f = state.view === 'menu' ? focusedEl() : null;
   const bar = $('menu-panel').querySelector('footer.hints');
   if (f && f.dataset.res && bar) patchHtml(bar, hints(menuHints(f)));
@@ -112,7 +114,7 @@ function resTell() { send({ type: 'res.watch', on: res.on, hold: res.hold || [] 
 // What is on screen changed (app.js sectionHooks: each render, the stage blank or back): the
 // host samples while the Home menu shows (under a question too: "End it?"), never while the
 // launcher is blank (behind an app, standby). Gone, its numbers go too: the next opening shows
-// no card until fresh ones come, never those of minutes ago.
+// no view until fresh ones come, never those of minutes ago.
 function resourcesInView(unders) {
   const on = !$('stage').classList.contains('blank') && (state.view === 'menu' || unders.includes('menu'));
   if (on === res.on) return;

@@ -82,39 +82,37 @@ html:has(#stage.blank) { background: var(--bg) !important; }
 #home { flex-direction: column; background: var(--bg); }
 #home.behind { display: flex; opacity: 0.35; }
 
-.status { height: 160px; box-sizing: border-box; padding: 52px 96px 0; display: flex; align-items: flex-start; justify-content: space-between; }
-.clock { display: flex; align-items: baseline; gap: 28px; }
-.clock .time { font-family: var(--display); font-weight: 600; font-size: 64px; letter-spacing: -0.02em; line-height: 1; }
-.clock .date { font-size: 28px; color: var(--text-2); }
+/* The clock and the pills: trimmer than they were (160 px), to give the tiles their three rows */
+.status { height: 112px; box-sizing: border-box; padding: 34px 96px 0; display: flex; align-items: flex-start; justify-content: space-between; }
+.clock { display: flex; align-items: baseline; gap: 26px; }
+.clock .time { font-family: var(--display); font-weight: 600; font-size: 60px; letter-spacing: -0.02em; line-height: 1; }
+.clock .date { font-size: 27px; color: var(--text-2); }
 .pills { display: flex; align-items: center; gap: 16px; }
-.pill { display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 24px; border-radius: 30px; background: var(--tile); font-size: 24px; }
+.pill { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 24px; border-radius: 28px; background: var(--tile); font-size: 24px; }
 .pill b { font-weight: 700; }
 .pill.timer { background: var(--accent-bg); color: var(--accent); font-weight: 700; }
 .pill.alert { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
-.round { display: flex; width: 60px; height: 60px; border-radius: 30px; background: var(--tile); align-items: center; justify-content: center; }
+.round { display: flex; width: 56px; height: 56px; border-radius: 28px; background: var(--tile); align-items: center; justify-content: center; }
 
-/* The tiles, centred while they fit (auto margins); more than fit, they scroll here (app.js
-   keepTileInView: the focused tile whole, its zoom and ring too), the clock and the hints stay.
-   Padding: room for the zoom and the ring at the ends; the ends fade where there are more.
+/* The tiles, centred while they fit (auto margins); more than fit, they scroll here by whole rows
+   (app.js keepTileInView), the clock and the hints stay. Three rows show whole (the owner, 29
+   Sept 2026: on the TV the rows were cut at the top or the bottom), and where there are more, a
+   sliver (26 px, a tenth of a tile) of the next row peeks out below them, or above once
+   scrolled: the padding at each end is a row's gap and that sliver. The stage's 1080 px are
+   exactly the status bar (112), three rows of 240 and their two gaps (28), the padding at both
+   ends (54 each) and the hints (84). Nothing is drawn over the ends (no fade, no mask): the
+   grid just scrolls, cut off at the edges of its box.
    Every list the focus scrolls (scrollTop) is overflow auto without a scrollbar, not hidden:
    Chromium moves an auto one on the GPU, and drew a hidden one afresh at each step. On the TV
    (4K, the box's GPU) that made a held direction in Add tile take 50-130 ms a press; 33 now. */
-.tiles-wrap { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 96px; overflow: hidden auto; scrollbar-width: none; }
-.tiles { flex-shrink: 0; margin: auto 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 48px; }
-/* The ends fade where there are more tiles: two strips of the page's colour that stay put while
-   the tiles scroll under them (sticky), shown by opacity. Not a mask on the list: a masked list
-   is drawn again whole, and masked again, for every change in it (each move's ring and zoom), and
-   with 38 tiles on the TV (4K, the box's GPU) a move took 60-140 ms. */
-.tiles-wrap::before, .tiles-wrap::after {
-  content: ''; position: sticky; z-index: 2; flex-shrink: 0; height: 28px; margin: 0 -96px; pointer-events: none;
-  opacity: 0; transition: opacity 0.15s ease;
-}
-.tiles-wrap::before { top: 0; margin-bottom: -28px; background: linear-gradient(var(--bg), transparent); }
-.tiles-wrap::after { bottom: 0; margin-top: -28px; background: linear-gradient(transparent, var(--bg)); }
-.tiles-wrap.more-up::before, .tiles-wrap.more-down::after { opacity: 1; }
+.tiles-wrap { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 54px 96px; overflow: hidden auto; scrollbar-width: none; }
+.tiles { flex-shrink: 0; margin: auto 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 240px; gap: 28px; }
+#home-hints { height: 84px; }
+/* A row's height is set (grid-auto-rows), not each tile's shape: 411 x 240 at 1080p, as big as
+   they were (396 x 248) but a little wider, and every row (the phone card's too) the same. */
 .tile {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
-  aspect-ratio: 16 / 10; border-radius: 28px; box-sizing: border-box;
+  border-radius: 28px; box-sizing: border-box;
   background: var(--tile); border: 2px solid var(--tile-edge); color: #D9D8D4;
   transition: transform 0.15s ease, translate 0.22s ease, opacity 0.15s ease;   /* the ring (box-shadow) comes at once: grown in, it was drawn again at each frame */
 }
@@ -159,31 +157,36 @@ html:has(#stage.blank) { background: var(--bg) !important; }
 .hint span:last-child { font-size: 26px; line-height: 1; }
 #power .hints, #timer .hints { position: absolute; left: 0; bottom: 0; }
 
-/* Home menu (side panel) */
+/* Home menu (side panel): one column, its resource view under the quick buttons (resources.css).
+   Its parts are compact (rows 60 px, not 88) so that all of it fits over an app with an app or
+   two open; more apps and alerts, it scrolls. */
 .panel {
-  position: absolute; left: 0; top: 0; bottom: 0; width: 640px; box-sizing: border-box; padding: 56px 48px 0;
-  background: var(--panel); box-shadow: 24px 0 80px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 14px;
+  position: absolute; left: 0; top: 0; bottom: 0; width: 640px; box-sizing: border-box; padding: 36px 48px 0;
+  background: var(--panel); box-shadow: 24px 0 80px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 10px;
   animation: slide-in 0.18s ease-out;
 }
 @keyframes slide-in { from { transform: translateX(-64px); opacity: 0; } to { transform: none; opacity: 1; } }
-.panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
-.panel-head .time { font-family: var(--display); font-weight: 600; font-size: 52px; letter-spacing: -0.02em; line-height: 1; }
-.panel-head .pad { display: flex; align-items: center; gap: 10px; font-size: 24px; color: var(--text-2); }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+.panel-head .time { font-family: var(--display); font-weight: 600; font-size: 44px; letter-spacing: -0.02em; line-height: 1; }
+.panel-head .pad { display: flex; align-items: center; gap: 10px; font-size: 22px; color: var(--text-2); }
 .section { margin-top: 18px; font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.row { display: flex; align-items: center; gap: 22px; height: 88px; padding: 0 28px; border-radius: 22px; background: var(--row); font-size: 30px; }
-.row.big { height: 92px; font-size: 32px; font-weight: 700; }
+#menu-panel .section { margin-top: 8px; font-size: 20px; }
+.row { display: flex; align-items: center; gap: 18px; height: 60px; padding: 0 24px; border-radius: 18px; background: var(--row); font-size: 27px; }
+.row.big { height: 64px; font-size: 28px; font-weight: 700; }
 .row .grow { flex-grow: 1; }
-.row .tag { padding: 6px 14px; border-radius: 16px; box-shadow: inset 0 0 0 2px var(--accent); color: var(--accent); font-size: 20px; font-weight: 700; }
+.row .tag { padding: 5px 12px; border-radius: 14px; box-shadow: inset 0 0 0 2px var(--accent); color: var(--accent); font-size: 19px; font-weight: 700; }
 .row.slider { gap: 20px; }
+/* The sliders after the open apps: a little apart from them, as a new part of the column */
+.apps + .row.slider { margin-top: 8px; }
 .row .track { flex-grow: 1; height: 10px; border-radius: 5px; background: var(--track); }
 .row .fill { height: 10px; border-radius: 5px; background: var(--accent); }
 .row .fill.white { background: var(--text); }
-.row .value { width: 56px; text-align: right; font-size: 28px; font-weight: 700; }
-.quicks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.quick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 116px; border-radius: 22px; background: var(--row); font-size: 22px; color: #D9D8D4; }
-.panel .hints { margin: auto -48px 0; padding: 0 48px; }
+.row .value { width: 56px; text-align: right; font-size: 26px; font-weight: 700; }
+.quicks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.quick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 80px; border-radius: 18px; background: var(--row); font-size: 20px; color: #D9D8D4; }
+.panel .hints { height: 80px; margin: auto -48px 0; padding: 0 48px; }
 /* The panel's rows: they scroll (to the focus) when there are too many; room for the rings */
-.panel-scroll { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px -8px 0; }
+.panel-scroll { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px -8px 0; }
 .panel-scroll > * { flex-shrink: 0; }
 
 /* The Home menu over an app: its buttons, beside the panel (buttons.js menuAppCard) */
@@ -301,7 +304,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
    notes are in a box of their own that scrolls when they are longer than it: 440 px high at most
    (about 40 % of the screen; less under a long question). Up and Down scroll it, the focus stays
    on the buttons. Overflow auto without a scrollbar, not hidden (see .tiles-wrap), and its ends
-   fade where there is more, as the tiles' do (strips of its colour, not a mask). */
+   fade where there is more (strips of its colour, not a mask). */
 .dialog:has(> .notes) { width: 1000px; max-height: calc(100% - 96px); }
 .dialog:has(> .notes) > :not(.notes) { flex-shrink: 0; }
 .dialog > .notes {

@@ -146,16 +146,20 @@ function renderTiles() {
   updateHomeHints();
 }
 
-// More tiles than fit: the grid scrolls (the clock and the hints stay) so the focused tile shows
-// whole, its zoom and ring too, with the next row peeking. By layout offsets (from .tiles-wrap,
-// scroll aside), not the screen: a tile still sliding (move mode) counts where it lands.
+// More tiles than fit: the grid scrolls by whole rows (the clock and the hints stay). Three rows
+// show whole, the focused one among them, its zoom and ring too, and a sliver of the row beyond
+// peeks out where there are more: the room kept round the focused row is the grid's padding (a
+// row's gap and that sliver, app.css .tiles-wrap), so a row is never cut. By layout offsets
+// (from .tiles-wrap, scroll aside), not the screen: a tile still sliding (move mode) counts where
+// it lands. The phone card's button: its card's row.
 function keepTileInView(el) {
   const wrap = el.closest('.tiles-wrap');
   if (!wrap) return;
-  const room = 36, top = el.offsetTop - room, bottom = el.offsetTop + el.offsetHeight + room;
+  const row = el.closest('#tiles > *') || el;
+  const room = parseFloat(getComputedStyle(wrap).paddingTop);
+  const top = row.offsetTop - room, bottom = row.offsetTop + row.offsetHeight + room;
   if (top < wrap.scrollTop) wrap.scrollTop = top;
   else if (bottom > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = bottom - wrap.clientHeight;
-  listEdges(wrap);
 }
 
 // Tiles whose place changed slide there from where they were (FLIP), instead of jumping. Not
@@ -200,46 +204,50 @@ function setHomeHints(html) {
   if (bar.hintsHtml !== html) { bar.innerHTML = html; bar.hintsHtml = html; }
 }
 
+// The Home menu: one column down the left of the screen. The way home and the open apps, only
+// when there is somewhere to go (the owner, 29 Sept 2026: no "Home screen" over the home screen,
+// no "Open apps" with none open), the sliders and the quick buttons, then what the box is busy
+// with (resources.js), under them.
 function renderMenu() {
   const running = state.tiles.filter((t) => t.running);
-  const apps = running.length
-    ? running.map((t) =>
-        `<div class="row" data-nav data-id="app:${esc(t.id)}" data-act="switch" data-arg="${esc(t.id)}" data-close="${esc(t.id)}">` +
-          appIcon(t, 36) + `<span class="grow">${esc(t.name)}</span>` +
-          (closing.has(t.id) ? '<span class="tag">Closing…</span>' : t.id === state.current ? '<span class="tag">Now</span>' : '') +
-        '</div>').join('')
-    : '<div class="empty">No apps open</div>';
+  const apps = running.map((t) =>
+    `<div class="row" data-nav data-id="app:${esc(t.id)}" data-act="switch" data-arg="${esc(t.id)}" data-close="${esc(t.id)}">` +
+      appIcon(t, 32) + `<span class="grow">${esc(t.name)}</span>` +
+      (closing.has(t.id) ? '<span class="tag">Closing…</span>' : t.id === state.current ? '<span class="tag">Now</span>' : '') +
+    '</div>').join('');
   // Many open apps (plus alert rows): two columns of shorter rows (notices.css).
   $('menu-panel').classList.toggle('crowded', running.length > 3 || (running.length > 2 && notices.rows.length > 0));
-  // In place (patchHtml): the volume changing redraws its value, not the focused row's ring.
-  // Everything but the hints is in .panel-scroll: with many apps and alerts it scrolls to the
-  // focus (setFocus), the hints stay at the bottom.
+  // In place (patchHtml): the volume changing redraws its value, not the focused row's ring, and
+  // the resource view's numbers change in it alone (resPatch). Everything but the hints is in
+  // .panel-scroll: with many apps and alerts it scrolls to the focus (setFocus), the hints stay
+  // at the bottom.
   patchHtml($('menu-panel'), '<div class="panel-scroll">' +
     `<div class="panel-head"><span class="time">${timeText(new Date())}</span>` +
-      `<span class="pad">${icon('controller', 30)}${esc(batteryText())}</span></div>` +
+      `<span class="pad">${icon('controller', 28)}${esc(batteryText())}</span></div>` +
     noticeRowsHtml() + // alerts with something to do (notices.js)
     // Over the Windows desktop (desktop mode) the way back comes first.
-    (state.desktop ? `<div class="row big" data-nav data-id="back-tv" data-act="power-action" data-arg="tv">${icon('tv', 38, 2)}Back to TV</div>` : '') +
-    `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 38, 2)}Home screen</div>` +
-    `<span class="section">Open apps</span><div class="apps">${apps}</div>` +
-    '<span class="section quick-label">Quick</span>' +
-    `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 34)}` +
+    (state.desktop ? `<div class="row big" data-nav data-id="back-tv" data-act="power-action" data-arg="tv">${icon('tv', 32, 2)}Back to TV</div>` : '') +
+    (state.current ? `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 32, 2)}Home screen</div>` : '') +
+    (running.length ? `<span class="section">Open apps</span><div class="apps">${apps}</div>` : '') +
+    `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 30)}` +
       `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
-    `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 34)}` +
+    `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 30)}` +
       `<div class="track"><div class="fill white" style="width:${state.brightness}%"></div></div><span class="value">${state.brightness}</span></div>` +
     // Settings, then Power: in the order of the home screen's top bar (renderStatus).
     '<div class="quicks">' +
-      `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 34)}Buttons</div>` +
-      `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 34)}Timer</div>` +
-      `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 34)}Settings</div>` +
-      `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 34)}Power</div>` +
-    '</div></div>' +
+      `<div class="quick" data-nav data-id="q-buttons" data-act="buttons">${icon('controller', 30)}Buttons</div>` +
+      `<div class="quick" data-nav data-id="q-timer" data-act="view" data-arg="timer">${icon('timer', 30)}Timer</div>` +
+      `<div class="quick" data-nav data-id="q-settings" data-act="settings">${icon('sliders', 30)}Settings</div>` +
+      `<div class="quick" data-nav data-id="q-power" data-act="view" data-arg="power">${icon('power', 30)}Power</div>` +
+    '</div>' +
+    // The box's CPU, memory, disk and network, and what uses the most (resources.js): nothing
+    // until the host's first numbers, which then change in it alone.
+    `<div id="menu-res">${typeof resViewHtml === 'function' ? resViewHtml() : ''}</div>` +
+    '</div>' +
     `<footer class="hints">${hints(menuHints($('menu').querySelector('[data-nav].focused')))}</footer>`);
   // Over an app: what its buttons do, beside the panel (buttons.js; replaces the hint that
   // showed for a few seconds when an app opened).
   if ($('menu-app')) patchHtml($('menu-app'), typeof menuAppCard === 'function' ? menuAppCard() : '');
-  // The box's CPU, memory, disk and network, and what uses the most (resources.js), at the top right.
-  if ($('menu-res')) patchHtml($('menu-res'), typeof resCardHtml === 'function' ? resCardHtml() : '');
 }
 
 // The Home menu's hints follow the focus: X only where it does something (an alert's row: it
@@ -597,16 +605,20 @@ function restoreFocus(id, prev) {
     (state.view === 'timer' ? list[1] : null) || list[0], false);
 }
 
-// The closest element in a direction from cur, among list; null when there is none. across:
-// left and right take only what is beside cur (wholly past its edge, and overlapping its
-// height or within 45 degrees), not a button under a wide row or far down another column.
+// The closest element in a direction from cur, among list; null when there is none. across (the
+// Home menu's column of wide rows and rows of buttons): left and right take only what is beside
+// cur (wholly past its edge, and overlapping its height or within 45 degrees), not a button
+// under a wide row or far down another column; up and down go by the gap between the edges, and
+// what overlaps cur's width is straight above or below it: from a wide row up to the four quick
+// buttons over it (the nearest to its middle), not past them to the slider over those, whose
+// centre is in line with its own.
 // Something scrolled out of its own list (a tile above the home grid's top, under the status
 // bar) is not a place to go from outside that list; within it, it is (the list scrolls to it).
 function nearest(cur, dir, list = items(), across = false) {
   const r = cur.getBoundingClientRect();
   const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
   const ownBox = scrollerOf(cur);
-  let best = null, bestScore = Infinity;
+  let best = null, bestScore = Infinity, bestOff = Infinity;
   for (const el of list) {
     if (el === cur) continue;
     const q = el.getBoundingClientRect();
@@ -620,12 +632,18 @@ function nearest(cur, dir, list = items(), across = false) {
     if (dir === 'right') { main = dx; side = dy; } else if (dir === 'left') { main = -dx; side = dy; }
     else if (dir === 'down') { main = dy; side = dx; } else { main = -dy; side = dx; }
     if (main <= 8) continue;
+    const off = Math.abs(side);   // off the line through cur's middle: across, the tie-break
     if (across && (dir === 'left' || dir === 'right')) {
       if (dir === 'left' ? q.right > r.left + 8 : q.left < r.right - 8) continue;
       if (Math.abs(side) > main && (q.bottom <= r.top || q.top >= r.bottom)) continue;
+    } else if (across) {
+      const gap = dir === 'down' ? q.top - r.bottom : r.top - q.bottom;
+      if (gap < -8) continue;
+      main = Math.max(0, gap);
+      side = q.right > r.left && q.left < r.right ? 0 : Math.min(Math.abs(q.left - r.right), Math.abs(r.left - q.right));
     }
     const score = main + Math.abs(side) * 2;
-    if (score < bestScore) { bestScore = score; best = el; }
+    if (score < bestScore || (across && score === bestScore && off < bestOff)) { bestScore = score; bestOff = off; best = el; }
   }
   return best;
 }
@@ -636,28 +654,17 @@ function scrollerOf(el) {
   return null;
 }
 
-// Nothing wraps round, anywhere: past the end of a row, a list or a grid the focus stays. A box
-// of its own (data-column: the Home menu's resource card) is a column: up and down stay in it,
-// and left or right go into it only from beside it. On a view with one, left and right go only
-// to what is beside the focus (nearest's across): from the menu's wide rows, right went down to
-// its quick buttons, ahead of the card beside them.
+// Nothing wraps round, anywhere: past the end of a row, a list or a grid the focus stays. In the
+// Home menu, one column, left and right go only to what is beside the focus (nearest's across):
+// from its wide rows (an open app, a program in the resource view), right went up or down to a
+// quick button. Up and down go along the column, into and out of the resource view as anywhere.
+// (Its programs were a card of their own, up and down kept in it: with the launcher's and
+// Windows' rows taking no focus, on the TV that often left one row, and the focus could not
+// move but back out to the left.)
 function move(dir) {
   const cur = focusedEl();
   if (!cur) { restoreFocus(); return; }
-  const column = cur.closest('[data-column]');
-  let list = column && (dir === 'up' || dir === 'down') ? [...column.querySelectorAll('[data-nav]')] : items();
-  let across = false;
-  if (dir === 'left' || dir === 'right') {
-    const r = cur.getBoundingClientRect();
-    list = list.filter((e) => {
-      const other = e.closest('[data-column]');
-      if (other) across = true;
-      if (!other || other === column) return true;
-      const q = other.getBoundingClientRect();
-      return q.bottom > r.top && q.top < r.bottom;
-    });
-  }
-  const best = nearest(cur, dir, list, across);
+  const best = nearest(cur, dir, items(), state.view === 'menu');
   if (best) setFocus(best);
 }
 

@@ -475,8 +475,10 @@
     return '<p class="at-note">Everything installed on this box, A to Z</p>' + `<div class="ob-grid">${rows}</div>`;
   }
 
-  // The address first (the name is optional), then Add tile; the preview beside them. Everything
-  // sits in the top half: the keyboard, up, never covers the field being typed into.
+  // The address first (the name is optional), then Add tile; the preview beside them. No line on
+  // how to bring the keyboard up: by then the user knows A on a field does (the owner, 29 Sept
+  // 2026), and the hints say Type. Everything sits in the top half: the keyboard, up, never
+  // covers the field being typed into.
   function websiteTabHtml() {
     const w = lib.website;
     const field = (id, label, value, max, placeholder, aria) =>
@@ -487,7 +489,6 @@
         field('url', 'Address', w.url, 2048, 'example.com', 'Website address') +
         field('name', 'Name', w.name, 24, 'Optional: its address if left empty', 'Tile name') +
         `<div class="lib-buttons"><div class="lib-btn primary" data-nav data-id="wf-add" data-act="addsite">${lib.adding ? 'Adding…' : 'Add tile'}</div></div>` +
-        `<p class="lib-note">${icon('keyboard', 28)}Opens as its own app window: no address bar or tabs. Type with the on-screen keyboard (A or R3) or on your phone.</p>` +
       '</div>' +
       `<div class="ws-preview">${previewHtml()}</div>` +
     '</div>';
