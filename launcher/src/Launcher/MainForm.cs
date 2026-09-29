@@ -453,6 +453,22 @@ sealed partial class MainForm : Form
     IntPtr lastForeground;
     CatalogApp? foregroundApp;
     bool foregroundIsOurs;
+    readonly HashSet<IntPtr> windowsSeen = new();
+
+    /// <summary>
+    /// A window a website tile (or the Browser) opened, the first time it comes in front: a
+    /// sign-in page, a link that opens a new window. Edge puts it in the middle of the screen at
+    /// its own size; it is maximized (Native.MaximizeIfWindowed: not full screen, so its title
+    /// bar's close button leads back to the site). Once per window: one the user made smaller
+    /// stays so. The site's own window is full screen, and left alone.
+    /// </summary>
+    void MaximizeOpenedWindow(IntPtr window)
+    {
+        if (foregroundApp is not { } app || !(app.IsWebsite || string.Equals(Path.GetFileName(app.Exe), "msedge.exe", StringComparison.OrdinalIgnoreCase))) return;
+        if (windowsSeen.Count > 500) windowsSeen.Clear();
+        if (!windowsSeen.Add(window)) return;
+        if (Native.MaximizeIfWindowed(window)) Log.Info($"{app.Id}: a window it opened maximized");
+    }
     bool foregroundIsInstaller;
 
     /// <summary>
@@ -477,6 +493,7 @@ sealed partial class MainForm : Form
                 foregroundApp = apps.ForegroundApp();
                 foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
                 foregroundIsInstaller = foregroundApp is null && library.IsInstallerProcess(Native.ProcessOf(window));
+                MaximizeOpenedWindow(window);
             }
             if (window != IntPtr.Zero && !foregroundIsOurs)
             {

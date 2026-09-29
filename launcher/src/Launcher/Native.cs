@@ -59,6 +59,30 @@ static class Native
         return true;
     }
 
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
+
+    /// <summary>
+    /// Maximizes a plain window (a frame to size it by, a maximize button; not owned by another
+    /// window, not a tool window), neither maximized nor minimized, that does not cover its screen:
+    /// a window a website opened (a sign-in page, a link to another site), which Edge puts in the
+    /// middle of the screen at its own size. Maximized, not filled: its title bar stays, to close
+    /// it and get back to the site. False when it was left alone.
+    /// </summary>
+    public static bool MaximizeIfWindowed(IntPtr hWnd)
+    {
+        const long WS_THICKFRAME = 0x00040000, WS_MAXIMIZEBOX = 0x00010000, WS_EX_TOOLWINDOW = 0x80;
+        const int SW_MAXIMIZE = 3;
+        if (hWnd == IntPtr.Zero || !IsWindowVisible(hWnd) || IsIconic(hWnd) || IsZoomed(hWnd) || GetWindow(hWnd, 4 /* GW_OWNER */) != IntPtr.Zero) return false;
+        var style = (long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */);
+        var exStyle = (long)GetWindowLongPtr(hWnd, -20 /* GWL_EXSTYLE */);
+        if ((style & (WS_THICKFRAME | WS_MAXIMIZEBOX)) != (WS_THICKFRAME | WS_MAXIMIZEBOX) || (exStyle & WS_EX_TOOLWINDOW) != 0) return false;
+        if (!GetWindowRect(hWnd, out var r)) return false;
+        var screen = Screen.FromHandle(hWnd).Bounds;
+        if (r.Left <= screen.Left && r.Top <= screen.Top && r.Right >= screen.Right && r.Bottom >= screen.Bottom) return false; // full screen: the site's own window
+        ShowWindow(hWnd, SW_MAXIMIZE);
+        return true;
+    }
+
     /// <summary>Whether the window covers its screen with no frame showing (FillsScreen), its strip cropped, minimized not.</summary>
     public static bool Fills(IntPtr hWnd, int cropTop = 0) =>
         !IsIconic(hWnd) && GetWindowRect(hWnd, out var r) && FillsScreen((long)GetWindowLongPtr(hWnd, -16 /* GWL_STYLE */), r, FillTarget(hWnd, cropTop));
