@@ -14,13 +14,20 @@
 .upd-row .text { min-width: 0; overflow-wrap: anywhere; }
 .upd-row .label { font-size: 27px; }
 .upd-row .caption { font-size: 21px; }
-/* 4 lines at most: a release's notes (updates.js cuts them first, at a word; the question A asks
-   has more of them), and a row's caption, an error message too: a row never gets taller than the
-   pane, its focus ring always whole. */
+/* 4 lines at most: a release's notes (updates.js keeps their first 4 lines, cut at a word; a line
+   that wraps is clamped here; the question A asks has all of them), and a row's caption, an error
+   message too: a row never gets taller than the pane, its focus ring always whole. */
 .upd-row .notes { font-size: 20px; line-height: 1.35; color: var(--muted); }
 .upd-row .caption, .upd-row .notes, .upd-card .upd-error, .upd-checked {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden;
 }
+/* A release's notes (updates.js updNotes), in the row and in the question A asks (app.css's
+   .dialog > .notes): line by line as written, a "- " line a bullet, the rest of its text under
+   its first word, not under the bullet. Apart a little in the question, where they all show. */
+.upd-note { display: block; }
+.upd-note.bullet { position: relative; padding-left: 1.1em; }
+.upd-note.bullet::before { content: '•'; position: absolute; left: 0.2em; }
+.dialog .upd-note + .upd-note { margin-top: 8px; }
 .upd-status { flex-shrink: 0; display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; white-space: nowrap; }
 .upd-status.update { color: var(--warn); }
 .upd-status.ok { color: #7FD1AE; }

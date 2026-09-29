@@ -20,7 +20,9 @@
 .PARAMETER Version
     The new version, e.g. 0.2.0.
 .PARAMETER Notes
-    One or two short sentences for the TV and the release page.
+    What is new, for the TV and the release page: a line per point, each starting "- " (a bullet
+    on both). The TV keeps the lines: Settings > Updates shows the first ones in the launcher's
+    row, and all of them (up to 20 000 characters) in the question it asks, which scrolls.
 .PARAMETER SkipBuild
     Do not build first (only when a build just passed).
 .PARAMETER Repo

@@ -297,6 +297,26 @@ h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 56px; 
   background: var(--track); font-family: var(--display); font-weight: 600; font-size: 30px;
 }
 .dialog .button.focused { background: var(--tile-focus); }
+/* A question with notes (a release's: app.js ask): wider, and never taller than the screen. The
+   notes are in a box of their own that scrolls when they are longer than it: 440 px high at most
+   (about 40 % of the screen; less under a long question). Up and Down scroll it, the focus stays
+   on the buttons. Overflow auto without a scrollbar, not hidden (see .tiles-wrap), and its ends
+   fade where there is more, as the tiles' do (strips of its colour, not a mask). */
+.dialog:has(> .notes) { width: 1000px; max-height: calc(100% - 96px); }
+.dialog:has(> .notes) > :not(.notes) { flex-shrink: 0; }
+.dialog > .notes {
+  flex: 0 1 auto; min-height: 0; max-height: 440px; box-sizing: border-box; display: flex; flex-direction: column;
+  padding: 18px 26px; border-radius: 20px; background: var(--panel); overflow: hidden auto; scrollbar-width: none;
+  font-size: 24px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere;
+}
+.dialog > .notes > * { flex-shrink: 0; }
+.dialog > .notes::before, .dialog > .notes::after {
+  content: ''; position: sticky; z-index: 2; flex-shrink: 0; height: 28px; margin: 0 -26px; pointer-events: none;
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.dialog > .notes::before { top: 0; margin-bottom: -28px; background: linear-gradient(var(--panel), transparent); }
+.dialog > .notes::after { bottom: 0; margin-top: -28px; background: linear-gradient(transparent, var(--panel)); }
+.dialog > .notes.more-up::before, .dialog > .notes.more-down::after { opacity: 1; }
 
 /* Opening an app: shown until its window is up */
 /* Above the views, stacked ones too (app.js render gives those a z-index by opening order). */

@@ -317,9 +317,12 @@ if (AUDIT_PAGE === 'index') {
   sectionState('Updates, a release that needs setup', 'updates', () => auditUpdates('setup'), launcherRow);
   sectionState('Updates, the longest notes', 'updates', () => auditUpdates('longnotes'), launcherRow);
   sectionState('Updates, long errors', 'updates', () => auditUpdates('longerrors'), launcherRow);
-  for (const [name, kind] of [['ask: update the TV launcher', 'ready'], ['ask: update the TV launcher, the longest notes', 'longnotes']]) {
+  // The question A asks on that row, its notes in a box that scrolls; the tallest: the longest
+  // notes under the longest title and text (a version that did not start here, asked again).
+  for (const [name, kind, skipped] of [['ask: update the TV launcher', 'ready'], ['ask: update the TV launcher, the longest notes', 'longnotes'],
+    ['ask: try the TV launcher again, the longest notes', 'longnotes', true]]) {
     auditPage(name, { view: 'ask', covers: [], open() {
-      auditSettings('updates'); auditUpdates(kind); render();
+      auditSettings('updates'); auditUpdates(kind); upd.s.launcher.skipped = !!skipped; render();
       EXT.actions['upd-row'](null, 'launcher');
     } });
   }
@@ -524,6 +527,7 @@ function auditProblems(el) {
   }
   // What it holds stays inside it (a long name that spills out, or is cut off, is not).
   for (const c of el.querySelectorAll('*')) {
+    if (auditClippedWithin(c, el)) continue;
     const q = c.getBoundingClientRect();
     if (q.width && q.height && (q.left < r.left - 1 || q.top < r.top - 1 || q.right > r.right + 1 || q.bottom > r.bottom + 1)) {
       out.push(`what it holds spills out of it (${auditDescribe(c)})`);
@@ -536,6 +540,14 @@ function auditProblems(el) {
     if (hit && hit !== el && !el.contains(hit)) { out.push(`it is covered by ${auditDescribe(hit)}`); break; }
   }
   return out;
+}
+
+// c is in a box within box that clips what it holds (a line clamp, notes that scroll): the lines
+// past that box's end are hidden there on purpose, as its text would be. That box itself is
+// checked, as everything else box holds.
+function auditClippedWithin(c, box) {
+  for (let p = c.parentElement; p && p !== box; p = p.parentElement) if (getComputedStyle(p).overflowY !== 'visible') return true;
+  return false;
 }
 
 // Text that runs out of its box, where the focus never lands too: a card or a row whose content
@@ -551,6 +563,7 @@ function auditSpills() {
     const r = box.getBoundingClientRect();
     if (!r.width || !r.height) continue;
     for (const c of box.querySelectorAll('*')) {
+      if (auditClippedWithin(c, box)) continue;
       const q = c.getBoundingClientRect();
       if (q.width && q.height && (q.left < r.left - 1 || q.top < r.top - 1 || q.right > r.right + 1 || q.bottom > r.bottom + 1)) {
         out.push(`${auditDescribe(c)} spills out of ${auditDescribe(box)}`);
