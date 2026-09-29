@@ -27,7 +27,10 @@ namespace Htpc.Launcher;
 ///
 /// The elevated wizard runs setup.ps1 directly (SetupRunner), with a WebView2 profile of its own,
 /// new each run (%LOCALAPPDATA%\HTPC\setup-webview\run-*: the browser runs at the user's rights,
-/// see WebViewFolder; the launcher's stays the one it always was), and holds the
+/// see WebViewFolder; the launcher's stays the one it always was). WebView2 starts that browser
+/// through Explorer's desktop, which TV mode does not have (the launcher is the shell): the first
+/// copy then starts Explorer as the user before it asks (DesktopMode.OpenForSetup, DesktopFlag),
+/// and setup closes it again as it ends (CloseOwnDesktop). The wizard holds the
 /// single-instance mutex with the user's access in it. Whatever it starts for the user runs as
 /// the signed-in user, not elevated (AsUser): the installed watchdog and launcher at the end, or
 /// this program as the home screen. Checked in launcher\tests\LauncherTests (ElevationTests.cs).
@@ -40,8 +43,47 @@ static class SetupElevation
     public const string HomeFlag = "--home";
     /// <summary>The elevated setup's copy of this exe, in TrustedDir.</summary>
     public const string TrustedExeName = "TV Box Setup.exe";
+    /// <summary>
+    /// The copy before it started Explorer for this setup (TV mode: DesktopMode.OpenForSetup), so
+    /// setup closes it as it ends (OwnDesktop). Harmless whoever passes it: at most it closes the
+    /// passer's own Explorer when setup ends.
+    /// </summary>
+    public const string DesktopFlag = "--desktop-for-setup";
     /// <summary>The only arguments the elevated copy gets besides --setup and --elevated.</summary>
-    static readonly string[] Forwarded = ["--no-tv", "--windowed"];
+    static readonly string[] Forwarded = ["--no-tv", "--windowed", DesktopFlag];
+
+    /// <summary>
+    /// This setup started Explorer for itself (DesktopFlag, or OpenForSetup here): Explorer closes
+    /// as setup ends (CloseOwnDesktop), and until then the wizard keeps in front of the desktop
+    /// (MainForm.GuardSetup). Set by Main from the arguments.
+    /// </summary>
+    public static bool OwnDesktop { get; set; }
+
+    /// <summary>
+    /// Setup ends (finished, quit, refused, its screens not shown): the desktop it opened for itself
+    /// closes, TV mode again (DesktopMode.CloseAfterSetup), before the launcher is started or its
+    /// watchdog let go. Once; nothing when setup did not open it. Never throws.
+    /// </summary>
+    public static void CloseOwnDesktop()
+    {
+        if (!OwnDesktop) return;
+        OwnDesktop = false;
+        try { DesktopMode.CloseAfterSetup(); }
+        catch (Exception e) { Log.Error("Setup: closing the desktop it opened", e); }
+    }
+
+    /// <summary>
+    /// Before the elevated setup starts (asking for the rights, or starting its copy again): no
+    /// Windows desktop (TV mode), Explorer starts first for the elevated WebView2
+    /// (DesktopMode.OpenForSetup), and args gets DesktopFlag so the copy closes it as it ends.
+    /// </summary>
+    static List<string> WithDesktop(IEnumerable<string> args)
+    {
+        var list = args.ToList();
+        if (DesktopMode.OpenForSetup()) OwnDesktop = true;
+        if (OwnDesktop && !list.Contains(DesktopFlag)) list.Add(DesktopFlag);
+        return list;
+    }
 
     /// <summary>Program Files\HTPC\Setup: where the elevated setup runs from (admin-only, as Program Files is).</summary>
     public static string TrustedDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup");
@@ -225,6 +267,7 @@ static class SetupElevation
         var why = match == SessionMatch.Other
             ? $"Windows started setup as {me.Name}, but {name} is signed in here. Setup would have set up {me.Name} instead, so it changed nothing."
             : $"Windows started setup as {me.Name} and did not say who is signed in here, so setup changed nothing.";
+        CloseOwnDesktop();   // the signed-in user's Explorer, started for this setup by its first copy
         if (sid is not null) WatchdogPause.ClearFor(sid);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -249,7 +292,7 @@ static class SetupElevation
             && Full(baseDir).StartsWith(Full(Path.Combine(trustedDir, "bundle")) + "\\", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>The elevated copy's arguments: --setup, the harmless ones of these (--no-tv, --windowed), --elevated.</summary>
+    /// <summary>The elevated copy's arguments: --setup, the harmless ones of these (--no-tv, --windowed, --desktop-for-setup), --elevated.</summary>
     public static List<string> ElevatedArgs(IEnumerable<string> args) =>
         ["--setup", .. Forwarded.Where(f => args.Contains(f)), ElevatedFlag];
 
@@ -352,7 +395,16 @@ static class SetupElevation
 
     /// <summary>The home screen's arguments after setup: these without setup's own, and --home.</summary>
     public static List<string> HomeArgs(IEnumerable<string> args) =>
-        args.Where(a => a is not ("--setup" or ElevatedFlag or HomeFlag)).Append(HomeFlag).ToList();
+        args.Where(a => a is not ("--setup" or ElevatedFlag or HomeFlag or DesktopFlag)).Append(HomeFlag).ToList();
+
+    /// <summary>
+    /// "Setup could not show its screens": what to do. WebView2's "Element not found"
+    /// (0x80070490) means it found no Windows desktop to start its browser through (TV mode, the
+    /// launcher as the shell): the words say how to get one.
+    /// </summary>
+    public static string CannotShowBody(Exception ex) => ex.HResult == unchecked((int)0x80070490)
+        ? "Nothing was changed. Setup needs the Windows desktop behind it: open Power › Desktop mode, then start TV Box Setup again."
+        : "Nothing was changed. Try again; if it happens again, restart the box and start TV Box Setup once more.";
 
     /// <summary>Arguments as one command line that Windows splits back into the same list.</summary>
     public static string CommandLine(IEnumerable<string> args) => string.Join(' ', args.Select(Quote));
@@ -378,8 +430,10 @@ static class SetupElevation
     /// one each run, setup-webview\run-&lt;id&gt;. The elevated setup's is in the user's profile, a
     /// folder the user can write, and that is safe:
     ///   - WebView2 starts its browser de-elevated, at the user's own rights, whatever its host's
-    ///     (runtime 154 does): in admin-only Program Files\HTPC\Setup it could not make its
-    ///     profile, and setup stopped before its first page.
+    ///     (runtimes 153 and 154 do, through Explorer's desktop: without one, as in TV mode, it
+    ///     fails with "Element not found", so the first copy starts Explorer: OwnDesktop): in
+    ///     admin-only Program Files\HTPC\Setup it could not make its profile, and setup stopped
+    ///     before its first page.
     ///   - The browser makes and writes the folder itself, at the user's rights. This elevated
     ///     process only names it: it never writes, reads or runs anything in it.
     ///   - Whatever a changed profile could make the page do, the user's own programs can do
@@ -533,11 +587,14 @@ static class SetupElevation
 
     /// <summary>
     /// A new copy of this setup, started the trusted way (Relaunch: no prompt when elevated), with
-    /// this one's arguments; this one then ends. Null once it runs, else why not, for the screen.
+    /// this one's arguments; this one then ends. With no Windows desktop (its screens did not show
+    /// for want of one: a setup started elevated in TV mode) Explorer starts first, as the user
+    /// (WithDesktop), and the new copy closes it as it ends. Null once it runs, else why not, for
+    /// the screen.
     /// </summary>
     public static string? StartAgain()
     {
-        var why = Relaunch(Environment.GetCommandLineArgs().Skip(1), prompt: !Environment.IsPrivilegedProcess);
+        var why = Relaunch(WithDesktop(Environment.GetCommandLineArgs().Skip(1)), prompt: !Environment.IsPrivilegedProcess);
         if (why is null) HandedOver = true;
         return why;
     }
@@ -550,7 +607,8 @@ static class SetupElevation
     public static bool HandedOver { get; set; }
 
     /// <summary>
-    /// Setup ended before it handed over (closed, or its screens did not show): the watchdog's pause
+    /// Setup ended before it handed over (closed, or its screens did not show): the desktop it
+    /// opened for itself closes (TV mode again, before the launcher comes back), the watchdog's pause
     /// it set goes, and a launcher it ended as it started comes back, started as the signed-in user
     /// (AsUser: the one-shot not-elevated task), through the watchdog when it is installed. A
     /// watchdog already running starts it by itself once the pause is off. Without this an install
@@ -561,6 +619,7 @@ static class SetupElevation
     {
         try
         {
+            CloseOwnDesktop();
             WatchdogPause.Clear();
             if (launchersEnded == 0) return;
             if (DesktopMode.WatchdogRunning()) { Log.Info("Setup ended early: the watchdog starts the launcher again"); return; }
@@ -579,9 +638,12 @@ static class SetupElevation
     /// Main, setup mode not running yet (Decide): without administrator rights, asks for them (the
     /// elevated copy carries on), else the "needs administrator rights" screen until they are given
     /// or the user quits. Elevated but unpacked where the user can write: starts the trusted copy
-    /// (no prompt) and ends. The watchdog is paused for 15 minutes from each try: a launcher that
-    /// closed for setup (About › Run setup again) is not started again over the prompt. Quitting
-    /// lifts the pause. Nothing else is done meanwhile: a running launcher is left alone.
+    /// (no prompt) and ends. Before either, with no Windows desktop (TV mode), Explorer starts as
+    /// the user (WithDesktop: the elevated WebView2 needs it) and the copy is told to close it as
+    /// it ends. The watchdog is paused for 15 minutes from each try: a launcher that closed for
+    /// setup (About › Run setup again) is not started again over the prompt. Quitting closes the
+    /// desktop it opened and lifts the pause. Nothing else is done meanwhile: a running launcher is
+    /// left alone.
     /// </summary>
     public static void GetRights(Step step, string[] args)
     {
@@ -593,6 +655,7 @@ static class SetupElevation
             _ => $"elevated, not from {TrustedDir} although it was started to be: stopped",
         });
         WatchdogPause.Set(TimeSpan.FromMinutes(15));
+        if (step is Step.Elevate or Step.Relocate) args = [.. WithDesktop(args)];
         var why = step switch
         {
             Step.Elevate => Relaunch(args),
@@ -611,6 +674,7 @@ static class SetupElevation
         });
         Application.Run(screen);
         if (screen.HandedOver) return;
+        CloseOwnDesktop();
         WatchdogPause.Clear();
         Log.Info("Setup: quit without administrator rights");
     }
@@ -631,6 +695,8 @@ static class AsUser
     /// <summary>Install-Launcher's and the watchdog's own task: one entry for the watchdog, overwritten each time.</summary>
     public const string WatchdogTask = "HTPC watchdog";
     public const string LauncherTask = "HTPC launcher";
+    /// <summary>Explorer for TV Box Setup from TV mode, started by an elevated copy (DesktopMode.OpenForSetup).</summary>
+    public const string DesktopTask = "HTPC desktop";
 
     public static void Start(UserStart start)
     {

@@ -10,7 +10,9 @@ namespace Htpc.Launcher;
 /// --no-tv (never sends the TV a key: for working on the box while nobody watches the TV),
 /// --setup (first-run setup; also when the exe's name has "setup" in it: "TV Box Setup.exe"; it
 /// runs elevated, see SetupElevation.cs), --elevated (the copy setup started with administrator
-/// rights, from Program Files\HTPC\Setup; it gets no --ui, --catalog or --dev), --home (not setup even so: the home screen after setup when no launcher was installed),
+/// rights, from Program Files\HTPC\Setup; it gets no --ui, --catalog or --dev), --desktop-for-setup (setup: the copy
+/// before it started Explorer for it, from TV mode; setup closes it as it ends: SetupElevation.OwnDesktop),
+/// --home (not setup even so: the home screen after setup when no launcher was installed),
 /// --version (prints the version and ends; see Program.Main), --phone-certificates-create (setup, as the user: the phone
 /// remote's CA made; ends), --phone-certificates (setup, elevated: its intermediate certificate in the machine's store; ends), 
 /// --restarted (started again by the watchdog: the TV is left as it is) with
@@ -158,6 +160,8 @@ static class Program
             return;
         }
         var options = Options.Parse(args);
+        // Setup from TV mode: its first copy started Explorer for it, which closes as setup ends.
+        SetupElevation.OwnDesktop = options.Setup && args.Contains(SetupElevation.DesktopFlag);
         var plan = Rights.Decide(options.Setup, token, args.Contains(Rights.AtStandardFlag));
         Rights.Set(plan.SetupElevated, token);
         // The everyday launcher elevated with a split token (Run as administrator, an elevated

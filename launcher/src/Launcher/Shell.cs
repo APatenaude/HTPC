@@ -153,6 +153,156 @@ sealed class DesktopMode
         SystemParametersInfo(0x2F /* SPI_SETWORKAREA */, 0, ref r, 0x2 /* SPIF_SENDCHANGE */);
     }
 
+    // --- TV Box Setup from TV mode (SetupElevation.OwnDesktop) ----------------------------------
+
+    [DllImport("user32.dll")] static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll")] static extern uint MsgWaitForMultipleObjectsEx(uint count, IntPtr[]? handles, uint milliseconds, uint wakeMask, uint flags);
+    [StructLayout(LayoutKind.Sequential)] struct Msg { public IntPtr Hwnd; public uint Message; public IntPtr WParam, LParam; public uint Time; public int X, Y; }
+    [DllImport("user32.dll")] static extern bool PeekMessage(out Msg message, IntPtr hWnd, uint first, uint last, uint remove);
+
+    /// <summary>
+    /// Waits ms while answering what other programs send this thread's windows. Explorer starting
+    /// or closing sends every top-level window messages and waits for each answer, the hidden
+    /// window COM gives the main (STA) thread included: a setup that only slept held Explorer's
+    /// start, and with it Windows' permission prompt, up for minutes (seen in the test VM). Only
+    /// sent messages: nothing posted or typed runs meanwhile, so none of setup's own handlers is
+    /// entered again.
+    /// </summary>
+    static void Pause(int ms)
+    {
+        var until = Environment.TickCount64 + ms;
+        for (long left; (left = until - Environment.TickCount64) > 0; )
+        {
+            MsgWaitForMultipleObjectsEx(0, null, (uint)left, 0x40 /* QS_SENDMESSAGE */, 0);
+            PeekMessage(out _, IntPtr.Zero, 0, 0, 0x00400000 /* PM_NOREMOVE | PM_QS_SENDMESSAGE: sent messages answered */);
+        }
+    }
+
+    /// <summary>Explorer's list of its windows (ShellWindows), for FindWindowSW: whether its desktop is in it.</summary>
+    [ComImport, Guid("85CB6900-4D95-11CF-960C-0080C7F4EE85"), InterfaceType(ComInterfaceType.InterfaceIsDual)]
+    interface IShellWindows
+    {
+        // In the interface's order, never called: get_Count, Item, _NewEnum, Register, RegisterPending, Revoke, OnNavigate, OnActivated.
+        void Slot1(); void Slot2(); void Slot3(); void Slot4(); void Slot5(); void Slot6(); void Slot7(); void Slot8();
+        [PreserveSig] int FindWindowSW(ref object location, ref object root, int windowClass, out int hwnd, int options,
+            [MarshalAs(UnmanagedType.IDispatch)] out object? window);
+    }
+
+    /// <summary>
+    /// Explorer's desktop is up for an elevated WebView2: the shell's window, and the desktop in
+    /// Explorer's list of its windows (IShellWindows.FindWindowSW, SWC_DESKTOP, with its object),
+    /// which is what a program starting something at the user's rights through Explorer asks for.
+    /// With no shell window that fails with "Element not found" (0x80070490). The list is asked
+    /// on a thread of its own that ends with the question, at most 5 s (an Explorer still starting
+    /// may not answer), in a single-threaded apartment: from the thread pool's (MTA) Explorer
+    /// answers "not found" even with its desktop up (checked on the box).
+    /// </summary>
+    public static bool DesktopUp()
+    {
+        if (GetShellWindow() == IntPtr.Zero) return false;
+        var answer = 0;   // 1 up, 2 not yet
+        var ask = new Thread(() =>
+        {
+            object? list = null, window = null;
+            try
+            {
+                list = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39"), true)!);
+                object location = 0 /* CSIDL_DESKTOP */, root = null!;
+                var hr = ((IShellWindows)list!).FindWindowSW(ref location, ref root, 8 /* SWC_DESKTOP */, out var hwnd, 1 /* SWFO_NEEDDISPATCH */, out window);
+                answer = hr == 0 && hwnd != 0 && window is not null ? 1 : 2;
+            }
+            catch (Exception e) { Log.Warn($"Setup: Explorer's list of windows not read ({e.Message}): its window will do"); answer = 1; }
+            finally
+            {
+                if (window is not null && Marshal.IsComObject(window)) Marshal.ReleaseComObject(window);
+                if (list is not null && Marshal.IsComObject(list)) Marshal.ReleaseComObject(list);
+            }
+        }) { IsBackground = true, Name = "Explorer's desktop?" };
+        ask.SetApartmentState(ApartmentState.STA);
+        ask.Start();
+        for (var waited = 0; Volatile.Read(ref answer) == 0 && waited < 5000; waited += 50) Pause(50);
+        return Volatile.Read(ref answer) == 1;
+    }
+
+    /// <summary>
+    /// TV Box Setup, before it asks for administrator rights (or starts its elevated copy again):
+    /// the elevated setup's WebView2 starts its browser at the user's rights through Explorer's
+    /// desktop, and where the launcher is the shell (TV mode) there is none. Its screens then do
+    /// not show: "Element not found" (0x80070490), seen on the box on 29 Sept 2026. So Explorer
+    /// starts first, as desktop mode starts it: as the user, at their rights (from an elevated
+    /// copy through the not-elevated one-shot task, AsUser, never elevated), and this waits until
+    /// its desktop is up, at most 60 s, answering Explorer meanwhile (Pause). An Explorer already
+    /// on its way (a process with no desktop yet, at sign-in) gets 10 s before another is started.
+    /// True when it started one: setup closes it again as it ends (CloseAfterSetup), and the box
+    /// is back in TV mode. False when a desktop was there (nothing to do) or Explorer could not be
+    /// started (the screens may not show; MainForm.SetupCannotShow says what to do).
+    /// </summary>
+    public static bool OpenForSetup()
+    {
+        if (DesktopUp()) return false;
+        var clock = Stopwatch.StartNew();
+        if (Explorers() is { Count: > 0 } starting)
+        {
+            foreach (var p in starting) p.Dispose();
+            while (clock.ElapsedMilliseconds < 10_000 && !DesktopUp()) Pause(250);
+            if (DesktopUp()) { Log.Info($"Setup: Explorer's desktop came up by itself ({clock.ElapsedMilliseconds} ms)"); return false; }
+        }
+        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        try
+        {
+            if (Environment.IsPrivilegedProcess) AsUser.Start(new UserStart(explorer, "", AsUser.DesktopTask));
+            else
+            {
+                var psi = new ProcessStartInfo(explorer) { UseShellExecute = false, WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) };
+                UserEnvironment.Apply(psi);
+                using var p = Process.Start(psi);
+                Log.Info($"Setup: no Windows desktop (TV mode): Explorer started for setup (pid {p?.Id})");
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error("Setup: no Windows desktop (TV mode), and Explorer did not start", e);
+            return false;
+        }
+        var started = clock.ElapsedMilliseconds;
+        long shellAt = -1;
+        bool up;
+        while (!(up = DesktopUp()) && clock.ElapsedMilliseconds - started < 60_000)
+        {
+            if (shellAt < 0 && GetShellWindow() != IntPtr.Zero) shellAt = clock.ElapsedMilliseconds - started;
+            Pause(250);
+        }
+        if (up) Log.Info($"Setup: Explorer's desktop up in {clock.ElapsedMilliseconds - started} ms{(shellAt >= 0 ? $" (its window at {shellAt} ms)" : "")}");
+        else Log.Warn($"Setup: Explorer's desktop not up after 60 s ({(shellAt >= 0 ? $"its window at {shellAt} ms" : "no window")}): setup goes on");
+        return true;
+    }
+
+    /// <summary>
+    /// Setup ends and it had started Explorer for itself (OpenForSetup): Explorer closes as Back
+    /// to TV closes it (Leave: asked first, then ended; the work area reset), whether or not a
+    /// watchdog runs as the shell (setup ended the launcher), before the launcher comes back, which
+    /// would otherwise start in desktop mode. Setup is ending, so a short watch for one that comes
+    /// back instead of Leave's 30 s. Blocks up to about 7 s, answering Explorer meanwhile (Pause);
+    /// from the elevated setup too (asking and ending a program of the user's is not starting one).
+    /// </summary>
+    public static void CloseAfterSetup()
+    {
+        var tray = Taskbar();
+        if (tray != IntPtr.Zero) PostMessage(tray, 0x5B4 /* WM_USER + 436: Exit Explorer */, IntPtr.Zero, IntPtr.Zero);
+        var clock = Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < 5000 && Explorers() is { Count: > 0 } left) { foreach (var p in left) p.Dispose(); Pause(250); }
+        EndExplorers("did not exit");
+        ResetWorkArea();
+        for (var i = 0; i < 8; i++)
+        {
+            Pause(250);
+            if (Taskbar() == IntPtr.Zero) continue;
+            EndExplorers("came back");
+            ResetWorkArea();
+        }
+        Log.Info($"Setup: the desktop it opened is closed, TV mode again ({clock.ElapsedMilliseconds} ms)");
+    }
+
     /// <summary>
     /// "--tv" with a launcher running: tells it to go Back to TV (and lets it take the
     /// foreground). False when none holds the single-instance mutex.
