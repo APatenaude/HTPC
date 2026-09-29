@@ -199,9 +199,37 @@ static class Native
     }
 
     /// <summary>The process and all its descendants.</summary>
-    public static HashSet<uint> ProcessTree(uint root)
+    public static HashSet<uint> ProcessTree(uint root) => Descendants(new[] { root }, ProcessParents().Children);
+
+    /// <summary>
+    /// The given processes and their descendants that are running now. A root that has ended still
+    /// leads to the children it left (Windows keeps their parent's id): an installer that starts
+    /// itself again and exits is followed through its new copy.
+    /// </summary>
+    public static HashSet<uint> ProcessTree(IEnumerable<uint> roots)
+    {
+        var (children, running) = ProcessParents();
+        var tree = Descendants(roots, children);
+        tree.IntersectWith(running);
+        return tree;
+    }
+
+    static HashSet<uint> Descendants(IEnumerable<uint> roots, Dictionary<uint, List<uint>> children)
+    {
+        var tree = new HashSet<uint>(roots);
+        var queue = new Queue<uint>(tree);
+        while (queue.Count > 0)
+            if (children.TryGetValue(queue.Dequeue(), out var kids))
+                foreach (var kid in kids)
+                    if (kid != 0 && tree.Add(kid)) queue.Enqueue(kid);
+        return tree;
+    }
+
+    // Every process now: each parent's children, and the ids running.
+    static (Dictionary<uint, List<uint>> Children, HashSet<uint> Running) ProcessParents()
     {
         var children = new Dictionary<uint, List<uint>>();
+        var running = new HashSet<uint>();
         var snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
         if (snapshot != new IntPtr(-1))
         {
@@ -212,16 +240,11 @@ static class Native
                 {
                     if (!children.TryGetValue(entry.th32ParentProcessID, out var list)) children[entry.th32ParentProcessID] = list = new();
                     list.Add(entry.th32ProcessID);
+                    running.Add(entry.th32ProcessID);
                 }
             }
             finally { CloseHandle(snapshot); }
         }
-        var tree = new HashSet<uint> { root };
-        var queue = new Queue<uint>(tree);
-        while (queue.Count > 0)
-            if (children.TryGetValue(queue.Dequeue(), out var kids))
-                foreach (var kid in kids)
-                    if (kid != 0 && tree.Add(kid)) queue.Enqueue(kid);
-        return tree;
+        return (children, running);
     }
 }

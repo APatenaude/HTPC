@@ -783,6 +783,50 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
         "website tiles: their own profile folder, the address as one argument of its own");
 }
 
+// ---------------------------------------------------------------- An installer finished on screen
+Console.WriteLine("== Catalog: an installer the user finishes on screen (install.interactive)");
+{
+    var root = new DirectoryInfo(AppContext.BaseDirectory);
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
+    var catalogPath = Path.Combine(root!.FullName, "setup", "catalog.json");
+    var catalogApps = new AppManager(catalogPath);
+    var retrobat = catalogApps.Get("retrobat");
+    Check(retrobat is { Installable: true, InstallInteractive: true, Scope: "user", InstallSource: "github" },
+        "RetroBat: a GitHub installer finished on screen, as the user (not through the SYSTEM task)");
+    Check(catalogApps.Catalog.Where(a => a.InstallInteractive).All(a => a.Scope == "user" && !a.IsWebsite),
+        "every installer finished on screen runs as the user (SYSTEM has no screen)");
+    Check(catalogApps.Get("vlc") is { InstallInteractive: false }, "a winget app is not interactive");
+    using var doc = JsonDocument.Parse(File.ReadAllText(catalogPath));
+    var install = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "retrobat").GetProperty("install");
+    var folder = install.GetProperty("folder").GetString()!;
+    Check(retrobat!.Exe!.StartsWith(folder + "\\", StringComparison.OrdinalIgnoreCase), $"RetroBat: its install.folder ({folder}) holds its launch exe");
+    var keep = install.GetProperty("keep").EnumerateArray().Select(k => k.GetString()).ToList();
+    Check(keep.Contains("roms") && keep.Contains("saves") && keep.Contains("bios"), "RetroBat: its uninstall keeps the games, saves and BIOS files");
+    Check(System.Text.RegularExpressions.Regex.IsMatch("RetroBat-v8.2.1-stable-win64-setup.exe", install.GetProperty("asset").GetString()!)
+        && !System.Text.RegularExpressions.Regex.IsMatch("RetroBat-v8.2.1-stable-win64-setup.exe.sha256.txt", install.GetProperty("asset").GetString()!),
+        "RetroBat: the asset pattern takes the setup exe, not the .sha256.txt beside it");
+
+    // While it is in front the controller is on the plain Mouse preset, whatever Other windows'
+    // map says, and nothing can edit that.
+    var stored = JsonDocument.Parse("""{ "_other": { "preset": "keyboard" }, "_installer": { "preset": "controller" } }""").RootElement.Clone();
+    var maps = new ButtonMapStore(stored, _ => { });
+    var wizardMap = maps.For(ButtonMapStore.Installer, "mouse");
+    Check(wizardMap is { Name: "mouse", LeftStick: StickRole.Pointer } && wizardMap.Buttons[PadControl.R3] is CommandAction { Command: "keyboard" },
+        "the installer's map: the plain Mouse preset (pointer, R3 the keyboard), not a stored one");
+    Check(maps.For(ButtonMapStore.Other, "mouse")?.Name == "keyboard", "... while Other windows keeps its own");
+    maps.SetPreset(ButtonMapStore.Installer, "keyboard", "mouse");
+    Check(!maps.SetControl(ButtonMapStore.Installer, "a", "key:Space", "mouse") && maps.For(ButtonMapStore.Installer, "mouse")?.Name == "mouse",
+        "the installer's map cannot be edited");
+
+    // The installer's processes: the roots running now and every process they started.
+    using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping -n 4 127.0.0.1 >nul") { CreateNoWindow = true, UseShellExecute = false })!;
+    var me = (uint)Environment.ProcessId;
+    var tree = Native.ProcessTree(new[] { me, 0xFFFFFFF0u });
+    Check(tree.Contains(me) && tree.Contains((uint)child.Id), "process tree from several roots: the running root and its child");
+    Check(!tree.Contains(0xFFFFFFF0u), "process tree from several roots: a root that is not running is left out");
+    try { child.Kill(entireProcessTree: true); } catch (Exception) { }
+}
+
 // ---------------------------------------------------------------- Logos (LogoTests.cs)
 LogoTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
 

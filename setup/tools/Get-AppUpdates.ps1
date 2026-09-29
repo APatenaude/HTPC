@@ -12,7 +12,8 @@
                   and only that entry may then show one; an installed version winget cannot
                   tell ("Unknown", "< 1.2") is never shown as an update.
     GitHub apps   the version of the installed exe against the latest release's tag, read from
-                  where github.com/<repo>/releases/latest redirects (no API call).
+                  where github.com/<repo>/releases/latest redirects (no API call). Zips only
+                  (install.installDir): an installer's app (RetroBat) has its own updater.
     winget        "winget --version" against microsoft/winget-cli's latest release.
     Prints one JSON array:
       [{ id, name, source, scope, installed, available, update, error }]
@@ -113,6 +114,8 @@ foreach ($app in $apps) {
                 $entry.update = if (-not (Test-KnownVersion $entry.installed)) { $false } elseif ($a -and $b) { $a -gt $b } else { $true }
             }
         } else {
+            # Only a GitHub zip is checked here: an installer's app (RetroBat) updates from its own menu.
+            if (-not (Get-Prop $install 'installDir')) { continue }
             $exe = Join-Path (Join-Path $env:ProgramFiles $install.installDir) $install.exe
             if (-not (Test-Path -LiteralPath $exe)) { continue }
             $mine = Get-FileSemVer $exe
