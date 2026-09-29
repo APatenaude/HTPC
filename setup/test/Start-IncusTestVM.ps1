@@ -5,9 +5,12 @@
     CD or DVD" so the unattended install runs (the Hyper-V Start-TestVM.ps1's counterpart).
 
 .DESCRIPTION
-    Safety: the answer file wipes disk 0. Once the VM's disk holds an install (over 2 GB used),
-    the Windows CD is put after the disk in the boot order and no key is pressed; -Reinstall puts
-    it first again and presses the key (reinstalls from scratch).
+    Safety: the answer file wipes disk 0. Once Windows is installed (SSH answered once: the VM's
+    user.htpc.installed, or it has a snapshot, or its disk holds over 2 GB), the Windows CD is put
+    after the disk in the boot order and no key is pressed; -Reinstall puts it first again and
+    presses the key (reinstalls from scratch). The size alone was not enough: on btrfs a volume's
+    "used" leaves out what a snapshot shares, so a start right after a snapshot saw a full disk
+    as empty and reinstalled Windows (29 Sept 2026).
 
     The key press goes through the VGA console (SPICE, IncusSpiceKeyboard.cs): Enter every 0.7 s
     for -KeySeconds after the start. ("incus console" in text mode cannot be used from a Windows
@@ -83,7 +86,11 @@ if ($instance.status -eq 'Running') {
     $state = Invoke-IncusQuery -Remote $Remote -Path "/1.0/storage-pools/$Pool/volumes/virtual-machine/$Name/state" -AllowFailure
     # An empty volume reports no "used" at all.
     $used = if ($state -and $state.usage -and $null -ne $state.usage.used) { [long]$state.usage.used } else { 0 }
-    $install = $Reinstall -or $used -le 2GB
+    # Installed: SSH answered once (the marker below), or snapshots were taken of it, or its disk
+    # holds more than a bare volume. A snapshot shares the volume's blocks, so "used" alone can
+    # read near 0 on a full disk.
+    $installed = $instance.config.'user.htpc.installed' -eq 'true' -or @($instance.snapshots).Count -gt 0 -or $used -gt 2GB
+    $install = $Reinstall -or -not $installed
 
     if ($instance.devices.install) {
         # The Windows CD boots first only while installing.
@@ -146,7 +153,9 @@ if ($WaitSsh) {
     Write-Host "Waiting for SSH (up to $TimeoutMinutes min)..."
     if (Wait-IncusTestSsh $Remote $Name $Dir ($TimeoutMinutes * 60)) {
         Write-Host "SSH answers, $([math]::Round($clock.Elapsed.TotalMinutes, 1)) min after the start."
-        # Windows is installed: from now on boot the disk first, never the Windows CD.
+        # Windows is installed: from now on boot the disk first, never the Windows CD, and say so
+        # on the VM (user.htpc.installed), which the next start believes whatever the disk reports.
+        Invoke-Incus -Arguments @('config', 'set', $instanceRef, 'user.htpc.installed=true') -AllowFailure | Out-Null
         $devices = (Get-IncusTestInstance $Remote $Name).devices
         if ($devices.install -and $devices.install.'boot.priority' -ne '1') {
             Invoke-Incus -Arguments @('config', 'device', 'set', $instanceRef, 'install', 'boot.priority=1') -AllowFailure | Out-Null

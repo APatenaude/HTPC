@@ -447,7 +447,19 @@ sealed partial class MainForm : Form
 
     // --- Controller --------------------------------------------------------------------------
 
-    bool LauncherActive => Native.GetForegroundWindow() == Handle || ContainsFocus;
+    // In front: shown, not minimized, and the window in front is the launcher's (its own, or one of
+    // this process's while the focus is in the launcher). Focus alone is not enough: a hidden or
+    // covered launcher keeps its thread's focus, and after an update in desktop mode (the owner,
+    // 29 Sept 2026) Home went to the hidden page, nothing came up, until Alt+Tab.
+    bool LauncherActive
+    {
+        get
+        {
+            if (!Visible || WindowState == FormWindowState.Minimized) return false;
+            var front = Native.GetForegroundWindow();
+            return front == Handle || (ContainsFocus && Native.ProcessOf(front) == Environment.ProcessId);
+        }
+    }
 
 
     IntPtr lastForeground;
