@@ -468,18 +468,24 @@ sealed partial class MainForm : Form
     readonly HashSet<IntPtr> windowsSeen = new();
 
     /// <summary>
-    /// A window a website tile (or the Browser) opened, the first time it comes in front: a
-    /// sign-in page, a link that opens a new window. Edge puts it in the middle of the screen at
-    /// its own size; it is maximized (Native.MaximizeIfWindowed: not full screen, so its title
-    /// bar's close button leads back to the site). Once per window: one the user made smaller
-    /// stays so. The site's own window is full screen, and left alone.
+    /// Every plain window, the first time it comes in front, is maximized (the owner, 29 Sept
+    /// 2026: "every other program ... full screen or maximized"): a program added from On this
+    /// box, a window a website or an app opened (a sign-in page), File Explorer in desktop mode.
+    /// Maximized, not filled: its title bar stays, to close it and get back. Left alone
+    /// (Native.MaximizeIfWindowed): the launcher's own, a window already maximized or covering the
+    /// screen (the catalog's full-screen and filled apps, games), dialogs, windows that cannot be
+    /// sized (installers). Once per window: one the user made smaller stays so. Not in setup,
+    /// standby or with the launcher in front (UpdateMapper).
     /// </summary>
     void MaximizeOpenedWindow(IntPtr window)
     {
-        if (foregroundApp is not { } app || !(app.IsWebsite || string.Equals(Path.GetFileName(app.Exe), "msedge.exe", StringComparison.OrdinalIgnoreCase))) return;
+        if (window == IntPtr.Zero || foregroundIsOurs) return;
         if (windowsSeen.Count > 500) windowsSeen.Clear();
-        if (!windowsSeen.Add(window)) return;
-        if (Native.MaximizeIfWindowed(window)) Log.Info($"{app.Id}: a window it opened maximized");
+        if (!windowsSeen.Add(window) || !Native.MaximizeIfWindowed(window)) return;
+        string who;
+        try { using var p = System.Diagnostics.Process.GetProcessById((int)Native.ProcessOf(window)); who = foregroundApp?.Id ?? p.ProcessName; }
+        catch (Exception) { who = foregroundApp?.Id ?? "a program"; }
+        Log.Info($"{who}: its window maximized");
     }
     bool foregroundIsInstaller;
 
