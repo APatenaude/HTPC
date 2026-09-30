@@ -94,10 +94,10 @@ that did the work; none of them belongs in the (public) repo:
 |---|---|
 | After a change: build + the 3 test projects, one line each | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests`, `-Ui` adds the condensed UI self-test) |
 | Build | `dotnet build launcher\src\Launcher\Launcher.csproj -c Release` |
-| Run one test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (also PhoneTests, AlertsTests, `launcher\dev\TvLab`); LauncherTests prints its groups and failures, `-- -v` every check, `-- Logos` only the groups named so |
+| Run one test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (also PhoneTests, AlertsTests, `launcher\dev\TvLab`); LauncherTests and PhoneTests print their groups and failures, `-- -v` every check, `-- Logos` only the groups named so |
 | The UI self-test and audit walker | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest` |
 | The UI in a plain browser | open `launcher\ui\index.html` (demo data; `#selftest`, `#audit`, `#settings` routes) |
-| The phone app's checks | open `launcher\dev\phone-test.html` in Edge (or it runs headless in Test-All) |
+| The phone app's checks | headless in Test-All; by hand, `launcher\dev\phone-test.html` in an Edge started with `--allow-file-access-from-files` (the layout audit looks inside its frames) |
 | Everything, one pass | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1` |
 | Screenshots of a page (look at every screen a UI change touches; full size for details) | `launcher\dev\Save-Screenshots.ps1`, `Test-Ui.ps1 -Shots`; compare two with `Compare-Screenshots.ps1` |
 | The setup exe | `launcher\dev\Publish-Setup.ps1` (writes `launcher\dist\TV Box Setup.exe`) |
