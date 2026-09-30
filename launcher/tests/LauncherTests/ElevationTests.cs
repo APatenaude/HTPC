@@ -125,8 +125,8 @@ static class ElevationTests
         using var screen = new AdminNeededForm(@"Windows started setup as BOX\admin, but BOX\tv is signed in here. Setup would have set up BOX\admin instead, so it changed nothing.",
             askAgain: null, "Setup must run as the TV account", body);
         var buttons = screen.Controls.OfType<Button>().ToList();
-        Check(buttons.Count == 1 && buttons[0].Text.Contains("Quit") && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
-            "refusal: Quit only (Enter and Esc quit too), nothing to try again");
+        Check(buttons.Count == 1 && buttons[0].Text.StartsWith("A") && buttons[0].Text.Contains("Quit") && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
+            $"refusal: A Quit only (Enter and Esc quit too), nothing to try again ({string.Join(" | ", buttons.Select(b => b.Text))})");
         Check(screen.Controls.OfType<Label>().Any(l => l.Text.Contains(body)) && screen.Controls.OfType<Label>().Any(l => l.Text.Contains("Setup must run as the TV account")),
             "refusal: its title and what to do (sign in as the TV account, an administrator, and run setup from there)");
         Check(screen.FormBorderStyle == FormBorderStyle.None && screen.StartPosition == FormStartPosition.Manual, "refusal: full screen, no frame");
@@ -144,7 +144,8 @@ static class ElevationTests
         Check(tv.SequenceEqual(["--setup", "--desktop-for-setup", "--elevated"]), "from TV mode: the elevated copy is told setup opened the desktop (it closes it as it ends): " + string.Join(" | ", tv));
         Check(SetupElevation.ElevatedArgs(tv).Count(a => a == SetupElevation.DesktopFlag) == 1, "... once, when started again");
         Check(SetupElevation.HomeArgs(["--elevated", SetupElevation.DesktopFlag, "--no-tv"]).SequenceEqual(["--no-tv", "--home"]), "the home screen after setup: not told about setup's desktop");
-        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))).Contains("Desktop mode"),
+        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))) is var body
+            && body.Contains("Desktop mode") && body.Contains("start TV Box Setup again"),
             "WebView2's \"Element not found\" (no Windows desktop, TV mode): the screen says to open desktop mode, then start setup again");
         Check(!SetupElevation.CannotShowBody(new COMException("Class not registered", unchecked((int)0x80040154))).Contains("Desktop mode"), "... any other failure: try again or restart, as before");
 
@@ -330,8 +331,9 @@ static class ElevationTests
         var labels = screen.Controls.OfType<Label>().ToList();
         var buttons = screen.Controls.OfType<Button>().ToList();
         Check(labels.Any(l => l.Text.Contains("administrator rights")), "screen: says setup needs administrator rights");
-        Check(buttons.Count == 2 && buttons[0].Text.Contains("Try again") && buttons[1].Text.Contains("Quit") && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[1],
-            "screen: Try again (Enter), Quit (Esc)");
+        Check(buttons.Count == 2 && buttons[0].Text.StartsWith("A") && buttons[0].Text.Contains("Try again") && buttons[1].Text.StartsWith("B") && buttons[1].Text.Contains("Quit")
+            && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[1],
+            $"screen: A Try again (Enter), B Quit (Esc) ({string.Join(" | ", buttons.Select(b => b.Text))})");
         Check(labels.Any(l => l.Text.Contains("Windows asked for permission")), "screen: why, under it");
         var (boxes, onScreen, apart) = Fixtures.Layout(screen);
         Check(onScreen && apart, "screen: everything on screen, nothing overlapping " + string.Join(" ", boxes));

@@ -136,7 +136,7 @@ static class Fixtures
         return dir;
     }
 
-    /// <summary>A test's folder or file gone, whatever is left in it; a file still open elsewhere is left (and said).</summary>
+    /// <summary>A test's folder or file gone, whatever is left in it; one still open elsewhere is left, and said (not a failure: a virus scanner may hold it).</summary>
     public static void Delete(string path)
     {
         try
@@ -144,7 +144,7 @@ static class Fixtures
             if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
             else File.Delete(path);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { T.Info($"left in %TEMP%: {path} ({e.Message})"); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Console.WriteLine($"  WARNING: left in %TEMP%: {path} ({e.Message})"); }
     }
 
     /// <summary>A file standing for an installed program (or its shortcut), written and made 30 days ago.</summary>

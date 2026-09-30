@@ -126,5 +126,6 @@ static class AddTileTests
         var page = Read(css, @"#kb \{[^}]*?\bheight: (\d+)px");
         var band = Read(js, @"const BAND = (\d+);");
         Check(window == page && page == band && window > 0, $"the keyboard's window, its page's band and its fit() agree ({window}, {page}, {band})");
+        Check(window <= 440, $"the keyboard no taller than 440 of 1080 (the owner's; it was 560): {window}");
     }
 }

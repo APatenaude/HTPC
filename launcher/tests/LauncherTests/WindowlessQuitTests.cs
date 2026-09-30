@@ -9,12 +9,17 @@ static class WindowlessQuitTests
 {
     static readonly AppLook Window = new(Window: true), None = new(Window: false);
 
-    // Ticks every 5 s from..to (seconds, both included); the steps other than None, as "s:Step".
-    static List<string> Run(WindowlessQuit w, int from, int to, AppLook look)
+    // Ticks every 5 s from..to (seconds, both included); the steps other than None, as "s:Step";
+    // the notes for the log into notes when given.
+    static List<string> Run(WindowlessQuit w, int from, int to, AppLook look, List<string>? notes = null)
     {
         var steps = new List<string>();
         for (var s = from; s <= to; s += 5)
-            if (w.Tick(s * 1000L, look).Step is var step && step != QuitStep.None) steps.Add($"{s}:{step}");
+        {
+            var (step, note) = w.Tick(s * 1000L, look);
+            if (note is not null) notes?.Add($"{s}: {note}");
+            if (step != QuitStep.None) steps.Add($"{s}:{step}");
+        }
         return steps;
     }
 
@@ -74,10 +79,12 @@ static class WindowlessQuitTests
         {
             var w = Opened();
             Run(w, 125, 175, None);
-            var held = Run(w, 180, 600, look);
+            var notes = new List<string>();
+            var held = Run(w, 180, 600, look, notes);
             var afterwards = Run(w, 605, 660, None);
             var ended = w.Tick(665_000, None).Step;
             check(held.Count == 0 && afterwards.Count == 0 && ended == QuitStep.End, $"{what}: not ended; after it, the whole 60 s again ({Show(held)}; {Show(afterwards)}; {ended})");
+            check(notes.Count == 1 && notes[0].StartsWith("180: "), $"  the hold logged once, as it starts, not at every look ({string.Join(" | ", notes)})");
         }
 
         // The catalog.

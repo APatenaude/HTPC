@@ -204,7 +204,7 @@ T.Group("PadMapper", () =>
 // A held 0.8 s below).
 T.Group("Controller: A tapped, and held", () =>
 {
-    var controller = new ControllerService();
+    using var controller = new ControllerService();   // stopped by a throw too (Dispose again is harmless)
     var pads = new List<Pad>();
     controller.Pressed += (pad, repeat) => { lock (pads) pads.Add(pad); };
     PadState P(ushort b) => new(b, 0, 0, 0, 0, 0, 0);
@@ -285,7 +285,7 @@ T.Group("Start + D-pad (StartChord)", () =>
     Check(arrows.First() == "down 28" && arrows.Count(x => x == "down 28") >= 3 && arrows.Last() == "up 28", "Down alone held 0.5 s: the arrow key, repeating like a held key (Edge scrolls the page): " + string.Join(" | ", arrows));
 
     // End to end: the controller thread raises the chord, not the buttons.
-    var controller = new ControllerService();
+    using var controller = new ControllerService();   // stopped by a throw too (Dispose again is harmless)
     var pads = new List<Pad>();
     var chords = new List<string>();
     controller.Pressed += (pad, repeat) => { lock (pads) pads.Add(pad); };
@@ -329,23 +329,26 @@ T.Group("Standby: waking with Home", () =>
     };
     PadState P(ushort b) => new(b, 0, 0, 0, 0, 0, 0);
     double Ms(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-    controller.Start();
     var seen = new List<double>();
     var held = new List<double>();
-    for (var i = 0; i < 2; i++)
+    try
     {
-        controller.Inject(null);   // the real controller again: the thread waits up to 300 ms between looks
-        Thread.Sleep(100 + 100 * i); // presses fall at different points of that wait: a press that did not wake it is seen 100 ms late or more
-        Interlocked.Exchange(ref downAt, -1);
-        Interlocked.Exchange(ref heldAt, -1);
-        var pressed = clock.ElapsedTicks;
-        controller.Inject(P(0x0400));
-        for (var waited = 0; Interlocked.Read(ref heldAt) < 0 && waited < 2000; waited += 5) Thread.Sleep(5);
-        if (Interlocked.Read(ref downAt) >= 0) seen.Add(Ms(downAt - pressed));
-        if (Interlocked.Read(ref heldAt) >= 0) held.Add(Ms(heldAt - pressed));
-        controller.Inject(P(0)); Thread.Sleep(80);
+        controller.Start();
+        for (var i = 0; i < 2; i++)
+        {
+            controller.Inject(null);   // the real controller again: the thread waits up to 300 ms between looks
+            Thread.Sleep(50 + 80 * i);   // 50 and 130 ms into that wait: a press that did not wake it would be seen 150 ms late or more
+            Interlocked.Exchange(ref downAt, -1);
+            Interlocked.Exchange(ref heldAt, -1);
+            var pressed = clock.ElapsedTicks;
+            controller.Inject(P(0x0400));
+            for (var waited = 0; Interlocked.Read(ref heldAt) < 0 && waited < 2000; waited += 5) Thread.Sleep(5);
+            if (Interlocked.Read(ref downAt) >= 0) seen.Add(Ms(downAt - pressed));
+            if (Interlocked.Read(ref heldAt) >= 0) held.Add(Ms(heldAt - pressed));
+            controller.Inject(P(0)); Thread.Sleep(80);
+        }
     }
-    controller.Dispose();
+    finally { controller.Dispose(); }
     double Median(List<double> v) => v.Count == 0 ? double.NaN : v.OrderBy(x => x).ElementAt(v.Count / 2);
     T.Info($"Home seen after {Median(seen):0} ms (max {(seen.Count > 0 ? seen.Max() : double.NaN):0}), held (the buzz) after {Median(held):0} ms (max {(held.Count > 0 ? held.Max() : double.NaN):0})");
     Check(seen.Count == 2 && seen.Max() < 100, $"standby: Home going down is seen within 100 ms, even between looks for a controller ({string.Join(", ", seen.Select(x => x.ToString("0")))})");
@@ -426,7 +429,7 @@ T.Group("Standby: the Wi-Fi radio on a cable", () =>
     Reset();
     var looks = 0;
     NewSwitch().Off(() => looks++ == 0).Wait();
-    Check(on && !flag && asked.SequenceEqual(new[] { false, true }), "woken while it went off: back on at once");
+    Check(on && !flag && asked.SequenceEqual(new[] { false, true }) && Log.Lines.Contains("INFO Test radio back on (woken meanwhile)"), "woken while it went off: back on at once, logged");
 
     // Woken before it was looked at: nothing asked.
     Reset();
@@ -437,7 +440,7 @@ T.Group("Standby: the Wi-Fi radio on a cable", () =>
     Reset();
     var failing = radio with { NotNeeded = () => Task.FromException<bool>(new TimeoutException("no answer")) };
     new StandbyRadioSwitch(failing, () => flag, off => flag = off, () => saves++).Off(() => true).Wait();
-    Check(on && !flag, "a failing look: left on");
+    Check(on && !flag && Log.Lines.Contains("WARN Standby: Test radio: no answer"), "a failing look: left on, logged");
 });
 
 // ---------------------------------------------------------------- The Bluetooth radio: off while nothing is paired
@@ -583,7 +586,7 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     rule = new BluetoothRadio(new BluetoothRadioParts(() => Task.FromResult(radio), on => { switched.Add(on); return Task.FromResult(true); },
         () => Task.FromException<bool?>(new TimeoutException("no answer")), () => false, () => now, (_, _) => { }, () => flag, off => flag = off, () => saves++));
     rule.Look("the launcher started").Wait();
-    Check(radio == "on" && switched.Count == 0, "a look that throws: left on");
+    Check(radio == "on" && switched.Count == 0 && Logged("WARN Bluetooth radio (the launcher started): no answer"), "a look that throws: left on, logged");
 
     // The launcher ended with the radio off (a crash, the watchdog starts another): the next
     // start looks again. Something paired meanwhile: on.
@@ -615,7 +618,7 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     Reset("off", false, true);
     rule = NewRule();
     rule.PageShown(true).Wait();
-    Check(rule.UserSwitch(false).Result && radio == "off" && !flag, "the user's switch off: off, the rule's flag cleared");
+    Check(rule.UserSwitch(false).Result && radio == "off" && !flag && Logged("INFO Bluetooth radio off (the user's switch)"), "the user's switch off: off, the rule's flag cleared, logged");
     rule.PageShown(false).Wait();
     now += 2 * 60_000;
     later!();
@@ -732,6 +735,11 @@ T.Group("VideoEndDetector", () =>
         .Select(x => $"{x.c.What} (got {x.Got ?? "no end"}, following {x.det.Title})").ToList();
     Check(wrongEnds.Count == 0, "the end of a video, an ad, a pause, a closed player, a raid, the cap: " + T.Misses(wrongEnds));
 
+    // Several sessions: the current one playing is followed.
+    var two = new VideoEndDetector(t0);
+    two.Feed(new[] { new MediaInfo("Spotify.exe", null, "Song", null, P, 10, 200, 1, t0, false), new MediaInfo("MSEdge", null, "Video", null, P, 10, 600, 1, t0, true) }, t0);
+    Check(two.Source == "MSEdge", $"several playing: the current session is followed ({two.Source})");
+
     // Seconds left, extrapolated between reads.
     var info = M("V", P, 100, 600, t0);
     Check(Math.Abs(info.PositionAt(t0.AddSeconds(10))!.Value - 110) < 0.01, "position moves on while playing");
@@ -764,9 +772,11 @@ T.Group("Media calls: a player that never answers", () =>
     string? error = null;
     try { MediaWatcher.Timed(never, "a frozen player", TimeSpan.FromMilliseconds(50)).GetAwaiter().GetResult(); }
     catch (TimeoutException e) { error = e.Message; }
-    Check(error?.Contains("a frozen player") == true, $"no answer: a TimeoutException that names the call ({error})");
+    Check(error?.Contains("a frozen player") == true && error.Contains("0.05 s"), $"no answer: a TimeoutException that names the call and the time waited ({error})");
     Check(clock.Elapsed < TimeSpan.FromSeconds(2), $"given up after the timeout, not later ({clock.ElapsedMilliseconds} ms for 50)");
     Check(MediaWatcher.Timed(Task.FromResult(true).AsAsyncOperation(), "a player").GetAwaiter().GetResult(), "an answer comes through");
+    // With no timeout given, the 2 s: an answer after 150 ms still comes through.
+    Check(MediaWatcher.Timed(Task.Delay(150).ContinueWith(_ => true).AsAsyncOperation(), "a slow player").GetAwaiter().GetResult(), "no timeout given: a player answering in 150 ms is waited for");
 });
 
 // ---------------------------------------------------------------- SleepTimer
@@ -938,23 +948,32 @@ T.Group("Alerts overlay and the volume indicator", () =>
         Save("volume-" + name, b, at, screen, avoid);
         return at;
     }
+    // A window holds its card(s) and room for their shadow around them (Shade, in 1920-wide units).
+    static Rectangle Card(Rectangle window, Rectangle screen, float shade)
+    {
+        var margin = (int)Math.Round(shade * screen.Width / 1920f);
+        window.Inflate(-margin, -margin);
+        return window;
+    }
     var hd = new Rectangle(0, 0, 1920, 1080);
     var uhd = new Rectangle(0, 0, 3840, 2160);
     var keyboard = new Rectangle(0, 0, 1920, 560);
-    var cardsHd = Cards("cards-1080", new OverlayView(cards), hd, Rectangle.Empty);
-    var cards4k = Cards("sleep-4k", new OverlayView(cards.Take(1).ToList()), uhd, Rectangle.Empty);
-    var cardsKb = Cards("cards-keyboard-top", new OverlayView(cards.Take(2).ToList()), hd, keyboard);
-    Check(cardsKb.Top + cardsKb.Height / 2 > keyboard.Bottom, $"the keyboard at the top: the cards below it ({cardsKb})");
+    var cardsHd = Card(Cards("cards-1080", new OverlayView(cards), hd, Rectangle.Empty), hd, AlertsForm.Shade);
+    var cards4k = Card(Cards("sleep-4k", new OverlayView(cards.Take(1).ToList()), uhd, Rectangle.Empty), uhd, AlertsForm.Shade);
+    var cardsKb = Card(Cards("cards-keyboard-top", new OverlayView(cards.Take(2).ToList()), hd, keyboard), hd, AlertsForm.Shade);
+    Check(!cardsKb.IntersectsWith(keyboard), $"the keyboard at the top: the cards below it, not over it (cards {cardsKb}, keyboard {keyboard})");
     Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>()), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
 
     // The volume indicator: top left, clear of the alert cards (top right) and of the keyboard.
     var volume = Volume("45", new SoundLevel(45, false), null, hd, Rectangle.Empty);
-    Check(volume.Left < hd.Width / 4 && volume.Top < hd.Height / 4 && !volume.IntersectsWith(cardsHd), $"volume: top left, clear of the cards ({volume}, the cards {cardsHd})");
+    Check(volume.Left < 96 && volume.Top < 48 && volume.Bottom < 250 && volume.Right < cardsHd.Left,
+        $"volume: top left, clear of the cards ({volume}, the cards {cardsHd})");
     Volume("muted", new SoundLevel(45, true), null, hd, Rectangle.Empty);
     var named = Volume("output-4k", new SoundLevel(30, false), "Speakers (USB Audio and HID)", uhd, Rectangle.Empty);
-    Check(named.Height > 2 * volume.Height && !named.IntersectsWith(cards4k), $"volume with the output's name, 4K: taller than at 1080 twice over, still clear of the cards ({named})");
-    var below = Volume("keyboard-top", new SoundLevel(80, false), null, hd, keyboard);
-    Check(below.Top + below.Height / 2 > keyboard.Bottom, $"keyboard at the top: the volume below it ({below})");
+    Check(named.Height > 2 * volume.Height && named.Right < cards4k.Left,
+        $"volume with the output's name, 4K: taller than at 1080 twice over, still clear of the cards ({named}, the cards {cards4k})");
+    var below = Card(Volume("keyboard-top", new SoundLevel(80, false), null, hd, keyboard), hd, VolumeOsd.Shade);
+    Check(!below.IntersectsWith(keyboard), $"keyboard at the top: the volume below it, not over it (card {below}, keyboard {keyboard})");
 });
 
 // ---------------------------------------------------------------- Brightness kept across a start
