@@ -229,31 +229,22 @@ static class ElevationTests
         const string setupExe = @"D:\TV Box Setup.exe";
         string[] args = ["--elevated"];
 
-        var n = SetupElevation.AfterSetup(installed, true, true, false, setupExe, args, elevated: true);
+        var n = SetupElevation.AfterSetup(installed, true, true, false, setupExe, args);
         Check(n is { Exe: watchdog, Arguments: "", Task: AsUser.WatchdogTask }, $"installed, with its watchdog: the watchdog, as the user ({n})");
-        n = SetupElevation.AfterSetup(installed, true, true, true, setupExe, args, elevated: true);
+        n = SetupElevation.AfterSetup(installed, true, true, true, setupExe, args);
         Check(n is { Exe: watchdog, Arguments: "--shell" }, "the watchdog as the shell when this session started that way");
-        n = SetupElevation.AfterSetup(installed, true, false, false, setupExe, args, elevated: true);
+        n = SetupElevation.AfterSetup(installed, true, false, false, setupExe, args);
         Check(n is { Exe: installed, Arguments: "", Task: AsUser.LauncherTask }, $"no watchdog: the installed launcher itself ({n})");
-        n = SetupElevation.AfterSetup(installed, true, true, false, installed, ["--setup", "--elevated"], elevated: true);
+        n = SetupElevation.AfterSetup(installed, true, true, false, installed, ["--setup", "--elevated"]);
         Check(n is { Exe: watchdog }, "setup run again from About (the installed exe, elevated): through the watchdog, never in place");
-        n = SetupElevation.AfterSetup(installed, false, false, false, setupExe, ["--dev", "--elevated"], elevated: true);
-        Check(n is { Exe: setupExe, Arguments: "--dev --home", Task: AsUser.LauncherTask }, $"nothing installed, elevated: a copy of this program as the home screen ({n})");
-        n = SetupElevation.AfterSetup(installed, false, false, false, @"C:\dev\TV Box Setup.exe", ["--ui", @"C:\my ui"], elevated: true);
-        Check(n is { Arguments: "--ui \"C:\\my ui\" --home" }, $"... its arguments quoted ({n?.Arguments})");
-
-        // Not elevated (setup mode never is now; kept as it was).
-        Check(SetupElevation.AfterSetup(installed, false, false, false, setupExe, args, elevated: false) is null, "nothing installed, not elevated: this window, in place");
-        Check(SetupElevation.AfterSetup(installed, true, true, false, installed, [], elevated: false) is null, "the installed launcher itself, not elevated: in place");
-        Check(SetupElevation.AfterSetup(installed, true, true, false, @"c:\program files\htpc\launcher\HTPCLAUNCHER.EXE", [], elevated: false) is null, "... whatever the case of its path");
-        Check(SetupElevation.AfterSetup(installed, true, true, false, setupExe, [], elevated: false) is { Exe: watchdog }, "installed elsewhere, not elevated: its watchdog");
+        n = SetupElevation.AfterSetup(installed, false, false, false, setupExe, ["--dev", "--elevated"]);
+        Check(n is { Exe: setupExe, Arguments: "--dev --home", Task: AsUser.LauncherTask }, $"nothing installed: a copy of this program as the home screen, never this elevated window ({n})");
+        n = SetupElevation.AfterSetup(installed, false, false, false, @"C:\dev\TV Box Setup.exe", ["--ui", @"C:\my ui"]);
+        Check(n is { Arguments: "--ui \"C:\\my ui\" --home" }, $"... its arguments quoted ({n.Arguments})");
     }
 
     static void Seams()
     {
-        // Elevated or not: Environment.IsPrivilegedProcess is Windows' own TokenElevation.
-        Check(Environment.IsPrivilegedProcess == TokenElevated(), $"Environment.IsPrivilegedProcess is the token's elevation (here {Environment.IsPrivilegedProcess})");
-
         // The mutex an elevated setup holds: the user in it, as a standard process has it. A test
         // name, never the launcher's.
         var name = $@"Local\HtpcElevationTest-{Guid.NewGuid():N}";
@@ -308,14 +299,13 @@ static class ElevationTests
 
         // WebView2: setup's profile is not the launcher's.
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        Check(SetupElevation.WebViewFolder(false, false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
+        Check(SetupElevation.WebViewFolder(false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
         // The elevated setup's: WebView2 runs its browser at the user's rights, which cannot write
         // admin-only Program Files (the VM run, runtime 154): a new one each run in the user's profile.
-        var setupView = SetupElevation.WebViewFolder(true, true);
-        Check(setupView.StartsWith(Path.Combine(local, "HTPC", "setup-webview", "run-"), StringComparison.OrdinalIgnoreCase) && setupView == SetupElevation.WebViewFolder(true, true),
+        var setupView = SetupElevation.WebViewFolder(true);
+        Check(setupView.StartsWith(Path.Combine(local, "HTPC", "setup-webview", "run-"), StringComparison.OrdinalIgnoreCase) && setupView == SetupElevation.WebViewFolder(true),
             $"the elevated setup's: its own for this run, in the user's profile, where its de-elevated browser can write ({setupView})");
         Check(!setupView.StartsWith(SetupElevation.TrustedDir, StringComparison.OrdinalIgnoreCase), "... never in admin-only Program Files\\HTPC\\Setup");
-        Check(SetupElevation.WebViewFolder(true, false) == Path.Combine(local, "HTPC", "setup-webview"), "a setup at standard rights (a dev run): its own in the user's profile");
 
         // The C# trust check (UpdateCore's Get-UntrustedReason): Windows' own folder passes, a
         // folder this account made in %TEMP% does not (its owner, or its write rights).
@@ -371,8 +361,6 @@ static class ElevationTests
         try { return Enumerable.Range(0, count).Select(i => Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, i * IntPtr.Size))!).ToArray(); }
         finally { LocalFree(argv); }
     }
-
-    static bool TokenElevated() => TokenValue(20 /* TokenElevation */) != 0;
 
     /// <summary>1 default (no split token), 2 full (elevated, split), 3 limited.</summary>
     static int TokenElevationType() => TokenValue(18 /* TokenElevationType */);

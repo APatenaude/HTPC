@@ -425,10 +425,10 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// The WebView2 profile, in %LOCALAPPDATA%\HTPC: launcher-webview for the launcher,
-    /// setup-webview for a setup at standard rights (a dev run), and for the elevated setup a new
-    /// one each run, setup-webview\run-&lt;id&gt;. The elevated setup's is in the user's profile, a
-    /// folder the user can write, and that is safe:
+    /// The WebView2 profile, in %LOCALAPPDATA%\HTPC: launcher-webview for the launcher, and for
+    /// setup (always elevated: Decide never runs setup without the rights) a new one each run,
+    /// setup-webview\run-&lt;id&gt;. Setup's is in the user's profile, a folder the user can write,
+    /// and that is safe:
     ///   - WebView2 starts its browser de-elevated, at the user's own rights, whatever its host's
     ///     (runtimes 153 and 154 do, through Explorer's desktop: without one, as in TV mode, it
     ///     fails with "Element not found", so the first copy starts Explorer: OwnDesktop): in
@@ -444,9 +444,9 @@ static class SetupElevation
     ///   - A new folder each run: nothing an earlier run, or anyone, left there is loaded; the
     ///     launcher removes them as the user at its start (ClearSetupWebViews).
     /// </summary>
-    public static string WebViewFolder(bool setupMode, bool elevated) =>
+    public static string WebViewFolder(bool setupMode) =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HTPC",
-            setupMode && elevated ? Path.Combine("setup-webview", SetupRun) : setupMode ? "setup-webview" : "launcher-webview");
+            setupMode ? Path.Combine("setup-webview", SetupRun) : "launcher-webview");
 
     /// <summary>This elevated setup's run: its WebView2 profile's folder (WebViewFolder).</summary>
     static readonly string SetupRun = $"run-{Guid.NewGuid():N}";
@@ -503,22 +503,21 @@ static class SetupElevation
     }
 
     /// <summary>
-    /// Who takes over when the wizard is done: the installed launcher, through its watchdog when
-    /// there is one (--shell when that is how this session started), started as the signed-in user.
-    /// Without an installed copy (a dev build, or the Launcher step failed) this program becomes the
-    /// home screen: elevated, a copy of it (--home), since every app opened from an elevated one
-    /// would run elevated too. Null: this window itself (not elevated, no other installed copy; the
-    /// installed launcher running setup again from About is elevated, so it hands over too).
+    /// Who takes over when the wizard is done (setup is always elevated: Decide never runs it
+    /// without the rights): the installed launcher, through its watchdog when there is one (--shell
+    /// when that is how this session started), started as the signed-in user; the installed
+    /// launcher running setup again from About hands over the same way. Without an installed copy
+    /// (a dev build, or the Launcher step failed) a copy of this program (--home) becomes the home
+    /// screen, since every app opened from this elevated window would run elevated too.
     /// </summary>
-    public static UserStart? AfterSetup(string installed, bool installedThere, bool watchdogThere, bool watchdogIsShell,
-        string self, IEnumerable<string> args, bool elevated)
+    public static UserStart AfterSetup(string installed, bool installedThere, bool watchdogThere, bool watchdogIsShell,
+        string self, IEnumerable<string> args)
     {
-        var isSelf = string.Equals(Path.GetFullPath(self), Path.GetFullPath(installed), StringComparison.OrdinalIgnoreCase);
-        if (installedThere && (elevated || !isSelf))
+        if (installedThere)
             return watchdogThere
                 ? new UserStart(Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe"), watchdogIsShell ? "--shell" : "", AsUser.WatchdogTask)
                 : new UserStart(installed, "", AsUser.LauncherTask);
-        return elevated ? new UserStart(self, CommandLine(HomeArgs(args)), AsUser.LauncherTask) : null;
+        return new UserStart(self, CommandLine(HomeArgs(args)), AsUser.LauncherTask);
     }
 
     /// <summary>
