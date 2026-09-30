@@ -71,7 +71,7 @@ $dom = & $edge --headless=new --do-not-de-elevate --disable-gpu --disable-extens
 $results = [regex]::Match($dom, '<pre id="results">([\s\S]*?)</pre>').Groups[1].Value
 if ($results -match 'ALL PASSED\s*$') { 'phone-test => ALL PASSED' } else {
     $failed++
-    'phone-test => FAILED ' + $(if ($results) { [regex]::Match($results, '\d+ FAILED').Value } else { '(no results: the page did not finish in its time budget)' })
+    'phone-test => FAILED ' + $(if ($results) { [regex]::Match($results, '\d+ FAILED').Value } else { '(no results: the page did not finish: out of time, or stopped by an error)' })
     $results -split "`r?`n" | Where-Object { $_ -match '^FAIL' } | Select-Object -First 6
 }
 Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*htpc-testall-edge*" } |

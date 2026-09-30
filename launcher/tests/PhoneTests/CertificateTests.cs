@@ -137,8 +137,9 @@ static partial class Program
             new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false),
             PhoneCertificates.NameConstraints(PhoneCertificates.LocalNames()),
         ];
+        // The good ones with one replaced in its place (or left out).
         IEnumerable<X509Extension> With(string oid, X509Extension? instead) =>
-            good.Where(e => e.Oid!.Value != oid).Concat(instead is null ? Array.Empty<X509Extension>() : new[] { instead }).ToList();
+            good.Select(e => e.Oid!.Value == oid ? instead : e).OfType<X509Extension>().ToList();
         string? Why(IEnumerable<X509Extension> extensions, string? name = null) => PhoneCertificates.Unfit(testRoot, Intermediate(testRoot, name ?? subject, extensions), testName);
 
         Check(Why(good) is null, $"one made as this box makes it: fit ({Why(good)})");
@@ -318,8 +319,9 @@ static partial class Program
         var inStore = IntermediatesInStore(testName);
         var left = leftovers.Count(l => inStore.Contains(l.Thumbprint));
         var currentIn = inStore.Contains(certs.Intermediate!.Thumbprint);
-        Check(left == 0 && currentIn, "at every start this box's older intermediates leave the CA store (CN and O in either order); the current one stays"
-            + $" ({left} of 2 left; the current one {(currentIn ? "there" : "missing")})");
+        Check(leftovers[0].Subject.StartsWith("CN=") && leftovers[1].Subject.StartsWith("O=") && left == 0 && currentIn,
+            "at every start this box's older intermediates leave the CA store (CN and O in either order); the current one stays"
+            + $" ({left} of 2 left; the current one {(currentIn ? "there" : "missing")}; {leftovers[1].Subject})");
         Check(others.All(o => inStore.Contains(o.Thumbprint)), "another O, or CN and O in one multi-valued name: left alone");
 
         // What the box had: leftovers in the machine's store (from test runs as administrator) show
@@ -360,7 +362,10 @@ static partial class Program
     static async Task HttpsTests()
     {
         var testName = NewTestName();
-        var store = new CngKeyStore(testName + " ");
+        // The keys under names of their own that do not change: what a run stopped half-way left goes here.
+        var store = new CngKeyStore("HTPC PhoneTests ");
+        store.Delete(PhoneCertificates.IntermediateKeyName);
+        store.Delete(PhoneCertificates.ServerKeyName);
         using var folder = new TempPath("certs-test");
         using var file = new TempPath("phones-test", ".json");
         PhoneServer? server = null;
@@ -472,12 +477,15 @@ static partial class Program
         }
         finally
         {
-            if (server is not null) await server.StopAsync();
-            store.Delete(PhoneCertificates.IntermediateKeyName);
-            store.Delete(PhoneCertificates.ServerKeyName);
-            RemoveTestCerts(Regex.Escape(testName));
-            Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null && IntermediatesInStore(testName).Count == 0,
-                "the test's keys deleted from the key store, its intermediate from the CA stores");
+            try { if (server is not null) await server.StopAsync(); }
+            finally
+            {
+                store.Delete(PhoneCertificates.IntermediateKeyName);
+                store.Delete(PhoneCertificates.ServerKeyName);
+                RemoveTestCerts(Regex.Escape(testName));
+                Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null && IntermediatesInStore(testName).Count == 0,
+                    "the test's keys deleted from the key store, its intermediate from the CA stores");
+            }
         }
     }
 }

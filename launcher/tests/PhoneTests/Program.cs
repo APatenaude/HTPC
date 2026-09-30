@@ -23,23 +23,34 @@ static partial class Program
         T.Start(args);
         // One run at a time on a box: runs share Windows' CA stores, and while another process writes
         // to one, its listing misses certificates (a leftover not removed, the current one not found).
-        using var turn = new Mutex(false, @"Local\HTPC PhoneTests");
-        var ours = TakeTurn(turn);
+        var turn = TakeTurn();
         try { return Groups(); }
-        finally { if (ours) turn.ReleaseMutex(); }
+        finally { turn?.ReleaseMutex(); turn?.Dispose(); }
     }
 
-    static bool TakeTurn(Mutex turn)
+    /// <summary>The box's PhoneTests turn (a named mutex), waited for up to 2 minutes; null: running without it (said).</summary>
+    static Mutex? TakeTurn()
     {
-        try
+        var waited = Stopwatch.StartNew();
+        var said = false;
+        while (true)
         {
-            if (turn.WaitOne(0)) return true;
-            Console.WriteLine("  (another PhoneTests is running: waiting for it, they share the CA stores)");
-            if (turn.WaitOne(TimeSpan.FromMinutes(2))) return true;
+            try
+            {
+                var turn = new Mutex(false, @"Local\HTPC PhoneTests");
+                try { if (turn.WaitOne(500)) return turn; }
+                catch (AbandonedMutexException) { return turn; }   // a run that ended without letting go
+                turn.Dispose();
+            }
+            catch (UnauthorizedAccessException) { }   // a run with administrator rights holds it
+            if (waited.Elapsed > TimeSpan.FromMinutes(2))
+            {
+                Console.WriteLine("  WARNING: another PhoneTests still runs after 2 minutes: running anyway (the certificate checks may fail)");
+                return null;
+            }
+            if (!said) Console.WriteLine("  (another PhoneTests is running: waiting for it, they share the CA stores)");
+            said = true;
         }
-        catch (AbandonedMutexException) { return true; }   // a run that ended without letting go
-        Console.WriteLine("  WARNING: another PhoneTests still runs after 2 minutes: running anyway (the certificate checks may fail)");
-        return false;
     }
 
     static int Groups()
@@ -398,7 +409,7 @@ static partial class Program
     // would pass for the wrong reason.
     static async Task SilenceTests()
     {
-        await using var box = await TestServer.StartAsync(silence: TimeSpan.FromMilliseconds(600));
+        await using var box = await TestServer.StartAsync(silence: TimeSpan.FromSeconds(1));
         box.Pairing.RequireCode = false;
         var (host, silence) = (box.Host, box.Server.Silence);
         using var stopPings = new CancellationTokenSource();
@@ -414,7 +425,8 @@ static partial class Program
         var (quiet, _) = await Ws(box.Port, box.Origin, null);
         await Receive(quiet!);
         var sw = Stopwatch.StartNew();
-        var gone = await Receive(quiet!, (int)(silence.TotalMilliseconds * 5));
+        // Waiting twice the upper bound: a launcher that ignored Silence would fail by seconds, not by a timer's jitter.
+        var gone = await Receive(quiet!, (int)(silence.TotalMilliseconds * 10));
         var after = sw.Elapsed;
         Check(gone is null && after > silence * 2 / 3 && after < silence * 5 && await WaitFor(host, "disconnected")
             && pinger!.State == WebSocketState.Open && host.Events.Count(e => e == "disconnected") == 1,

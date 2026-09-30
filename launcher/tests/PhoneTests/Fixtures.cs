@@ -106,9 +106,12 @@ static partial class Program
 
         public async ValueTask DisposeAsync()
         {
-            Http.Dispose();
-            await Server.StopAsync();
-            file.Dispose();
+            try
+            {
+                Http.Dispose();
+                await Server.StopAsync();
+            }
+            finally { file.Dispose(); }
         }
     }
 
