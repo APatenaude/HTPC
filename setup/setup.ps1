@@ -10,13 +10,16 @@
       Apps          the apps picked in catalog.json (or -Apps)
       Codecs        HEVC Video Extensions (for Edge)
       Edge          Google search, the extensions (uBlock Origin Lite, FrankerFaceZ, Video Speed
-                    Controller), no first-run, promotions or password saving
+                    Controller), no first-run, promotions or password saving, pages off screen
+                    asleep after 5 minutes
       Power         never sleeps on its own (the launcher's standby), wake sources
       Drivers       the makers' drivers from Windows Update for devices without one (graphics
                     still on the Microsoft Basic Display Adapter, HDMI audio, chipset...)
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       Bluetooth     the Bluetooth adapter's own driver instead of Windows' generic one, if any
-      System        no popups over the TV, Private network, time zone, computer name TV
+      System        no popups over the TV, Private network, time zone, computer name TV; less in
+                    the background (unused services, telemetry tasks, a gentler Defender scan);
+                    no multiplane overlay (after a restart)
       AutoLogon     open box: no Windows password, automatic sign-in
       Launcher      the launcher (-LauncherExe) and its watchdog into Program Files, started at sign-in
       Library       lock ProgramData\HTPC and register the \HTPC\Jobs task (install from the TV)

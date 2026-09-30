@@ -145,6 +145,19 @@ function Remove-RegValue([string]$Path, [string]$Name) {
     }
 }
 
+# A service's start type, Automatic (Delayed Start) told apart (Windows PowerShell 5.1's
+# Get-Service says Automatic for both); $null when this Windows has no such service.
+function Get-ServiceStart([string]$Name) {
+    if (-not (Get-Service $Name -ErrorAction SilentlyContinue)) { return $null }
+    $reg = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
+    switch ([int]$reg.Start) {
+        2 { if ($reg.DelayedAutostart -eq 1) { 'AutomaticDelayedStart' } else { 'Automatic' } }
+        3 { 'Manual' }
+        4 { 'Disabled' }
+        default { "start $($reg.Start)" }
+    }
+}
+
 # Runs a program and echoes its output through Write-Host, because Windows PowerShell's
 # transcript misses what a program writes straight to the console. Spinner-only lines are
 # dropped. Returns the exit code. (No 2>&1: with ErrorActionPreference Stop, PowerShell 5.1

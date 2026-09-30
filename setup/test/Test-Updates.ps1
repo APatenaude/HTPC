@@ -12,7 +12,9 @@
     and a fake GitHub on http://127.0.0.1 (Serve-FakeRelease.ps1).
       Core      version order (0.9 < 0.10), update.json checks, the job grammar (dry runs), the
                 real watchdog's rules (Watchdog.cs compiled with checks: a job's pause or watch
-                file, how an exit counts, never a fallback while an update watches)
+                file, how an exit counts, never a fallback while an update watches), what an
+                update applies of setup (the machine steps; the System step's record of what it
+                turned off, and that none of it is something the box uses)
       Download  pinned redirects: another host, another scheme, more than 5 hops, another
                 repository's path (a renamed one: "moved", also for releases/latest), no release
                 yet, a lying Content-Length, a longer stream, 429 short and long, 403 with and
@@ -673,6 +675,33 @@ static class Checks {
         $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*') { throw 'failed' } }
         $ran.Clear(); Update-MachineSettings $mp $fake
         Check (($ran -join ',') -eq 'Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
+
+        # The System step's record of what it turned off, for the uninstall (Save-FirstValue): the
+        # first value of each kept, so a run again never records the step's own setting; a record
+        # Users could change is refused.
+        $record = Join-Path $mp.StateRoot 'system-before.json'
+        Save-FirstValue $record $mp.DataRoot 'service:Spooler' 'Automatic'
+        Save-FirstValue $record $mp.DataRoot 'task:\Microsoft\Windows\Autochk\Proxy' 'Enabled'
+        Save-FirstValue $record $mp.DataRoot 'service:Spooler' 'Disabled'
+        $kept = [IO.File]::ReadAllText($record) | ConvertFrom-Json
+        Check ($kept.'service:Spooler' -eq 'Automatic' -and $kept.'task:\Microsoft\Windows\Autochk\Proxy' -eq 'Enabled') "the System step's record keeps the first value of each ($($kept | ConvertTo-Json -Compress))"
+        $acl = Get-Acl -LiteralPath $record
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'Modify', 'Allow'))
+        Set-Acl -LiteralPath $record -AclObject $acl
+        $refused = $false
+        try { Save-FirstValue $record $mp.DataRoot 'service:Fax' 'Manual' } catch { $refused = (Kind $_) -eq 'refused' }
+        Check $refused '  a record Users can change is refused'
+
+        # What the System step turns off, read from the script an update runs: never what the box
+        # uses (Bluetooth, audio, the network, Windows Update, Defender, Edge's and WebView2's
+        # updaters, the \HTPC tasks).
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib 'Set-SystemPolicy.ps1'), [ref]$null, [ref]$null)
+        $off = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq '$telemetryTasks' }, $true) |
+                ForEach-Object { $_.Right.FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) } | ForEach-Object { $_.Value })
+        $off += @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.HashtableAst] -and @($n.KeyValuePairs | ForEach-Object { "$($_.Item1)" }) -contains 'Start' }, $true) |
+                ForEach-Object { $_.KeyValuePairs | Where-Object { "$($_.Item1)" -eq 'Name' } | ForEach-Object { $_.Item2.Extent.Text.Trim("'") } })
+        $used = @($off | Where-Object { $_ -match 'Bluetooth|\bBth|Audio|Netw|Nla|Dhcp|Dns|Wlan|wuauserv|UsoSvc|UpdateOrchestrator|WindowsUpdate|Defender|WinDefend|MpsSvc|EdgeUpdate|WebView|\\HTPC\\' })
+        Check ($off.Count -ge 10 -and -not $used.Count) "the System step turns off none of what the box uses ($($off.Count) services and tasks$(if ($used) { ': ' + ($used -join ', ') }))"
 
         # The watchdog compiled above, with its checks.
         $built = Receive-Child $wdBuild

@@ -542,6 +542,24 @@ function Write-AtomicText([string]$Path, [string]$Text) {
     Move-WriteThrough $tmp $Path -Replace
 }
 
+# Adds $Key = $Value to a small JSON record ($Path, in the admin-only $Root) unless the key is
+# there already: the first value of each is kept. The System step records there what it turns
+# off, as it was before (state\system-before.json), for the uninstall to put back: a run again
+# finds the step's own setting, which must not replace the one from before. A record that cannot
+# be read is started again, and said so.
+function Save-FirstValue([string]$Path, [string]$Root, [string]$Key, [string]$Value) {
+    $record = [ordered]@{}
+    if (Test-Path -LiteralPath $Path) {
+        Assert-TrustedPath $Path $Root
+        try { ([IO.File]::ReadAllText($Path) | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $record[$_.Name] = [string]$_.Value } }
+        catch { Write-Host "  ! $Path unreadable ($($_.Exception.Message)): started again" }
+    }
+    if ($record.Contains($Key)) { return }
+    $record[$Key] = $Value
+    New-TrustedDirectory (Split-Path $Path -Parent) $Root -UsersRead
+    Write-AtomicText $Path (([pscustomobject]$record) | ConvertTo-Json)
+}
+
 # Unpacks a zip into $To, refusing any entry that would land outside it ("..\", a drive, a
 # stream name).
 function Expand-ZipSafely([string]$Zip, [string]$To) {
