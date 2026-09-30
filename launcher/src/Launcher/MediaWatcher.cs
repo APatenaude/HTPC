@@ -145,18 +145,20 @@ sealed class MediaWatcher
     }
 
     /// <summary>
-    /// A WinRT call, waited for CallTimeout at most: then it is cancelled (if the other side
-    /// listens) and left behind, and a TimeoutException says who did not answer.
+    /// A WinRT call, waited for CallTimeout at most (timeout: shorter, for the tests): then it is
+    /// cancelled (if the other side listens) and left behind, and a TimeoutException says who did
+    /// not answer.
     /// </summary>
-    internal static async Task<T> Timed<T>(IAsyncOperation<T> operation, string what)
+    internal static async Task<T> Timed<T>(IAsyncOperation<T> operation, string what, TimeSpan? timeout = null)
     {
+        var limit = timeout ?? CallTimeout;
         var task = operation.AsTask();
-        try { return await task.WaitAsync(CallTimeout); }
+        try { return await task.WaitAsync(limit); }
         catch (TimeoutException)
         {
             try { operation.Cancel(); } catch (Exception) { }
             _ = task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted); // observed, whatever it ends with
-            throw new TimeoutException($"{what}: no answer within {CallTimeout.TotalSeconds:0} s");
+            throw new TimeoutException($"{what}: no answer within {limit.TotalSeconds:0.##} s");
         }
     }
 

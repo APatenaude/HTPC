@@ -127,7 +127,7 @@ static class ResourceTests
     // test is "the launcher" here) never stoppable, a held row that is gone, and the cost.
     static void Live()
     {
-        var watch = new ResourceWatch(Repo.Apps);
+        var watch = new ResourceWatch(Repo.Apps, everyMs: 200);   // a report every 200 ms here, not every 2 s
         var reports = new List<string>();
         var times = new List<(double Report, double Cpu, double List)>();
         using var enough = new ManualResetEventSlim();
@@ -163,7 +163,7 @@ static class ResourceTests
         check(held.Count == 1 && held[0].GetProperty("key").GetString() == "exe:no-such-program.exe" && held[0].GetProperty("gone").GetBoolean(),
             "a held row whose program is not there: gone");
         check(watch.Find("self") is { Name: "TV launcher", MayStop: false }, "the launcher's own row (this test here): never stoppable");
-        // The first one pays for the JSON's first use; the others are what each 2 s costs. By the
+        // The first one pays for the JSON's first use; the others are what each report costs. By the
         // clock a busy machine adds its waits for a CPU; the thread's own cycles are the cost.
         var first = times[0];
         var after = times.Skip(1).DefaultIfEmpty(first).ToList();

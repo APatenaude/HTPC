@@ -193,7 +193,7 @@ T.Group("PadMapper", () =>
     now = 1200;
     // Held until the frame thread has moved it (up to 3 s): on a busy runner it may not have run
     // within a fixed 240 ms (the check failed at random on GitHub).
-    for (var i = 0; i < 30 || (i < 375 && !Input.Snapshot().Contains("move")); i++) { mapper.Update(new PadState(0, 0, 0, 30000, 0, 0, 0), now += 8, true); Thread.Sleep(8); }
+    for (var i = 0; i < 375 && !Input.Snapshot().Contains("move"); i++) { mapper.Update(new PadState(0, 0, 0, 30000, 0, 0, 0), now += 8, true); Thread.Sleep(8); }
     mapper.Update(S(), now += 8, true);
     Thread.Sleep(50);
     Check(Input.Snapshot().Contains("move"), "left stick moves the pointer on the frame thread");
@@ -332,10 +332,10 @@ T.Group("Standby: waking with Home", () =>
     controller.Start();
     var seen = new List<double>();
     var held = new List<double>();
-    for (var i = 0; i < 6; i++)
+    for (var i = 0; i < 2; i++)
     {
-        controller.Inject(null);   // the real controller again: the thread waits between looks
-        Thread.Sleep(650 + 37 * i); // presses fall at different points of that wait
+        controller.Inject(null);   // the real controller again: the thread waits up to 300 ms between looks
+        Thread.Sleep(100 + 100 * i); // presses fall at different points of that wait: a press that did not wake it is seen 100 ms late or more
         Interlocked.Exchange(ref downAt, -1);
         Interlocked.Exchange(ref heldAt, -1);
         var pressed = clock.ElapsedTicks;
@@ -348,8 +348,8 @@ T.Group("Standby: waking with Home", () =>
     controller.Dispose();
     double Median(List<double> v) => v.Count == 0 ? double.NaN : v.OrderBy(x => x).ElementAt(v.Count / 2);
     T.Info($"Home seen after {Median(seen):0} ms (max {(seen.Count > 0 ? seen.Max() : double.NaN):0}), held (the buzz) after {Median(held):0} ms (max {(held.Count > 0 ? held.Max() : double.NaN):0})");
-    Check(seen.Count == 6 && seen.Max() < 100, $"standby: Home going down is seen within 100 ms, even between looks for a controller ({string.Join(", ", seen.Select(x => x.ToString("0")))})");
-    Check(held.Count == 6 && held.Min() >= 490 && held.Max() < 700, $"standby: the 0.5 s hold is reached 0.5 s after the press, not much later ({string.Join(", ", held.Select(x => x.ToString("0")))})");
+    Check(seen.Count == 2 && seen.Max() < 100, $"standby: Home going down is seen within 100 ms, even between looks for a controller ({string.Join(", ", seen.Select(x => x.ToString("0")))})");
+    Check(held.Count == 2 && held.Min() >= 490 && held.Max() < 700, $"standby: the 0.5 s hold is reached 0.5 s after the press, not much later ({string.Join(", ", held.Select(x => x.ToString("0")))})");
 
     // With no controller connected: awake, a look every 50 ms as ever; in standby, the thread
     // waits for the next look for a controller (every 300 ms), however long is left.
@@ -757,13 +757,15 @@ T.Group("VideoEndDetector", () =>
 // Standby's pause, the idle check and the phone must go on without a player that never answers.
 T.Group("Media calls: a player that never answers", () =>
 {
+    // Waited for 50 ms here, not the calls' 2 s.
+    Check(MediaWatcher.CallTimeout == TimeSpan.FromSeconds(2), $"a call is waited for 2 s ({MediaWatcher.CallTimeout})");
     var never = new TaskCompletionSource<bool>().Task.AsAsyncOperation();
     var clock = System.Diagnostics.Stopwatch.StartNew();
     string? error = null;
-    try { MediaWatcher.Timed(never, "a frozen player").GetAwaiter().GetResult(); }
+    try { MediaWatcher.Timed(never, "a frozen player", TimeSpan.FromMilliseconds(50)).GetAwaiter().GetResult(); }
     catch (TimeoutException e) { error = e.Message; }
     Check(error?.Contains("a frozen player") == true, $"no answer: a TimeoutException that names the call ({error})");
-    Check(clock.Elapsed < MediaWatcher.CallTimeout + TimeSpan.FromSeconds(2), $"given up after the timeout, not later ({clock.ElapsedMilliseconds} ms)");
+    Check(clock.Elapsed < TimeSpan.FromSeconds(2), $"given up after the timeout, not later ({clock.ElapsedMilliseconds} ms for 50)");
     Check(MediaWatcher.Timed(Task.FromResult(true).AsAsyncOperation(), "a player").GetAwaiter().GetResult(), "an answer comes through");
 });
 

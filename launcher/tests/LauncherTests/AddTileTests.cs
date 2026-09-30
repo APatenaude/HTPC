@@ -49,9 +49,9 @@ static class AddTileTests
         var again = new AppLogos(dir, (_, _) => Task.FromResult<(byte[], Uri)?>(null), Shell);   // the launcher started again
         saved += await again.RefreshNow(sources);
         Check(saved == 0 && made.Count == 0 && again.Url(id) is not null, "made once: not again on the next look, nor after the launcher restarts");
+        File.SetLastWriteTimeUtc(Path.Combine(dir, id + ".png"), DateTime.UtcNow.AddHours(-2));   // the icon made two hours ago
         var first = icons.Url(id);
-        Thread.Sleep(20);
-        File.SetLastWriteTimeUtc(link, DateTime.UtcNow);   // the program updated its shortcut
+        File.SetLastWriteTimeUtc(link, DateTime.UtcNow.AddHours(-1));   // the program updated its shortcut an hour ago
         saved = await icons.RefreshNow(sources);
         Check(saved == 1 && made.Count == 1 && icons.Url(id) != first, "its shortcut written again (an update): made again, a new address");
 

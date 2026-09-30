@@ -36,6 +36,7 @@ sealed unsafe class ResourceWatch
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     readonly AppManager apps;
+    readonly int everyMs;
     readonly uint self = (uint)Environment.ProcessId;
     readonly uint session;
 
@@ -57,9 +58,11 @@ sealed unsafe class ResourceWatch
     /// <summary>The process list's part of it (NtQuerySystemInformation and reading it), in ms.</summary>
     public double LastListMs { get; private set; }
 
-    public ResourceWatch(AppManager apps)
+    /// <param name="everyMs">A report every so often while watched: 2 s; shorter only for the tests.</param>
+    public ResourceWatch(AppManager apps, int everyMs = EveryMs)
     {
         this.apps = apps;
+        this.everyMs = everyMs;
         using var me = Process.GetCurrentProcess();
         session = (uint)me.SessionId;
     }
@@ -165,7 +168,7 @@ sealed unsafe class ResourceWatch
                     if (Environment.TickCount64 >= nextReportAt)
                     {
                         Report(held);
-                        nextReportAt = Environment.TickCount64 + EveryMs;
+                        nextReportAt = Environment.TickCount64 + everyMs;
                     }
                     wait = (int)Math.Max(1, nextReportAt - Environment.TickCount64);
                 }

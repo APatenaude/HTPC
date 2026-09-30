@@ -327,9 +327,9 @@ static class LogoTests
         saved = await logos.RefreshNow(sources);
         Check(saved == 0 && web.Asked.Count == 0 && extracted.Count == 0, "second pass: the site is not asked again, the program not read again");
 
+        File.SetLastWriteTimeUtc(Path.Combine(dir, "player.png"), DateTime.UtcNow.AddHours(-2));   // the logo taken two hours ago
         var firstUrl = logos.Url("player");
-        Thread.Sleep(20);
-        File.SetLastWriteTimeUtc(exePath, DateTime.UtcNow); // the program was updated
+        File.SetLastWriteTimeUtc(exePath, DateTime.UtcNow.AddHours(-1)); // the program updated an hour ago
         saved = await logos.RefreshNow(sources);
         Check(saved == 1 && extracted.Count == 1 && logos.Url("player") != firstUrl, "the program updated: its icon read again, a new address (the UI reloads it)");
 
