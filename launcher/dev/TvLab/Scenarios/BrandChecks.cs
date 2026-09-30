@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Htpc.Launcher;
 
@@ -284,6 +286,21 @@ static class BrandChecks
         await w.RunFor(10);
         await h.Wake();
         await Check.Eventually("Google TV: WAKEUP when the box wakes", () => atv.Keys.Contains(224) && atv.On, 30);
+
+        // The launcher's end (MainForm disposes the service): the box's client key leaves no file in the user's profile.
+        var keyFile = KeyFile(((AndroidTvDriver)h.Tv.DriverFor("androidtv")!).ClientCertificate);
+        var there = keyFile is not null && File.Exists(keyFile);
+        h.Tv.Dispose();
+        Check.That(there && !File.Exists(keyFile), $"Google TV: the box's client key file ({(there ? "there while it runs" : "not found")}) is gone once the driver is disposed");
+    }
+
+    /// <summary>The file in the user's profile that holds a certificate's private key (a CNG key, as a PFX loads into the user's key set).</summary>
+    static string? KeyFile(X509Certificate2? cert)
+    {
+        using var rsa = cert?.GetRSAPrivateKey();
+        if (rsa is not RSACng cng) return null;
+        using var key = cng.Key;
+        return key.UniqueName is { } name ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Crypto", "Keys", name) : null;
     }
 
     static async Task SonyFlow()

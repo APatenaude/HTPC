@@ -49,12 +49,7 @@ try
 }
 finally
 {
-    // Certificates the drivers made and never dispose (Google TV's client key, as the launcher
-    // keeps it) delete their key files in the user's profile when finalized: a process exit runs
-    // no finalizer, so they run here.
-    LabCertificate.DisposeShared();
-    GC.Collect();
-    GC.WaitForPendingFinalizers();
+    LabCertificate.DisposeShared(); // the Google TV fakes' keys (their files in the user's profile)
     LabRun.CleanUp();
 }
 

@@ -20,7 +20,7 @@ namespace Htpc.Launcher;
 /// as silent. Keys go only over that pinned connection. Chromecasts, Google TV Streamers and Nest
 /// devices answer the same service and are left out (their cast name gives them away).
 /// </summary>
-sealed class AndroidTvDriver : ITvDriver, ITvPairing
+sealed class AndroidTvDriver : ITvDriver, ITvPairing, IDisposable
 {
     public const string Service = "_androidtvremote2._tcp.local";
     const string ClientKey = "androidtv:client";
@@ -92,18 +92,45 @@ sealed class AndroidTvDriver : ITvDriver, ITvPairing
     /// <summary>The box's client certificate (one per box, made on first use, kept with the pairing keys).</summary>
     X509Certificate2 Client()
     {
-        if (client is not null) return client;
-        var pfx = credentials?.Get(ClientKey)?.Pfx;
-        if (pfx is null)
+        lock (gate)
         {
-            using var rsa = RSA.Create(2048);
-            var request = new CertificateRequest("CN=TV Box", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-            using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(20));
-            pfx = made.Export(X509ContentType.Pfx);
-            credentials?.Set(ClientKey, new TvCredentials.Secret { Pfx = pfx });
+            ObjectDisposedException.ThrowIf(disposed, this); // a TLS attempt after the launcher's end fails (Tls and Pair catch it)
+            if (client is not null) return client;
+            var pfx = credentials?.Get(ClientKey)?.Pfx;
+            if (pfx is null)
+            {
+                using var rsa = RSA.Create(2048);
+                var request = new CertificateRequest("CN=TV Box", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(20));
+                pfx = made.Export(X509ContentType.Pfx);
+                credentials?.Set(ClientKey, new TvCredentials.Secret { Pfx = pfx });
+            }
+            // A key TLS client authentication (Schannel) can use: loaded from the PFX into the user's
+            // key set, a key file in the profile until the certificate is disposed (Dispose).
+            return client = X509CertificateLoader.LoadPkcs12(pfx, null, X509KeyStorageFlags.UserKeySet);
         }
-        // A key TLS client authentication (Schannel) can use: loaded from the PFX into the user's key set.
-        return client = X509CertificateLoader.LoadPkcs12(pfx, null, X509KeyStorageFlags.UserKeySet);
+    }
+
+    readonly object gate = new();
+    bool disposed;
+
+    /// <summary>The box's client certificate once loaded (TvLab checks its key file goes with Dispose).</summary>
+    internal X509Certificate2? ClientCertificate => client;
+
+    /// <summary>
+    /// The launcher ends: its connections closed and the client certificate disposed, which deletes
+    /// its key file from the user's profile (a process exit disposes nothing: one file per launcher
+    /// run was left behind). The certificate itself stays with the pairing keys.
+    /// </summary>
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            disposed = true;
+            foreach (var key in sessions.Keys) if (sessions.TryRemove(key, out var s)) s.Dispose();
+            client?.Dispose();
+            client = null;
+        }
     }
 
     static string PinOf(X509Certificate cert) =>

@@ -80,10 +80,10 @@ sealed class NewHost : IDisposable
     public Task Tick() => Tv.Poll();
     public Task<bool> Test() { TurnOns++; return Tv.Test(); }
 
-    /// <summary>A pairing still waiting is cancelled first (it would write its key after the folder is gone).</summary>
+    /// <summary>The service disposed first, as MainForm does: a pairing still waiting is cancelled (it would write its key after the folder is gone), the drivers' keys let go.</summary>
     public void Dispose()
     {
-        Tv.CancelPairing();
+        Tv.Dispose();
         try { Directory.Delete(FilesDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } // else at the run's end
     }
 }
