@@ -323,10 +323,11 @@ Console.WriteLine("== Start + D-pad (StartChord)");
 // The controller thread as standby runs it (Slow, WakeMode), from the moment Home goes down:
 // when the thread sees it, and when the 0.5 s hold is reached (the buzz and the wake come then).
 // Between presses it reads the real controller (none on a runner): the thread waits for the next
-// look for one, and a press made up with Inject must still get through at once.
+// look for one, and a press made up with Inject must still get through at once. Not WakeMode: it
+// only adds the wake buzz, which reached the real controller on a box (and the mapper, unused here).
 Console.WriteLine("== Standby: waking with Home");
 {
-    var controller = new ControllerService { Slow = true, WakeMode = true };
+    var controller = new ControllerService { Slow = true };
     var clock = System.Diagnostics.Stopwatch.StartNew();
     long downAt = -1, heldAt = -1;
     controller.Pressed += (pad, repeat) =>

@@ -102,8 +102,8 @@ that did the work; none of them belongs in the (public) repo:
 | Screenshots of a page (look at every screen a UI change touches; full size for details) | `launcher\dev\Save-Screenshots.ps1`, `Test-Ui.ps1 -Shots`; compare two with `Compare-Screenshots.ps1` |
 | The setup exe | `launcher\dev\Publish-Setup.ps1` (writes `launcher\dist\TV Box Setup.exe`) |
 
-`Test-All.ps1` runs the build, every test project, `setup\test\Test-*.ps1` (not `Test-Library.ps1`,
-which installs real apps: VM only), the UI self-test with the audit at 1080p, 1536x864 (a 4K TV
+`Test-All.ps1` runs the build, every test project, the setup tests CI runs (Test-Autostart, -Drivers,
+-Rights, -Updates; not `Test-Library.ps1`, which installs real apps, nor `Test-ReleaseInVm.ps1`), the UI self-test with the audit at 1080p, 1536x864 (a 4K TV
 at Windows' 250 % scaling), 720p, 1200p and ultrawide, and the phone page. `Test-Updates.ps1` needs administrator rights (it sets folder
 owners): run it elevated, or in the VM.
 

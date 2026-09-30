@@ -44,7 +44,8 @@ foreach ($p in $projects) {
 }
 
 if (-not $SkipSetupTests) {
-    foreach ($s in Get-ChildItem "$Root\setup\test\Test-*.ps1" | Where-Object Name -ne 'Test-Library.ps1') {
+    # By name, as CI runs them: not Test-Library (installs real apps) nor Test-ReleaseInVm (the VM).
+    foreach ($s in 'Test-Autostart', 'Test-Drivers', 'Test-Rights', 'Test-Updates' | ForEach-Object { Get-Item "$Root\setup\test\$_.ps1" }) {
         $o = & powershell -NoProfile -ExecutionPolicy Bypass -File $s.FullName 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { $failed++ }
         "$($s.BaseName) => exit $LASTEXITCODE :: " + (($o -split "`n" | Where-Object { $_ -match 'passed|failed' } | Select-Object -Last 1) -join '').Trim()
