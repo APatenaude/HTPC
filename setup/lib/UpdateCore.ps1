@@ -536,10 +536,17 @@ function Sync-FileTree([string]$Path) {
     }
 }
 # Writes a small file so it is either complete or not there: a temporary name, then a rename.
+# A reader that has the file open at that moment (the launcher polling a progress file, the
+# watchdog its pause) makes the rename fail ("access denied"): tried again for up to 2 s.
 function Write-AtomicText([string]$Path, [string]$Text) {
     $tmp = "$Path.tmp-$PID"
     [IO.File]::WriteAllText($tmp, $Text, (New-Object Text.UTF8Encoding $false))
-    Move-WriteThrough $tmp $Path -Replace
+    $deadline = [DateTime]::UtcNow.AddSeconds(2)
+    while ($true) {
+        try { Move-WriteThrough $tmp $Path -Replace; return }
+        catch { if ([DateTime]::UtcNow -ge $deadline) { throw } }
+        Start-Sleep -Milliseconds 20
+    }
 }
 
 # Adds $Key = $Value to a small JSON record ($Path, in the admin-only $Root) unless the key is

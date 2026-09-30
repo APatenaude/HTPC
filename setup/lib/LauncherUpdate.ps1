@@ -148,7 +148,13 @@ function Clear-WatchdogPause($Paths, [switch]$OnlyStale, [switch]$Watch) {
             if ($alive -and [int]$p.jobPid -ne $PID -and [DateTime]::Parse($p.expiresUtc).ToUniversalTime() -gt [DateTime]::UtcNow) { return }
         } catch { }
     }
-    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    # The watchdog reading it at that moment makes the delete fail: tried again for up to 2 s.
+    $deadline = [DateTime]::UtcNow.AddSeconds(2)
+    while ($true) {
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path -LiteralPath $file) -or [DateTime]::UtcNow -ge $deadline) { return }
+        Start-Sleep -Milliseconds 20
+    }
 }
 
 # The new launcher is about to be checked: the watch first, then the pause goes (never a moment
