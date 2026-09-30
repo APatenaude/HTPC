@@ -9,10 +9,15 @@
       dialogs; no Sticky/Filter/Toggle Keys prompts; no Game DVR; no controller navigation of
       Windows' own (the stick moving the focus in the Start menu and Explorer in desktop mode).
     - Less background work: Windows Search indexing and SysMain (prefetch) off, no peer-to-peer
-      update sharing; Print Spooler and Fax off; Windows' telemetry and Customer Experience
-      Improvement Program tasks off; Microsoft Defender's scheduled scan gentler (its protection
-      stays on). What was on before goes into state\system-before.json, for the uninstall.
-    - No multiplane overlay (the display; after a restart).
+      update sharing; Print Spooler, Fax, whesvc off, MapsBroker on demand; Windows' telemetry,
+      CEIP and toast tasks off; Microsoft Defender's real-time protection off and its scheduled
+      scan gentler (the scan, updates, cloud protection and SmartScreen stay); the new Outlook,
+      Dev Home and CrossDevice removed (the uninstall does not bring them back). What was there
+      before goes into state\system-before.json, for the uninstall.
+    - No advertising ID, activity history or app telemetry (AIT); no program from the firmware
+      (WPBT); no automatic device encryption.
+    - No multiplane overlay (the display), memory integrity, VBS and Credential Guard off (after
+      a restart).
     - Connected networks set to Private (the phone remote and TV discovery need the LAN), and
       every network joined later too (a SYSTEM task on Windows' network-connected event).
     - Location allowed for desktop apps and the launcher (its Wi-Fi list needs it since 24H2).
@@ -24,8 +29,8 @@
 .PARAMETER ComputerName
     Renaming needs a restart; setup.ps1 reports it.
 .PARAMETER MachineOnly
-    Only the machine's part: the HKLM values, the services, Windows' tasks, Defender's scan
-    settings, the sign-in screen's picture and colour. Not this user's settings (HKCU), the
+    Only the machine's part: the HKLM values, the services, Windows' tasks, Defender's settings,
+    the apps removed, the sign-in screen's picture and colour. Not this user's settings (HKCU), the
     networks, the task or the name. What a launcher update applies again, as SYSTEM, when this
     script changed (lib\LauncherUpdate.ps1).
 #>
@@ -48,6 +53,14 @@ $user = -not $MachineOnly
 # like the rest of state\, written before each change, the first value of each kept
 # (Save-FirstValue, UpdateCore.ps1).
 $beforeFile = Join-Path $HtpcData 'state\system-before.json'
+# A DWORD set with its old value kept in the same record ("reg:<key>\<name>", '' when there was
+# none), for the uninstall to put back exactly. True when it changed.
+function Set-KeptValue([string]$Path, [string]$Name, [int]$Value) {
+    $was = (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue).$Name
+    if ("$was" -ne "$Value") { Save-FirstValue $beforeFile $HtpcData "reg:$Path\$Name" "$was" }
+    Set-RegValue $Path $Name $Value
+    "$was" -ne "$Value"
+}
 
 Write-Host '  Privacy and nags'
 Set-RegValue "$policies\DataCollection" 'AllowTelemetry' 0
@@ -55,6 +68,17 @@ Set-RegValue "$policies\CloudContent" 'DisableWindowsConsumerFeatures' 1
 Set-RegValue "$policies\CloudContent" 'DisableSoftLanding' 1
 Set-RegValue "$policies\CloudContent" 'DisableCloudOptimizedContent' 1
 Set-RegValue "$policies\CloudContent" 'DisableConsumerAccountStateContent' 1
+# No advertising ID, activity history (Timeline) or Application Impact Telemetry (the owner, 30
+# Sept 2026). WPBT: a PC maker's firmware can hand Windows a program to run at every start (its
+# tools; a known way in for malware); a TV box needs none. Device encryption (BitLocker at the
+# first Microsoft account sign-in, its key in that account) is prevented by the USB install's
+# answer file already; this covers boxes installed without it.
+foreach ($v in @("$policies\AdvertisingInfo", 'DisabledByGroupPolicy', 1), @("$policies\System", 'PublishUserActivities', 0),
+    @("$policies\System", 'EnableActivityFeed', 0), @("$policies\AppCompat", 'AITEnable', 0),
+    @('HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager', 'DisableWpbtExecution', 1),
+    @('HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker', 'PreventDeviceEncryption', 1)) {
+    [void](Set-KeptValue $v[0] $v[1] $v[2])
+}
 if ($user) {
     Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
     Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableTailoredExperiencesWithDiagnosticData' 1
@@ -126,15 +150,19 @@ Set-RegValue "$policies\DeliveryOptimization" 'DODownloadMode' 0
 # Application log) a display problem is looked into with. Windows' telemetry service
 # (Connected User Experiences and Telemetry, DiagTrack) off as well (the owner, 29 Sept 2026):
 # it runs all the time (about 20 MB) to send Microsoft usage data, which nothing on the box needs,
-# with diagnostic data at its minimum already. Only ever turned down: a service already off
-# stays off.
+# with diagnostic data at its minimum already. The owner, 30 Sept 2026: 24H2's Health and
+# Optimized Experiences service (whesvc: its tips and toasts) Disabled; the offline maps
+# downloader (MapsBroker) on demand, no map app being there. Only ever turned down: a service
+# already off stays off.
 $rank = @{ Disabled = 0; Manual = 1; Automatic = 2; AutomaticDelayedStart = 2 }
-foreach ($service in @{ Name = 'Spooler'; Start = 'Disabled' }, @{ Name = 'Fax'; Start = 'Disabled' }, @{ Name = 'WerSvc'; Start = 'Manual' }, @{ Name = 'DiagTrack'; Start = 'Disabled' }) {
+foreach ($service in @{ Name = 'Spooler'; Start = 'Disabled' }, @{ Name = 'Fax'; Start = 'Disabled' }, @{ Name = 'WerSvc'; Start = 'Manual' }, @{ Name = 'DiagTrack'; Start = 'Disabled' },
+    @{ Name = 'whesvc'; Start = 'Disabled' }, @{ Name = 'MapsBroker'; Start = 'Manual' }) {
     $now = Get-ServiceStart $service.Name
     if (-not $now) { continue }
     if (-not $rank.ContainsKey($now) -or $rank[$now] -le $rank[$service.Start]) { Write-Same "service $($service.Name) $now"; continue }
     Save-FirstValue $beforeFile $HtpcData "service:$($service.Name)" $now
-    Set-Service $service.Name -StartupType $service.Start
+    try { Set-Service $service.Name -StartupType $service.Start }
+    catch { Write-Attention "service $($service.Name) left $now`: $($_.Exception.Message)"; continue }
     if ($service.Start -eq 'Disabled') {
         Stop-Service $service.Name -Force -ErrorAction SilentlyContinue
         Write-Change "service $($service.Name) stopped and disabled (was $now)"
@@ -146,7 +174,11 @@ foreach ($service in @{ Name = 'Spooler'; Start = 'Disabled' }, @{ Name = 'Fax';
 # Microsoft only (diagnostic data is at its minimum already, above), nothing on the box uses it,
 # and they start by themselves (at boot, on timers, in maintenance). Only those this Windows has
 # (24H2 names the compatibility appraiser "... Exp"; ProgramDataUpdater and KernelCeipTask are
-# older builds'). Disabled, not deleted: they are Windows' own.
+# older builds'). The owner, 30 Sept 2026: also the toasts and diagnostics of Maps, Family Safety,
+# Xbox saves, whesvc, feedback, power efficiency, WinSAT, sustainability, disk footprint and device
+# information (never defrag/TRIM, component cleanup, NGEN, restore points, Windows Update,
+# ReconcileFeatures, ProactiveScan or Automatic Maintenance). Disabled, not deleted: they are
+# Windows' own.
 $telemetryTasks = @(
     '\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser'
     '\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser Exp'
@@ -160,6 +192,18 @@ $telemetryTasks = @(
     '\Microsoft\Windows\Feedback\Siuf\DmClient'
     '\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload'
     '\Microsoft\Windows\Windows Error Reporting\QueueReporting'   # sends the crash reports (they stay on the box)
+    '\Microsoft\Windows\Maps\MapsToastTask'
+    '\Microsoft\Windows\Shell\FamilySafetyMonitor'
+    '\Microsoft\Windows\Shell\FamilySafetyRefreshTask'
+    '\Microsoft\XblGameSave\XblGameSaveTask'
+    '\Microsoft\Windows\PerformanceTrace\WhesvcToast'
+    '\Microsoft\Windows\PerformanceTrace\ShowFeedbackToast'
+    '\Microsoft\Windows\Power Efficiency Diagnostics\AnalyzeSystem'
+    '\Microsoft\Windows\Maintenance\WinSAT'
+    '\Microsoft\Windows\Sustainability\SustainabilityTelemetry'
+    '\Microsoft\Windows\DiskFootprint\Diagnostics'
+    '\Microsoft\Windows\Device Information\Device'
+    '\Microsoft\Windows\Device Information\Device User'
 )
 foreach ($full in $telemetryTasks) {
     $cut = $full.LastIndexOf('\') + 1
@@ -170,12 +214,26 @@ foreach ($full in $telemetryTasks) {
     try { $task | Disable-ScheduledTask | Out-Null; Write-Change "task $full disabled" }
     catch { Write-Attention "task $full left on: $($_.Exception.Message)" }
 }
+# Apps Windows updates bring that a TV box has no use for (the owner, 30 Sept 2026): the new
+# Outlook, Dev Home and Phone Link's CrossDevice (a clean LTSC install has none of them), for every
+# user and from the image, at every run. The uninstall does not bring them back.
+$apps = 'Microsoft.OutlookForWindows', 'Microsoft.Windows.DevHome', 'MicrosoftWindows.CrossDevice'
+try {
+    $found = @(Get-AppxPackage -AllUsers | Where-Object { $apps -contains $_.Name }) + @(Get-AppxProvisionedPackage -Online | Where-Object { $apps -contains $_.DisplayName })
+    if (-not $found.Count) { Write-Same "none of $($apps -join ', ')" }
+} catch { $found = @(); Write-Attention "apps not looked for: $($_.Exception.Message)" }
+foreach ($p in $found) {
+    try {
+        if ($p.PackageFullName) { Remove-AppxPackage -Package $p.PackageFullName -AllUsers; Write-Change "app $($p.Name) removed for every user" }
+        else { Remove-AppxProvisionedPackage -Online -PackageName $p.PackageName | Out-Null; Write-Change "app $($p.DisplayName) removed from the image" }
+    } catch { Write-Attention "app $($p.PackageFullName)$($p.PackageName) not removed: $($_.Exception.Message)" }
+}
 
-Write-Host '  Microsoft Defender: its scheduled scan gentler (protection stays on)'
-# How the daily scan runs, never what Defender protects (real-time protection and exclusions are
-# not touched). Windows schedules a quick scan every day at 02:00, which Defender starts at a
-# random time up to 4 hours later, once the box is idle: here from 04:00 instead, when nobody
-# watches. ScanScheduleOffset is that scan's time; ScanScheduleQuickScanTime is a second, separate
+Write-Host '  Microsoft Defender: its scheduled scan gentler'
+# How the daily scan runs (exclusions are not touched). Windows schedules a quick scan every day
+# at 02:00, which Defender starts at a random time up to 4 hours later, once the box is idle: here
+# from 04:00 instead, when nobody watches. ScanScheduleOffset is that scan's time;
+# ScanScheduleQuickScanTime is a second, separate
 # daily quick scan in Microsoft's scan documentation, so setting it could add a scan instead of
 # moving this one. Scheduled scans at low CPU priority, and at 20% of the processor on average
 # instead of 50% should one run while the box is in use (one the box is idle for runs unthrottled:
@@ -201,6 +259,30 @@ if ($mp) {
     }
 }
 
+Write-Host '  Microsoft Defender: real-time protection off, its notifications hidden'
+# The owner's choice (30 Sept 2026): real-time scanning of every file read and written weighs on a
+# small processor, for a box that runs known apps. Kept: the nightly quick scan (above), signature
+# updates, cloud protection (MAPS) and SmartScreen; no samples sent. Windows ignores these policies
+# while Tamper Protection is on; the Edge step's fake MDM enrollment turns it off at Defender's
+# next start (the owner's box, 26 Sept, and the test VM, 30 Sept 2026: undocumented), so this
+# takes a restart. Where Tamper Protection stays on, protection stays on: said so, never fought.
+$wd = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender'
+$realtime = $false
+foreach ($name in 'DisableRealtimeMonitoring', 'DisableBehaviorMonitoring', 'DisableIOAVProtection', 'DisableOnAccessProtection', 'DisableScanOnRealtimeEnable') {
+    if (Set-KeptValue "$wd\Real-Time Protection" $name 1) { $realtime = $true }
+}
+[void](Set-KeptValue "$wd\Spynet" 'SubmitSamplesConsent' 2)
+[void](Set-KeptValue "$wd\UX Configuration" 'Notification_Suppress' 1)
+[void](Set-KeptValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Notifications' 'DisableNotifications' 1)
+if ($mp) {
+    # Without Tamper Protection Defender reads the policy within a second (the VM).
+    $status = Get-MpComputerStatus
+    if ($status.RealTimeProtectionEnabled -and -not $status.IsTamperProtected) { Start-Sleep -Seconds 5; $status = Get-MpComputerStatus }
+    if (-not $status.RealTimeProtectionEnabled) { Write-Same 'Defender real-time protection off' }
+    elseif ($status.IsTamperProtected -and -not $realtime) { Write-Attention 'Defender real-time protection kept on by Tamper Protection' }
+    else { Add-RestartReason 'Microsoft Defender real-time protection off (at its next start)' }
+}
+
 Write-Host '  Display: no multiplane overlay (after a restart)'
 # The owner's random black flashes of under a second (29 Sept 2026; their cause is not found yet):
 # the agreed test is Windows composing the whole picture itself, without the graphics chip's
@@ -214,6 +296,33 @@ $dwm = 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm'
 $overlay = (Get-ItemProperty $dwm -Name 'OverlayTestMode' -ErrorAction SilentlyContinue).OverlayTestMode
 Set-RegValue $dwm 'OverlayTestMode' 5
 if ($overlay -ne 5) { Add-RestartReason 'the display (no multiplane overlay)' }
+
+Write-Host '  Memory integrity, virtualization-based security and Credential Guard off (after a restart)'
+# Windows 11 turns these on by itself where the PC can run them (WasEnabledBy 1 and Credential
+# Guard's LsaCfgFlagsDefault 2 on the owner's box): the kernel and every driver checked under the
+# hypervisor, a few percent of a small processor and of games' frame rates, for protections a
+# one-account TV box has no use for (the owner, 30 Sept 2026). Read at boot: a restart. A firmware
+# (UEFI) lock or a Device Guard policy keeps them on whatever these say: said so, left alone.
+$dg = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard'
+$lsa = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+$gp = Get-ItemProperty "$policies\DeviceGuard" -ErrorAction SilentlyContinue
+$held = @(
+    if ((Get-ItemProperty $dg -ErrorAction SilentlyContinue).Locked -eq 1 -or (Get-ItemProperty "$dg\Scenarios\HypervisorEnforcedCodeIntegrity" -ErrorAction SilentlyContinue).Locked -eq 1 -or
+        (Get-ItemProperty $lsa).LsaCfgFlags -eq 1) { 'a firmware (UEFI) lock' }   # LsaCfgFlags 1: Credential Guard with UEFI lock
+    if ($gp.EnableVirtualizationBasedSecurity -or $gp.HypervisorEnforcedCodeIntegrity -or $gp.LsaCfgFlags) { 'a Device Guard policy' }
+)
+$vbs = $false
+foreach ($v in @("$dg\Scenarios\HypervisorEnforcedCodeIntegrity", 'Enabled'), @($dg, 'EnableVirtualizationBasedSecurity'), @($lsa, 'LsaCfgFlags')) {
+    if (Set-KeptValue $v[0] $v[1] 0) { $vbs = $true }
+}
+if ($held) { Write-Attention "memory integrity or Credential Guard may stay on: kept by $($held -join ' and ') (left alone)" }
+if ($vbs) { Add-RestartReason 'memory integrity and Credential Guard off' }
+else {
+    # 1 Credential Guard, 2 memory integrity (Win32_DeviceGuard); none where VBS cannot run (a VM without nesting).
+    $running = @((Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction SilentlyContinue).SecurityServicesRunning | Where-Object { $_ -in 1, 2 })
+    if ($running) { Write-Attention "still running: $(@($running | ForEach-Object { @{ 1 = 'Credential Guard'; 2 = 'memory integrity' }[[int]$_] }) -join ', ') (until a restart, or held by the firmware)" }
+    else { Write-Same 'memory integrity and Credential Guard not running' }
+}
 
 Write-Host '  Network, time zone, name'
 if ($user) {

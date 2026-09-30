@@ -1,16 +1,17 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Edge policies for the box: Google search, the extensions, no first-run, promotions or
-    password saving.
+    Edge policies for the box: Google search, the extensions, no first-run, promotions, Copilot,
+    casting, spell checking or password saving.
 
 .DESCRIPTION
     Machine policies under HKLM\SOFTWARE\Policies\Microsoft\Edge (check edge://policy).
 
     Edge ignores the DefaultSearchProvider* policies on PCs that are not domain-joined or
     MDM-enrolled, so this also writes the well-known "fake MDM enrollment" keys that make
-    Windows report the PC as managed (SPEC decision). Side effect: Windows Security shows
-    Tamper Protection as managed by the organisation.
+    Windows report the PC as managed (SPEC decision). Side effect: Defender turns Tamper
+    Protection off at its next start (Windows Security shows it managed by the organisation),
+    which lets the System step's real-time protection policy apply.
 
     Edge keeps updating itself (decision: Edge auto, apps on demand).
 
@@ -75,7 +76,7 @@ Set-RegValue $edge 'NewTabPageSearchBox' 'redirect' 'String'
 # The Browser tile opens on Google (its command line) and so do its new tabs, not Edge's news page.
 Set-RegValue $edge 'NewTabPageLocation' 'https://www.google.com' 'String'
 
-Write-Host '  Quiet: no first run, promotions, shopping, sidebar or telemetry'
+Write-Host '  Quiet: no first run, promotions, shopping, sidebar, telemetry, Copilot, casting or spell checking'
 Set-RegValue $edge 'HideFirstRunExperience' 1
 Set-RegValue $edge 'DefaultBrowserSettingEnabled' 0
 Set-RegValue $edge 'PromotionalTabsEnabled' 0
@@ -90,6 +91,23 @@ Set-RegValue $edge 'NewTabPageHideDefaultTopSites' 1
 Set-RegValue $edge 'PersonalizationReportingEnabled' 0
 Set-RegValue $edge 'DiagnosticData' 0
 Set-RegValue $edge 'UserFeedbackAllowed' 0
+# Edge's newer extras (the owner, 30 Sept 2026): the on-device AI model (a download of gigabytes),
+# Copilot's icon, the performance detector, Microsoft's error-page suggestions, the web widget,
+# Drop, Wallet donations, default-browser and Insider campaigns, casting (Media Router), spell
+# checking. Not component updates (Widevine, for Netflix and the like, comes through them), asset
+# delivery, or hardware acceleration and energy (below). WebView2, the launcher's, reads none of
+# Edge's policies (Microsoft's "Enterprise management of WebView2").
+Set-RegValue $edge 'GenAILocalFoundationalModelSettings' 1
+Set-RegValue $edge 'Microsoft365CopilotChatIconEnabled' 0
+Set-RegValue $edge 'PerformanceDetectorEnabled' 0
+Set-RegValue $edge 'AlternateErrorPagesEnabled' 0
+Set-RegValue $edge 'WebWidgetAllowed' 0
+Set-RegValue $edge 'EdgeEDropEnabled' 0
+Set-RegValue $edge 'WalletDonationEnabled' 0
+Set-RegValue $edge 'DefaultBrowserSettingsCampaignEnabled' 0
+Set-RegValue $edge 'MicrosoftEdgeInsiderPromotionEnabled' 0
+Set-RegValue $edge 'EnableMediaRouter' 0
+Set-RegValue $edge 'SpellcheckEnabled' 0
 
 # Sign-ins are kept by the sites' own cookies in each profile. Edge never offers to save a
 # password (the user, 27 Sept 2026); it still fills one saved before, and then without asking

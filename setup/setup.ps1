@@ -18,8 +18,9 @@
       Updates       Windows updates manual, no driver swaps, apps on demand, Edge automatic
       Bluetooth     the Bluetooth adapter's own driver instead of Windows' generic one, if any
       System        no popups over the TV, Private network, time zone, computer name TV; less in
-                    the background (unused services, telemetry tasks, a gentler Defender scan);
-                    no multiplane overlay (after a restart)
+                    the background (unused services, telemetry tasks, unused apps, a gentler
+                    Defender scan, Defender's real-time protection off); no multiplane overlay,
+                    memory integrity or Credential Guard (after a restart)
       AutoLogon     open box: no Windows password, automatic sign-in
       Launcher      the launcher (-LauncherExe) and its watchdog into Program Files, started at sign-in
       Library       lock ProgramData\HTPC and register the \HTPC\Jobs task (install from the TV)

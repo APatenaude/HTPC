@@ -66,6 +66,10 @@ self-contained file with these scripts inside (launcher/README.md, "Setup mode";
     FrankerFaceZ (Twitch), Video Speed Controller.
   - No first-run, promotions, shopping, sidebar or telemetry; never offers to save a password (one
     saved before fills without asking for the Windows password); autoplay and hardware acceleration on.
+  - No on-device AI model download (`GenAILocalFoundationalModelSettings` 1), Copilot icon, performance
+    detector, error-page suggestions, web widget, Drop, Wallet donations, default-browser or Insider
+    campaigns, casting (`EnableMediaRouter` 0) or spell checking. Component updates stay on (Widevine
+    comes through them), asset delivery too. The launcher's WebView2 reads none of Edge's policies.
   - Nothing of Edge running with no window open: `StartupBoostEnabled` and `BackgroundModeEnabled` 0,
     the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed.
   - Pages off screen asleep after 30 minutes (`SleepingTabsEnabled` 1, `SleepingTabsTimeout` 1800): a
@@ -100,17 +104,36 @@ self-contained file with these scripts inside (launcher/README.md, "Setup mode";
     the launcher's Wi-Fi list, computer name TV.
   - Less running in the background: Windows Search and SysMain off; Print Spooler and Fax (where there
     is one) Disabled; Windows Error Reporting's service left on demand (it runs only after a crash, and
-    keeps the crash and display-reset records); Windows' telemetry service (DiagTrack) Disabled.
+    keeps the crash and display-reset records); Windows' telemetry service (DiagTrack) Disabled; 24H2's
+    Health and Optimized Experiences (`whesvc`) Disabled; the maps downloader (`MapsBroker`) on demand.
   - Windows' telemetry and CEIP tasks disabled (the compatibility appraiser, ProgramDataUpdater,
     MareBackup, Autochk Proxy, Consolidator, KernelCeipTask, UsbCeip, DiskDiagnosticDataCollector, the
-    feedback DmClient tasks, WER's QueueReporting: those this Windows has).
-  - What they were before goes in `state\system-before.json`, for the uninstall.
-  - Microsoft Defender's scheduled scan gentler, its protection untouched: low CPU priority, 20% of the
-    processor on average while the box is in use (not 50%), at 04:00 exactly (not 02:00 plus a random
-    delay of up to 4 hours), only while idle, no catch-up scan.
-  - Skipped where Defender is missing or another antivirus runs.
+    feedback DmClient tasks, WER's QueueReporting), and the toasts and diagnostics of Maps, Family
+    Safety, Xbox saves, whesvc, feedback (`PerformanceTrace\ShowFeedbackToast`), power efficiency,
+    WinSAT, sustainability, disk footprint and device information: those this Windows has. Never
+    defrag/TRIM, component cleanup, NGEN, restore points, Windows Update or Automatic Maintenance.
+  - No advertising ID, activity history or Application Impact Telemetry (policies); no program from
+    the firmware (`DisableWpbtExecution` 1); no automatic device encryption (`PreventDeviceEncryption`
+    1, which the USB install's answer file sets already).
+  - The new Outlook, Dev Home and CrossDevice removed for every user and from the image (a clean LTSC
+    install has none; Windows updates bring them). The uninstall does not bring them back.
+  - What was there before goes in `state\system-before.json`, for the uninstall: services, tasks, and
+    each value `Set-KeptValue` changes (`reg:<key>\<name>`, empty when there was none).
+  - Microsoft Defender's scheduled scan gentler: low CPU priority, 20% of the processor on average
+    while the box is in use (not 50%), at 04:00 exactly (not 02:00 plus a random delay of up to 4
+    hours), only while idle, no catch-up scan. Skipped where Defender is missing or another antivirus
+    runs.
+  - Defender's real-time protection off by policy (real-time, behaviour, downloads and on-access
+    scanning), no samples sent, its notifications and Windows Security's hidden; the nightly scan,
+    signature updates, cloud protection and SmartScreen stay. Windows ignores the policy while Tamper
+    Protection is on: the Edge step's fake MDM enrollment turns that off at Defender's next start
+    (undocumented; seen on the owner's box and the VM), so it takes the restart. Where Tamper
+    Protection stays on the step says "kept on by Tamper Protection" and leaves it.
   - Multiplane overlay off (`HKLM\SOFTWARE\Microsoft\Windows\Dwm` `OverlayTestMode` 5, after a
     restart: the test for the random black flashes).
+  - Memory integrity (HVCI), virtualization-based security and Credential Guard off (`Enabled`,
+    `EnableVirtualizationBasedSecurity`, `LsaCfgFlags` 0), after a restart. A firmware (UEFI) lock or
+    a Device Guard policy that keeps them on is named, not fought.
 - **AutoLogon** (`lib/Set-AutoLogon.ps1`): open box: no Windows password, automatic sign-in, nothing
   locks.
 - **Launcher** (`lib/Install-Launcher.ps1`): the launcher (`-LauncherExe`, which the setup exe passes:
@@ -191,16 +214,18 @@ What each step undoes:
 - **Certificates**: the phone remote's certificates (`O=HTPC TV box`) in the machine's and the user's CA
   stores.
 - **System**: the sign-in screen's picture and blur, Windows' default wallpaper, Windows Search and
-  SysMain on again; Print Spooler, Fax, Windows Error Reporting's service, the telemetry service
-  (DiagTrack) and the telemetry tasks as they were before setup (`state\system-before.json`).
+  SysMain on again; the services, the tasks and the values the step recorded (Defender's real-time
+  protection and notifications, memory integrity, VBS, Credential Guard, WPBT, advertising ID,
+  activity history, AIT, device encryption) as they were before setup (`state\system-before.json`).
   Defender's scheduled scan as Windows sets it (normal priority, 50%, 02:00 plus Windows' random
-  delay); `OverlayTestMode` removed (multiplane overlay back after a restart); the computer name is
-  kept (it says so).
+  delay); `OverlayTestMode` removed; the overlay, real-time protection and VBS come back after the
+  restart; the computer name is kept (it says so).
 - **Files**: the launcher and watchdog ended (and waited for), `Program Files\HTPC` and
   `ProgramData\HTPC` removed (the logs and setup copied to `Documents\HTPC logs` first),
   `HKCU\Software\HTPC` and the launcher's unpack folder variable removed.
 
-Kept: the apps, winget, the HEVC extension, the power settings, the privacy and no-pop-up settings,
+Kept: the apps, winget, the HEVC extension, the power settings, the privacy and no-pop-up settings
+(but those listed above), the apps the System step removed (the new Outlook, Dev Home, CrossDevice),
 dark mode, Private networks, automatic time zone, the computer name, and `%LOCALAPPDATA%\HTPC` (the
 launcher's settings and logs, setup's WebView2 profiles and the website tiles' Edge profiles, with
 their sign-ins: delete it by hand if not wanted).
@@ -271,9 +296,9 @@ in `lib/LauncherUpdate.ps1`, each script run with `-MachineOnly`).
   change restarts the adapter). Needs setup again: nothing.
 - **Updates**: applied: all of it: Windows Update's policies (manual, no drivers, no notifications) and
   the Store's (apps on demand). Needs setup again: nothing.
-- **System**: applied: the HKLM values, the services, Windows' telemetry tasks, Defender's scan
-  settings, the overlay switch (it takes a restart: the box's next one, or say so in the release notes),
-  the sign-in screen's picture and colour.
+- **System**: applied: the HKLM values, the services, Windows' telemetry tasks, the apps' removal,
+  Defender's scan settings and real-time policy, the overlay and VBS switches (they take a restart: the
+  box's next one, or say so in the release notes), the sign-in screen's picture and colour.
   Needs TV Box Setup again: this user's settings (HKCU: notifications, accessibility keys, dark mode,
   location consent), the networks, the "Networks private" task, the computer name.
 - **PhoneRemote**: applied: nothing (the firewall rules name the same exe). Needs TV Box Setup again:
