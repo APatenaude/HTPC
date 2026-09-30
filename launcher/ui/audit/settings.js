@@ -54,12 +54,13 @@ if (AUDIT_PAGE === 'index') {
     } });
   }
   // The states a section goes through, beyond its first look.
+  // extra.focus: where it starts (else the pane's first element).
   const sectionState = (name, id, set, extra) => auditPage(`settings: ${name}`, { view: 'settings', covers: [], scope: '.spane', back: 2, tick: sectionTick[id], ...extra, open() {
     auditSettings(id);
     if (sectionData[id]) sectionData[id]();
     set();
     render();
-    auditSettingsFirst();
+    if (extra && extra.focus) setFocus(extra.focus()); else auditSettingsFirst();
   } });
   // In a Wi-Fi form, B first leaves the form (then the pane, then Settings).
   sectionState('Wi-Fi, a password to type', 'wifi', () => WifiUI.demo('password'), { back: 3, tick: () => WifiUI.handle(auditClone(AUDIT_WIFI)) });
@@ -71,8 +72,10 @@ if (AUDIT_PAGE === 'index') {
   sectionState('Updates, Windows updates installing', 'updates', () => auditUpdates('wininstall'));
   sectionState('Updates, an update failed', 'updates', () => auditUpdates('failed'));
   // The launcher's row in each state, and the longest text each place can get (1.0.3's notes ran
-  // out of that row on a TV); a screenshot (#audit?page=) ends on that row.
-  const launcherRow = { last: () => $('settings').querySelector('[data-id="upd-launcher"]') };
+  // out of that row on a TV): the row alone, the focus on it (the pane round it is walked in
+  // 'settings: Updates'); a screenshot (#audit?page=) ends on it too.
+  const updRow = () => $('settings').querySelector('[data-id="upd-launcher"]');
+  const launcherRow = { dirs: [], focus: updRow, last: updRow };
   sectionState('Updates, checking', 'updates', () => auditUpdates('checking'), launcherRow);
   sectionState('Updates, up to date', 'updates', () => auditUpdates('uptodate'), launcherRow);
   sectionState('Updates, the launcher downloading', 'updates', () => auditUpdates('downloading'), launcherRow);
