@@ -252,15 +252,16 @@ function Get-BoxProcesses([string]$Root) {
 }
 
 # What a fake box is doing, for a check that found no launcher running: its watchdog, the job's
-# pause and watch files, its launchers, and the exits its watchdog saw.
+# pause and watch files, what else runs from it (a launcher whose start ended after a rollback
+# renamed its file can run under the new name, HtpcLauncher.bad), and the exits its watchdog saw.
 function Get-BoxState([string]$Root) {
     $state = Join-Path $Root 'PD\HTPC\state'
     $file = { param($n) $f = Join-Path $state $n; if (Test-Path -LiteralPath $f) { try { [IO.File]::ReadAllText($f).Trim() } catch { '(unreadable)' } } else { 'none' } }
     $exits = Join-Path $Root 'watchdog-exits.log'
     "watchdog $(Get-BoxWatchdog $Root), pause $(& $file 'watchdog-pause'), watch $(& $file 'watchdog-watch'), " +
-    "launchers $(@(Get-BoxProcesses $Root | Where-Object Name -eq 'HtpcLauncher' | ForEach-Object { "$($_.Id) $(Get-Content -LiteralPath (Join-Path $Root "launcher-$($_.Id).version") -ErrorAction SilentlyContinue)" }) -join ', '), " +
+    "its processes $(@(Get-BoxProcesses $Root | Where-Object Name -notlike 'HtpcWatchdog*' | ForEach-Object { "$($_.Name) $($_.Id) $(Get-Content -LiteralPath (Join-Path $Root "launcher-$($_.Id).version") -ErrorAction SilentlyContinue)" }) -join ', '), " +
     "exits $(if (Test-Path -LiteralPath $exits) { @(Get-Content -LiteralPath $exits) -join ', ' }), " +
-    "HtpcLauncher processes whose path cannot be read (any box's, or this machine's own): $(@(Get-Process -Name 'HtpcLauncher' -ErrorAction SilentlyContinue | Where-Object { -not $_.Path } | ForEach-Object Id) -join ', ')"
+    "HtpcLauncher* processes whose path cannot be read (any box's, or this machine's own): $(@(Get-Process -Name 'HtpcLauncher*' -ErrorAction SilentlyContinue | Where-Object { -not $_.Path } | ForEach-Object { "$($_.Name) $($_.Id)" }) -join ', ')"
 }
 
 # The id of the watchdog running from a fake box (0 when none; there is at most one).

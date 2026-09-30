@@ -184,12 +184,12 @@ UI-only or launcher-only changes, which the headless UI self-test and the test p
    `%TEMP%\htpc-release-vm\<time>`. Times on the homelab: a restore about 1 min, a setup 3 to 10
    min (app downloads), an update about 100 s.
 4. The setup tests in the VM (`Invoke-IncusTestVM.ps1` with a copy of `setup\` and
-   `launcher\src\Watchdog\`, elevated): after a restore, Defender updates itself (its engine at
-   boot, its platform about 10 minutes later, when real-time protection restarts: event 2014 in
-   its Operational log). Around that moment a program's start can be held for seconds (30 Sept
-   2026: 7 to 8 s, and a Test-Updates check waiting for a launcher failed). Run Test-Updates after
-   it; a failed wait prints the box's state (a watchdog "start" line with no "started" after it is
-   such a held start).
+   `launcher\src\Watchdog\`, elevated): the VM's Defender (cloud protection on) holds a new
+   program's start for up to 8 s now and then, most around its own updates after a restore (its
+   platform about 10 minutes after boot, event 2014 in its Operational log). A launcher start held
+   past a rollback survives it (likely under its renamed file, HtpcLauncher.bad): on 30 Sept
+   2026 about one Test-Updates run in ten failed a "runs again" check so. A failed wait prints the
+   box's state: a watchdog "start" line with "started" 8 s later is such a hold.
 
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots

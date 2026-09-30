@@ -55,7 +55,7 @@ $finish = @(
         $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
         $wd = Get-BoxFileVersion $root 'HtpcWatchdog.exe'
         Note $c ($c.Cut -eq 'rollingback' -and $c.Pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $wd -eq '0.1.0' -and $c.Held -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($c.Release)) cut after '$($c.Step)' ($($c.Cut)): finished, 0.1.0 on disk and running, setup $kept, watchdog $wd ($r; $($j.message))$(if (-not $c.Held) { ' -- not running: ' + (Get-BoxState $c.Root) })" })
-foreach ($step in 'rollingback', 'restored-launcher', 'restored-watchdog', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') {
+foreach ($step in 'rollingback', 'restored-launcher', 'restored-watchdog', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json', 'restored-setup:') {
     # The crashing release (0.3.0): the update rolls back by itself, cut after $step.
     $cases += New-Case "fault-rb-crash-$($step -replace '[:.]', '_')" (@(
             { param($c) $c.Job = Start-FakeJob $c.Root 'Invoke-LauncherUpdate -Version 0.3.0 -Source $src -Paths $paths' $c.Step }) + $finish
