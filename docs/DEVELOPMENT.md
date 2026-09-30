@@ -85,7 +85,7 @@ that did the work; none of them belongs in the (public) repo:
 | `launcher/tests/*`, `launcher/dev/TvLab` | Console test projects: `dotnet run -c Release`, exit 0 = pass |
 | `launcher/dev` | Dev and release scripts (below) |
 | `setup` | `setup.ps1` and its steps in `lib/`, the SYSTEM job verbs in `jobs/`, `catalog.json` (the apps), `autounattend/` (USB install), `test/` (setup tests, the VM tools) |
-| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator: the .NET test projects and TvLab; setup's four PowerShell tests) |
+| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator: the .NET test projects, TvLab and the quick setup tests; Test-Updates, the longest, without the .NET SDK) |
 | `.github/workflows/release.yml` | Builds and publishes a release from a `v*` tag whose commit passed Tests |
 
 ## 3. The everyday loop
@@ -183,6 +183,13 @@ UI-only or launcher-only changes, which the headless UI self-test and the test p
    may be using it). The report (a line per stage with its time) and the screenshots are in
    `%TEMP%\htpc-release-vm\<time>`. Times on the homelab: a restore about 1 min, a setup 3 to 10
    min (app downloads), an update about 100 s.
+4. The setup tests in the VM (`Invoke-IncusTestVM.ps1` with a copy of `setup\` and
+   `launcher\src\Watchdog\`, elevated): after a restore, Defender updates itself (its engine at
+   boot, its platform about 10 minutes later, when real-time protection restarts: event 2014 in
+   its Operational log). Around that moment a program's start can be held for seconds (30 Sept
+   2026: 7 to 8 s, and a Test-Updates check waiting for a launcher failed). Run Test-Updates after
+   it; a failed wait prints the box's state (a watchdog "start" line with no "started" after it is
+   such a held start).
 
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots
