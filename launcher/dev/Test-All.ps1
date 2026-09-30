@@ -58,6 +58,7 @@ $lines = $o -split "`r?`n"
 "selftest => exit $LASTEXITCODE :: PASS " + @($lines | Where-Object { $_ -match '^\s*PASS' }).Count + ", FAIL " + @($lines | Where-Object { $_ -match '^\s*FAIL' }).Count
 $lines | Where-Object { $_ -match '^\s*FAIL|WARN' } | Select-Object -First 12
 
+. (Join-Path $PSScriptRoot 'KillOnExit.ps1')
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 $profileDir = Join-Path $env:TEMP 'htpc-testall-edge'
 $page = 'file:///' + ("$l\dev\phone-test.html" -replace '\\', '/')

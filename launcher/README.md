@@ -828,7 +828,6 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
 
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Quick.ps1            # build + the 4 test projects, one line each (-Ui: the UI too)
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1              # everything: build, tests, UI audit, phone page
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Describe-Page.ps1 -Route settings/wifi -Keys down,a   # a page as text
     powershell -ExecutionPolicy Bypass -File launcher\dev\Merge-Branch.ps1 -Ref <branch> -Message "Merge ..." -Test
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screenshots.ps1 -Shots @(@{ Url = '...'; Out = '...' })
     powershell -ExecutionPolicy Bypass -File launcher\dev\Compare-Screenshots.ps1 -A before.png -B after.png
@@ -848,7 +847,7 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   the keys and clicks it gets, for Test-Presets), `library-uitest.html` (the library screens' checks),
   `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`, `Run-NetProbe.ps1`, `TvLab` (above).
 - Screenshots (Save-Screenshots, Test-Ui `-Shots`, Save-Screen) also write a half-size `-small.png`
-  (`-Scale`, `Save-ScaledImage.ps1`): look at that one; read a page as text with `Describe-Page.ps1`.
+  (`-Scale`, `Save-ScaledImage.ps1`) for a quick look; judge details on the full-size one.
 
 ### Checks that need no box, controller or TV
 
@@ -890,7 +889,7 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   (`addView`), each Settings section and each setup step (what to set up, how to open it); one without
   fails the audit.
 - `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element; `-ShotSize
-  1536x864` takes it at the TV's size. As text: `Describe-Page.ps1 -Route "audit?page=home"`.
+  1536x864` takes it at the TV's size.
 
 ### The box's own drawing
 

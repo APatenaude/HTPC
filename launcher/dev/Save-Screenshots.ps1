@@ -19,6 +19,7 @@
 #>
 param([Parameter(Mandatory)] [hashtable[]] $Shots, [double] $Scale = 0.5)
 
+. (Join-Path $PSScriptRoot 'KillOnExit.ps1')
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 $shotProfile = Join-Path $env:TEMP 'htpc-dev-shots'
 foreach ($s in $Shots) {

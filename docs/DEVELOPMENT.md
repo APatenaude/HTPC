@@ -99,8 +99,7 @@ that did the work; none of them belongs in the (public) repo:
 | The UI in a plain browser | open `launcher\ui\index.html` (demo data; `#selftest`, `#audit`, `#settings` routes) |
 | The phone app's checks | open `launcher\dev\phone-test.html` in Edge (or it runs headless in Test-All) |
 | Everything, one pass | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1` |
-| A page as text (view, focus, hints, what shows, what overflows), after keys | `launcher\dev\Describe-Page.ps1 -Route home -Keys down,right` |
-| Screenshots of a page (only for visual layout; look at the half-size `-small.png`) | `launcher\dev\Save-Screenshots.ps1`, `Test-Ui.ps1 -Shots`; compare two with `Compare-Screenshots.ps1` |
+| Screenshots of a page (look at every screen a UI change touches; full size for details) | `launcher\dev\Save-Screenshots.ps1`, `Test-Ui.ps1 -Shots`; compare two with `Compare-Screenshots.ps1` |
 | The setup exe | `launcher\dev\Publish-Setup.ps1` (writes `launcher\dist\TV Box Setup.exe`) |
 
 `Test-All.ps1` runs the build, every test project, `setup\test\Test-*.ps1` (not `Test-Library.ps1`,
@@ -376,7 +375,7 @@ What the 29-30 Sept releases brought, from the owner's testing on the TV:
 
 Made for agents (30 Sept, no product change): `docs/CODEMAP.md` (each area's files, names to
 Grep, tests, log lines; recipes), `launcher\dev\Test-Quick.ps1` (build and tests, a line each),
-`launcher\dev\Describe-Page.ps1` (a UI page as text), `setup\test\Test-ReleaseInVm.ps1` (the VM
+`setup\test\Test-ReleaseInVm.ps1` (the VM
 checklist, gated), half-size screenshots, `docs/CATALOG.md`, READMEs with short lines, and the
 big files split by area (`ui/selftest/`, `ui/audit/`, `ui/app/`, `setup/test/updates/`,
 `MainForm.<Area>.cs`) with their comments trimmed to short "why" notes. Measured before: agents

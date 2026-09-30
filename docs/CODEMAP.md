@@ -16,7 +16,6 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 |---|---|
 | Build + the 4 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
 | Everything (TvLab, setup tests, phone page) | `launcher\dev\Test-All.ps1` |
-| A page as text (view, focus, hints, what shows, what overflows) | `launcher\dev\Describe-Page.ps1 -Route settings/wifi -Keys down,a` |
 | The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
 | TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
 | Setup's scripts on fakes | `setup\test\Test-Updates.ps1` (admin; `-Only Core,Download,Swap,Faults,Planting,Wua`: each in `setup\test\updates\<Section>.ps1`, the fakes in `updates\Fakes.ps1`, `FakeGitHub.ps1`, `Cases.ps1`), `Test-Autostart.ps1` (`-Only Match,Guard,Prefs,Catalog`), `Test-Rights.ps1` (`-Only Walker,Acl,JobParams`), `Test-Drivers.ps1`; `Test-Library.ps1` in the VM only |
@@ -380,7 +379,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
    `send({ type: 'x.y' })` and a `[UiMessages("x.")]` method in a `src/MainForm.*.cs` part.
 3. `ui/selftest/menu.js`: a check in "Where the Home menu opens / quick buttons..."; the audit's 'home
    menu ...' pages (`ui/audit/home.js`) walk it (make it reachable, never clipped). Look:
-   `Describe-Page.ps1 -Route home -Keys h`.
+   `Test-Ui.ps1 -Shots 'audit?page=home menu over an app' -ShotSize 1536x864`.
 
 ### Add a Settings section
 1. `SECTIONS` in `ui/app/settings.js` (id, icon, label); `settingsSection('<id>', { render, press, shown,
@@ -392,7 +391,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 3. Audit: a 'settings: <label>' page comes from `SECTIONS` by itself; add its stress data and states
    in `ui/audit/settings.js` (`sectionData`, `auditSettings`, `sectionState(...)`). Selftest: a group of
    'Settings › <label>:' checks in `ui/selftest/settings.js` (or a new file in `SELFTEST_FILES`).
-4. Demo: `index.html#settings/<id>`; check with `Describe-Page.ps1 -Route settings/<id>` and `Test-Quick -Only Ui`.
+4. Demo: `index.html#settings/<id>`; look with `Test-Ui.ps1 -Shots settings/<id>` and `Test-Quick -Only Ui`.
 
 ### Add a selftest check or an audit page
 1. `ui/selftest/<area>.js`: in its `// ---- Title ----` group, drive the page (`reset(view)`,
@@ -404,7 +403,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
    open() { auditFresh(); ...stress data...; go(view); }, scope, dirs, back, hints, tick })`. Every
    `addView`, Settings section and setup step must be covered (`auditMustCover` in `ui/audit.js`) or the
    audit fails.
-3. Look at it: `Describe-Page.ps1 -Route 'audit?page=name'`; run `Test-Quick -Only Ui`.
+3. Look at it: `Test-Ui.ps1 -Shots 'audit?page=name'`; run `Test-Quick -Only Ui`.
 
 ### Add a LauncherTests file
 1. `tests/LauncherTests/<Area>Tests.cs`: `namespace Htpc.Launcher; static class <Area>Tests { public static

@@ -16,8 +16,8 @@
     PNG of each route into -OutDir
     (index.html#<route>; e.g. alerts, menu-alerts, settings/wifi, ?upd=failed#settings/updates,
     audit?page=<an audit page's name>), -ShotSize big (1920x1080 unless said: 1536x864 is the
-    4K TV at 250%), and a copy at -Scale (default half size, <name>-small.png: the one to look
-    at; 1: none). To read a page as text instead: Describe-Page.ps1. Headless Edge can linger
+    4K TV at 250%), and a copy at -Scale (default half size, <name>-small.png: a quick look;
+    judge details on the full one; 1: none). Headless Edge can linger
     after it has written its output: once the output is there, or after -TimeoutSeconds, this
     script ends the processes on its own profile (and only those).
 
@@ -50,6 +50,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'KillOnExit.ps1')
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 if (-not $Page) { $Page = Join-Path (Split-Path $PSScriptRoot -Parent) 'ui\index.html' }
 $url = 'file:///' + ($Page -replace '\\', '/')
@@ -69,6 +70,14 @@ function Stop-OwnEdge {
         Where-Object { $_.CommandLine -like "*$profileDir*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
+
+# Profiles of earlier runs ended from outside before their clean-up (74 of them, 30 Sept 2026): the
+# folder names carry the run's process id; only those whose PowerShell is gone.
+$alive = @{}
+Get-Process powershell, pwsh -ErrorAction SilentlyContinue | ForEach-Object { $alive[$_.Id] = $true }
+Get-ChildItem $env:TEMP -Directory -Filter 'htpc-ui-test-profile-*' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^htpc-ui-test-profile-(\d+)-' -and -not $alive[[int]$Matches[1]] } |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
 # One DevTools protocol request to the page of the Edge on $userData (started with
 # --remote-debugging-port=0), on a socket of its own: the answer's JSON, or '' if none came within
@@ -263,7 +272,9 @@ if ($Shots.Count -gt 0) {
         $png = Join-Path $OutDir (($route -replace '[^\w-]', '_') + "$suffix.png")
         Remove-Item $png -ErrorAction SilentlyContinue
         try {
-            Invoke-Edge @("--screenshot=$png", $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" })) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png } -Size "$shotW,$shotH"
+            # Spaces as %20 (audit page names have them; the page decodes them): Start-Process quotes nothing.
+            $shotUrl = $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" }) -replace ' ', '%20'
+            Invoke-Edge @("--screenshot=$png", $shotUrl) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png } -Size "$shotW,$shotH"
             if ($Scale -lt 1) { "$route -> $(& (Join-Path $PSScriptRoot 'Save-ScaledImage.ps1') -Path $png -Scale $Scale) (full size: $png)" }
             else { "$route -> $png" }
         } catch { Write-Warning "${route}: $($_.Exception.Message)"; $failed = 1 }
