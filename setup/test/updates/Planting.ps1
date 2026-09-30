@@ -96,8 +96,14 @@ $usersModify = { param($p) [bool]((Get-Acl -LiteralPath $p).Access | Where-Objec
 Check ($null -eq (Get-UntrustedReason "$data\logs") -and -not (& $usersModify "$data\logs")) "  logs\ setup's own now: Users' write gone, trusted ($(Get-UntrustedReason "$data\logs"))"
 Check (-not (Test-Path -LiteralPath "$data\logs\launcher.log") -and @(Get-ChildItem "$data\logs" -Filter 'launcher.log.untrusted-*').Count -eq 1) '  the launcher log the user owned there: renamed aside'
 Check ((& $usersModify "$data\user") -and (& $usersModify "$data\tv")) '  user\ and tv\ still user-writable'
+# Run again: every item's owner and rules the same, nothing more set aside (*.untrusted-*).
+$tree = { @($data; Get-ChildItem -LiteralPath $data -Recurse -Force | ForEach-Object FullName) | ForEach-Object { "$_`t$((Get-Acl -LiteralPath $_).Sddl)" } }
+$before = & $tree
+$aside = @(Get-ChildItem -LiteralPath $data -Recurse -Force -Filter '*.untrusted-*').Count
 $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
-Check ($out -notmatch 'now by Administrators|renamed aside|threw|setup''s own now') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
+$changed = @(Compare-Object @(& $tree) $before | ForEach-Object { ($_.InputObject -split "`t")[0] } | Sort-Object -Unique)
+$asideNow = @(Get-ChildItem -LiteralPath $data -Recurse -Force -Filter '*.untrusted-*').Count
+Check ($out -notlike 'threw:*' -and -not $changed.Count -and $asideNow -eq $aside) "  run again: nothing changes ($($before.Count) items: owners and rules the same, $asideNow set aside as before$(if ($changed) { '; changed: ' + ($changed -join ', ') })$(if ($out -like 'threw:*') { '; ' + $out }))"
 
 # The app jobs started above.
 $r = & $receiveAppJob $appRuns[0]
