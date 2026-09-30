@@ -98,7 +98,8 @@ that did the work; none of them belongs in the (public) repo:
 | The UI in a plain browser | open `launcher\ui\index.html` (demo data; `#selftest`, `#audit`, `#settings` routes) |
 | The phone app's checks | open `launcher\dev\phone-test.html` in Edge (or it runs headless in Test-All) |
 | Everything, one pass | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1` |
-| Screenshots of a page | `launcher\dev\Save-Screenshots.ps1`, compare two with `Compare-Screenshots.ps1` |
+| A page as text (view, focus, hints, what shows, what overflows), after keys | `launcher\dev\Describe-Page.ps1 -Route home -Keys down,right` |
+| Screenshots of a page (only for visual layout; look at the half-size `-small.png`) | `launcher\dev\Save-Screenshots.ps1`, `Test-Ui.ps1 -Shots`; compare two with `Compare-Screenshots.ps1` |
 | The setup exe | `launcher\dev\Publish-Setup.ps1` (writes `launcher\dist\TV Box Setup.exe`) |
 
 `Test-All.ps1` runs the build, every test project, `setup\test\Test-*.ps1` (not `Test-Library.ps1`,

@@ -11,10 +11,13 @@
 .PARAMETER Shots
     Hashtables: @{ Url = 'file:///.../index.html#settings'; Out = 'C:\...\a.png'; W = 1920; H = 1080; Budget = 4000 }
     (W, H and Budget, the virtual-time milliseconds, are optional).
+.PARAMETER Scale
+    Also a smaller copy of each, <Out>-small.png (Save-ScaledImage.ps1), to look at; default half
+    size. The full one is for Compare-Screenshots.ps1. 1: none.
 .EXAMPLE
     .\Save-Screenshots.ps1 -Shots @(@{ Url = 'file:///C:/src/HTPC/launcher/ui/index.html#settings'; Out = "$env:TEMP\s.png" })
 #>
-param([Parameter(Mandatory)] [hashtable[]] $Shots)
+param([Parameter(Mandatory)] [hashtable[]] $Shots, [double] $Scale = 0.5)
 
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 $shotProfile = Join-Path $env:TEMP 'htpc-dev-shots'
@@ -29,6 +32,7 @@ foreach ($s in $Shots) {
     $null = $p.WaitForExit(60000)
     for ($i = 0; $i -lt 20 -and -not (Test-Path $s.Out); $i++) { Start-Sleep -Milliseconds 500 }
     "{0} {1}" -f $(if (Test-Path $s.Out) { 'OK  ' } else { 'FAIL' }), $s.Out
+    if ($Scale -lt 1 -and (Test-Path $s.Out)) { "     small: $(& (Join-Path $PSScriptRoot 'Save-ScaledImage.ps1') -Path $s.Out -Scale $Scale)" }
 }
 # Its own profile's only (another checkout's run may be taking its shots meanwhile).
 Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*$shotProfile*" } |

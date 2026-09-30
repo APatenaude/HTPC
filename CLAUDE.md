@@ -19,6 +19,8 @@ lines, and recipes for the usual changes).
 - The launcher never runs elevated; nothing elevated or SYSTEM reads or writes user-writable places.
 - UI: every view in the audit walker (`launcher/ui/audit.js`); run `launcher\dev\Test-Ui.ps1 -SelfTest`
   and look at screenshots before showing a change. Full check: `launcher\dev\Test-All.ps1`.
+- Read a page as text with `launcher\dev\Describe-Page.ps1` and trust the audit before a screenshot;
+  look at a screenshot only when the question is visual layout, and then the half-size `-small.png`.
 - Merge one branch at a time in a scratch worktree (`launcher\dev\Merge-Branch.ps1`), keep both
   sides of a conflict, run the tests before the main branch moves. Nothing is committed while
   `git grep -n '^<<<<<<< '` finds anything.
