@@ -124,7 +124,8 @@ if (-not $MachineOnly) {
 }
 
 # Lighter with pages left off screen: sleeping tabs, Edge's own and on by default after 2 hours,
-# kept on and after 5 minutes. A page asleep is frozen (its scripts and timers stop, Windows takes
+# kept on and after 30 minutes (the owner's choice, 29 Sept 2026: a website tile paused behind
+# another app is as he left it for half an hour; 5 minutes froze it sooner). A page asleep is frozen (its scripts and timers stop, Windows takes
 # back its RAM: a YouTube tab's working set went from 164 to 4 MB) and comes back as it was when
 # shown. Asleep: a tab behind another one
 # (the Browser tile's), and a page whose window another window covers (the test VM, 29 Sept 2026:
@@ -134,9 +135,9 @@ if (-not $MachineOnly) {
 # that test. Energy saver (Edge's "efficiency mode" before) off and not to be turned on: on a PC
 # with no battery it is off, or always on once enabled, and on it also slows what is in front
 # ("may cause videos to be less smooth", Microsoft's performance features article).
-Write-Host '  Pages off screen asleep after 5 minutes; energy saver off (never slows the page in front)'
+Write-Host '  Pages off screen asleep after 30 minutes; energy saver off (never slows the page in front)'
 Set-RegValue $edge 'SleepingTabsEnabled' 1
-Set-RegValue $edge 'SleepingTabsTimeout' 300
+Set-RegValue $edge 'SleepingTabsTimeout' 1800
 Set-RegValue $edge 'EfficiencyModeEnabled' 0
 
 Write-Host '  Fake MDM enrollment (so Edge honours the search policies)'

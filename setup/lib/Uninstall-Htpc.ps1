@@ -361,10 +361,11 @@ $UninstallSteps = [ordered]@{
             } catch { Write-Attention "$($entry.Name) not put back ($($_.Exception.Message))" }
         }
         # Microsoft Defender's scheduled scan as Windows sets it: normal priority, 50% of the
-        # processor, 02:00 (only while idle and no catch-up scan are Windows' own already).
+        # processor, 02:00, started at a random time up to 4 hours later (only while idle and no
+        # catch-up scan are Windows' own already).
         try { $mp = Get-MpPreference } catch { $mp = $null; Write-Same "Microsoft Defender not available ($($_.Exception.Message)): its scan settings left as they are" }
         if ($mp) {
-            $windows = [ordered]@{ EnableLowCpuPriority = $false; ScanAvgCPULoadFactor = 50; ScanScheduleOffset = 120 }
+            $windows = [ordered]@{ EnableLowCpuPriority = $false; ScanAvgCPULoadFactor = 50; ScanScheduleOffset = 120; RandomizeScheduleTaskTimes = $true }
             foreach ($name in $windows.Keys) {
                 if ("$($mp.$name)" -eq "$($windows[$name])") { Write-Same "Defender $name = $($windows[$name])"; continue }
                 $one = @{ $name = $windows[$name] }

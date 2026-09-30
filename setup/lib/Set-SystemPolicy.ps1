@@ -123,10 +123,13 @@ Set-RegValue "$policies\DeliveryOptimization" 'DODownloadMode' 0
 # nothing; Fax is there only where it was added). Windows Error Reporting's service stays on
 # demand, as Windows has it: it runs only once a program has crashed, so Disabled would save
 # nothing, and it keeps the crash and display-driver-reset records (Reliability Monitor, the
-# Application log) a display problem is looked into with. Only ever turned down: a service
-# already off stays off.
+# Application log) a display problem is looked into with. Windows' telemetry service
+# (Connected User Experiences and Telemetry, DiagTrack) off as well (the owner, 29 Sept 2026):
+# it runs all the time (about 20 MB) to send Microsoft usage data, which nothing on the box needs,
+# with diagnostic data at its minimum already. Only ever turned down: a service already off
+# stays off.
 $rank = @{ Disabled = 0; Manual = 1; Automatic = 2; AutomaticDelayedStart = 2 }
-foreach ($service in @{ Name = 'Spooler'; Start = 'Disabled' }, @{ Name = 'Fax'; Start = 'Disabled' }, @{ Name = 'WerSvc'; Start = 'Manual' }) {
+foreach ($service in @{ Name = 'Spooler'; Start = 'Disabled' }, @{ Name = 'Fax'; Start = 'Disabled' }, @{ Name = 'WerSvc'; Start = 'Manual' }, @{ Name = 'DiagTrack'; Start = 'Disabled' }) {
     $now = Get-ServiceStart $service.Name
     if (-not $now) { continue }
     if (-not $rank.ContainsKey($now) -or $rank[$now] -le $rank[$service.Start]) { Write-Same "service $($service.Name) $now"; continue }
@@ -177,9 +180,11 @@ Write-Host '  Microsoft Defender: its scheduled scan gentler (protection stays o
 # moving this one. Scheduled scans at low CPU priority, and at 20% of the processor on average
 # instead of 50% should one run while the box is in use (one the box is idle for runs unthrottled:
 # Defender's default, DisableCpuThrottleOnIdleScans). Still only while idle, and no catch-up scan
-# after a missed one (Windows' defaults, checked). Skipped where Defender is not there or another
-# antivirus protects the box; the uninstall puts Windows' values back.
-$scan = [ordered]@{ EnableLowCpuPriority = $true; ScanAvgCPULoadFactor = 20; ScanScheduleOffset = 240; ScanOnlyIfIdleEnabled = $true; DisableCatchupQuickScan = $true }
+# after a missed one (Windows' defaults, checked). At 04:00 exactly, not at a random time up to
+# 4 hours later (RandomizeScheduleTaskTimes off; the owner, 29 Sept 2026: done long before anyone
+# watches in the morning). Skipped where Defender is not there or another antivirus protects the
+# box; the uninstall puts Windows' values back.
+$scan = [ordered]@{ EnableLowCpuPriority = $true; ScanAvgCPULoadFactor = 20; ScanScheduleOffset = 240; RandomizeScheduleTaskTimes = $false; ScanOnlyIfIdleEnabled = $true; DisableCatchupQuickScan = $true }
 try { $mode = "$((Get-MpComputerStatus).AMRunningMode)"; $mp = Get-MpPreference }
 catch { $mp = $null; Write-Attention "Microsoft Defender not available ($($_.Exception.Message)): its scan settings left alone" }
 if ($mp -and $mode -and $mode -ne 'Normal') { Write-Same "Defender runs as '$mode' (another antivirus protects the box): its scan settings left alone"; $mp = $null }
