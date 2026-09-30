@@ -118,19 +118,14 @@ tracks them, finds their windows, closes them.
 
 ### An app that outlives its window (`launch.quitWhenWindowless`, `WindowlessQuit.cs`)
 
-- Stremio: 60 s; Steam had it until it left the catalog. Steam after Exit Big Picture keeps
-  steam.exe and its web helpers running, with no notification area to show them.
+- Stremio: 60 s. Closing its window hides it, with its streaming server, to a notification area
+  the TV does not have.
 - Once neither the app nor anything it started has had a visible top-level window for that long,
-  it is asked to quit with `launch.quitArgs` (Steam: `steam.exe -shutdown`), and its process tree is
-  ended 20 s later if still there (no `quitArgs`: ended). Checked every 5 s from the clock
-  (`CheckWindowless`), each step logged.
-- Never before the launcher has seen its window (Steam's self-update runs windowless at start), in
-  the first minute, while a program it started runs (`launch.ownProcesses` names the app's own; any
-  other process in its tree is a game, window or not), while another program's window covers the
-  screen in front (a game outside its tree), or while the Home menu is over it. Those, and a
-  returning window, start the count over.
-- Close uses `quitArgs` too: asked, then ended after 20 s (else the window closed, then ended after
-  4 s).
+  its process tree is ended. Checked every 5 s from the clock (`CheckWindowless`), each step logged.
+- Never before the launcher has seen its window (an app may start or update itself windowless), in
+  the first minute, while another program's window covers the screen in front (a game outside its
+  tree), or while the Home menu is over it. Those, and a returning window, start the count over.
+- Close: the window closed, then ended after 4 s.
 
 ## Logos (`src/AppLogos.cs`, `LogoSources.cs`, `MainForm.Logos.cs`)
 

@@ -34,10 +34,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
   pointer only. The sign-in screen and desktop are in the home screen's
   colour. Catalog apps never start by themselves (the autostart guard: their Run and RunOnce
   values, Startup shortcuts and tasks, and the services the catalog names), and their own
-  updaters are off where they can be. An app that stays running once its window is gone (Steam
-  after Exit Big Picture) is asked to quit after a minute with no window, and ended 20 s later
-  if still there; never while a game it started runs, nor before it has had a window (the
-  owner, 29 Sept 2026: catalog `launch.quitWhenWindowless`, `quitArgs`).
+  updaters are off where they can be. An app that stays running once its window is gone
+  (Stremio, hidden to a notification area the TV lacks) is ended after a minute with no window;
+  never before it has had a window (the owner, 29 Sept 2026: catalog `launch.quitWhenWindowless`;
+  Steam's way to be asked to quit, `quitArgs`, and its own programs, `ownProcesses`, left with
+  Steam: the owner, 30 Sept 2026).
 - **N2 Big app tiles.** Dark tiles, 4 per row, with each app's real logo taken from the app
   itself (a program's own icon, a website's own icon; none ship), and a line icon in the app's
   colour until there is one; blue focus glow; 24-hour clock. Fully controller-driven. Soft

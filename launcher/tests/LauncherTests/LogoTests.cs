@@ -358,8 +358,8 @@ static class LogoTests
         saved = await logos.RefreshNow(sources);
         Check(saved == 1 && extracted.Count == 1 && logos.Url("player") != firstUrl, "the program updated: its icon read again, a new address (the UI reloads it)");
 
-        // The logo's program changed (the catalog's logoExe: RetroBat's own icon, not the
-        // EmulationStation it runs), though neither program was written since: read again, once.
+        // The app's program is found elsewhere now (its Start menu shortcut's before, the catalog's
+        // launch.exe now), though neither program was written since: read again, once.
         var ownIcon = Path.Combine(dir, "front-end.exe");
         File.WriteAllText(ownIcon, "not really a program either");
         File.SetLastWriteTimeUtc(ownIcon, DateTime.UtcNow.AddDays(-30));

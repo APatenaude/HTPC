@@ -292,7 +292,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `ui/app.js` (`appIcon`: `https://logos.htpc/<id>.png`, glyph fallback), `ui/app/host.js` (`demoLogo`).
 - Names: `AppLogos.Refresh`, `RefreshNow`, `FromProgram`, `FromSite`, `Forget`, `IsOnInternet`;
   `SiteIcons.ParseManifest`, `LogoImage.ToPng`, `Normalize`; `StartLogos`, `RefreshLogos`. Catalog
-  `logoUrl`, `logoExe`.
+  `logoUrl`.
 - Tests: LauncherTests `LogoTests.cs`; selftest 'Logos:' (`ui/selftest/logos.js`); audit 'change icon',
   'add tile: on this box' (`ui/audit/home.js`).
   Demo: `index.html#home?logos=1`.
@@ -336,8 +336,8 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 
 - One list for setup's picks, the library and the launcher. ASCII, CRLF. Each field and its rules:
   [CATALOG.md](CATALOG.md).
-- Launcher: `AppManager.Parse` -> `CatalogApp` record; validators `QuitWhenWindowlessOf`, `QuitArgsOf`,
-  `OwnProcessesOf`, `CropTopOf`, `LaunchEnv`, `ClearBeforeStartOf`, `CategoriesOf`, `MenuKeys.Parse`; also
+- Launcher: `AppManager.Parse` -> `CatalogApp` record; validators `QuitWhenWindowlessOf`,
+  `CropTopOf`, `LaunchEnv`, `ClearBeforeStartOf`, `CategoriesOf`, `MenuKeys.Parse`; also
   `AutostartGuard.Load` (autostart), `PhoneAppKeys` (phoneKeys), `LibraryService` (install.firstRun,
   blockInbound), `UpdateService` (install.selfUpdate).
 - PowerShell: `AppCore.ps1` (install.*), `Install-Apps.ps1` (default, install.elevated), `AppAutostart.ps1`

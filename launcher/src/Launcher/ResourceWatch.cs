@@ -424,8 +424,6 @@ sealed unsafe class ResourceWatch
 
     bool open;
     Dictionary<string, string>? appByProgram;
-    List<(System.Text.RegularExpressions.Regex Pattern, string Id)>? appByOwnProcess;
-    readonly Dictionary<string, string?> appOfProgram = new(StringComparer.OrdinalIgnoreCase);
 
     void Open()
     {
@@ -436,27 +434,18 @@ sealed unsafe class ResourceWatch
         ifRow = NativeMemory.AllocZeroed(IfRowSize);
         OpenDisks();
         PickAdapters();
-        // The apps' programs by file name, for copies the launcher did not start (Steam opened
+        // The apps' programs by file name, for copies the launcher did not start (Stremio opened
         // from the desktop). Not Edge's: it is every website's, and the Browser's.
         appByProgram = new(StringComparer.OrdinalIgnoreCase);
-        appByOwnProcess = new();
         foreach (var a in apps.All)
         {
             if (a.IsWebsite) continue;
             if (a.Exe is { } exe && Path.GetFileName(exe) is { Length: > 0 } file && !file.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase))
                 appByProgram.TryAdd(file, a.Id);
-            foreach (var pattern in a.OwnProcesses ?? []) appByOwnProcess.Add((pattern, a.Id));
         }
-        appOfProgram.Clear();
     }
 
-    string? AppOfProgram(string name)
-    {
-        if (appOfProgram.TryGetValue(name, out var id)) return id;
-        id = appByProgram!.GetValueOrDefault(name) ?? appByOwnProcess!.Find(o => o.Pattern.IsMatch(name)).Id;
-        appOfProgram[name] = id;
-        return id;
-    }
+    string? AppOfProgram(string name) => appByProgram!.GetValueOrDefault(name);
 
     void Release()
     {

@@ -128,8 +128,8 @@ sealed class AppLogos
         if (exe is null || !File.Exists(exe)) return false; // not installed (yet): looked at again next time
         // Up to date unless the program was written since (an update; an installer may keep the
         // file's own date, so its creation counts too), or the logo came from another program
-        // (the catalog's logoExe changed it: RetroBat's own, not EmulationStation's). <id>.from
-        // says which; a logo from before it is taken again once.
+        // (the app's program is found elsewhere now: its Start menu shortcut's, then the catalog's
+        // launch.exe). <id>.from says which; a logo from before it is taken again once.
         var png = new FileInfo(PathOf(s.Id));
         var from = Path.Combine(dir, s.Id + ".from");
         var changed = new[] { File.GetLastWriteTimeUtc(exe), File.GetCreationTimeUtc(exe) }.Max();
