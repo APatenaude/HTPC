@@ -7,6 +7,7 @@ Publish-FakeRelease '0.2.0' 'healthy'
 Publish-FakeRelease '0.3.0' 'crash'
 $steps = 'download', 'staged', 'ready', 'swapping', 'moved-launcher', 'placed-launcher', 'moved-setup:lib', 'placed-setup:lib',
     'moved-setup:jobs', 'placed-setup:jobs', 'moved-setup:catalog.json', 'placed-setup:catalog.json', 'moved-setup:', 'placed-setup:', 'swapped', 'verifying'
+# One check per cut, of every part (the line names the parts that failed).
 $cases = @(foreach ($step in $steps) {
         New-Case "fault-$($step -replace '[:.]', '_')" @(
             { param($c) $c.Job = Start-FakeJob $c.Root $update $c.Step },
@@ -15,21 +16,24 @@ $cases = @(foreach ($step in $steps) {
                 # (lib\ may be gone, or new beside the old jobs\), the one that began the update; the
                 # reconcile runs from there, not from this repository.
                 $pick = Resolve-FakeRunner $c.Root
-                Note $c ($pick.Whole -and $pick.LibFrom -eq '0.1.0' -and $pick.JobsFrom -eq '0.1.0') "after '$($c.Step)': the task's bootstrap finds the whole runner that began the update (lib $($pick.LibFrom), jobs $($pick.JobsFrom))"
+                $c.Parts = [ordered]@{}
+                $c.Parts["the task's bootstrap finds the whole runner that began the update (lib $($pick.LibFrom), jobs $($pick.JobsFrom))"] = $pick.Whole -and $pick.LibFrom -eq '0.1.0' -and $pick.JobsFrom -eq '0.1.0'
                 $c.Job = Start-FakeJob $c.Root $reconcile -Lib $pick.Lib },
             { param($c)
-                $root = $c.Root
-                $c.V = Get-ExeVersion $root
+                $c.V = Get-ExeVersion $c.Root
                 Wait-Case $c { param($c) Get-Running $c.Root $c.V } 25 },
             { param($c)
-                $root = $c.Root; $r = $c.R; $v = $c.V
+                $root = $c.Root; $v = $c.V
                 $j = Get-Journal $root
-                $consistent = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
                 $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
-                $sameSetup = ($v -eq '0.1.0' -and $kept -eq '0.1.0') -or ($v -eq '0.2.0' -and $kept -eq '0.2.0')
+                $left = @(Get-Leftovers $root)
                 $next = Resolve-FakeRunner $root
-                Note $c ($consistent -and $sameSetup -and $c.Held -and (Get-Leftovers $root).Count -eq 0) "after '$($c.Step)': $v on disk and running, journal $($j.step), setup $kept ($r)"
-                Note $c ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))" }
+                $c.Parts["the old launcher and journal aborted or rolled back, or the new one and done ($v, $($j.step))"] = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
+                $c.Parts["the kept setup the launcher's version (setup $kept)"] = $kept -eq $v
+                $c.Parts["$v running"] = $c.Held
+                $c.Parts["no .new left ($($left.Name -join ', '))"] = $left.Count -eq 0
+                $c.Parts["the task's next runner $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"] = $next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v
+                Note-Parts $c "after '$($c.Step)': the runner that began it found; reconciled to $v on disk and running, journal $($j.step), setup $kept, the next runner $v's ($($c.R))" $c.Parts }
         ) @{ Step = $step }
     })
 

@@ -119,16 +119,17 @@ Check (($ran -join ',') -eq 'Set-Power.ps1,Set-UpdatePolicy.ps1') "  a box whose
 # Each machine step's script as an update runs it: it takes -MachineOnly, and the Power and
 # Updates steps, applied whole, touch nothing of a user's (as SYSTEM, HKCU and the profile
 # folders would be SYSTEM's own).
-foreach ($s in $MachineSteps.Values) {
-    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $s), [ref]$null, [ref]$null)
-    $takes = @($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'MachineOnly' }).Count -eq 1
-    Check $takes "  $s takes -MachineOnly"
-}
-foreach ($s in 'Set-Power.ps1', 'Set-UpdatePolicy.ps1') {
-    $text = [IO.File]::ReadAllText((Join-Path $lib $s)) -replace '(?s)<#.*?#>', ''
-    $user = [regex]::Matches($text, 'HKCU:|HKEY_CURRENT_USER|HKEY_USERS|\$env:(APPDATA|LOCALAPPDATA|USERPROFILE|USERNAME)|\$HOME\b') | ForEach-Object { $_.Value }
-    Check (-not $user) "  $s is all the machine's$(if ($user) { ': ' + ($user -join ', ') })"
-}
+$machineScripts = @($MachineSteps.Values)
+$noParam = @(foreach ($s in $machineScripts) {
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $s), [ref]$null, [ref]$null)
+        if (@($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'MachineOnly' }).Count -ne 1) { $s }
+    })
+Check (-not $noParam.Count) "  every machine step's script takes -MachineOnly ($($machineScripts -join ', ')$(if ($noParam) { '; not: ' + ($noParam -join ', ') }))"
+$user = @(foreach ($s in 'Set-Power.ps1', 'Set-UpdatePolicy.ps1') {
+        $text = [IO.File]::ReadAllText((Join-Path $lib $s)) -replace '(?s)<#.*?#>', ''
+        [regex]::Matches($text, 'HKCU:|HKEY_CURRENT_USER|HKEY_USERS|\$env:(APPDATA|LOCALAPPDATA|USERPROFILE|USERNAME)|\$HOME\b') | ForEach-Object { "${s}: $($_.Value)" }
+    })
+Check (-not $user.Count) "  Set-Power.ps1 and Set-UpdatePolicy.ps1 are all the machine's$(if ($user) { ': ' + ($user -join ', ') })"
 
 # The System step's record of what it turned off, for the uninstall (Save-FirstValue): the
 # first value of each kept, so a run again never records the step's own setting; a record
@@ -161,10 +162,10 @@ $used = @($off | Where-Object { $_ -match 'Bluetooth|\bBth|Audio|Netw|Nla|Dhcp|D
 Check ($off.Count -ge 10 -and -not $used.Count) "the System step turns off none of what the box uses ($($off.Count) services and tasks$(if ($used) { ': ' + ($used -join ', ') }))"
 # What the owner kept (30 Sept 2026), never a name in the step's code: Widevine's component
 # updates and asset delivery in Edge; Defender's cloud protection, signature updates, SmartScreen.
-foreach ($t in @('Set-EdgePolicy.ps1', '^(ComponentUpdatesEnabled|EdgeAssetDeliveryServiceEnabled)$'), @('Set-SystemPolicy.ps1', '^(SpynetReporting|DisableAntiSpyware|DisableAntiVirus|DisableBlockAtFirstSeen|EnableSmartScreen|SmartScreenEnabled|Signature\w*)$')) {
-    $names = @([Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $t[0]), [ref]$null, [ref]$null).FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) | Where-Object { $_.Value -match $t[1] } | ForEach-Object Value)
-    Check (-not $names.Count) "  $($t[0]) leaves alone what the owner kept$(if ($names) { ': ' + ($names -join ', ') })"
-}
+$names = @(foreach ($t in @('Set-EdgePolicy.ps1', '^(ComponentUpdatesEnabled|EdgeAssetDeliveryServiceEnabled)$'), @('Set-SystemPolicy.ps1', '^(SpynetReporting|DisableAntiSpyware|DisableAntiVirus|DisableBlockAtFirstSeen|EnableSmartScreen|SmartScreenEnabled|Signature\w*)$')) {
+        [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $t[0]), [ref]$null, [ref]$null).FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) | Where-Object { $_.Value -match $t[1] } | ForEach-Object { "$($t[0]): $($_.Value)" }
+    })
+Check (-not $names.Count) "  Set-EdgePolicy.ps1 and Set-SystemPolicy.ps1 leave alone what the owner kept$(if ($names) { ': ' + ($names -join ', ') })"
 
 # The watchdog compiled above, with its checks.
 $built = Receive-Child $wdBuild
