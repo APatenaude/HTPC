@@ -18,7 +18,7 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 | The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
 | TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
 | Setup's scripts on fakes | `setup\test\Test-Updates.ps1` (admin; `-Only Core,Download,Swap,Faults,Planting,Wua`), `Test-Autostart.ps1` (`-Only Match,Guard,Prefs,Catalog`), `Test-Rights.ps1` (`-Only Walker,Acl,JobParams`), `Test-Drivers.ps1`; `Test-Library.ps1` in the VM only |
-| The release in the test VM | DEVELOPMENT.md section 6 |
+| The release in the test VM | `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build`, then `-UpdateFrom <previous>` (DEVELOPMENT.md section 6) |
 
 Logs: the launcher's and watchdog's `%LOCALAPPDATA%\HTPC\logs\launcher.log`, `watchdog.log` (TV Box
 Setup elevated: `Program Files\HTPC\Setup\logs\launcher.log`). Setup: `C:\ProgramData\HTPC\logs\setup-<time>.log`,
@@ -235,7 +235,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   `MainForm.PostSetupInit`, `StartSetup`; `Rights` decided once in `Program.Main`.
 - Tests: LauncherTests `ElevationTests.cs`; `Test-Rights.ps1` (uninstall walker, ACL lock, job params);
   `Test-Drivers.ps1`; `Test-Updates -Only Core` (machine steps, system-before.json); selftest 'Setup:';
-  audit 'setup: welcome' ... 'setup: done, many steps failed'; the VM: DEVELOPMENT.md section 6.
+  audit 'setup: welcome' ... 'setup: done, many steps failed'; the VM: `setup\test\Test-ReleaseInVm.ps1`.
 - Log: setup-*.log `== {step}` then `  + ...` lines and `== Summary`; launcher.log `Setup started:
   powershell ...`, `Setup ended (exit code {n})`.
 
@@ -343,8 +343,8 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
    Set-SystemPolicy.ps1 does), and put it back in `$UninstallSteps` in `setup/lib/Uninstall-Htpc.ps1`
    (before the Files step, which deletes ProgramData\HTPC); list it in setup/README.md's tables.
 4. Tests: `Test-Updates -Only Core` (the `$MachineSteps` order, MachineOnly declared, no HKCU in
-   machine-only scripts, the before-record), `Test-Rights`; then the VM (DEVELOPMENT.md section 6), the
-   setting read before setup, after it and after the uninstall.
+   machine-only scripts, the before-record), `Test-Rights`; then the VM: `Test-ReleaseInVm.ps1 -Candidate
+   -Build -Probe <a script printing the setting>` (clean Windows, after setup, after the uninstall).
 
 ### Add a Home menu element
 1. `renderMenu` in `ui/app.js`: a `data-nav` element with a unique `data-id` and a `data-act` in the right

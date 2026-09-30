@@ -160,25 +160,27 @@ UI-only or launcher-only changes, which the headless UI self-test and the test p
 
 **Every release, on the Incus VM (the owner's rule since 29 Sept 2026: 1.0.7 went out without it):**
 
-1. Before `New-Release.ps1`, the candidate: `launcher\dev\Build-Release.ps1 -Out <folder>`;
-   `Restore-IncusTestVM.ps1 'before-shell'`; copy the unpacked `setup.zip` folder,
-   `TV-Box-Setup.exe` and `HtpcWatchdog.exe` to `C:\htpc-test\`; run
-   `C:\htpc-test\setup\setup.ps1 -Unattended -NoPause -LauncherExe C:\htpc-test\TV-Box-Setup.exe`
-   with `Invoke-IncusTestVM.ps1 -File <script> -InSession -Elevated` (in the TV user's session:
-   over plain SSH, Store-package installs fail with 0x80070005); every step OK; restart; the
-   launcher healthy (its log); screenshots of the screens the release changed; any setting the
-   release adds checked before and after; then `C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
-   -NoPause` (in session, elevated) and the settings back as on clean Windows.
-2. After the release is published, **before telling the owner to update**: install the previous
-   release in the VM the same way, restart, then update exactly as a box does, driving the TV UI
-   with `Send-IncusTestVMKeys.ps1` (Enter = A, Esc = B, arrows, `h` = Home, `p` = hold Home):
-   Up, Enter (Settings), Down to Updates, Enter, Right, Enter (Check now), Up Up Enter (Update
-   all), Left Enter (confirm), Esc Esc (Home). About 100 s later: the new version in
-   `HtpcLauncher.exe`'s file version, `Launcher x.y.z healthy` in the log, and a key press moving
-   the focus ring (the launcher really has the focus). A setting the release adds must also have
-   reached the box through the update (`Update-MachineSettings`).
-3. `Stop-IncusTestVM.ps1`. Times on the homelab: a restore 45 s, a setup 3 to 10 min (app
-   downloads), an update about 100 s.
+1. Before `New-Release.ps1`, the candidate:
+   `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build` (or `-Candidate <folder>` with
+   Build-Release's four files). It restores 'before-shell', runs setup.ps1 `-Unattended` in the
+   TV user's session, elevated (over plain SSH, Store-package installs fail with 0x80070005),
+   and stops at the first gate that fails: every step OK or skipped; after a restart,
+   `Launcher x.y.z healthy`; screenshots of Home and the Home menu; the uninstall (in the session,
+   elevated) with no FAILED. A setting the release adds: `-Probe <script>` prints it at each point
+   (clean Windows, after setup, after the uninstall) and the report lists what the uninstall did
+   not put back. Look at the screenshots of the screens the release changed (the `-small` ones).
+2. After the release is published, **before telling the owner to update**:
+   `Test-ReleaseInVm.ps1 -UpdateFrom <previous version>`. It downloads that release (checked
+   against GitHub's digests), installs it the same way, then updates exactly as a box does,
+   driving the TV UI by keys (Up Enter: Settings; Down to Updates, Enter; Right Enter: Check now;
+   Up Up Enter: Update all; Left Enter: yes; Esc Esc: Home), and requires the new version in
+   `HtpcLauncher.exe`, `Launcher x.y.z healthy`, every machine step of the new `lib\` applied
+   (`state\machine-settings.json`, `Update-MachineSettings`) and a key press changing the screen
+   (the launcher really has the focus).
+3. Both stop the VM at the end, on a failure too, and refuse to start while it runs (someone else
+   may be using it). The report (a line per stage with its time) and the screenshots are in
+   `%TEMP%\htpc-release-vm\<time>`. Times on the homelab: a restore about 1 min, a setup 3 to 10
+   min (app downloads), an update about 100 s.
 
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots
@@ -246,7 +248,8 @@ OpenSSH Server from Windows Update 3); a snapshot under a second; a restore abou
 | `Restore-IncusTestVM.ps1` | Turns it off, restores a snapshot, boots it and waits for SSH |
 | `Invoke-IncusTestVM.ps1` | PowerShell over SSH (elevated, session 0), `-File` for a local script; `-InSession` in the TV user's desktop session (standard rights, or `-Elevated`); `-Start` a program there |
 | `Copy-IncusTestVMFile.ps1` | scp in (owner Administrators; `-Owner user` for the TV user's), or out with `-FromGuest` |
-| `Get-IncusTestVMScreenshot.ps1` | PNG of the screen, taken by Incus (QEMU's screendump): firmware, Setup, sign-in and secure desktop included |
+| `Get-IncusTestVMScreenshot.ps1` | PNG of the screen, taken by Incus (QEMU's screendump): firmware, Setup, sign-in and secure desktop included; also a half-size `-small.png` (`-Scale`), the one to look at |
+| `Test-ReleaseInVm.ps1` | The release checklist above, one command: `-Candidate <folder>` / `-Candidate -Build`, or `-UpdateFrom <version>` |
 | `Send-IncusTestVMKeys.ps1` | Send-VMKeys' steps, by SendInput from a helper in the TV user's session; `-Console` types through the VGA console (SPICE) instead, which reaches every screen |
 
 How it reaches the guest: the VM sits on the server's NAT bridge (internet, but not the TVs and

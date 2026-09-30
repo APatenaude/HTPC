@@ -24,8 +24,8 @@ lines, and recipes for the usual changes).
   `git grep -n '^<<<<<<< '` finds anything.
 - After every push, watch the Tests workflow to the end and report it. Flaky tests are fixed at
   their cause, never with longer waits.
-- Every release gets the VM checklist in docs/DEVELOPMENT.md section 6 (the candidate's setup and
-  uninstall before `New-Release.ps1`; the real update from the previous release after it), and
+- Every release gets the VM checklist in docs/DEVELOPMENT.md section 6 (`setup\test\Test-ReleaseInVm.ps1
+  -Candidate -Build` before `New-Release.ps1`; `-UpdateFrom <previous>` after it), and
   the owner is told to update only after that. Release notes are baked into update.json: get them
   right first.
 - Code edits with an editor that fails when the text is not found; after a scripted edit,
