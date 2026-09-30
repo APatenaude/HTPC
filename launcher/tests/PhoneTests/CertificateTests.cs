@@ -177,9 +177,11 @@ static partial class Program
         File.WriteAllBytes(Path.Combine(folder, "root.cer"), testRoot.RawData);
         File.WriteAllBytes(Path.Combine(folder, "intermediate.cer"), forgedPair.RawData);
         var step = new PhoneCertificates(folder, keys, testName);
-        Check(step.LoadExisting() && !step.PlaceIntermediateInMachineStore() && !step.IntermediateInMachineStore
-            && Log.Warnings.Any(w => w.Contains("not put in the machine's CA store") && w.Contains("path length 0")),
-            "setup's step: an intermediate this box would not make is loaded, then refused before the machine store");
+        // Refused for being unfit (the reason Unfit gives, logged by this step), not for want of administrator rights.
+        var why = PhoneCertificates.Unfit(testRoot, forgedPair, testName);
+        Log.Clear();
+        Check(why is not null && step.LoadExisting() && !step.PlaceIntermediateInMachineStore() && !step.IntermediateInMachineStore && Log.Warnings.Any(w => w.Contains(why)),
+            $"setup's step: an intermediate this box would not make is loaded, then refused before the machine store ({why})");
     }
 
     // A test's name for its CAs: "HTPC test <32 hex digits>", never the box's (RemoveTestCerts finds them by it).
@@ -291,7 +293,7 @@ static partial class Program
         Check(setupView.LoadExisting() && setupView.Intermediate!.Thumbprint == inter.Thumbprint && store.Names.OrderBy(n => n).SequenceEqual(keysBefore),
             "setup's step loads the launcher's pair as it is, and makes no key");
         using var emptyFolder = new TempPath("certs-test");
-        Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && !Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any(),
+        Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && (!Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any()),
             "before the launcher's first start there is nothing to load, and nothing is made");
         MachineStoreChecks(root, inter, testName);
         var moved = IPAddress.Parse("192.168.1.33");
@@ -380,12 +382,13 @@ static partial class Program
 
             // Windows sends the intermediate from the machine's CA store only (Schannel, in LSA). With
             // administrator rights (TV Box Setup's step) it goes there; without them the machine store
-            // is left alone and the launcher says setup must do it.
+            // is left alone and the launcher says setup must do it (Settings shows IntermediateMissing).
             var elevated = Environment.IsPrivilegedProcess;
             if (elevated)
-                Check(certs.PlaceIntermediateInMachineStore() && certs.IntermediateInMachineStore, "with administrator rights (setup's step): the intermediate in the machine's CA store");
+                Check(certs.PlaceIntermediateInMachineStore() && certs.IntermediateInMachineStore && !server.IntermediateMissing,
+                    "with administrator rights (setup's step): the intermediate in the machine's CA store");
             else
-                Check(!certs.PlaceIntermediateInMachineStore() && !certs.IntermediateInMachineStore && Log.Warnings.Any(w => w.Contains("not in Windows' machine store")),
+                Check(!certs.PlaceIntermediateInMachineStore() && !certs.IntermediateInMachineStore && server.IntermediateMissing,
                     "without administrator rights: the machine store left alone, and the launcher says setup must put the intermediate there");
             var ca = certs.Authority!;
             var inter = certs.Intermediate!;

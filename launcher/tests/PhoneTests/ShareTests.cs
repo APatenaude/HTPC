@@ -15,8 +15,12 @@ static partial class Program
         Check(PhoneLinks.FindLink("https://vimeo.com/1") == "https://vimeo.com/1", "shared link as is");
         Check(PhoneLinks.FindLink("Look at this! https://youtu.be/dQw4w9WgXcQ.") == "https://youtu.be/dQw4w9WgXcQ", "the link in shared text, without the full stop");
         Check(PhoneLinks.FindLink("no link here") is null && PhoneLinks.FindLink(null) is null && PhoneLinks.FindLink("file:///C:/x") is null, "no link: nothing");
-        var manifest = File.ReadAllText(Path.Combine(PhoneFolder, "manifest.webmanifest"));
-        Check(manifest.Contains("\"method\": \"POST\"") && manifest.Contains("application/x-www-form-urlencoded"), "manifest: the Share target posts");
+        using (var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(PhoneFolder, "manifest.webmanifest"))))
+        {
+            var target = manifest.RootElement.GetProperty("share_target");
+            Check(target.GetProperty("action").GetString() == "/share" && target.GetProperty("method").GetString() == "POST"
+                && target.GetProperty("enctype").GetString() == "application/x-www-form-urlencoded", "manifest: the Share target posts a form to /share");
+        }
 
         await using var box = await TestServer.StartAsync();
         var (host, pairing, server, port, origin, http) = (box.Host, box.Pairing, box.Server, box.Port, box.Origin, box.Http);
