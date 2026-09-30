@@ -15,8 +15,10 @@
                 (Watchdog.cs compiled with checks), the machine steps an update applies
       Download  pinned redirects, lying lengths, rate limits, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken runner, not newer, no space,
-                never back at Home; the fake watchdog counts none of its exits
-      Faults    the job ended hard after each journal step, then reconcile: never half of each
+                never back at Home; the fake watchdog counts none of its exits; the release's
+                watchdog swapped in and rolled back (and, new on a box, removed again)
+      Faults    the job ended hard after each journal step, then reconcile: never half of each;
+                a launcher start held past the reconcile's rollback (as the antivirus can) ended
       Planting  junctions, user-owned files and ACL entries refused; the app jobs' work folders
                 (run it as SYSTEM in the VM too: -Only Planting)
       Wua       the Windows Update child faked: hangs, counts, "n of m", a stuck service
@@ -53,6 +55,9 @@ $lib = Join-Path $repo 'setup\lib'
 
 $work = Join-Path $env:TEMP 'htpc-updtest'
 $bin = Join-Path $work 'bin'
+# Elevated, setup's Common.ps1 (in the scripts this runs) makes Program Files\HTPC\Setup\temp (its
+# TEMP): the first of those folders this run made goes at the end, never one that was there.
+$pfMade = @('HTPC', 'HTPC\Setup', 'HTPC\Setup\temp' | ForEach-Object { Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $_ } | Where-Object { -not (Test-Path -LiteralPath $_) } | Select-Object -First 1)
 $pass = 0; $fail = 0
 function Check([bool]$ok, [string]$what) {
     if ($ok) { $script:pass++; Write-Host "  PASS  $what" } else { $script:fail++; Write-Host "  FAIL  $what" -ForegroundColor Red }
@@ -74,14 +79,17 @@ try {
     if (Section 'Core') { . "$PSScriptRoot\updates\Core.ps1" }
 
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) {
-        # The fakes the sections below use, all built side by side from here on.
+        # The fakes the sections below use, all built side by side from here on: launchers, and
+        # the watchdogs of the boxes (0.1.0) and of the releases that ship one.
         $fakes = @('0.2.0 healthy')
+        $watchdogs = @('0.2.0')
         if ((Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) {
             $fakes += '0.1.0 healthy', '0.1.0 busy', '0.3.0 crash', '0.4.0 hang', '0.5.0 healthy', '0.6.0 healthy'
-            Get-FakeWatchdog -Later
+            $watchdogs += '0.1.0', '0.3.0'
             [void](Get-NativeDll -Later)
         }
         foreach ($fake in $fakes) { $v, $mode = $fake -split ' '; Get-FakeLauncher $v $mode -Later }
+        foreach ($v in $watchdogs) { Get-FakeWatchdog $v -Later }
         Start-FakeGitHub
     }
 
@@ -103,7 +111,12 @@ try {
     if (-not $Keep) {
         [void](Wait-For { (& $fromWork).Count -eq 0 } 5)
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $work) {
+            $left = @(Get-ChildItem -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName.Substring($work.Length + 1) })
+            Write-Host "  WARNING: $work could not be removed (still there: $($left -join ', ')...)" -ForegroundColor Yellow
+        }
     }
+    foreach ($d in $pfMade) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host ''

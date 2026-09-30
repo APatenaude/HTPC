@@ -148,7 +148,13 @@ function Clear-WatchdogPause($Paths, [switch]$OnlyStale, [switch]$Watch) {
             if ($alive -and [int]$p.jobPid -ne $PID -and [DateTime]::Parse($p.expiresUtc).ToUniversalTime() -gt [DateTime]::UtcNow) { return }
         } catch { }
     }
-    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+    # The watchdog reading it at that moment makes the delete fail: tried again for up to 2 s.
+    $deadline = [DateTime]::UtcNow.AddSeconds(2)
+    while ($true) {
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path -LiteralPath $file) -or [DateTime]::UtcNow -ge $deadline) { return }
+        Start-Sleep -Milliseconds 20
+    }
 }
 
 # The new launcher is about to be checked: the watch first, then the pause goes (never a moment
@@ -163,6 +169,18 @@ function Switch-WatchdogToWatch($Paths) {
 function Get-LauncherProcesses($Paths) {
     @(Get-CimInstance Win32_Process -Filter "Name = 'HtpcLauncher.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $Paths.Exe, [StringComparison]::OrdinalIgnoreCase) })
+}
+
+# For a rollback to end: every launcher running from the launcher's own folder under a name an
+# update gives its file (HtpcLauncher.exe, .new/.prev/.bad, a set-aside .old-*). A start Windows
+# held while the rollback renamed the file can come up under the new name. Nothing else.
+function Get-LauncherProcessesToEnd($Paths) {
+    $dir = $Paths.LauncherDir.TrimEnd('\')
+    @(Get-CimInstance Win32_Process -Filter "Name LIKE 'HtpcLauncher%'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ExecutablePath -and [string]::Equals((Split-Path $_.ExecutablePath -Parent), $dir, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path $_.ExecutablePath -Leaf) -match '^HtpcLauncher(\.[A-Za-z0-9-]+)*\.exe(\.old-[0-9a-f]{8})?$'
+        })
 }
 
 # The launcher's "I'm healthy" signal: a named event in its own session, which this job (in
@@ -702,7 +720,7 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
     # pause comes before the watch (if any) goes: the launcher this stops is never counted either.
     Save-LauncherJournal $Paths $Journal 'rollingback' $Reason
     Set-WatchdogPause $Paths
-    foreach ($p in Get-LauncherProcesses $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+    foreach ($p in Get-LauncherProcessesToEnd $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
     foreach ($step in @($plan)) {
         $slot = $step.Slot; $names = $step.Names
@@ -718,6 +736,17 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
         Remove-TrustedItem $names.New $slot.Root
         # Test hook: a power cut between two slots of a rollback.
         Invoke-UpdateFault "restored-$(Get-SlotKey $slot)"
+    }
+    # A launcher the watchdog was starting as the pause came (it looked, then started it: a start
+    # the antivirus holds takes seconds) shows up after the pass above, still the version put
+    # aside: ended too, until none has shown for half a second (at most 5 s), before the pause goes.
+    $quiet = [DateTime]::UtcNow
+    $until = $quiet.AddSeconds(5)
+    while (([DateTime]::UtcNow - $quiet).TotalMilliseconds -lt 500 -and [DateTime]::UtcNow -lt $until) {
+        $late = @(Get-LauncherProcessesToEnd $Paths)
+        foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+        if ($late.Count) { $quiet = [DateTime]::UtcNow }
+        Start-Sleep -Milliseconds 100
     }
     Save-LauncherJournal $Paths $Journal 'rolledback' "$Reason; back on $($Journal.from)"
     Clear-WatchdogPause $Paths -Watch

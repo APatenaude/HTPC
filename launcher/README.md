@@ -765,9 +765,10 @@ go, when the quiet check is due, an hour's wait after a failed one.
   section in `setup\test\updates\<Section>.ps1`) runs the update jobs against fakes under
   `%TEMP%\htpc-updtest`. Nothing on the machine changes.
 - The fakes: a fake GitHub on 127.0.0.1 (`Serve-FakeRelease.ps1`: bad redirects, lying lengths, 429,
-  404, wrong hashes), fake launchers (healthy, crashing, hanging) and a fake watchdog, the job ended
-  hard after every journal step, planted junctions / foreign owners / writable folders, and a faked
-  Windows Update child.
+  404, wrong hashes), fake launchers (healthy, crashing, hanging) and a fake watchdog (releases ship
+  theirs, as real ones do; a box can lack one), the job ended hard after every journal step (one
+  line per cut, naming what failed), planted junctions / foreign owners / writable folders, and a
+  faked Windows Update child.
 - Run it as SYSTEM too (a one-off scheduled task, in the test VM). The cases run side by side, each on
   a fake box of its own (`-Parallel 1`: one at a time).
 
@@ -830,16 +831,17 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
     powershell -ExecutionPolicy Bypass -File launcher\dev\Start-Launcher.ps1 -Restore  # back to the installed launcher
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screen.ps1
     powershell -ExecutionPolicy Bypass -File launcher\dev\Send-Pad.ps1 -Press A      # controller input without a controller
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1           # Mouse preset, end to end, on a test page
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1 -Keyboard # on-screen keyboard: click a field, type
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Show-Presets.ps1           # by hand, never on the TV unasked: Mouse preset on a test page
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Show-Presets.ps1 -Keyboard # the same: on-screen keyboard, click a field, type
     powershell -ExecutionPolicy Bypass -File launcher\dev\Publish-Setup.ps1          # launcher\dist\TV Box Setup.exe (68 MB, self-contained; 12 MB of it Kestrel)
 
-- Send-Pad, Test-Presets and `Measure-StandbyPower.ps1` (the processor's power awake and in standby,
-  and what wakes it) drive the launcher through window messages (`HtpcLauncher.Pad`,
-  `HtpcLauncher.Standby`) that only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`,
-  with `-NoTv` while nobody watches the TV); a release, and the setup exe, ignore them.
+- Send-Pad, Show-Presets (a demo run by hand: full-screen Edge, the real pointer) and
+  `Measure-StandbyPower.ps1` (the processor's power awake and in standby, and what wakes it)
+  drive the launcher through window messages (`HtpcLauncher.Pad`, `HtpcLauncher.Standby`) that
+  only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`, with `-NoTv` while
+  nobody watches the TV); a release, and the setup exe, ignore them.
 - Also in `dev/`: `Build-Icon.ps1` (the launcher's icon from `art/`), `input-test.html` (a page showing
-  the keys and clicks it gets, for Test-Presets), `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`,
+  the keys and clicks it gets, for Show-Presets), `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`,
   `Run-NetProbe.ps1`, `TvLab` (above).
 - Screenshots (Save-Screenshots, Test-Ui `-Shots`, Save-Screen) also write a half-size `-small.png`
   (`-Scale`, `Save-ScaledImage.ps1`) for a quick look; judge details on the full-size one.

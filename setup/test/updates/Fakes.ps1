@@ -92,10 +92,12 @@ static EventWaitHandle Signal(string name) {
 }
 static int Main() {
   var started = DateTime.UtcNow;
-  if ("$Mode" == "crash") { Thread.Sleep(1000); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
-  var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
   var me = Process.GetCurrentProcess().Id;
+  // Its version, by process id, in the box's folder: the file at its path can change under it.
+  try { File.WriteAllText(Path.GetFullPath(Path.Combine(dir, @"..\..\..\launcher-" + me + ".version")), "$Version"); } catch (Exception) { }
+  if ("$Mode" == "crash") { Thread.Sleep(1000); return 1; }
+  var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
   EventWaitHandle ev = null, leaving = null;
   if ("$Mode" == "healthy" || "$Mode" == "busy") ev = Signal("Local\\HtpcHealthy_$($Version)_" + me);
   for (var i = 0; i < 3000; i++) {
@@ -113,15 +115,26 @@ static int Main() {
 "@
 }
 
-# The watchdog: starts HtpcLauncher.exe from its folder whenever none runs from there, unless
-# the job's pause file names a live process. Each exit of a launcher it started is judged as the
-# real one judges it, into <root>\watchdog-exits.log: "planned" (exit code 75), "covered" (a
-# job's pause or watch file names a live process: not counted) or "counted" (a crash the real
-# watchdog would count towards restarting the box). Stops when <root>\stop-watchdog exists.
-function Get-FakeWatchdog([switch]$Later) {
-    Build-Fake 'HtpcWatchdog.exe' -Later:$Later -Source @'
-using System; using System.IO; using System.Threading; using System.Diagnostics; using System.Text.RegularExpressions;
+# The watchdog (release $Version's: the boxes start with 0.1.0's): starts HtpcLauncher.exe from its
+# folder whenever none runs from there, unless the job's pause file names a live process. Each
+# exit of a launcher it started is judged as the real one judges it, into
+# <root>\watchdog-exits.log: "planned" (exit code 75), "covered" (a job's pause or watch file names
+# a live process: not counted) or "counted" (a crash the real watchdog would count towards
+# restarting the box). Stops when <root>\stop-watchdog exists. Renamed while it runs (an update
+# that brings a watchdog), it goes on from there, as the real one does. As the real one, it ends a
+# start that a job's pause or a change of the launcher's file overtook (not counted: "ended at
+# start" in the log). <root>\hold-next-start (seconds) holds its next start that long, as the
+# antivirus can, with the file it began with (a hard link, HtpcLauncher.held.exe, keeps it
+# whatever a rollback renames meanwhile).
+function Get-FakeWatchdog([string]$Version = '0.1.0', [switch]$Later) {
+    Build-Fake "watchdog-$Version.exe" -Later:$Later -Source (@'
+using System; using System.IO; using System.Threading; using System.Diagnostics; using System.Text.RegularExpressions; using System.Runtime.InteropServices;
+[assembly: System.Reflection.AssemblyVersion("VERSION.0")] [assembly: System.Reflection.AssemblyFileVersion("VERSION.0")]
 class W {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool CreateHardLink(string link, string existing, IntPtr security);
+  static string Stamp(string path) {
+    try { var f = new FileInfo(path); return f.Exists ? f.Length + "|" + f.CreationTimeUtc.Ticks + "|" + f.LastWriteTimeUtc.Ticks : null; } catch (Exception) { return null; }
+  }
   static bool Holds(string path) {
     try { var m = Regex.Match(File.ReadAllText(path), "\"jobPid\":\\s*(\\d+)");
           if (m.Success) { using (Process.GetProcessById(int.Parse(m.Groups[1].Value))) return true; } } catch (Exception) { }
@@ -147,13 +160,37 @@ class W {
     // boxes side by side, reading every launcher's path ten times a second costs).
     var running = child != null;
     if (!running) foreach (var p in Process.GetProcessesByName("HtpcLauncher")) { try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) running = true; } catch (Exception) { } }
-    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(exe); } catch (Exception) { } }
+    // Started as the real one starts it (CreateProcess, not the shell's ShellExecute).
+    // Logged before and after: a start the antivirus holds shows as a "start" line alone.
+    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) {
+      var stamp = Stamp(exe);
+      var from = exe;
+      var hold = Path.Combine(root, "hold-next-start");
+      try { File.AppendAllText(log, "start " + DateTime.UtcNow.ToString("HH:mm:ss.f") + Environment.NewLine); } catch (Exception) { }
+      if (File.Exists(hold)) {
+        int seconds; int.TryParse(File.ReadAllText(hold).Trim(), out seconds); File.Delete(hold);
+        from = Path.Combine(dir, "HtpcLauncher.held.exe");
+        if (!CreateHardLink(from, exe, IntPtr.Zero)) from = exe;
+        Thread.Sleep(seconds * 1000);
+      }
+      try { child = Process.Start(new ProcessStartInfo(from) { UseShellExecute = false, WorkingDirectory = dir }); } catch (Exception) { }
+      try { File.AppendAllText(log, "started " + (child == null ? "none" : child.Id.ToString()) + " " + DateTime.UtcNow.ToString("HH:mm:ss.f") + Environment.NewLine); } catch (Exception) { }
+      if (child != null && (Holds(pause) || Stamp(exe) != stamp)) {
+        try { File.AppendAllText(log, "ended at start " + child.Id + Environment.NewLine); } catch (Exception) { }
+        try { child.Kill(); child.WaitForExit(5000); } catch (Exception) { }
+        child = null;
+        nextStart = DateTime.UtcNow;
+      }
+    }
     // Waits on the launcher itself, so its exit is judged at once (as the real watchdog waits on
     // its mutex): a sleep could miss a rollback's short pause on a loaded box.
     if (child != null) child.WaitForExit(100); else Thread.Sleep(100);
   } } }
-'@
+'@).Replace('VERSION', $Version)
 }
+
+# The version of a file in a fake box's launcher folder ('' when there is none).
+function Get-BoxFileVersion([string]$Root, [string]$Name) { Format-SemVer (Get-FileSemVer (Join-Path $Root "PF\HTPC\Launcher\$Name")) }
 
 # The exits of a fake box's launcher its watchdog would have counted as crashes (see above).
 function Get-CountedExits([string]$Root) {
@@ -208,44 +245,66 @@ function New-SetupCopy([string]$To, [string]$Version) {
 }
 
 # A box: Program Files\HTPC\Launcher with launcher 0.1.0 (healthy, or busy: an app always in
-# front), the watchdog and the job runner, and ProgramData\HTPC with the kept setup. The watchdog
-# is started (it starts the launcher), and the launcher waited for (-NoWait: the caller waits).
-function New-FakeBox([string]$Name, [string]$Mode = 'healthy', [switch]$NoWait) {
+# front), watchdog 0.1.0 (as HtpcWatchdog.exe, or -WatchdogFile: a box with none in place, its
+# watchdog running from another name) and the job runner, and ProgramData\HTPC with the kept
+# setup. The watchdog is started (it starts the launcher), and the launcher waited for (-NoWait:
+# the caller waits).
+function New-FakeBox([string]$Name, [string]$Mode = 'healthy', [string]$WatchdogFile = 'HtpcWatchdog.exe', [switch]$NoWait) {
     $root = Join-Path $work $Name
     New-AdminFolder $root
     $dir = Join-Path $root 'PF\HTPC\Launcher'
     New-Item -ItemType Directory -Force $dir, (Join-Path $root 'PD\HTPC') | Out-Null
     Copy-Item (Get-FakeLauncher '0.1.0' $Mode) (Join-Path $dir 'HtpcLauncher.exe')
-    Copy-Item (Get-FakeWatchdog) (Join-Path $dir 'HtpcWatchdog.exe')
+    Copy-Item (Get-FakeWatchdog) (Join-Path $dir $WatchdogFile)
     $setup = Join-Path $root 'PD\HTPC\setup'
     New-SetupCopy $setup '0.1.0'
     Copy-Item (Join-Path $setup 'lib') (Join-Path $dir 'lib') -Recurse
     Copy-Item (Join-Path $setup 'jobs') (Join-Path $dir 'jobs') -Recurse
     Copy-Item (Join-Path $setup 'catalog.json') $dir
     Copy-Item (Join-Path $setup 'lib\Start-Job.ps1') $dir
-    Start-Process (Join-Path $dir 'HtpcWatchdog.exe') | Out-Null
+    Start-Process (Join-Path $dir $WatchdogFile) | Out-Null
     if (-not $NoWait) { [void](Wait-For { Get-Running $root '0.1.0' } 20) }
     $root
 }
 
 # What runs from a fake box: its watchdog and launchers (under that box's folder only: one box's
-# name can begin another's).
+# name can begin another's). Get-Process, not WMI: the cases look ten times a second. A program
+# renamed while it runs keeps the path it was started from, as with WMI.
 function Get-BoxProcesses([string]$Root) {
-    @(Get-CimInstance Win32_Process -Filter "Name LIKE 'Htpc%'" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith("$Root\", 'OrdinalIgnoreCase') })
+    @(Get-Process -Name 'Htpc*' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", 'OrdinalIgnoreCase') })
 }
 
-# Its watchdog is told to stop, and ended first with the rest (so it starts nothing more), until
-# nothing runs from the box; then its folder goes.
+# What a fake box is doing, for a check that found no launcher running: its watchdog, the job's
+# pause and watch files, what else runs from it (a launcher whose start ended after a rollback
+# renamed its file can run under the new name, HtpcLauncher.bad), and the exits its watchdog saw.
+function Get-BoxState([string]$Root) {
+    $state = Join-Path $Root 'PD\HTPC\state'
+    $file = { param($n) $f = Join-Path $state $n; if (Test-Path -LiteralPath $f) { try { [IO.File]::ReadAllText($f).Trim() } catch { '(unreadable)' } } else { 'none' } }
+    $exits = Join-Path $Root 'watchdog-exits.log'
+    "watchdog $(Get-BoxWatchdog $Root), pause $(& $file 'watchdog-pause'), watch $(& $file 'watchdog-watch'), " +
+    "its processes $(@(Get-BoxProcesses $Root | Where-Object Name -notlike 'HtpcWatchdog*' | ForEach-Object { "$($_.Name) $($_.Id) $(Get-Content -LiteralPath (Join-Path $Root "launcher-$($_.Id).version") -ErrorAction SilentlyContinue)" }) -join ', '), " +
+    "exits $(if (Test-Path -LiteralPath $exits) { @(Get-Content -LiteralPath $exits) -join ', ' }), " +
+    "HtpcLauncher* processes whose path cannot be read (any box's, or this machine's own): $(@(Get-Process -Name 'HtpcLauncher*' -ErrorAction SilentlyContinue | Where-Object { -not $_.Path } | ForEach-Object { "$($_.Name) $($_.Id)" }) -join ', ')"
+}
+
+# The id of the watchdog running from a fake box (0 when none; there is at most one).
+function Get-BoxWatchdog([string]$Root) { @(@(Get-BoxProcesses $Root | Where-Object Name -like 'HtpcWatchdog*' | ForEach-Object Id) + 0)[0] }
+
+# Its watchdog told to stop, and ended first with the rest (so it starts nothing more): true once
+# nothing runs from the box.
+function Stop-FakeBox([string]$Root) {
+    New-Item -ItemType File -Force (Join-Path $Root 'stop-watchdog') | Out-Null
+    $left = Get-BoxProcesses $Root
+    foreach ($p in @($left | Where-Object Name -like 'HtpcWatchdog*') + @($left | Where-Object Name -notlike 'HtpcWatchdog*')) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    }
+    $left.Count -eq 0
+}
+
+# A box stopped at once (a case cut short), until nothing runs from it; then its folder goes.
 function Remove-FakeBox([string]$Root) {
     if (-not (Test-Path -LiteralPath $Root)) { return }
-    New-Item -ItemType File -Force (Join-Path $Root 'stop-watchdog') | Out-Null
-    [void](Wait-For {
-            $left = Get-BoxProcesses $Root
-            foreach ($p in @($left | Where-Object Name -like 'HtpcWatchdog*') + @($left | Where-Object Name -notlike 'HtpcWatchdog*')) {
-                Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-            }
-            $left.Count -eq 0
-        } 15)
+    [void](Wait-For { Stop-FakeBox $Root } 15)
     if (-not $Keep) { Remove-Item -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
@@ -256,10 +315,15 @@ function Wait-For([scriptblock]$Condition, [int]$Seconds) {
     $false
 }
 
-# Versions of the launchers running from a fake box's launcher folder.
+# The launchers running from a fake box's HtpcLauncher.exe; with -Version, whether one of that
+# version runs (as it says itself: a launcher started late, after a rollback put another file at
+# its path, is the version it was) and that file is that version.
 function Get-Running([string]$Root, [string]$Version) {
     $exe = Join-Path $Root 'PF\HTPC\Launcher\HtpcLauncher.exe'
-    $running = @(Get-CimInstance Win32_Process -Filter "Name = 'HtpcLauncher.exe'" | Where-Object { $_.ExecutablePath -eq $exe })
-    if ($Version) { return [bool]($running | Where-Object { (Format-SemVer (Get-FileSemVer $_.ExecutablePath)) -eq $Version }) }
+    $running = @(Get-Process -Name 'HtpcLauncher' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+    if ($Version) {
+        $own = @($running | Where-Object { $f = Join-Path $Root "launcher-$($_.Id).version"; (Test-Path -LiteralPath $f) -and "$(Get-Content -LiteralPath $f -ErrorAction SilentlyContinue)".Trim() -eq $Version })
+        return [bool]($own.Count -and (Format-SemVer (Get-FileSemVer $exe)) -eq $Version)
+    }
     $running
 }

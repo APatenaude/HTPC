@@ -15,8 +15,12 @@
 #>
 $ErrorActionPreference = 'Stop'
 $lib = Join-Path (Split-Path $PSScriptRoot -Parent) 'lib'
+# Elevated, setup's Common.ps1 (dot-sourced here) makes Program Files\HTPC\Setup\temp (its TEMP):
+# the first of those folders this run made goes at the end, never one that was there.
+$pfMade = @('HTPC', 'HTPC\Setup', 'HTPC\Setup\temp' | ForEach-Object { Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $_ } | Where-Object { -not (Test-Path -LiteralPath $_) } | Select-Object -First 1)
 . "$lib\Common.ps1"
 . "$lib\DriverUpdate.ps1"
+foreach ($d in $pfMade) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
 
 $pass = 0; $fail = 0
 function Check([bool]$ok, [string]$what) {

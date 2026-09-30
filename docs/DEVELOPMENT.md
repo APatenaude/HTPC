@@ -85,7 +85,7 @@ that did the work; none of them belongs in the (public) repo:
 | `launcher/tests/*`, `launcher/dev/TvLab` | Console test projects: `dotnet run -c Release`, exit 0 = pass |
 | `launcher/dev` | Dev and release scripts (below) |
 | `setup` | `setup.ps1` and its steps in `lib/`, the SYSTEM job verbs in `jobs/`, `catalog.json` (the apps), `autounattend/` (USB install), `test/` (setup tests, the VM tools) |
-| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator) |
+| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator: the .NET test projects, TvLab and the quick setup tests; Test-Updates, the longest, without the .NET SDK) |
 | `.github/workflows/release.yml` | Builds and publishes a release from a `v*` tag whose commit passed Tests |
 
 ## 3. The everyday loop
@@ -182,6 +182,14 @@ UI-only or launcher-only changes, which the headless UI self-test and the test p
    may be using it). The report (a line per stage with its time) and the screenshots are in
    `%TEMP%\htpc-release-vm\<time>`. Times on the homelab: a restore about 1 min, a setup 3 to 10
    min (app downloads), an update about 100 s.
+4. The setup tests in the VM (`Invoke-IncusTestVM.ps1` with a copy of `setup\` and
+   `launcher\src\Watchdog\`, elevated): the VM's Defender (cloud protection on) holds a new
+   program's start for up to 8 s now and then, most around its own updates after a restore (its
+   platform about 10 minutes after boot, event 2014 in its Operational log). A launcher start held
+   past a rollback used to survive it (about one Test-Updates run in ten failed on 30 Sept 2026):
+   the watchdog now ends a start a launcher update's pause or file change overtook, and the
+   rollback ends the launcher under its renamed names too. Faults reproduces it (a cut after
+   'placed-launcher' with the next start held 10 s). A failed wait prints the box's state.
 
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots

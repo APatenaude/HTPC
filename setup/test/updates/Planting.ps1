@@ -56,8 +56,7 @@ Invoke-Cases @(
             { param($c)
                 $root = $c.Root; $r = $c.R
                 Note $c ($r -like 'refused*' -and @(Get-ChildItem $c.Elsewhere).Count -eq 0 -and (Get-ExeVersion $root) -eq '0.1.0') "a junction for state\staging: refused, nothing written through it ($r)"
-                cmd /c rmdir "$root\PD\HTPC\state\staging" | Out-Null
-                Remove-FakeBox $root })),
+                cmd /c rmdir "$root\PD\HTPC\state\staging" | Out-Null })),
     (New-Case 'plant-owner' @(
             { param($c)
                 $planted = Join-Path $c.Root 'PF\HTPC\Launcher\HtpcLauncher.new.exe'
@@ -65,8 +64,7 @@ Invoke-Cases @(
                 & icacls $planted /setowner "*$me" | Out-Null
                 $c.Job = Start-FakeJob $c.Root $update },
             { param($c)
-                Note $c ($c.R -like 'refused*owned*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "a .new file owned by someone else: refused ($($c.R))"
-                Remove-FakeBox $c.Root })),
+                Note $c ($c.R -like 'refused*owned*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "a .new file owned by someone else: refused ($($c.R))" })),
     (New-Case 'plant-ace' @(
             { param($c)
                 $stateDir = Join-Path $c.Root 'PD\HTPC\state'
@@ -74,8 +72,7 @@ Invoke-Cases @(
                 & icacls $stateDir /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
                 $c.Job = Start-FakeJob $c.Root $update },
             { param($c)
-                Note $c ($c.R -like 'refused*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "state\ that Users can change: refused ($($c.R))"
-                Remove-FakeBox $c.Root })))
+                Note $c ($c.R -like 'refused*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "state\ that Users can change: refused ($($c.R))" })))
 
 # ProgramData\HTPC made at standard rights (TV Box Setup's log before it asked for the
 # rights), so the user's, with state\, setup\ and a journal of theirs in it: the lock
@@ -99,8 +96,14 @@ $usersModify = { param($p) [bool]((Get-Acl -LiteralPath $p).Access | Where-Objec
 Check ($null -eq (Get-UntrustedReason "$data\logs") -and -not (& $usersModify "$data\logs")) "  logs\ setup's own now: Users' write gone, trusted ($(Get-UntrustedReason "$data\logs"))"
 Check (-not (Test-Path -LiteralPath "$data\logs\launcher.log") -and @(Get-ChildItem "$data\logs" -Filter 'launcher.log.untrusted-*').Count -eq 1) '  the launcher log the user owned there: renamed aside'
 Check ((& $usersModify "$data\user") -and (& $usersModify "$data\tv")) '  user\ and tv\ still user-writable'
+# Run again: every item's owner and rules the same, nothing more set aside (*.untrusted-*).
+$tree = { @($data; Get-ChildItem -LiteralPath $data -Recurse -Force | ForEach-Object FullName) | ForEach-Object { "$_`t$((Get-Acl -LiteralPath $_).Sddl)" } }
+$before = & $tree
+$aside = @(Get-ChildItem -LiteralPath $data -Recurse -Force -Filter '*.untrusted-*').Count
 $out = try { & (Join-Path $lib 'Register-AppInstaller.ps1') -LockOnly -DataRoot $data *>&1 | Out-String } catch { "threw: $($_.Exception.Message)" }
-Check ($out -notmatch 'now by Administrators|renamed aside|threw|setup''s own now') "  run again: nothing to change ($($out.Trim() -replace '\s+', ' '))"
+$changed = @(Compare-Object @(& $tree) $before | ForEach-Object { ($_.InputObject -split "`t")[0] } | Sort-Object -Unique)
+$asideNow = @(Get-ChildItem -LiteralPath $data -Recurse -Force -Filter '*.untrusted-*').Count
+Check ($out -notlike 'threw:*' -and -not $changed.Count -and $asideNow -eq $aside) "  run again: nothing changes ($($before.Count) items: owners and rules the same, $asideNow set aside as before$(if ($changed) { '; changed: ' + ($changed -join ', ') })$(if ($out -like 'threw:*') { '; ' + $out }))"
 
 # The app jobs started above.
 $r = & $receiveAppJob $appRuns[0]

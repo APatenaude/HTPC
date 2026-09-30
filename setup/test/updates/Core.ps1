@@ -2,13 +2,12 @@
 # Dot-sourced by Test-Updates.ps1 (its script scope: Check, Section, $lib, $work...).
 
 Write-Host 'Core'
-# The start of every update job, as the real jobs call it (the fake jobs below skip it): a bare
-# 0x80000001 there stopped every update from 1.0.0 to 1.0.4 before it began.
-$enter = (& { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$lib\UpdateCore.ps1'; try { Enter-UpdateJob; 'entered' } catch { `$_.Exception.Message }" 2>&1 | Out-String }).Trim()
-Check ($enter -eq 'entered') "an update job starts: keep-awake and low priority ($enter)"
-# The slow parts start first, side by side, and are checked below in their turn: the job
-# runner's and the bootstrap's own dry runs (a PowerShell each; a bad token is refused with
-# an error on stderr, and an exit code), and the real watchdog's compile (further down).
+# The slow parts start first, side by side, and are checked below in their turn (a PowerShell
+# each): the start of every update job, as the real jobs call it (the fake jobs below skip it: a
+# bare 0x80000001 there stopped every update from 1.0.0 to 1.0.4 before it began); the job
+# runner's and the bootstrap's own dry runs (a bad token is refused with an error on stderr, and
+# an exit code); and the real watchdog's compile (further down).
+$enterRun = Start-Child $psExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ". '$lib\UpdateCore.ps1'; try { Enter-UpdateJob; 'entered' } catch { `$_.Exception.Message }")
 $dryRuns = @(
     foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update') {
         @{ Accepted = $true; What = "job token accepted: $t"; Child = Start-PowerShell "$lib\Invoke-AppJob.ps1" @('-Job', $t, '-DryRun') }
@@ -51,11 +50,17 @@ static class Checks {
     Check(Program.FallBack(3, -1, false), "3 fast exits in a row: restart the box or the desktop");
     Check(!Program.FallBack(3, -1, true), "  never while a launcher update watches the launcher it put in place");
     Check(!Program.FallBack(2, -1, false) && !Program.FallBack(3, 0, false), "  not before 3, nor again while in the fallback");
+    Check(!Program.StartOvertaken("7|1|2", "7|1|2", false), "a launcher start, the same file at its path and no pause after it: kept");
+    Check(Program.StartOvertaken("7|1|2", "7|1|2", true), "  ended when a launcher update's pause came while it started");
+    Check(Program.StartOvertaken("7|1|2", "8|1|3", false) && Program.StartOvertaken("7|1|2", null, false), "  ended when the file at its path changed or went while it started (a rollback)");
     return failed;
   } } }
 '@)
 $wdExe = Join-Path $bin 'watchdog-checks.exe'
 $wdBuild = Start-Child $csc @('/nologo', '/target:exe', '/warnaserror+', '/main:Htpc.Watchdog.Checks', "/out:$wdExe", (Join-Path $repo 'launcher\src\Watchdog\Watchdog.cs'), $wdChecks)
+
+$enter = (Receive-Child $enterRun).Output.Trim()
+Check ($enter -eq 'entered') "an update job starts: keep-awake and low priority ($enter)"
 
 Check ((ConvertTo-SemVer '0.10.0') -gt (ConvertTo-SemVer '0.9.9')) '0.10.0 is newer than 0.9.9'
 Check ((ConvertTo-SemVer 'v1.2.3') -eq (ConvertTo-SemVer '1.2.3')) 'v1.2.3 is 1.2.3'
@@ -119,16 +124,17 @@ Check (($ran -join ',') -eq 'Set-Power.ps1,Set-UpdatePolicy.ps1') "  a box whose
 # Each machine step's script as an update runs it: it takes -MachineOnly, and the Power and
 # Updates steps, applied whole, touch nothing of a user's (as SYSTEM, HKCU and the profile
 # folders would be SYSTEM's own).
-foreach ($s in $MachineSteps.Values) {
-    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $s), [ref]$null, [ref]$null)
-    $takes = @($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'MachineOnly' }).Count -eq 1
-    Check $takes "  $s takes -MachineOnly"
-}
-foreach ($s in 'Set-Power.ps1', 'Set-UpdatePolicy.ps1') {
-    $text = [IO.File]::ReadAllText((Join-Path $lib $s)) -replace '(?s)<#.*?#>', ''
-    $user = [regex]::Matches($text, 'HKCU:|HKEY_CURRENT_USER|HKEY_USERS|\$env:(APPDATA|LOCALAPPDATA|USERPROFILE|USERNAME)|\$HOME\b') | ForEach-Object { $_.Value }
-    Check (-not $user) "  $s is all the machine's$(if ($user) { ': ' + ($user -join ', ') })"
-}
+$machineScripts = @($MachineSteps.Values)
+$noParam = @(foreach ($s in $machineScripts) {
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $s), [ref]$null, [ref]$null)
+        if (@($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'MachineOnly' }).Count -ne 1) { $s }
+    })
+Check (-not $noParam.Count) "  every machine step's script takes -MachineOnly ($($machineScripts -join ', ')$(if ($noParam) { '; not: ' + ($noParam -join ', ') }))"
+$user = @(foreach ($s in 'Set-Power.ps1', 'Set-UpdatePolicy.ps1') {
+        $text = [IO.File]::ReadAllText((Join-Path $lib $s)) -replace '(?s)<#.*?#>', ''
+        [regex]::Matches($text, 'HKCU:|HKEY_CURRENT_USER|HKEY_USERS|\$env:(APPDATA|LOCALAPPDATA|USERPROFILE|USERNAME)|\$HOME\b') | ForEach-Object { "${s}: $($_.Value)" }
+    })
+Check (-not $user.Count) "  Set-Power.ps1 and Set-UpdatePolicy.ps1 are all the machine's$(if ($user) { ': ' + ($user -join ', ') })"
 
 # The System step's record of what it turned off, for the uninstall (Save-FirstValue): the
 # first value of each kept, so a run again never records the step's own setting; a record
@@ -161,10 +167,10 @@ $used = @($off | Where-Object { $_ -match 'Bluetooth|\bBth|Audio|Netw|Nla|Dhcp|D
 Check ($off.Count -ge 10 -and -not $used.Count) "the System step turns off none of what the box uses ($($off.Count) services and tasks$(if ($used) { ': ' + ($used -join ', ') }))"
 # What the owner kept (30 Sept 2026), never a name in the step's code: Widevine's component
 # updates and asset delivery in Edge; Defender's cloud protection, signature updates, SmartScreen.
-foreach ($t in @('Set-EdgePolicy.ps1', '^(ComponentUpdatesEnabled|EdgeAssetDeliveryServiceEnabled)$'), @('Set-SystemPolicy.ps1', '^(SpynetReporting|DisableAntiSpyware|DisableAntiVirus|DisableBlockAtFirstSeen|EnableSmartScreen|SmartScreenEnabled|Signature\w*)$')) {
-    $names = @([Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $t[0]), [ref]$null, [ref]$null).FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) | Where-Object { $_.Value -match $t[1] } | ForEach-Object Value)
-    Check (-not $names.Count) "  $($t[0]) leaves alone what the owner kept$(if ($names) { ': ' + ($names -join ', ') })"
-}
+$names = @(foreach ($t in @('Set-EdgePolicy.ps1', '^(ComponentUpdatesEnabled|EdgeAssetDeliveryServiceEnabled)$'), @('Set-SystemPolicy.ps1', '^(SpynetReporting|DisableAntiSpyware|DisableAntiVirus|DisableBlockAtFirstSeen|EnableSmartScreen|SmartScreenEnabled|Signature\w*)$')) {
+        [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $t[0]), [ref]$null, [ref]$null).FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) | Where-Object { $_.Value -match $t[1] } | ForEach-Object { "$($t[0]): $($_.Value)" }
+    })
+Check (-not $names.Count) "  Set-EdgePolicy.ps1 and Set-SystemPolicy.ps1 leave alone what the owner kept$(if ($names) { ': ' + ($names -join ', ') })"
 
 # The watchdog compiled above, with its checks.
 $built = Receive-Child $wdBuild
