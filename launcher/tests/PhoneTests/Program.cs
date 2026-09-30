@@ -8,14 +8,9 @@ using System.Text.Json;
 
 namespace Htpc.Launcher;
 
-/// <summary>The launcher's log, on the console instead (tests never write launcher.log).</summary>
-static class Log
-{
-    public static void Info(string m) => Console.WriteLine("    log INFO  " + m);
-    public static readonly ConcurrentQueue<string> Warnings = new();
-    public static void Warn(string m) { Warnings.Enqueue(m); Console.WriteLine("    log WARN  " + m); }
-    public static void Error(string m, Exception? e = null) => Console.WriteLine("    log ERROR " + m + (e is null ? "" : ": " + e.Message));
-}
+// The phone remote's checks, one group per area (Harness.cs): dotnet run -c Release in this folder.
+// Prints each group with its time, and the failures only; -v adds the passes, the details and the
+// log, and any other argument runs only the groups whose name has it ("dotnet run -- -v Pairing").
 
 /// <summary>The launcher as the server sees it: records what arrives.</summary>
 sealed class FakeHost : IPhoneHost
@@ -43,36 +38,29 @@ sealed class FakeHost : IPhoneHost
 
 static partial class Program
 {
-    static int passed, failed;
-
-    static void Check(bool ok, string what)
-    {
-        if (ok) passed++; else failed++;
-        if (!ok) Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"  {(ok ? "PASS" : "FAIL")}  {what}");
-        Console.ResetColor();
-    }
+    static void Check(bool ok, string what) => T.Check(ok, what);
 
     static PhoneCommand? P(string json) => PhoneProtocol.Parse(Encoding.UTF8.GetBytes(json));
 
-    static async Task<int> Main()
+    static int Main(string[] args)
     {
+        T.Start(args);
         // Tests name their CAs themselves: the box's own (its intermediates stay in Windows' CA stores) never grow.
         var boxOnes = IntermediatesInStore(PhoneCertificates.BoxName);
-        Console.WriteLine("Protocol"); ProtocolTests();
-        Console.WriteLine("Links"); LinkTests();
-        Console.WriteLine("Routing"); RoutingTests();
-        Console.WriteLine("Pointer"); PointerTests();
-        Console.WriteLine("Pairing"); PairingTests();
-        Console.WriteLine("Host and Origin"); HostTests();
-        Console.WriteLine("Server"); await ServerTests();
-        Console.WriteLine("Server: a silent phone"); await SilenceTests();
-        Console.WriteLine("Certificates"); CertificateTests();
-        Console.WriteLine("HTTPS (a key in the user's key store for the test, deleted after)"); await HttpsTests();
-        Console.WriteLine("Share and the Shortcut"); await ShareTests();
-        Check(IntermediatesInStore(PhoneCertificates.BoxName).IsSubsetOf(boxOnes), "no intermediate under the box's own name added to the CA stores");
-        Console.WriteLine($"\n{passed} passed, {failed} failed");
-        return failed == 0 ? 0 : 1;
+        T.Group("Protocol", ProtocolTests);
+        T.Group("Links", LinkTests);
+        T.Group("Routing", RoutingTests);
+        T.Group("Pointer", PointerTests);
+        T.Group("Pairing", PairingTests);
+        T.Group("Host and Origin", HostTests);
+        T.GroupAsync("Server", ServerTests);
+        T.GroupAsync("Server: a silent phone", SilenceTests);
+        T.Group("Certificates", CertificateTests);
+        T.GroupAsync("HTTPS (a key in the user's key store for the test, deleted after)", HttpsTests);
+        T.GroupAsync("Share and the Shortcut", ShareTests);
+        T.Group("Afterwards: the CA stores", () =>
+            Check(IntermediatesInStore(PhoneCertificates.BoxName).IsSubsetOf(boxOnes), "no intermediate under the box's own name added to the CA stores"));
+        return T.Summary();
     }
 
     // ---- PhoneProtocol ----------------------------------------------------------------------------

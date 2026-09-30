@@ -309,7 +309,7 @@ static partial class Program
             Check(asAdmin is { Removed: 2, Stuck: 0 } && !machineOnes.Any(m => IntermediatesInStore(testName).Contains(m.Thumbprint)),
                 "an administrator's cleanup removes them from the machine's store (either order)");
         }
-        else Console.WriteLine("    info: not administrator: the machine-store leftover check is skipped");
+        else T.Info("not administrator: the machine-store leftover check is skipped");
 
         // What the single CA of an earlier build left goes too, and only that.
         var legacy = new MemoryKeyStore();
@@ -344,7 +344,7 @@ static partial class Program
             var httpPort = FreePort();
             var httpsPort = FreePort();
             Check(await server.StartAsync(new[] { httpPort }, httpsPort) == httpPort && server.SecurePort == httpsPort, "HTTP and HTTPS both start");
-            Console.WriteLine($"    info: the intermediate's key is in the {store.LastProvider} key store on this box");
+            T.Info($"the intermediate's key is in the {store.LastProvider} key store on this box");
 
             using (var interKey = (ECDsaCng)store.Open(PhoneCertificates.IntermediateKeyName)!)
             {
@@ -398,7 +398,7 @@ static partial class Program
             if (elevated)
                 Check(intermediateSent && chainStatus == X509ChainStatusFlags.NoError, $"the handshake sends the intermediate; the chain ends at the root (sent: {intermediateSent}; chain: {chainStatus})");
             else
-                Console.WriteLine($"    info: not administrator: the intermediate {(intermediateSent ? "was" : "was not")} sent (setup's step puts it where Windows sends it from)");
+                T.Info($"not administrator: the intermediate {(intermediateSent ? "was" : "was not")} sent (setup's step puts it where Windows sends it from)");
             var shareOverHttps = new HttpRequestMessage(HttpMethod.Post, "/share")
             {
                 Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["url"] = "https://vimeo.com/1" }), Headers = { { "Sec-Fetch-Site", "none" } },
