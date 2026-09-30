@@ -31,8 +31,10 @@ selftestGroup(async ({ check, checkRows, asksFirst, pin, until, sent, lastSent, 
     && [resMemory(356), resMemory(999), resMemory(1843), resMemory(12406)].join(' ') === '356 MB 999 MB 1.8 GB 12.1 GB'
     && JSON.stringify([resRate(0, 'B'), resRate(845.3e6, 'B'), resRate(4.24e6, 'b'), resRate(1.2e9, 'b'), resRate(null, 'b')]) === '[["0","KB/s"],["845","MB/s"],["4.2","Mb/s"],["1.2","Gb/s"],null]');
 
-  // Sampled only while the menu is on screen: what the page asks the host, step by step.
-  const sampling = () => (lastSent('res.watch') || { on: false }).on;
+  // Sampled only while the menu is on screen, step by step: what the page last told the host, and
+  // its own state (a step that changes nothing sends nothing: the home screen, sampling on already).
+  const told = () => (lastSent('res.watch') || { on: false }).on;
+  const sampling = () => (told() === !!res.on ? told() : `told ${told()}, sampling ${!!res.on}`);
   sent.length = 0;
   let blankData;
   checkRows('Resources: sampled only while the menu is on screen; blank, the numbers go', [
