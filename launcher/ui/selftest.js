@@ -68,7 +68,7 @@ function selftestGroup(run) { SELFTEST_GROUPS.push(run); }
 
     // ---- The UI audit: every page walked with the D-pad (audit.js) ---------------------------------
     press = realPress;   // eslint-disable-line no-global-assign
-    if (typeof runAudit === 'function') await runAudit(check);
+    if (typeof runAudit === 'function') { await AUDIT.ready; await runAudit(check); }
     else check('audit: audit.js is loaded', false);
 
     // ---- Report -------------------------------------------------------------------------------------
