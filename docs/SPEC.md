@@ -114,8 +114,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   the pinned repository, HTTPS and hashes; rolled back automatically). A quiet daily check,
   installs only when asked, restore points before Update all and Windows updates.
 - **N11 On-screen keyboard in any app** (browser logins, searches). A band at the bottom of
-  the screen. Pops up automatically when a text or password field gets focus (UI Automation),
-  and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
+  the screen. Pops up automatically when a text or password field gets focus (UI Automation;
+  an editable region of a page too), never on a switch, a check box, a button, a slider or a
+  list to pick from (Twitch, 29 Sept 2026), and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
   symbols, show password, and a row of what a controller lacks (Tab, refresh, zoom, full
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
   with their own keyboard (VacuumTube, Jellyfin, Moonlight, Plex HTPC); R3 not intercepted in

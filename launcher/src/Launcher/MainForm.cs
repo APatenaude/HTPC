@@ -682,7 +682,8 @@ sealed partial class MainForm : Form
         mapper.Map = null; // at once: the controller now drives the keyboard
         keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false);
         // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
-        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"";
+        // An app's field: what the app calls it too ("textbox", "combobox"), should one that is no text field slip through.
+        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"{(field.Kind.Length > 0 ? $", {field.Kind}" : "")}";
         Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")}{label}")})");
     }
 

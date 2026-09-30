@@ -3,8 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-/// <summary>A text field that has the keyboard focus in some app. (Where it is does not matter: the keyboard is always at the bottom.)</summary>
-sealed record TextField(int ProcessId, string Name, bool IsPassword);
+/// <summary>
+/// A text field that has the keyboard focus in some app. (Where it is does not matter: the
+/// keyboard is always at the bottom.) Kind: what the app calls it (its ARIA role, else its control
+/// type: "textbox", "combobox", "edit"), for the log.
+/// </summary>
+sealed record TextField(int ProcessId, string Name, bool IsPassword, string Kind = "");
 
 /// <summary>
 /// Tells when a text field gets the keyboard focus in any app, through UI Automation's focus
@@ -126,29 +130,59 @@ sealed class TextFieldWatcher : IDisposable
 
     static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
-    // UI Automation property ids (UIAutomationClient.h).
-    const int ProcessId = 30002, ControlType = 30003, Name = 30005,
-        IsKeyboardFocusable = 30009, IsEnabled = 30010, IsPassword = 30019, ValueIsReadOnly = 30046,
-        IsValuePatternAvailable = 30043;
-    const int EditControl = 50004, ComboBoxControl = 50003, DocumentControl = 50030;
+    // UI Automation property ids and control types (UIAutomationClient.h).
+    internal const int ProcessId = 30002, ControlType = 30003, LocalizedControlType = 30004, Name = 30005,
+        IsKeyboardFocusable = 30009, IsEnabled = 30010, IsPassword = 30019, IsRangeValuePatternAvailable = 30033,
+        IsTextPatternAvailable = 30040, IsTogglePatternAvailable = 30041, IsValuePatternAvailable = 30043,
+        ValueIsReadOnly = 30046, AriaRole = 30101, IsTextEditPatternAvailable = 30149;
+    internal const int ComboBoxControl = 50003, EditControl = 50004, GroupControl = 50026, DocumentControl = 50030;
 
     void OnFocus(IUIAutomationElement element)
     {
         if (!enabled) return;
         object? Get(int property) => element.GetCurrentPropertyValue(property, out var value) == 0 ? value : null;
-        var type = Get(ControlType) as int? ?? 0;
         var pid = Get(ProcessId) as int? ?? 0;
         if (pid == Environment.ProcessId) return; // the launcher's own UI (its keyboard included)
-
-        // A text field: an edit box (inputs, textareas, rich editors) or an editable combo box
-        // (search boxes with suggestions), enabled and writable. A web page itself is a
-        // read-only document and does not count.
-        var editable = type == EditControl
-            || (type is ComboBoxControl or DocumentControl && Get(IsValuePatternAvailable) is true);
-        var field = editable && Get(IsEnabled) is true && Get(IsKeyboardFocusable) is true && Get(ValueIsReadOnly) is not true
-            ? new TextField(pid, (Get(Name) as string ?? "").Trim(), Get(IsPassword) is true)
+        var field = IsTextField(Get)
+            ? new TextField(pid, (Get(Name) as string ?? "").Trim(), Get(IsPassword) is true,
+                Get(AriaRole) is string { Length: > 0 } role ? role : Get(LocalizedControlType) as string ?? "")
             : null;
         FocusChanged?.Invoke(field, pid);
+    }
+
+    /// <summary>
+    /// A text field, from what UI Automation says of the element that has the focus (get: one of
+    /// its properties by id; asked only as far as needed, each is a call into the app):
+    ///   - an edit box (inputs, text areas, editors with role=textbox);
+    ///   - an editable combo box (a search box with suggestions): one with text to edit, the Text
+    ///     pattern. A select, or a combo box that only picks from a list, has none;
+    ///   - a document with a value to write (a rich editor in another app). A web page itself is
+    ///     a read-only document;
+    ///   - an editable region with no role of its own (contenteditable): a group with the TextEdit
+    ///     pattern;
+    /// enabled, focusable and writable; and never a switch, a check box or a slider (the Toggle or
+    /// RangeValue pattern), whatever else it says. What Edge shows of each kind of control (Edge
+    /// 154 on the box, 30 Sept 2026: a page of them on a desktop of its own) is in LauncherTests:
+    /// switches (a check box with role=switch, a div or button with aria-checked) are buttons with
+    /// the Toggle pattern, check boxes check boxes, sliders sliders; a select a combo box with a
+    /// value but no text. An edit box with no Text pattern still counts: other apps' text boxes
+    /// seen through MSAA have none (and so have Edge's date pickers, as before).
+    /// </summary>
+    internal static bool IsTextField(Func<int, object?> get)
+    {
+        var type = get(ControlType) as int? ?? 0;
+        var editable = type switch
+        {
+            EditControl => true,
+            ComboBoxControl => get(IsValuePatternAvailable) is true && get(IsTextPatternAvailable) is true,
+            DocumentControl => get(IsValuePatternAvailable) is true,
+            GroupControl => get(IsTextEditPatternAvailable) is true,
+            _ => false,
+        };
+        return editable && get(IsEnabled) is true && get(IsKeyboardFocusable) is true
+            // A group has no value of its own (UI Automation then says read-only): its TextEdit pattern is what says it edits.
+            && (type == GroupControl || get(ValueIsReadOnly) is not true)
+            && get(IsTogglePatternAvailable) is not true && get(IsRangeValuePatternAvailable) is not true;
     }
 
     [ComVisible(true)]

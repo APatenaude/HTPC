@@ -1396,6 +1396,72 @@ using (var watcher = new TextFieldWatcher())
     Check(watcher.Quiet && watcher.WhenDone().IsCompleted, "turned off while off: still quiet, nothing queued");
 }
 
+// ---------------------------------------------------------------- The text-field watcher: what is a text field
+// What UI Automation said of each kind of control in Edge 154 (read on the box, 30 Sept 2026: a
+// local page of every kind, Edge on a desktop of its own, never on the TV). The keyboard pops up
+// by itself on real text inputs, never on a switch, a check box, a button, a slider or a list
+// (Twitch, 29 Sept 2026: it came up on "Show Overlay Extensions", a switch in its player).
+Console.WriteLine("== Text-field watcher: what is a text field");
+{
+    const int Button = 50000, CheckBox = 50002, ComboBox = 50003, Edit = 50004, Hyperlink = 50005, RadioButton = 50013,
+        Slider = 50015, Spinner = 50016, Group = 50026, Document = 50030;
+    var asked = new List<int>();
+    // UI Automation's own defaults for what an element does not have: no pattern, read-only (no value).
+    Func<int, object?> Element(int type, bool value = false, bool readOnly = true, bool text = false, bool textEdit = false,
+        bool toggle = false, bool range = false, bool enabled = true, bool focusable = true)
+    {
+        var props = new Dictionary<int, object?>
+        {
+            [TextFieldWatcher.ControlType] = type, [TextFieldWatcher.IsValuePatternAvailable] = value, [TextFieldWatcher.ValueIsReadOnly] = readOnly,
+            [TextFieldWatcher.IsTextPatternAvailable] = text, [TextFieldWatcher.IsTextEditPatternAvailable] = textEdit,
+            [TextFieldWatcher.IsTogglePatternAvailable] = toggle, [TextFieldWatcher.IsRangeValuePatternAvailable] = range,
+            [TextFieldWatcher.IsEnabled] = enabled, [TextFieldWatcher.IsKeyboardFocusable] = focusable,
+        };
+        return id => { asked.Add(id); return props.TryGetValue(id, out var v) ? v : null; };
+    }
+    var textInput = Element(Edit, value: true, readOnly: false, text: true, textEdit: true);
+    var fields = new (string What, Func<int, object?> Element)[]
+    {
+        ("input type=text, search, url, email, password, tel; textarea", textInput),
+        ("a div with role=textbox, contenteditable (Slate, ProseMirror: chat boxes, prompts)", textInput),
+        ("an editable combo box (input role=combobox, input with a datalist)", Element(ComboBox, value: true, readOnly: false, text: true, textEdit: true)),
+        ("a contenteditable div with no role (and plaintext-only)", Element(Group, text: true, textEdit: true)),
+        ("the contenteditable body of a frame (designMode too)", Element(Group, text: true, textEdit: true)),
+        ("another app's text box through MSAA (no Text pattern)", Element(Edit, value: true, readOnly: false)),
+        ("another app's rich editor (a document with a value to write)", Element(Document, value: true, readOnly: false, text: true)),
+        ("a date, month or week picker (typed digits; as before)", Element(Edit, value: true, readOnly: false)),
+    };
+    foreach (var (what, element) in fields) Check(TextFieldWatcher.IsTextField(element), $"a text field: {what}");
+    var notFields = new (string What, Func<int, object?> Element)[]
+    {
+        ("input type=checkbox (Twitch's tw-toggle too)", Element(CheckBox, value: true, readOnly: false, toggle: true)),
+        ("a switch: input type=checkbox role=switch, a div or button with role=switch aria-checked", Element(Button, value: true, readOnly: false, toggle: true)),
+        ("a contenteditable div with role=switch", Element(Button, value: true, readOnly: false, text: true, textEdit: true, toggle: true)),
+        ("menuitemcheckbox", Element(CheckBox, value: true, readOnly: false, toggle: true)),
+        ("a toggle button (aria-pressed)", Element(Button, toggle: true)),
+        ("a button, input type=button or submit", Element(Button)),
+        ("input type=range, a div with role=slider", Element(Slider, value: true, readOnly: false, range: true)),
+        ("input type=radio, menuitemradio", Element(RadioButton, value: true, readOnly: false)),
+        ("a select", Element(ComboBox, value: true, readOnly: false)),
+        ("a combo box that only picks (a div with role=combobox, a check box given it)", Element(ComboBox, value: true, readOnly: false)),
+        ("a link", Element(Hyperlink, value: true)),
+        ("input type=number (a spinner: as before)", Element(Spinner, value: true, readOnly: false, text: true, textEdit: true, range: true)),
+        ("a focusable div", Element(Group)),
+        ("a web page, a frame, role=document", Element(Document)),
+        ("the page itself (its address: read-only)", Element(Document, value: true, readOnly: true, text: true)),
+        ("a read-only input or textarea", Element(Edit, value: true, readOnly: true, text: true, textEdit: true)),
+        ("a disabled input", Element(Edit, value: true, readOnly: true, text: true, textEdit: true, enabled: false, focusable: false)),
+        ("an edit box that is a switch all the same (a Toggle pattern)", Element(Edit, value: true, readOnly: false, text: true, toggle: true)),
+        ("an edit box that is a slider all the same (a RangeValue pattern)", Element(Edit, value: true, readOnly: false, range: true)),
+        ("a combo box that is a switch all the same", Element(ComboBox, value: true, readOnly: false, text: true, toggle: true)),
+    };
+    foreach (var (what, element) in notFields) Check(!TextFieldWatcher.IsTextField(element), $"not a text field: {what}");
+    // Each property is a call into the app: a button costs one.
+    asked.Clear();
+    TextFieldWatcher.IsTextField(Element(Button, toggle: true));
+    Check(asked.SequenceEqual(new[] { TextFieldWatcher.ControlType }), $"a button: its control type asked, nothing more ({asked.Count} asked)");
+}
+
 // ---------------------------------------------------------------- The WebViews' recovery
 // A page that keeps failing neither reloads in a tight loop nor stays dead; a GPU lost twice
 // means a new browser (software drawing otherwise), whatever the GPU.
