@@ -343,7 +343,7 @@ exists for answer ISOs only; `setup\test` is in neither the setup exe nor setup.
 
 ## 8. Where it stands (30 September 2026)
 
-Released: 1.0.2 to 1.0.9, all immutable, each with the four assets. The owner's box runs the
+Released: 1.0.2 to 1.0.10, all immutable, each with the four assets. The owner's box runs the
 released launcher and updates from Settings › Updates (from 1.0.5 on boxes update themselves;
 `minimumFrom` 1.0.5). Since 1.0.8 every release has passed the VM checklist in section 6 before the
 owner is told to update.
@@ -365,11 +365,22 @@ What the 29-30 Sept releases brought, from the owner's testing on the TV:
   30 minutes, overlay planes off for the owner's brief black flashes: a restart after the update);
   screen-off standby turns Bluetooth off when nothing is paired and wakes the processor less.
 
-In progress (30 Sept, for 1.0.10): Bluetooth off whenever nothing is paired (on while Settings ›
-Bluetooth is open, on for good once something is paired); the automatic keyboard only for real
-text fields (Twitch's switches opened it); the Home menu remembering where the focus was; the
-"installer finished on screen" mechanism removed (no catalog app uses it); updates re-applying
-setup's Update and Power steps too.
+- 1.0.10 (30 Sept): Bluetooth off whenever nothing is paired (`BluetoothRadio.cs`: on while
+  Settings › Bluetooth is open and a minute after, on for good once something is paired, the
+  user's own "off" sticks); the automatic keyboard only for real text fields
+  (`TextFieldWatcher.IsTextField`: switches, check boxes, sliders and lists refused; the log names
+  the field's role); the Home menu remembering the control and quick button used last; the
+  "installer finished on screen" mechanism removed; updates re-applying setup's Power and Updates
+  steps too (from a 1.0.9 box they apply at the first reconcile, the next Windows start: the old
+  runner performs the update itself).
+
+Made for agents (30 Sept, no product change): `docs/CODEMAP.md` (each area's files, names to
+Grep, tests, log lines; recipes), `launcher\dev\Test-Quick.ps1` (build and tests, a line each),
+`launcher\dev\Describe-Page.ps1` (a UI page as text), `setup\test\Test-ReleaseInVm.ps1` (the VM
+checklist, gated), half-size screenshots, `docs/CATALOG.md`, READMEs with short lines, and the
+big files split by area (`ui/selftest/`, `ui/audit/`, `ui/app/`, `setup/test/updates/`,
+`MainForm.<Area>.cs`) with their comments trimmed to short "why" notes. Measured before: agents
+read the same big files dozens of times and 275 full-size screenshots in two days.
 
 Open:
 - The brief black flashes (under a second, random, in several apps, nothing in Windows' logs):

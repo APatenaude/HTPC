@@ -20,9 +20,10 @@
         above > updated to the latest release through the TV's own screens by keys, as a box does
         (Up Enter: Settings; Down x -UpdatesDown, Enter: Updates; Right Enter: Check now; Up Up
         Enter: Update all; Left Enter: Yes; Esc Esc: Home) > HtpcLauncher.exe at the new version
-        and "Launcher <new> healthy" > state\machine-settings.json has every machine step of the
-        new lib\ at its current hash > a key press changes the screen (the launcher has the focus)
-        > [probe].
+        and "Launcher <new> healthy" > a key press changes the screen (the launcher has the focus)
+        > state\machine-settings.json has every machine step of the new lib\ at its current hash
+        (when the new release adds a step, the previous runner that did the update doesn't know it:
+        the VM restarts once so the reconcile applies it, then the record is read again) > [probe].
 
     Every stage must pass or the run stops there, with the lines that explain it. The VM is stopped
     at the end, on a failure too. It refuses to start while the VM runs (someone else may be using
@@ -339,11 +340,7 @@ try {
         if ($script:toolExit) { Stop-Run "not updated to $latest" $health }
         Pass $health[0]
 
-        $script:stage = 'machine settings'
-        $ms = @(VM-Script 'machine-settings' $guestMachineSettings)
-        if ($script:toolExit) { Stop-Run 'machine-settings.json does not match the new lib\' $ms }
-        Pass ($ms -join ' ')
-
+        # Straight after the update, before anything restarts the VM: the new launcher has the focus.
         $script:stage = 'a key press moves the focus'
         Start-Sleep -Seconds 5
         $a = Shot 'update-focus-a'
@@ -353,6 +350,26 @@ try {
         $cmp = (Invoke-Tool (Join-Path $repoRoot 'launcher\dev\Compare-Screenshots.ps1') @('-A', $a, '-B', $b)) -join ' '
         if ($cmp -match 'identical') { Stop-Run 'the screen did not change after Right: the launcher may not have the focus' @($a, $b) }
         Pass $cmp
+
+        # The previous release's runner performs the update, with its own list of machine steps: a
+        # step the new release adds (1.0.10: Power, Updates) is applied at the first reconcile, at the
+        # next Windows start. So when the record is not current yet, the VM restarts once and the
+        # record is read again; only then does a missing step fail.
+        $script:stage = 'machine settings'
+        $ms = @(VM-Script 'machine-settings' $guestMachineSettings)
+        if ($script:toolExit) {
+            Detail (@('not current after the update (the previous runner did it); restarting for the reconcile:') + $ms)
+            VM @('Restart-Computer -Force') | Out-Null
+            Start-Sleep -Seconds 30
+            $out = Invoke-Tool 'Start-IncusTestVM.ps1' (@('-WaitSsh') + $common)
+            if ($script:toolExit) { Stop-Run 'no SSH after the restart for the reconcile' ($out | Select-Object -Last 5) }
+            $health = @(VM-Script 'healthy' $guestHealthy -Values @{ Version = $latest; Seconds = 240; AnyTime = 0 })
+            if ($script:toolExit) { Stop-Run "launcher $latest not healthy after the restart" $health }
+            Start-Sleep -Seconds 30   # the reconcile runs at Windows' start, beside the launcher
+            $ms = @(VM-Script 'machine-settings' $guestMachineSettings)
+            if ($script:toolExit) { Stop-Run 'machine-settings.json does not match the new lib\ even after a restart' $ms }
+            Pass (($ms -join ' ') + ' (at the reconcile after a restart)')
+        } else { Pass ($ms -join ' ') }
         Run-Probe "after the update to $latest" | Out-Null
     }
     $script:stage = 'done'
