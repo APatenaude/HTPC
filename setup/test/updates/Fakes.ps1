@@ -93,10 +93,12 @@ static EventWaitHandle Signal(string name) {
 static int Main() {
   if (Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == "--warm") return 0;
   var started = DateTime.UtcNow;
-  if ("$Mode" == "crash") { Thread.Sleep(1000); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
-  var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
   var me = Process.GetCurrentProcess().Id;
+  // Its version, by process id, in the box's folder: the file at its path can change under it.
+  try { File.WriteAllText(Path.GetFullPath(Path.Combine(dir, @"..\..\..\launcher-" + me + ".version")), "$Version"); } catch (Exception) { }
+  if ("$Mode" == "crash") { Thread.Sleep(1000); return 1; }
+  var progress = Path.GetFullPath(Path.Combine(dir, @"..\..\..\PD\HTPC\state\test-progress.json"));
   EventWaitHandle ev = null, leaving = null;
   if ("$Mode" == "healthy" || "$Mode" == "busy") ev = Signal("Local\\HtpcHealthy_$($Version)_" + me);
   for (var i = 0; i < 3000; i++) {
@@ -153,7 +155,12 @@ class W {
     var running = child != null;
     if (!running) foreach (var p in Process.GetProcessesByName("HtpcLauncher")) { try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) running = true; } catch (Exception) { } }
     // Started as the real one starts it (CreateProcess, not the shell's ShellExecute).
-    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = dir }); } catch (Exception) { } }
+    // Logged before and after: a start the antivirus holds shows as a "start" line alone.
+    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) {
+      try { File.AppendAllText(log, "start " + DateTime.UtcNow.ToString("HH:mm:ss.f") + Environment.NewLine); } catch (Exception) { }
+      try { child = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = dir }); } catch (Exception) { }
+      try { File.AppendAllText(log, "started " + (child == null ? "none" : child.Id.ToString()) + " " + DateTime.UtcNow.ToString("HH:mm:ss.f") + Environment.NewLine); } catch (Exception) { }
+    }
     // Waits on the launcher itself, so its exit is judged at once (as the real watchdog waits on
     // its mutex): a sleep could miss a rollback's short pause on a loaded box.
     if (child != null) child.WaitForExit(100); else Thread.Sleep(100);
@@ -263,9 +270,9 @@ function Get-BoxState([string]$Root) {
     $file = { param($n) $f = Join-Path $state $n; if (Test-Path -LiteralPath $f) { try { [IO.File]::ReadAllText($f).Trim() } catch { '(unreadable)' } } else { 'none' } }
     $exits = Join-Path $Root 'watchdog-exits.log'
     "watchdog $(Get-BoxWatchdog $Root), pause $(& $file 'watchdog-pause'), watch $(& $file 'watchdog-watch'), " +
-    "launchers $(@(Get-BoxProcesses $Root | Where-Object Name -eq 'HtpcLauncher' | ForEach-Object { "$($_.Id) $("$($_.Path)" -replace '^.*\\', '')" }) -join ', '), " +
+    "launchers $(@(Get-BoxProcesses $Root | Where-Object Name -eq 'HtpcLauncher' | ForEach-Object { "$($_.Id) $(Get-Content -LiteralPath (Join-Path $Root "launcher-$($_.Id).version") -ErrorAction SilentlyContinue)" }) -join ', '), " +
     "exits $(if (Test-Path -LiteralPath $exits) { @(Get-Content -LiteralPath $exits) -join ', ' }), " +
-    "launchers of any box with no path yet: $(@(Get-Process -Name 'HtpcLauncher' -ErrorAction SilentlyContinue | Where-Object { -not $_.Path } | ForEach-Object Id) -join ', ')"
+    "HtpcLauncher processes whose path cannot be read (any box's, or this machine's own): $(@(Get-Process -Name 'HtpcLauncher' -ErrorAction SilentlyContinue | Where-Object { -not $_.Path } | ForEach-Object Id) -join ', ')"
 }
 
 # The id of the watchdog running from a fake box (0 when none; there is at most one).
@@ -296,11 +303,15 @@ function Wait-For([scriptblock]$Condition, [int]$Seconds) {
     $false
 }
 
-# The launchers running from a fake box's HtpcLauncher.exe; with -Version, whether one runs and
-# that file is that version.
+# The launchers running from a fake box's HtpcLauncher.exe; with -Version, whether one of that
+# version runs (as it says itself: a launcher started late, after a rollback put another file at
+# its path, is the version it was) and that file is that version.
 function Get-Running([string]$Root, [string]$Version) {
     $exe = Join-Path $Root 'PF\HTPC\Launcher\HtpcLauncher.exe'
     $running = @(Get-Process -Name 'HtpcLauncher' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
-    if ($Version) { return [bool]($running.Count -and (Format-SemVer (Get-FileSemVer $exe)) -eq $Version) }
+    if ($Version) {
+        $own = @($running | Where-Object { $f = Join-Path $Root "launcher-$($_.Id).version"; (Test-Path -LiteralPath $f) -and "$(Get-Content -LiteralPath $f -ErrorAction SilentlyContinue)".Trim() -eq $Version })
+        return [bool]($own.Count -and (Format-SemVer (Get-FileSemVer $exe)) -eq $Version)
+    }
     $running
 }
