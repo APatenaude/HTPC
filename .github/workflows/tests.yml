@@ -2,9 +2,10 @@
 #   - the launcher's console tests;
 #   - the TV bench;
 #   - setup's tests against fakes: the update jobs, the autostart guard, the driver picks and the
-#     privilege checks. Test-Updates and Test-Rights need an administrator: the runner is one.
+#     privilege checks. Test-Updates and Test-Rights need an administrator: every runner is one.
 # Test-Library installs real apps: test VM only. Each exits 0 only when all its checks passed.
-# Two jobs run side by side, about 2 minutes each: the launcher's and TvLab, and Test-Updates.
+# Two jobs run side by side, about 2 minutes each: the launcher's test projects and TvLab (.NET),
+# and setup's PowerShell tests (the .NET Framework's csc only: no .NET SDK set up).
 #
 # A release is only tagged on a commit whose run here passed (launcher\dev\New-Release.ps1 waits
 # for it), and the release workflow checks that again before it builds: a flaky check can never
@@ -38,6 +39,7 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        if: matrix.part == 'launcher'
         with:
           global-json-file: global.json
 
@@ -50,10 +52,10 @@ jobs:
           $failed = @()
           if ($env:PART -eq 'launcher') {
             $projects = @(Get-ChildItem launcher\tests -Directory | ForEach-Object { $_.FullName }) + @((Resolve-Path launcher\dev\TvLab).Path)
-            $scripts = 'Test-Autostart', 'Test-Drivers', 'Test-Rights'
+            $scripts = @()
           } else {
             $projects = @()
-            $scripts = 'Test-Updates'
+            $scripts = 'Test-Updates', 'Test-Rights', 'Test-Autostart', 'Test-Drivers'
           }
           foreach ($project in $projects) {
             Write-Host "== $project"
