@@ -12,8 +12,7 @@
       builtin  ships with Windows (Edge); nothing to do
     Websites have nothing to install. Already installed apps are left alone (updates are on demand,
     from the launcher later). Apps marked install.elevated = false (Spotify refuses to install
-    elevated) or install.interactive (RetroBat: an installer finished on screen) are skipped here
-    and installed from the library instead.
+    elevated) are skipped here and installed from the library instead.
 
     Nothing may pop up on the TV:
       - an app its installer starts (Stremio does) is closed again;
@@ -52,10 +51,9 @@ if ($unknown) { throw "Not in the catalog: $($unknown -join ', ')" }
 function Test-AppFiles($App) {
     [bool]($App.launch -and $App.launch.exe -and (Test-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($App.launch.exe))))
 }
-# Left to the library: an app that refuses to install elevated (Spotify), and one whose installer
-# the user finishes on screen (install.interactive, RetroBat): setup runs unattended.
+# Left to the library: an app that refuses to install elevated (Spotify).
 function Test-InstallsLater($App) {
-    (Test-InteractiveInstall $App) -or ($App.install.PSObject.Properties['elevated'] -and $App.install.elevated -eq $false -and (Test-Admin))
+    $App.install.PSObject.Properties['elevated'] -and $App.install.elevated -eq $false -and (Test-Admin)
 }
 
 # Offline, only what is there already is dealt with; the others are named at the end.
@@ -75,8 +73,7 @@ try {
         try {
             if (-not $app.install) { Write-Same "$($app.name): website, nothing to install"; continue }
             if (Test-InstallsLater $app) {
-                $why = if (Test-InteractiveInstall $app) { 'its installer is finished on screen' } else { 'it must be installed without admin rights' }
-                Write-Attention "$($app.name): $why; install it from the library"; continue
+                Write-Attention "$($app.name) must be installed without admin rights; install it from the library"; continue
             }
             if (Test-Admin) { Add-InboundBlock $app $null }   # before the app can first run
             $before = @(Get-Process | Select-Object -ExpandProperty Id)

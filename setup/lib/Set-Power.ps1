@@ -24,8 +24,13 @@
     the launcher switched to in standby. It saved nothing measurable (processor package ~3.3 W
     either way) and froze the box for 5-7 s on the first Home press after a quiet spell, so it
     is gone; this script removes it where an earlier run made it.
+
+.PARAMETER MachineOnly
+    Changes nothing here: every setting of this step is the machine's (the power plan, hibernate,
+    HKLM values, the devices' wake). What a launcher update passes when it applies the step
+    again, as SYSTEM, after this script changed (lib\LauncherUpdate.ps1).
 #>
-param()
+param([switch]$MachineOnly)
 
 . "$PSScriptRoot\Common.ps1"
 Assert-Admin
@@ -75,6 +80,11 @@ foreach ($device in $armed | Where-Object { $_ -match 'mouse' }) {
     Write-Change "wake off: $device"
 }
 foreach ($nic in Get-NetAdapter -Physical | Where-Object { $_.MediaType -eq '802.3' }) {
+    # Only when it differs: a change restarts the adapter (the network drops for a few seconds),
+    # which a launcher update applying this step again must not do to a box already set.
+    $pm = Get-NetAdapterPowerManagement -Name $nic.Name -ErrorAction SilentlyContinue
+    if ($pm -and "$($pm.WakeOnMagicPacket)" -eq 'Unsupported') { Write-Same "$($nic.Name): cannot wake the box (the adapter has no wake on LAN)"; continue }
+    if ($pm -and "$($pm.WakeOnMagicPacket)" -eq 'Enabled' -and "$($pm.WakeOnPattern)" -ne 'Enabled') { Write-Same "$($nic.Name): wake on magic packet only"; continue }
     Set-NetAdapterPowerManagement -Name $nic.Name -WakeOnMagicPacket Enabled -WakeOnPattern Disabled -ErrorAction SilentlyContinue
     Write-Change "$($nic.Name): wake on magic packet only"
 }

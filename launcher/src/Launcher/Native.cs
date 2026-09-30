@@ -330,21 +330,8 @@ static class Native
     /// </summary>
     public static Dictionary<uint, string> ProcessTreeNames(uint root)
     {
-        var (children, _, names) = ProcessParents(withNames: true);
+        var (children, names) = ProcessParents(withNames: true);
         return Descendants(new[] { root }, children).ToDictionary(pid => pid, pid => names!.GetValueOrDefault(pid, ""));
-    }
-
-    /// <summary>
-    /// The given processes and their descendants that are running now. A root that has ended still
-    /// leads to the children it left (Windows keeps their parent's id): an installer that starts
-    /// itself again and exits is followed through its new copy.
-    /// </summary>
-    public static HashSet<uint> ProcessTree(IEnumerable<uint> roots)
-    {
-        var (children, running, _) = ProcessParents();
-        var tree = Descendants(roots, children);
-        tree.IntersectWith(running);
-        return tree;
     }
 
     /// <summary>
@@ -369,11 +356,10 @@ static class Native
         return tree;
     }
 
-    // Every process now: each parent's children, the ids running and, when asked, each one's program file name.
-    static (Dictionary<uint, List<uint>> Children, HashSet<uint> Running, Dictionary<uint, string>? Names) ProcessParents(bool withNames = false)
+    // Every process now: each parent's children and, when asked, each one's program file name.
+    static (Dictionary<uint, List<uint>> Children, Dictionary<uint, string>? Names) ProcessParents(bool withNames = false)
     {
         var children = new Dictionary<uint, List<uint>>();
-        var running = new HashSet<uint>();
         var names = withNames ? new Dictionary<uint, string>() : null;
         var snapshot = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
         if (snapshot != new IntPtr(-1))
@@ -385,12 +371,11 @@ static class Native
                 {
                     if (!children.TryGetValue(entry.th32ParentProcessID, out var list)) children[entry.th32ParentProcessID] = list = new();
                     list.Add(entry.th32ProcessID);
-                    running.Add(entry.th32ProcessID);
                     if (names is not null) names[entry.th32ProcessID] = entry.szExeFile ?? "";
                 }
             }
             finally { CloseHandle(snapshot); }
         }
-        return (children, running, names);
+        return (children, names);
     }
 }

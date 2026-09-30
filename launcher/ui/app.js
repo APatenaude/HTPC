@@ -1189,8 +1189,8 @@ function onHost(msg) {
         for (const t of state.tiles) t.running = msg.running.includes(t.id);
         for (const id of [...closing.keys()]) if (!msg.running.includes(id)) doneClosing(id);
         // The app the menu was opened over has closed: B and Home now lead home, not to it (not
-        // the desktop, nor an installer finished on screen: the host takes B there, or home).
-        if (state.current && state.current !== 'desktop' && state.current !== 'installer' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
+        // the desktop: the host takes B there).
+        if (state.current && state.current !== 'desktop' && !msg.running.includes(state.current)) { state.current = null; state.backdrop = null; }
       }
       for (const k of ['volume', 'brightness', 'battery', 'controller', 'alert', 'phone', 'desktop']) if (k in msg) state[k] = msg[k];
       if ('timer' in msg) state.timer = msg.timer;

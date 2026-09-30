@@ -17,13 +17,11 @@ namespace Htpc.Launcher;
 ///
 /// Controller-preset apps (the app reads the controller itself) take no changes: the launcher
 /// cannot keep a button from reaching them. "_other" holds the map for windows that are not
-/// catalog apps (Mouse unless changed). "_installer" is never edited: an installer the user
-/// finishes on screen (RetroBat's) always gets the plain Mouse preset.
+/// catalog apps (Mouse unless changed).
 /// </summary>
 sealed class ButtonMapStore
 {
     public const string Other = "_other";
-    public const string Installer = "_installer";
     public static readonly string[] Presets = { "controller", "mouse", "keyboard" };
     public static readonly string[] Controls =
         { "leftStick", "rightStick", "a", "b", "x", "y", "dpad", "lb", "rb", "lt", "rt", "select", "start", "l3", "r3" };
@@ -76,7 +74,10 @@ sealed class ButtonMapStore
         if (stored is not { ValueKind: JsonValueKind.Object } root) return;
         foreach (var app in root.EnumerateObject())
         {
-            if (app.Value.ValueKind != JsonValueKind.Object || app.Name == Installer) { Log.Warn($"Button map {app.Name}: not an object or not editable, skipped"); continue; }
+            // "_installer": launchers up to 1.0.9 reserved that name for installers finished on
+            // screen (gone since). Not a tile's map: dropped at the next save.
+            if (app.Name == "_installer") continue;
+            if (app.Value.ValueKind != JsonValueKind.Object) { Log.Warn($"Button map {app.Name}: not an object, skipped"); continue; }
             var entry = new Entry();
             foreach (var p in app.Value.EnumerateObject())
             {
@@ -181,7 +182,7 @@ sealed class ButtonMapStore
     /// <summary>Picks the preset; the tile's changes go (they belonged to the old one).</summary>
     public void SetPreset(string id, string preset, string catalogPreset)
     {
-        if (!Presets.Contains(preset) || id == Installer) return;
+        if (!Presets.Contains(preset)) return;
         var e = Get(id);
         e.Changes.Clear();
         e.Preset = preset == Normalize(catalogPreset) ? null : preset;
@@ -191,7 +192,7 @@ sealed class ButtonMapStore
     /// <summary>One control's action (a string as above); the preset's own action clears the change.</summary>
     public bool SetControl(string id, string control, string value, string catalogPreset)
     {
-        if (!Controls.Contains(control) || !Valid(control, value) || id == Installer) return false;
+        if (!Controls.Contains(control) || !Valid(control, value)) return false;
         if (PresetOf(id, catalogPreset) == "controller") return false;   // preset only
         var e = Get(id);
         if (value == DefaultOf(PresetOf(id, catalogPreset), control)) e.Changes.Remove(control);

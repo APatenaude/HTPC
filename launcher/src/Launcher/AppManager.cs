@@ -3,8 +3,6 @@ using System.Text.Json;
 
 namespace Htpc.Launcher;
 
-/// <param name="InstallInteractive">install.interactive: an installer with a wizard that the user
-/// finishes on screen (RetroBat), from the library only, never in setup (LibraryService, MainForm.Library.cs).</param>
 /// <param name="LogoUrl">logoUrl: a website's own icon, for a site that turns the logo fetcher away
 /// (AppLogos tries it before the site's page).</param>
 /// <param name="OwnKeyboard">ownKeyboard: the app has its own on-screen keyboard (Plex HTPC), so the
@@ -32,7 +30,7 @@ namespace Htpc.Launcher;
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? WingetScope = null, string? InstallSource = null, bool Custom = false,
-    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null, bool InstallInteractive = false,
+    bool InstallElevated = true, IReadOnlyDictionary<string, string>? Env = null,
     string? LogoUrl = null,
     bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
     int QuitWhenWindowless = 0, IReadOnlyList<string>? QuitArgs = null, IReadOnlyList<System.Text.RegularExpressions.Regex>? OwnProcesses = null,
@@ -185,7 +183,6 @@ sealed class AppManager
             Custom: false,
             InstallElevated: !(installable && install.TryGetProperty("elevated", out var el) && el.ValueKind == JsonValueKind.False),
             Env: launch.ValueKind == JsonValueKind.Object ? LaunchEnv(launch) : null,
-            InstallInteractive: installable && install.TryGetProperty("interactive", out var ia) && ia.ValueKind == JsonValueKind.True,
             LogoUrl: Str(a, "logoUrl"),
             OwnKeyboard: a.TryGetProperty("ownKeyboard", out var ok) && ok.ValueKind == JsonValueKind.True,
             CropTop: launch.ValueKind == JsonValueKind.Object ? CropTopOf(launch) : 0,

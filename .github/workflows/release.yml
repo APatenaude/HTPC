@@ -111,7 +111,7 @@ jobs:
           @(
             '',
             '---',
-            'Updating from the TV (Settings > Updates) replaces the launcher, the watchdog, the job runner, the app catalog and the kept setup scripts, and applies again the machine part of the Edge and System setup steps when their scripts changed (the Edge policies, the HKLM system settings, the sign-in screen).',
+            'Updating from the TV (Settings > Updates) replaces the launcher, the watchdog, the job runner, the app catalog and the kept setup scripts, and applies again the machine part of the Edge, Power, Updates and System setup steps when their scripts changed (the Edge policies, the power plan, the Windows Update policies, the HKLM system settings, the sign-in screen).',
             'It does not apply the signed-in user''s settings (HKCU), the phone remote''s HTTPS certificate or any other setup step: for those, run TV Box Setup again (setup/README.md, "What an update applies").'
           ) | Out-File -Append -Encoding utf8 "$env:RUNNER_TEMP\notes.txt"
           $files = @(Get-ChildItem release -File | ForEach-Object { $_.FullName })

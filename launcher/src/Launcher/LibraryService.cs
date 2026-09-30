@@ -338,16 +338,9 @@ sealed class LibraryService
 
     // --- User scope: winget without elevation, run by the launcher ----------------------------
 
-    (bool, string) RunAsUser(LibraryJob job, CatalogApp app)
-    {
-        // An installer the user finishes on screen (install.interactive, RetroBat): its processes
-        // are followed so MainForm can bring its window up, and a permission prompt, if the
-        // installer asks for one, is the user's to answer, not a reason to stop.
-        var wizard = job.Action == "install" && app.InstallInteractive;
-        return RunAsUser(job, NameOf(app), watchConsent: !wizard, followInstaller: wizard);
-    }
+    (bool, string) RunAsUser(LibraryJob job, CatalogApp app) => RunAsUser(job, NameOf(app));
 
-    (bool, string) RunAsUser(LibraryJob job, JobName app, bool watchConsent = true, bool followInstaller = false)
+    (bool, string) RunAsUser(LibraryJob job, JobName app)
     {
         ClearProgress(UserProgress);
         var startedAt = DateTime.UtcNow;
@@ -366,48 +359,21 @@ sealed class LibraryService
         lock (gate) userProcess = process;
         // A per-user install must never pop a Windows permission prompt: the job script watches for
         // consent.exe and fails, but end it here too so a stuck prompt cannot hold the queue.
-        var (ok, message) = Follow(app, job.Token, startedAt, UserProgress, process, watchConsent, followInstaller);
-        installer = Array.Empty<uint>();
+        var (ok, message) = Follow(app, job.Token, startedAt, UserProgress, process, watchConsent: true);
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception) { }
         lock (gate) userProcess = null;
         return (ok, message);
     }
 
-    // --- An installer the user finishes on screen (install.interactive) -------------------------
-
-    // Its processes: the job's and every one started from it. The ones found before stay roots, so
-    // a wizard that starts itself again (elevated, say) and exits is followed through its new copy.
-    volatile uint[] installer = Array.Empty<uint>();
-
-    void FollowInstaller(Process job)
-    {
-        try { installer = Native.ProcessTree(installer.Append((uint)job.Id)).ToArray(); }
-        catch (Exception e) { Log.Warn($"Library: following the installer: {e.Message}"); }
-    }
-
-    /// <summary>Whether the process is the running install.interactive job's installer (or the job). Any thread.</summary>
-    public bool IsInstallerProcess(uint pid) => pid != 0 && Array.IndexOf(installer, pid) >= 0;
-
-    /// <summary>The running installer's window to bring up (its largest visible one), or zero. Any thread.</summary>
-    public IntPtr InstallerWindow()
-    {
-        var pids = installer;
-        if (pids.Length == 0) return IntPtr.Zero;
-        return Native.TopLevelWindows(new HashSet<uint>(pids))
-            .OrderByDescending(w => Native.GetWindowRect(w, out var r) ? (long)(r.Right - r.Left) * (r.Bottom - r.Top) : 0)
-            .FirstOrDefault();
-    }
-
     // --- Following a job's progress file ------------------------------------------------------
 
-    (bool, string) Follow(JobName app, string token, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false, bool followInstaller = false)
+    (bool, string) Follow(JobName app, string token, DateTime startedAt, string progressPath, Process? process, bool watchConsent = false)
     {
         var sinceChange = Stopwatch.StartNew(); // not the clock: a daylight-saving change is an hour
         string lastSeen = "";
         while (true)
         {
             lock (gate) if (cancelled) return (false, $"{app.Name}: cancelled");   // Cancel stopped it (or the task)
-            if (followInstaller && process is not null) FollowInstaller(process);
             // A per-user install must not raise a Windows permission prompt on the TV. If one
             // appears (consent.exe), stop the job at once rather than leave it stuck behind a
             // prompt the user cannot answer with the controller.
