@@ -7,7 +7,7 @@ using Htpc.Launcher;
 /// The owner's list of 29 Sept 2026, the host's side: On this box's programs with their own icons
 /// (their shortcut's, made once and kept, gone with the program), a program tile not filled (its
 /// window maximized instead, MainForm.MaximizeOpenedWindow; one that cannot be sized: FixedSize), the catalog's categories, and
-/// the on-screen keyboard's window as high as its page. The pages' side: ui\selftest.js.
+/// the on-screen keyboard's window as high as its page. The pages' side: ui\selftest\addtile.js.
 /// </summary>
 static class AddTileTests
 {
