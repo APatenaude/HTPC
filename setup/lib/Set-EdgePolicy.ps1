@@ -19,7 +19,9 @@
     website tiles open a little slower without it) and no background mode (extensions and
     apps kept running after the last window closes). The startup boost's own start at sign-in,
     HKCU Run MicrosoftEdgeAutoLaunch_<hash>, is removed (the catalog's "autostart" for the Browser:
-    the launcher and the jobs keep it away if it comes back).
+    the launcher and the jobs keep it away if it comes back). Pages off screen (a tab behind
+    another, a window covered by another) sleep after 5 minutes; energy saver (once "efficiency
+    mode") stays off, since it slows the page in front too.
 
 .PARAMETER MachineOnly
     Only the machine's policies (everything but the HKCU Run value): what a launcher update
@@ -120,6 +122,22 @@ if (-not $MachineOnly) {
     $browser = @(Get-AutostartCatalog (Join-Path $PSScriptRoot '..\catalog.json') | Where-Object { $_.id -eq 'edge' })
     [void](Invoke-AppAutostartGuard -Apps $browser -Kinds run -Context 'Edge')
 }
+
+# Lighter with pages left off screen: sleeping tabs, Edge's own and on by default after 2 hours,
+# kept on and after 5 minutes. A page asleep is frozen (its scripts and timers stop, Windows takes
+# back its RAM: a YouTube tab's working set went from 164 to 4 MB) and comes back as it was when
+# shown. Asleep: a tab behind another one
+# (the Browser tile's), and a page whose window another window covers (the test VM, 29 Sept 2026:
+# a window under a full-screen website tile froze at 5 minutes). Never the page on screen, nor
+# one playing sound, sharing the screen, casting or using the camera (Microsoft's policy and
+# sleeping tabs documentation); a website tile under the launcher's Home screen kept running in
+# that test. Energy saver (Edge's "efficiency mode" before) off and not to be turned on: on a PC
+# with no battery it is off, or always on once enabled, and on it also slows what is in front
+# ("may cause videos to be less smooth", Microsoft's performance features article).
+Write-Host '  Pages off screen asleep after 5 minutes; energy saver off (never slows the page in front)'
+Set-RegValue $edge 'SleepingTabsEnabled' 1
+Set-RegValue $edge 'SleepingTabsTimeout' 300
+Set-RegValue $edge 'EfficiencyModeEnabled' 0
 
 Write-Host '  Fake MDM enrollment (so Edge honours the search policies)'
 $fake = 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF'

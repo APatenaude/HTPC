@@ -15,7 +15,10 @@
 #   Firewall    the "HTPC" rule group and the apps' "HTPC block inbound" rules
 #   Certificates the phone remote's certificates (O=HTPC TV box) from the CA stores
 #   System      the sign-in screen and the desktop back to Windows' look (default wallpaper),
-#               Windows Search and SysMain back on; the computer name kept
+#               Windows Search and SysMain back on; Print Spooler, Fax, Windows Error Reporting's
+#               service and Windows' telemetry tasks as they were before setup (its record,
+#               state\system-before.json); Defender's scheduled scan and multiplane overlay as
+#               Windows has them (the overlay at the next restart); the computer name kept
 #   Files       the launcher and watchdog ended; a copy of the box's logs, and of this setup (to
 #               run it again), in Documents\HTPC logs; Program Files\HTPC and ProgramData\HTPC
 #               removed
@@ -324,6 +327,57 @@ $UninstallSteps = [ordered]@{
                 Write-Change "service $($service.Name) back on ($mode)"
             } else { Write-Same "service $($service.Name) $($s.StartType)" }
         }
+        # What the System step turned off, as it was before: the services' start types and Windows'
+        # telemetry tasks, from its record (state\system-before.json, read here before the Files
+        # step removes ProgramData\HTPC). No record (a second run: the first put them back, and the
+        # record went with ProgramData\HTPC): nothing to put back.
+        $beforeFile = Join-Path $HtpcData 'state\system-before.json'
+        $before = $null
+        if (Test-Path -LiteralPath $beforeFile) {
+            try { $before = [IO.File]::ReadAllText($beforeFile) | ConvertFrom-Json }
+            catch { Write-Attention "$beforeFile unreadable ($($_.Exception.Message)): what the System step turned off stays off" }
+        } else { Write-Same 'no record of services or tasks the System step turned off' }
+        $scStart = @{ Automatic = 'auto'; AutomaticDelayedStart = 'delayed-auto'; Manual = 'demand'; Disabled = 'disabled' }
+        foreach ($entry in @(if ($before) { $before.PSObject.Properties })) {
+            $kind, $name = $entry.Name -split ':', 2
+            $was = [string]$entry.Value
+            try {
+                if ($kind -eq 'service') {
+                    $now = Get-ServiceStart $name
+                    if (-not $now) { continue }
+                    if ($now -eq $was) { Write-Same "service $name $was"; continue }
+                    if (-not $scStart.ContainsKey($was)) { throw "unknown start type '$was'" }
+                    & sc.exe config $name start= $scStart[$was] | Out-Null
+                    if ($LASTEXITCODE) { throw "sc.exe config: exit code $LASTEXITCODE" }
+                    if ($was -like 'Automatic*') { Start-Service $name -ErrorAction SilentlyContinue }
+                    Write-Change "service $name back to $was"
+                } elseif ($kind -eq 'task') {
+                    $cut = $name.LastIndexOf('\') + 1
+                    $task = Get-ScheduledTask -TaskPath $name.Substring(0, $cut) -TaskName $name.Substring($cut) -ErrorAction SilentlyContinue
+                    if (-not $task) { continue }
+                    if ($was -eq 'Enabled' -and "$($task.State)" -eq 'Disabled') { $task | Enable-ScheduledTask | Out-Null; Write-Change "task $name enabled again" }
+                    else { Write-Same "task $name $($task.State)" }
+                }
+            } catch { Write-Attention "$($entry.Name) not put back ($($_.Exception.Message))" }
+        }
+        # Microsoft Defender's scheduled scan as Windows sets it: normal priority, 50% of the
+        # processor, 02:00 (only while idle and no catch-up scan are Windows' own already).
+        try { $mp = Get-MpPreference } catch { $mp = $null; Write-Same "Microsoft Defender not available ($($_.Exception.Message)): its scan settings left as they are" }
+        if ($mp) {
+            $windows = [ordered]@{ EnableLowCpuPriority = $false; ScanAvgCPULoadFactor = 50; ScanScheduleOffset = 120 }
+            foreach ($name in $windows.Keys) {
+                if ("$($mp.$name)" -eq "$($windows[$name])") { Write-Same "Defender $name = $($windows[$name])"; continue }
+                $one = @{ $name = $windows[$name] }
+                try { Set-MpPreference @one; Write-Change "Defender $name = $($windows[$name]) (Windows' own)" }
+                catch { Write-Attention "Defender $name not put back ($($_.Exception.Message))" }
+            }
+        }
+        # Multiplane overlay as Windows has it (no OverlayTestMode), from the next restart.
+        $dwm = 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm'
+        if ($null -ne (Get-ItemProperty $dwm -Name 'OverlayTestMode' -ErrorAction SilentlyContinue)) {
+            Remove-RegValue $dwm 'OverlayTestMode'
+            Add-RestartReason 'the display (multiplane overlay back)'
+        } else { Write-Same "$dwm\OverlayTestMode absent" }
         Write-Same "computer name $env:COMPUTERNAME kept (Settings > System > About renames it)"
     }
 
