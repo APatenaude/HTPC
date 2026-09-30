@@ -14,9 +14,9 @@
     plus, for a failure only, the failing checks' lines, compiler errors and an unhandled
     exception's first lines. Exit code 1 on any failure, 0 when all passed.
 
-    -Ui adds the page's self-test and the UI audit at every size (Test-Ui.ps1 -SelfTest, about
-    3 minutes), condensed the same way: the SELFTEST pass/fail count, one line per audit run
-    ("audit index.html 1536x864: 61 passed"), the slowest press, and only FAIL and WARNING lines.
+    -Ui adds the page's self-test and the UI audit of the three pages (Test-Ui.ps1 -SelfTest, about
+    20 s), condensed the same way: one line (passed, failed, the pages and sizes run, the slowest
+    press), then only the FAIL and WARNING lines. Every size: Test-All.ps1.
 
     The full pass (TvLab, setup\test, the phone page) stays Test-All.ps1.
 
@@ -114,44 +114,20 @@ if ($Ui) {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $out = @(& powershell -NoProfile -ExecutionPolicy Bypass -File "$l\dev\Test-Ui.ps1" -SelfTest 2>&1 | ForEach-Object { "$_" })
     $code = $LASTEXITCODE
-    # Test-Ui prints: the self-test's lines (the page's checks and the audit, PASS/FAIL each); then
-    # "UI audit in real time (index.html#audit):" with the size, its FAIL lines, "N passed" and the
-    # slowest press per page; then "UI audit, <page> at <WxH>:", FAIL lines, "N passed" for each size.
-    $section = 'selftest'; $pass = 0; $fail = 0; $size = ''
-    $slowest = 0.0; $slowestPage = ''
-    $lines = New-Object Collections.Generic.List[string]
-    $failLines = New-Object Collections.Generic.List[string]
+    # Test-Ui prints a line per run ("UI self-test, index.html at 1536x864: N passed, M failed (s)",
+    # "UI audit, setup.html at ...", ...), each followed by its FAIL lines; then the slowest presses,
+    # the slowest first. Here: one line, then the FAIL and WARNING lines.
+    $pass = 0; $fail = 0; $pages = @(); $slowest = ''
+    $shown = New-Object Collections.Generic.List[string]
     foreach ($line in $out) {
         $t = $line.Trim()
-        if ($t -match '^UI audit in real time \((.+)\):$') {
-            $lines.Add(('{0,-13} {1} passed, {2} failed' -f 'SELFTEST', $pass, $fail))
-            $failLines | ForEach-Object { $lines.Add("  $_") }; $failLines.Clear()
-            $section = "audit $($Matches[1] -replace '#audit$', '') (real time)"; $size = ''
-            continue
-        }
-        if ($t -match '^UI audit, (\S+) at (\d+x\d+):$') { $section = "audit $($Matches[1])"; $size = $Matches[2]; continue }
-        if ($section -eq 'selftest') {
-            if ($t -match '^PASS\b') { $pass++ }
-            elseif ($t -match '^FAIL\b') { $fail++; $failLines.Add($t) }
-            elseif ($t -match '^WARNING:') { $failLines.Add($t) }
-            continue
-        }
-        if (-not $size -and $t -match '^(\d+x\d+)$') { $size = $Matches[1]; continue }
-        if ($t -match '^(\d+) passed$') {
-            $lines.Add(('{0} {1}: {2} passed' -f $section, $size, $Matches[1]))
-            $failLines | ForEach-Object { $lines.Add("  $_") }; $failLines.Clear()
-            continue
-        }
-        if ($t -match '^FAIL\b|^WARNING:') { $failLines.Add($t); continue }
-        if ($section -like '*(real time)' -and $t -match '^(\d+(?:\.\d+)?)\s+(\S.*)$') {
-            if ([double]$Matches[1] -gt $slowest) { $slowest = [double]$Matches[1]; $slowestPage = $Matches[2] }
-        }
+        if ($t -match '^UI (?:self-test|audit), (\S+)\.html at (\d+x\d+): (\d+) passed, (\d+) failed') {
+            $pass += [int]$Matches[3]; $fail += [int]$Matches[4]; $pages += "$($Matches[1]) $($Matches[2])"
+        } elseif ($t -match '^FAIL\b|^WARNING:') { $shown.Add("  $t") }
+        elseif (-not $slowest -and $t -match '^(\d+(?:\.\d+)?)\s+\S+ \d+x\d+: (.+)$') { $slowest = "$($Matches[1]) ms ($($Matches[2]))" }
     }
-    if ($section -eq 'selftest') { $lines.Add(('{0,-13} {1} passed, {2} failed' -f 'SELFTEST', $pass, $fail)) }
-    $failLines | ForEach-Object { $lines.Add("  $_") }
-    $lines
-    if ($slowestPage) { '  slowest press in real time: {0} ms ({1})' -f $slowest, $slowestPage }
-    '{0,-13} exit {1}, {2} s' -f 'UI', $code, (Get-Seconds $clock)
+    '{0,-13} {1} passed, {2} failed ({3}), slowest press {4}, {5} s' -f 'UI', $pass, $fail, ($pages -join ', '), $slowest, (Get-Seconds $clock)
+    $shown
     if ($code -ne 0) {
         $failedParts.Add('UI')
         if ($pass + $fail -eq 0) { $out | Select-Object -Last 8 | ForEach-Object { "  $_" } }

@@ -383,10 +383,16 @@ async function auditRun() {
   const failed = results.filter((r) => !r.ok);
   const pre = document.createElement('pre');
   pre.id = 'audit-results';
-  pre.textContent = `${innerWidth}x${innerHeight}\n` + results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.ok ? '' : '  [' + r.detail + ']'}`).join('\n') +
-    '\n\nSlowest press per page (ms, real time):\n' + times.map(([n, ms]) => `  ${ms.toFixed(1).padStart(6)}  ${n}`).join('\n');
+  pre.textContent = auditReport(results, times);
   document.body.appendChild(pre);
   document.title = failed.length ? `AUDIT FAIL ${failed.length}` : `AUDIT PASS ${results.length}`;
+}
+
+// What Test-Ui.ps1 reads: a line per check (PASS, or FAIL and why), then the slowest press of
+// each page walked (runAudit's times), indented.
+function auditReport(results, times) {
+  return results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.ok ? '' : '  [' + r.detail + ']'}`).join('\n') +
+    '\n\nSlowest press per page (ms, real time):\n' + times.map(([n, ms]) => `  ${ms.toFixed(1).padStart(6)}  ${n}`).join('\n');
 }
 
 // The page lists in order (async off), then the run: still before the page's load event, which

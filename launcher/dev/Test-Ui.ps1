@@ -1,46 +1,47 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Dev: the launcher page in headless Edge, without the launcher: its self-test, and
-    screenshots of demo screens.
+    Dev: the launcher page in headless Edge, without the launcher: its self-test and the UI audit,
+    and screenshots of demo screens.
 
 .DESCRIPTION
-    Opens launcher\ui\index.html from disk (demo data, no host) in a headless Edge with a
-    profile of its own, so it never touches an Edge the TV is showing. -SelfTest runs
-    index.html#selftest and prints its results (exit code 1 if any failed): the page's checks
-    and the UI audit (audit.js, every page walked with the D-pad), read through the DevTools
-    protocol once the page's title says it is done; then the audit again, index.html#audit, with
-    how long each press takes; then the audit of setup.html and keyboard.html, and of index.html
-    at 1920x1080, 1536x864 (a 4K TV at Windows' 250% scaling: what the page gets there),
-    1280x720, 2560x1080 and 1920x1200 (a TV or monitor that is not 1080p 16:9). -Shots takes a
-    PNG of each route into -OutDir
-    (index.html#<route>; e.g. alerts, menu-alerts, settings/wifi, ?upd=failed#settings/updates,
-    audit?page=<an audit page's name>), -ShotSize big (1920x1080 unless said: 1536x864 is the
-    4K TV at 250%), and a copy at -Scale (default half size, <name>-small.png: a quick look;
-    judge details on the full one; 1: none). Headless Edge can linger
-    after it has written its output: once the output is there, or after -TimeoutSeconds, this
-    script ends the processes on its own profile (and only those).
+    Opens launcher\ui\index.html from disk (demo data, no host) in a headless Edge with a profile
+    of its own, so it never touches an Edge the TV is showing.
 
-    All of it runs in real time; only the screenshots keep Edge's virtual time
-    (--virtual-time-budget), which since 29 Sept 2026 hung about one long run in two on this box
-    (see Invoke-Edge and the self-test below).
+    -SelfTest: index.html#selftest (the page's checks, then the UI audit: audit.js, every page
+    walked with the D-pad), then the audit of setup.html and keyboard.html (#audit), one after the
+    other in the same Edge (DevTools' Page.navigate), in real time, at the owner's TV's size:
+    1536x864, a 4K TV at Windows' 250% (the keyboard's band 1536x352: the screen's width, 440/1080
+    of its height). Every page draws a fixed 1920x1080 stage (the keyboard a 1920x440 band) that
+    fit() scales and letterboxes, nothing else follows the screen's size: the self-test checks fit()
+    at other sizes. -AllSizes (Test-All) also walks the pages at the sizes they were walked at
+    before: index.html at 1920x1080, 1280x720, 2560x1080 and 1920x1200, setup.html at 1920x1080
+    and 1280x720, the keyboard at 1920x440 and 2560x440 (the page's size set through DevTools).
+    Prints a line per run (passed, failed and its failures), then the slowest presses; exit code 1
+    if anything failed. A run with no results in -TimeoutSeconds is tried once more in a new Edge.
 
-    Edge runs with --disable-extensions, whatever the machine's Edge policies say. TV Box
-    Setup force-installs extensions into every Edge profile (setup\lib\Set-EdgePolicy.ps1,
-    HKLM\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist): on a box that is also a
-    dev box, each fresh test profile below downloaded and unpacked them (65 MB) while the page
-    ran, busying the box (press times over the audit's limit) and, landing mid-test, stalling
-    the page. The switch keeps policy-forced extensions out too (Edge 154), as in the
-    launcher's WebView2; the policies stay as they are (they are the TV's). Should an Edge
-    still put an extension into a test profile, this script says so.
+    -Shots takes a PNG of each route into -OutDir (index.html#<route>; e.g. alerts, menu-alerts,
+    settings/wifi, ?upd=failed#settings/updates, audit?page=<an audit page's name>), -ShotSize big
+    (1920x1080 unless said: 1536x864 is the 4K TV at 250%), and a copy at -Scale (default half
+    size, <name>-small.png: a quick look; judge details on the full one; 1: none). Only the
+    screenshots use Edge's virtual time (--virtual-time-budget: their animations played out):
+    since 29 Sept 2026 it hung about one long run in two on this box, never a screenshot.
+
+    Edge runs with --disable-extensions, whatever the machine's Edge policies say: TV Box Setup
+    force-installs extensions into every Edge profile (setup\lib\Set-EdgePolicy.ps1), and on a box
+    that is also a dev box each fresh test profile downloaded them (65 MB) while the page ran,
+    stalling it. Should an Edge still put an extension into a test profile, this script says so.
+    Every Edge it starts is ended with it (KillOnExit.ps1), its profile folder removed.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest -AllSizes
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -Shots alerts,menu-alerts -OutDir C:\temp\shots
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -Shots '?upd=longnotes#settings/updates' -ShotSize 1536x864
 #>
 param(
     [switch]$SelfTest,
+    [switch]$AllSizes,
     [string[]]$Shots = @(),
     [string]$ShotSize = '1920x1080',
     [double]$Scale = 0.5,
@@ -53,23 +54,12 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'KillOnExit.ps1')
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 if (-not $Page) { $Page = Join-Path (Split-Path $PSScriptRoot -Parent) 'ui\index.html' }
+$uiDir = Split-Path $Page -Parent
 $url = 'file:///' + ($Page -replace '\\', '/')
-$profileDir = Join-Path $env:TEMP 'htpc-ui-test-profile'
+# This run's profiles: <this>-<n>, one per Edge started.
+$profileDir = Join-Path $env:TEMP "htpc-ui-test-profile-$PID"
 # -File passes "a,b,c" as one string.
 $Shots = @($Shots | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
-
-# Reads a file Edge may still have open (its redirected output).
-function Read-Shared([string]$path) {
-    if (-not (Test-Path $path)) { return '' }
-    $stream = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
-    try { return (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
-}
-
-function Stop-OwnEdge {
-    Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
-        Where-Object { $_.CommandLine -like "*$profileDir*" } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-}
 
 # Profiles of earlier runs ended from outside before their clean-up (74 of them, 30 Sept 2026): the
 # folder names carry the run's process id; only those whose PowerShell is gone.
@@ -79,205 +69,215 @@ Get-ChildItem $env:TEMP -Directory -Filter 'htpc-ui-test-profile-*' -ErrorAction
     Where-Object { $_.Name -match '^htpc-ui-test-profile-(\d+)-' -and -not $alive[[int]$Matches[1]] } |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
-# One DevTools protocol request to the page of the Edge on $userData (started with
-# --remote-debugging-port=0), on a socket of its own: the answer's JSON, or '' if none came within
-# $TimeoutMs (the page busy: it answers between its tasks). The page is the file: page among the
-# targets: Edge lists others beside it at times (its built-in extensions' background pages and
-# service worker, on 29 Sept 2026 for the first 30 s or more of a run). PowerShell 5.1 hands a
-# JSON array on as one object (ForEach-Object unrolls it): with a second target, the old
-# filter kept the whole list, never got the page's address, and the run hung until its timeout.
-function Invoke-PageDevTools([string]$userData, [string]$method, [hashtable]$params, [int]$TimeoutMs = 2000) {
-    $port = Get-Content (Join-Path $userData 'DevToolsActivePort') -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $port) { return '' }
-    $socket = New-Object Net.WebSockets.ClientWebSocket
-    try {
-        # Unrolled (ForEach-Object): PowerShell 5.1's Invoke-RestMethod hands a JSON array on as one
-        # object, so with Edge's own component extensions listed beside the page (7 targets on the
-        # box) "the first page" was the whole list and every look came back empty: the self-test
-        # "gave no output in 300 s" though it had finished. Only the test page, a file: address.
-        $target = Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5 | ForEach-Object { $_ } |
-            Where-Object { $_.type -eq 'page' -and "$($_.url)".StartsWith('file:') } | Select-Object -First 1
-        if (-not $target) { return '' }
-        $none = [Threading.CancellationToken]::None
-        if (-not $socket.ConnectAsync([Uri]$target.webSocketDebuggerUrl, $none).Wait($TimeoutMs)) { return '' }
-        $request = [Text.Encoding]::UTF8.GetBytes((@{ id = 1; method = $method; params = $params } | ConvertTo-Json -Compress))
-        [void]$socket.SendAsync((New-Object ArraySegment[byte] (, $request)), 'Text', $true, $none).Wait($TimeoutMs)
-        $buffer = New-Object byte[] 65536
-        $message = New-Object IO.MemoryStream
-        $clock = [Diagnostics.Stopwatch]::StartNew()
-        while ($clock.ElapsedMilliseconds -lt $TimeoutMs) {
-            $receive = $socket.ReceiveAsync((New-Object ArraySegment[byte] (, $buffer)), $none)
-            if (-not $receive.Wait([Math]::Max(1, $TimeoutMs - $clock.ElapsedMilliseconds))) { return '' }
-            $message.Write($buffer, 0, $receive.Result.Count)
-            if (-not $receive.Result.EndOfMessage) { continue }
-            $text = [Text.Encoding]::UTF8.GetString($message.ToArray())
-            if ($text.StartsWith('{"id":1,')) { return $text }
-            $message.SetLength(0)
-        }
-        return ''
-    } catch { return '' } finally { $socket.Dispose() }
+# Ends this run's Edge processes (and only those), and waits until they are gone.
+function Stop-OwnEdge {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $own = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*$profileDir-*" })
+        $own | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        if ($own.Count) { [Threading.Thread]::Sleep(100) }
+    } while ($own.Count -and $clock.Elapsed.TotalSeconds -lt 5)
 }
 
-# Runs headless Edge until $done says its output is complete (or it exits, or the time is up).
-# A fresh profile each time: one whose Edge was ended keeps a lock that stalls the next.
+# Headless Edge on a fresh profile (one whose Edge was ended keeps a lock that stalls the next).
+# --window-size is the window's: headless Edge keeps 40x100 of it for its frame, so the page's
+# size ($PageSize, WxH) plus that; a screenshot's window is the page ($ShotWindow).
 $script:run = 0
 $script:extensionsWarned = $false
-# -RealTime: no --virtual-time-budget. --dump-dom then dumps the page at its load event, so what it
-# checks must be done by then (audit.js's #audit is); the self-test says it is done in its title.
-# Only the screenshots keep virtual time (their animations played out; short runs, which never
-# hung).
-function Invoke-Edge([string[]]$arguments, [string]$stdout, [scriptblock]$done, [switch]$RealTime, [string]$Size = '1920,1080') {
+function Start-TestEdge([string[]]$arguments, [string]$PageSize = '', [string]$ShotWindow = '') {
     Stop-OwnEdge
     $script:run++
-    $userData = "$profileDir-$PID-$($script:run)"
-    $script:userData = $userData   # for $done
+    $userData = "$profileDir-$($script:run)"
+    New-Item -ItemType Directory -Force $userData | Out-Null
+    $window = if ($ShotWindow) { $ShotWindow } else { $w, $h = $PageSize -split 'x'; "$([int]$w + 40),$([int]$h + 100)" }
     # --disable-extensions: none of the machine's policy-forced extensions (see the description).
-    $common = @('--headless=new', '--do-not-de-elevate', '--disable-gpu', '--disable-extensions', "--window-size=$Size",
+    $common = @('--headless=new', '--do-not-de-elevate', '--disable-gpu', '--disable-extensions', "--window-size=$window",
         '--hide-scrollbars', "--user-data-dir=$userData")
-    if (-not $RealTime) { $common += '--virtual-time-budget=3000' }
-    $p = Start-Process -FilePath $edge -ArgumentList ($common + $arguments) -RedirectStandardOutput $stdout `
-        -RedirectStandardError "$stdout.err" -PassThru -WindowStyle Hidden
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $p.HasExited -and -not (& $done) -and $clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        [Threading.Thread]::Sleep(500)
-    }
-    [Threading.Thread]::Sleep(1000)
+    if ($ShotWindow) { $common += '--virtual-time-budget=3000' }
+    $p = Start-Process -FilePath $edge -ArgumentList ($common + $arguments) -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $userData 'edge-out.txt') -RedirectStandardError (Join-Path $userData 'edge-err.txt')
+    [pscustomobject]@{ Process = $p; UserData = $userData }
+}
+
+function Stop-TestEdge($edgeRun) {
     Stop-OwnEdge
-    [Threading.Thread]::Sleep(500)
-    $installed = @(Get-ChildItem (Join-Path $userData 'Default\Extensions') -Directory -ErrorAction SilentlyContinue |
+    $installed = @(Get-ChildItem (Join-Path $edgeRun.UserData 'Default\Extensions') -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne 'Temp' })
     if ($installed.Count -and -not $script:extensionsWarned) {
         $script:extensionsWarned = $true
         Write-Warning ("Edge installed extensions into its test profile despite --disable-extensions (machine policy " +
             "ExtensionInstallForcelist?): $($installed.Name -join ', '). Runs may crawl or hang.")
     }
-    Remove-Item -Recurse -Force $userData -ErrorAction SilentlyContinue
-    if (-not (& $done)) { throw "Edge gave no output in $TimeoutSeconds s" }
+    Remove-Item -LiteralPath $edgeRun.UserData -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$failed = 0
-if ($SelfTest) {
-    # The self-test in real time, its page read through the DevTools protocol once its title says
-    # it is done. Not --dump-dom with a virtual-time budget any more: from 29 Sept 2026 that hung
-    # about one run in two on this box, with or without extensions: the page stopped at a timer or
-    # finished, and Edge neither dumped it nor answered DevTools again (its renderer idle). Each
-    # look also notes the page's uncaught errors, for the warning if it never finishes.
-    $out = Join-Path $env:TEMP 'htpc-ui-selftest.html'
-    $look = @'
+# A DevTools session with the test page: the file: page among Edge's targets (it lists others
+# beside it at times: its built-in extensions' pages, for 30 s or more of a run on 29 Sept 2026).
+# One socket for the Edge's life, so what it sets (the page's size) holds from page to page.
+function Connect-TestPage($edgeRun, [int]$TimeoutMs = 30000) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -lt $TimeoutMs -and -not $edgeRun.Process.HasExited) {
+        $port = Get-Content (Join-Path $edgeRun.UserData 'DevToolsActivePort') -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($port) {
+            $socket = New-Object Net.WebSockets.ClientWebSocket
+            try {
+                # Unrolled (ForEach-Object): PowerShell 5.1's Invoke-RestMethod hands a JSON array on as
+                # one object, and "the first page" of it was the whole list (the runs hung).
+                $target = Invoke-RestMethod "http://127.0.0.1:$port/json/list" -TimeoutSec 5 | ForEach-Object { $_ } |
+                    Where-Object { $_.type -eq 'page' -and "$($_.url)".StartsWith('file:') } | Select-Object -First 1
+                if ($target -and $socket.ConnectAsync([Uri]$target.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait(5000)) {
+                    return [pscustomobject]@{ Socket = $socket; Id = 0; Buffer = (New-Object byte[] 65536); Pending = $null; Message = (New-Object IO.MemoryStream) }
+                }
+            } catch { }
+            $socket.Dispose()
+        }
+        [Threading.Thread]::Sleep(200)
+    }
+    $null
+}
+
+# One DevTools request on that session: its answer's result, or $null if none came within $TimeoutMs
+# (the page busy: it answers between its tasks; a late answer is skipped by the next request).
+function Invoke-Cdp($session, [string]$method, [hashtable]$params = @{}, [int]$TimeoutMs = 2000) {
+    $session.Id++
+    $id = $session.Id
+    $none = [Threading.CancellationToken]::None
+    $request = [Text.Encoding]::UTF8.GetBytes((@{ id = $id; method = $method; params = $params } | ConvertTo-Json -Compress -Depth 5))
+    try {
+        if (-not $session.Socket.SendAsync((New-Object ArraySegment[byte] (, $request)), 'Text', $true, $none).Wait($TimeoutMs)) { return $null }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        while ($clock.ElapsedMilliseconds -lt $TimeoutMs) {
+            # A receive that timed out before is still waiting: its message is the next one.
+            if (-not $session.Pending) { $session.Pending = $session.Socket.ReceiveAsync((New-Object ArraySegment[byte] (, $session.Buffer)), $none) }
+            if (-not $session.Pending.Wait([Math]::Max(1, $TimeoutMs - $clock.ElapsedMilliseconds))) { return $null }
+            $received = $session.Pending.Result
+            $session.Pending = $null
+            $session.Message.Write($session.Buffer, 0, $received.Count)
+            if (-not $received.EndOfMessage) { continue }
+            $text = [Text.Encoding]::UTF8.GetString($session.Message.ToArray())
+            $session.Message.SetLength(0)
+            if ($text.StartsWith("{`"id`":$id,")) { return ($text | ConvertFrom-Json).result }
+        }
+        $null
+    } catch { $null }
+}
+
+# A page's results, once its title says it is done ("SELFTEST PASS n", "AUDIT FAIL n"...): the text
+# of the <pre> its run fills and the page's size, read in the page loaded for run $n (?run=n, never
+# the page before it). Each look also notes the page's uncaught errors, for the warning if it never
+# finishes. $null if not done within -TimeoutSeconds.
+$look = @'
 (() => {
   if (!window.__testErrors) {
     window.__testErrors = [];
     addEventListener('error', (e) => __testErrors.push(e.message));
     addEventListener('unhandledrejection', (e) => __testErrors.push(String(e.reason && e.reason.stack || e.reason)));
   }
-  return JSON.stringify({ errors: __testErrors, html: document.title.startsWith('SELFTEST ') ? document.documentElement.outerHTML : '' });
+  const pre = document.getElementById('%PRE%');
+  const done = location.search === '?run=%RUN%' && document.title.startsWith('%TITLE% ') && pre;
+  return JSON.stringify({ errors: __testErrors, title: document.title, size: innerWidth + 'x' + innerHeight, text: done ? pre.textContent : '' });
 })()
 '@
-    $pageDone = {
-        if (Test-Path $out) { return $true }
-        $answer = Invoke-PageDevTools $script:userData 'Runtime.evaluate' @{ expression = $look; returnByValue = $true }
-        if (-not $answer) { return $false }
-        $seen = ($answer | ConvertFrom-Json).result.result.value | ConvertFrom-Json
-        if ($seen.errors) { $script:pageErrors = $seen.errors -join ' | ' }
-        if ($seen.html) { [IO.File]::WriteAllText($out, $seen.html) }
-        [bool]$seen.html
-    }
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
-        Remove-Item $out -ErrorAction SilentlyContinue
-        $script:pageErrors = ''
-        try { Invoke-Edge @('--remote-debugging-port=0', "$url#selftest") "$out.txt" $pageDone -RealTime }
-        catch {
-            $why = if ($script:pageErrors) { "; the page's errors: $($script:pageErrors)" } else { '' }
-            if ($attempt -eq 2) { throw "$($_.Exception.Message)$why" }
-            Write-Warning "$($_.Exception.Message)$why; trying again"; continue
+function Wait-Results($edgeRun, $session, [string]$pre, [string]$title, [int]$n) {
+    $expression = $look.Replace('%PRE%', $pre).Replace('%TITLE%', $title).Replace('%RUN%', "$n")
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt $TimeoutSeconds -and -not $edgeRun.Process.HasExited) {
+        $answer = Invoke-Cdp $session 'Runtime.evaluate' @{ expression = $expression; returnByValue = $true }
+        if ($answer -and $answer.result.value) {
+            $seen = $answer.result.value | ConvertFrom-Json
+            if ($seen.errors) { $script:pageErrors = $seen.errors -join ' | ' }
+            if ($seen.text) { return $seen }
         }
-        $dom = Read-Shared $out
-        if ($dom -match '<pre id="selftest-results">') { break }
+        [Threading.Thread]::Sleep(200)
     }
-    if ($dom -match '(?s)<pre id="selftest-results">(.*?)</pre>') {
-        [Net.WebUtility]::HtmlDecode($Matches[1])
-        if ($dom -match '<title>SELFTEST FAIL') { $failed = 1 }
-    } else {
-        Write-Warning 'No self-test results in the page (a script error?)'
-        $failed = 1
+    $null
+}
+
+$failed = 0
+if ($SelfTest) {
+    # The runs: the self-test, then the audit of the other two pages; -AllSizes adds the other sizes.
+    $runs = @(@{ Name = 'UI self-test'; Page = 'index.html'; Route = 'selftest'; Size = '1536x864'; Pre = 'selftest-results'; Title = 'SELFTEST' })
+    $audits = @(@('setup.html', '1536x864'), @('keyboard.html', '1536x352'))
+    if ($AllSizes) {
+        $audits += @(@('index.html', '1920x1080'), @('index.html', '1280x720'), @('index.html', '2560x1080'), @('index.html', '1920x1200'),
+            @('setup.html', '1920x1080'), @('setup.html', '1280x720'), @('keyboard.html', '1920x440'), @('keyboard.html', '2560x440'))
     }
-    $out = Join-Path $env:TEMP 'htpc-ui-audit.html'
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
-        Remove-Item $out -ErrorAction SilentlyContinue
-        try { Invoke-Edge @('--dump-dom', "$url#audit") $out { (Read-Shared $out) -match '</html>' } -RealTime }
-        catch { if ($attempt -eq 2) { throw }; Write-Warning "$($_.Exception.Message); trying again"; continue }
-        $dom = Read-Shared $out
-        if ($dom -match '<pre id="audit-results">') { break }
-        if ($attempt -eq 1) { Write-Warning 'No audit results in the page; trying again' }
-    }
-    if ($dom -match '(?s)<pre id="audit-results">(.*?)</pre>') {
-        ''
-        'UI audit in real time (index.html#audit):'
-        $lines = [Net.WebUtility]::HtmlDecode($Matches[1]) -split '\r?\n'
-        $lines | Where-Object { $_.Trim() -and $_ -notmatch '^PASS' }
-        "  $(@($lines | Where-Object { $_ -match '^PASS' }).Count) passed"
-        if ($dom -match '<title>AUDIT FAIL') { $failed = 1 }
-    } else {
-        Write-Warning 'No audit results in the page (a script error, or it did not finish by the load event?)'
-        $failed = 1
-    }
-    # The audit on first-run setup's and the on-screen keyboard's pages, and the launcher's again
-    # at other screen sizes (the stage scaled and letterboxed: 720p, ultrawide, 16:10; the
-    # keyboard's band the screen's width), in real time too: with a virtual-time budget these hung
-    # now and then as well, and their press times were real anyway (#audit runs before the load
-    # event: performance.now() moved some 65 s over one such run).
-    # --window-size is the window's: headless Edge keeps 40x100 of it for its frame, so each size
-    # below is the page's plus that (setup at 1920x1080 and 1280x720, the keyboard's band at
-    # 1920x440 and 2560x440, its window's size on those screens, the launcher at 1920x1080,
-    # 1536x864 (4K at 250%), 1280x720, 2560x1080 and 1920x1200).
-    $uiDir = Split-Path $Page -Parent
-    $runs = @(
-        @('setup.html', '1960,1180'), @('setup.html', '1320,820'),
-        @('keyboard.html', '1960,540'), @('keyboard.html', '2600,540'),
-        @('index.html', '1960,1180'), @('index.html', '1576,964'),
-        @('index.html', '1320,820'), @('index.html', '2600,1180'), @('index.html', '1960,1300')
-    )
-    foreach ($r in $runs) {
-        $runUrl = 'file:///' + ((Join-Path $uiDir $r[0]) -replace '\\', '/') + '#audit'
-        $out = Join-Path $env:TEMP 'htpc-ui-audit-more.html'
-        $dom = ''
-        for ($attempt = 1; $attempt -le 2; $attempt++) {
-            Remove-Item $out -ErrorAction SilentlyContinue
-            try { Invoke-Edge @('--dump-dom', $runUrl) $out { (Read-Shared $out) -match '</html>' } -RealTime -Size $r[1] }
-            catch { if ($attempt -eq 2) { throw }; Write-Warning "$($_.Exception.Message); trying again"; continue }
-            $dom = Read-Shared $out
-            if ($dom -match '<pre id="audit-results">') { break }
+    $runs += @($audits | ForEach-Object { @{ Name = 'UI audit'; Page = $_[0]; Route = 'audit'; Size = $_[1]; Pre = 'audit-results'; Title = 'AUDIT' } })
+
+    $edgeRun = $null; $session = $null; $windowSize = ''; $n = 0
+    $presses = New-Object Collections.Generic.List[object]
+    try {
+        foreach ($r in $runs) {
+            $result = $null
+            for ($attempt = 1; $attempt -le 2 -and -not $result; $attempt++) {
+                $n++
+                $pageUrl = 'file:///' + ((Join-Path $uiDir $r.Page) -replace '\\', '/') + "?run=$n#$($r.Route)"
+                $script:pageErrors = ''
+                $clock = [Diagnostics.Stopwatch]::StartNew()
+                if ($session) {
+                    # The same Edge: the page's size (the window's own: none set), then the page.
+                    $w, $h = $r.Size -split 'x'
+                    if ($r.Size -eq $windowSize) { [void](Invoke-Cdp $session 'Emulation.clearDeviceMetricsOverride') }
+                    else { [void](Invoke-Cdp $session 'Emulation.setDeviceMetricsOverride' @{ width = [int]$w; height = [int]$h; deviceScaleFactor = 1; mobile = $false }) }
+                    [void](Invoke-Cdp $session 'Page.navigate' @{ url = $pageUrl } 10000)
+                } else {
+                    if ($edgeRun) { Stop-TestEdge $edgeRun }
+                    $edgeRun = Start-TestEdge @('--remote-debugging-port=0', $pageUrl) -PageSize $r.Size
+                    $windowSize = $r.Size
+                    $session = Connect-TestPage $edgeRun
+                }
+                if ($session) { $result = Wait-Results $edgeRun $session $r.Pre $r.Title $n }
+                if (-not $result) {
+                    $why = if ($script:pageErrors) { "; the page's errors: $($script:pageErrors)" } else { '' }
+                    $next = if ($attempt -eq 1) { '; trying again in a new Edge' } else { '' }
+                    Write-Warning "$($r.Page) at $($r.Size): no results in $([int]$clock.Elapsed.TotalSeconds) s$why$next"
+                    if ($session) { $session.Socket.Dispose(); $session = $null }
+                }
+            }
+            if (-not $result) { $failed = 1; continue }
+            $lines = @($result.text -split '\r?\n')
+            $fails = @($lines | Where-Object { $_ -match '^FAIL' })
+            $passes = @($lines | Where-Object { $_ -match '^PASS' }).Count
+            '{0}, {1} at {2}: {3} passed, {4} failed ({5:0.0} s)' -f $r.Name, $r.Page, $result.size, $passes, $fails.Count, $clock.Elapsed.TotalSeconds
+            $fails
+            if ($result.size -ne $r.Size) { Write-Warning "$($r.Page) ran at $($result.size), not $($r.Size)"; $failed = 1 }
+            if ($fails.Count -or $result.title -notmatch ' PASS ') { $failed = 1 }
+            # The slowest press of each page walked (the audit's own table, under its results).
+            $lines | Where-Object { $_ -match '^\s+(\d+(?:\.\d+)?)\s+(\S.*)$' } |
+                ForEach-Object { $presses.Add([pscustomobject]@{ Ms = [double]$Matches[1]; Page = "$($r.Page) $($result.size): $($Matches[2])" }) }
         }
-        ''
-        if ($dom -match '(?s)<pre id="audit-results">(.*?)</pre>') {
-            $lines = [Net.WebUtility]::HtmlDecode($Matches[1]) -split '\r?\n'
-            "UI audit, $($r[0]) at $($lines[0]):"
-            $passed = @($lines | Where-Object { $_ -match '^PASS' }).Count
-            $lines | Where-Object { $_ -match '^FAIL' }
-            "  $passed passed"
-            if ($dom -match '<title>AUDIT FAIL') { $failed = 1 }
-        } else {
-            Write-Warning "No audit results in $($r[0]) at $($r[1]) (a script error?)"
-            $failed = 1
-        }
+    } finally {
+        if ($session) { $session.Socket.Dispose() }
+        if ($edgeRun) { Stop-TestEdge $edgeRun }
+    }
+    if ($presses.Count) {
+        'Slowest presses (ms, real time; the audit allows 50):'
+        $presses | Sort-Object Ms -Descending | Select-Object -First 5 | ForEach-Object { '  {0,6:0.0}  {1}' -f $_.Ms, $_.Page }
     }
 }
 if ($Shots.Count -gt 0) {
     New-Item -ItemType Directory -Force $OutDir | Out-Null
-    # A screenshot's window is the page: no frame taken off (unlike --dump-dom above).
     if ($ShotSize -notmatch '^(\d+)[x,](\d+)$') { throw "-ShotSize: width x height, e.g. 1536x864" }
     $shotW = $Matches[1]; $shotH = $Matches[2]
     $suffix = if ("${shotW}x$shotH" -eq '1920x1080') { '' } else { "-${shotW}x$shotH" }
     foreach ($route in $Shots) {
         $png = Join-Path $OutDir (($route -replace '[^\w-]', '_') + "$suffix.png")
         Remove-Item $png -ErrorAction SilentlyContinue
-        try {
-            # Spaces as %20 (audit page names have them; the page decodes them): Start-Process quotes nothing.
-            $shotUrl = $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" }) -replace ' ', '%20'
-            Invoke-Edge @("--screenshot=$png", $shotUrl) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png } -Size "$shotW,$shotH"
-            if ($Scale -lt 1) { "$route -> $(& (Join-Path $PSScriptRoot 'Save-ScaledImage.ps1') -Path $png -Scale $Scale) (full size: $png)" }
-            else { "$route -> $png" }
-        } catch { Write-Warning "${route}: $($_.Exception.Message)"; $failed = 1 }
+        # Spaces as %20 (audit page names have them; the page decodes them): Start-Process quotes nothing.
+        $shotUrl = $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" }) -replace ' ', '%20'
+        $edgeRun = Start-TestEdge @("--screenshot=$png", $shotUrl) -ShotWindow "$shotW,$shotH"
+        # Written: there, and Edge no longer has it open (it may be writing it still).
+        $written = {
+            if (-not (Test-Path $png)) { return $false }
+            try { [IO.File]::Open($png, 'Open', 'Read', 'None').Dispose(); $true } catch { $false }
+        }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        while (-not (& $written) -and -not $edgeRun.Process.HasExited -and $clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) { [Threading.Thread]::Sleep(200) }
+        $ok = & $written
+        Stop-TestEdge $edgeRun
+        if (-not $ok) { Write-Warning "${route}: no screenshot in $([int]$clock.Elapsed.TotalSeconds) s"; $failed = 1; continue }
+        if ($Scale -lt 1) { "$route -> $(& (Join-Path $PSScriptRoot 'Save-ScaledImage.ps1') -Path $png -Scale $Scale) (full size: $png)" }
+        else { "$route -> $png" }
     }
 }
 exit $failed

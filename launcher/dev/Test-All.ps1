@@ -9,7 +9,7 @@
     - the console test projects (launcher\tests\*, launcher\dev\TvLab), each `dotnet run -c Release`;
     - setup\test\Test-*.ps1, except Test-Library.ps1 (it installs real apps: test VM only);
       Test-Updates.ps1 needs administrator rights (it sets folder owners): run elevated, or in the VM;
-    - the TV UI self-test plus the UI audit walker at every size (Test-Ui.ps1 -SelfTest);
+    - the TV UI self-test plus the UI audit walker at every size (Test-Ui.ps1 -SelfTest -AllSizes);
     - the phone remote's test page (dev\phone-test.html) in headless Edge.
     Light on purpose: one thing at a time, no parallel builds (the box is small).
 
@@ -53,10 +53,15 @@ if (-not $SkipSetupTests) {
     }
 }
 
-$o = & powershell -NoProfile -ExecutionPolicy Bypass -File "$l\dev\Test-Ui.ps1" -SelfTest 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0) { $failed++ }
+$o = & powershell -NoProfile -ExecutionPolicy Bypass -File "$l\dev\Test-Ui.ps1" -SelfTest -AllSizes 2>&1 | Out-String
+$code = $LASTEXITCODE
+if ($code -ne 0) { $failed++ }
 $lines = $o -split "`r?`n"
-"selftest => exit $LASTEXITCODE :: PASS " + @($lines | Where-Object { $_ -match '^\s*PASS' }).Count + ", FAIL " + @($lines | Where-Object { $_ -match '^\s*FAIL' }).Count
+# A line per run: "UI self-test, index.html at 1536x864: N passed, M failed (s)", "UI audit, ...".
+$uiPass = 0; $uiFail = 0; $uiRuns = 0
+$lines | Where-Object { $_ -match '^UI (?:self-test|audit), .*: (\d+) passed, (\d+) failed' } |
+    ForEach-Object { $uiPass += [int]$Matches[1]; $uiFail += [int]$Matches[2]; $uiRuns++ }
+"selftest => exit $code :: PASS $uiPass, FAIL $uiFail ($uiRuns runs: the self-test, the audit of the three pages at every size)"
 $lines | Where-Object { $_ -match '^\s*FAIL|WARN' } | Select-Object -First 12
 
 . (Join-Path $PSScriptRoot 'KillOnExit.ps1')

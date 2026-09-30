@@ -68,15 +68,16 @@ function selftestGroup(run) { SELFTEST_GROUPS.push(run); }
 
     // ---- The UI audit: every page walked with the D-pad (audit.js) ---------------------------------
     press = realPress;   // eslint-disable-line no-global-assign
-    if (typeof runAudit === 'function') { await AUDIT.ready; await runAudit(check); }
+    let times = [];
+    if (typeof runAudit === 'function') { await AUDIT.ready; times = await runAudit(check); }
     else check('audit: audit.js is loaded', false);
 
-    // ---- Report -------------------------------------------------------------------------------------
+    // ---- Report: the results, then the audit's slowest press per page ------------------------------
     console.log = log;
     const failed = results.filter((r) => !r.ok);
     const pre = document.createElement('pre');
     pre.id = 'selftest-results';
-    pre.textContent = results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.ok ? '' : '  [' + r.detail + ']'}`).join('\n');
+    pre.textContent = typeof auditReport === 'function' ? auditReport(results, times) : results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}`).join('\n');
     document.body.appendChild(pre);
     document.title = failed.length ? `SELFTEST FAIL ${failed.length}` : `SELFTEST PASS ${results.length}`;
   }
