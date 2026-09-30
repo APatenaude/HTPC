@@ -31,6 +31,21 @@ releases and repo settings, and Hyper-V (Windows Pro/Enterprise) or an Incus ser
   `git clone -b claude/multimedia-device-software-23aqa5 HTPC.bundle HTPC` and
   `git remote set-url origin https://github.com/APatenaude/HTPC.git`.
 - Signing in to GitHub: the first `git push` opens Git Credential Manager's browser sign-in.
+  Releases also need the GitHub CLI signed in: `gh auth login` (the owner signs in himself).
+
+### What is not in git, and how to carry it over
+
+Everything the product needs is in the repo and its GitHub releases. These live only on the machine
+that did the work; none of them belongs in the (public) repo:
+
+| What | Where | On the new machine |
+|---|---|---|
+| The Incus client and its trust on the homelab | `incus.exe` (winget `LinuxContainers.Incus`); the client certificate in the user's Incus config | Install the client, then `launcher\dev\Connect-Incus.ps1` with a **new** trust token the owner makes on the server (`incus config trust add <name>`). Each machine gets its own; nothing is copied. |
+| The test VM's keys | `%USERPROFILE%\VMs\htpc-test-incus` (the SSH key, `known_hosts`, the answer ISO and its `credentials.txt`, screenshots) | Copy the folder to the same place by hand (a USB stick, not a chat or the repo). Or rebuild: `setup\test\New-IncusTestVM.ps1 -Force` makes a new key and VM, then take the snapshots again (`before-shell` after the install, see section 6). |
+| The ISOs | `%USERPROFILE%\VMs\iso` (Windows 11 IoT LTSC 2024, virtio-win) | Only to rebuild the VM: the server keeps them as the `htpc-iso-*` volumes. |
+| Claude Code's working notes | `%USERPROFILE%\.claude\projects\<this checkout's path>\memory` | Optional. What lasts is written here and in `CLAUDE.md`; the notes are keyed by the checkout's path, so copy the folder into the new machine's matching project folder if wanted. |
+| Agent worktrees | `.claude\worktrees` (gitignored) | Disposable: everything in them was merged and pushed. |
+| The TV box | the owner's box runs the released launcher | Nothing to move: it updates from GitHub releases (Settings › Updates). |
 
 ## 2. The layout in one minute
 
@@ -112,8 +127,31 @@ routine, scripted in `launcher\dev\Merge-Branch.ps1`:
 
 Since 29 Sept 2026 the test VM lives on the owner's Incus server ("The test VM on an Incus server"
 below); the Hyper-V VM on the TV box was deleted, to keep its load off the box. The Hyper-V tools
-still work on any dev PC with Hyper-V. Use the VM only for changes a real setup run must show
-(setup steps, elevation, the shell, uninstall, install paths): one run of the fixed build, no more.
+still work on any dev PC with Hyper-V. Use the VM for changes a real setup run must show (setup
+steps, elevation, the shell, uninstall, install paths) and for every release (below); not for
+UI-only or launcher-only changes, which the headless UI self-test and the test projects cover.
+
+**Every release, on the Incus VM (the owner's rule since 29 Sept 2026: 1.0.7 went out without it):**
+
+1. Before `New-Release.ps1`, the candidate: `launcher\dev\Build-Release.ps1 -Out <folder>`;
+   `Restore-IncusTestVM.ps1 'before-shell'`; copy the unpacked `setup.zip` folder,
+   `TV-Box-Setup.exe` and `HtpcWatchdog.exe` to `C:\htpc-test\`; run
+   `C:\htpc-test\setup\setup.ps1 -Unattended -NoPause -LauncherExe C:\htpc-test\TV-Box-Setup.exe`
+   with `Invoke-IncusTestVM.ps1 -File <script> -InSession -Elevated` (in the TV user's session:
+   over plain SSH, Store-package installs fail with 0x80070005); every step OK; restart; the
+   launcher healthy (its log); screenshots of the screens the release changed; any setting the
+   release adds checked before and after; then `C:\ProgramData\HTPC\setup\setup.ps1 -Uninstall
+   -NoPause` (in session, elevated) and the settings back as on clean Windows.
+2. After the release is published, **before telling the owner to update**: install the previous
+   release in the VM the same way, restart, then update exactly as a box does, driving the TV UI
+   with `Send-IncusTestVMKeys.ps1` (Enter = A, Esc = B, arrows, `h` = Home, `p` = hold Home):
+   Up, Enter (Settings), Down to Updates, Enter, Right, Enter (Check now), Up Up Enter (Update
+   all), Left Enter (confirm), Esc Esc (Home). About 100 s later: the new version in
+   `HtpcLauncher.exe`'s file version, `Launcher x.y.z healthy` in the log, and a key press moving
+   the focus ring (the launcher really has the focus). A setting the release adds must also have
+   reached the box through the update (`Update-MachineSettings`).
+3. `Stop-IncusTestVM.ps1`. Times on the homelab: a restore 45 s, a setup 3 to 10 min (app
+   downloads), an update about 100 s.
 
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots
@@ -122,9 +160,9 @@ copies files in (Guest Service Interface). The guest's TV user has no password, 
 Direct needs a separate local admin in the guest: create one with a password you keep outside the
 repo. Checkpoints before risky steps; after restoring one, `ipconfig /renew` in the guest.
 
-Before a release, in the VM: a real TV Box Setup run from Downloads (the permission prompt, the
-wizard, Install, a restart into the launcher), `Test-Updates.ps1` and `Test-Library.ps1` elevated,
-an update from the previous release, and `setup.ps1 -Uninstall` run as the TV user.
+With Hyper-V, the same checklist applies; there a real TV Box Setup run from Downloads also shows
+the permission prompt (the Incus VM elevates without it), and `Test-Updates.ps1` and
+`Test-Library.ps1` run elevated.
 
 ### The test VM on an Incus server
 
@@ -238,6 +276,23 @@ exists for answer ISOs only; `setup\test` is in neither the setup exe nor setup.
   elevated with a split token (UAC on), start again at standard rights; with none (UAC off, the
   built-in Administrator) they run as usual in the user's folders, warned. **Test every change as a
   normal user AND elevated** (UAC on, and UAC off).
+- **The UAC boundary stays:** a window running as administrator, and Windows' permission prompt,
+  cannot take the launcher's controller input (Windows' UIPI, the secure desktop). That is by
+  design: never build a way around it. An app whose installer needs administrator rights and has
+  no silent mode is not offered (RetroBat was dropped for this).
+- **Every push:** watch the Tests workflow to the end (`gh run watch`) and fix a failure before
+  anything else. A flaky test is fixed at its cause and the fix proven, never by a longer wait.
+- **Edits and merges:** code changes with an editor that fails when the text is not found; after
+  any scripted edit, `git diff --stat` must list every file meant to change (a one-pair
+  `@(@('old','new'))` in Windows PowerShell flattens and silently changes nothing). A script that
+  edits and then commits starts with `$ErrorActionPreference = 'Stop'` (a failed .NET call does
+  not stop the next line in 5.1), and nothing is committed while `git grep -n '^<<<<<<< '` finds
+  anything.
+- **Helpers in worktrees** start from the branch as pushed to GitHub, not from local commits:
+  push first when a helper needs them.
+- **The box is the owner's TV:** builds and test runs on it make the TV lag. One build at a time,
+  a few helpers at most, and nothing ever shown on its screen during a test (a hidden desktop,
+  `CreateDesktop`, for anything that needs a real window).
 
 ### Working with the owner
 
@@ -247,10 +302,53 @@ exists for answer ISOs only; `setup\test` is in neither the setup exe nor setup.
 - Usage limits: slow down in proportion; never kill work abruptly. Near the limit, have each helper
   commit its work in progress with a per-item status (done / partly / not started) and stop.
 - The owner decides product questions; don't re-litigate decisions recorded in SPEC.md.
+- He sends findings in bursts, often while testing on the TV: acknowledge every point (a numbered
+  table with each one's status works), give a short status often, and don't go quiet.
+- Lean testing during work, full checks before a release (the VM checklist above). Batch fixes into
+  releases; tell him to update only after the post-release VM update has passed.
+- Look before claiming: logs on the box (`%LOCALAPPDATA%\HTPC\logs`), Windows' event logs, the
+  app's own logs. Say plainly what was and was not tested.
 
-## 8. Where 1.0 stands (28 September 2026)
+## 8. Where it stands (30 September 2026)
 
-Done:
+Released: 1.0.2 to 1.0.9, all immutable, each with the four assets. The owner's box runs the
+released launcher and updates from Settings › Updates (from 1.0.5 on boxes update themselves;
+`minimumFrom` 1.0.5). Since 1.0.8 every release has passed the VM checklist in section 6 before the
+owner is told to update.
+
+What the 29-30 Sept releases brought, from the owner's testing on the TV:
+- 1.0.7: the Home menu's resource view; Home follows what is installed both ways; catalog
+  `category` groups (Add a tile and setup by category, LT/RT jump); On this box icons; the website
+  form and Rename on the real on-screen keyboard (shorter, wraps, RT = symbols); YouTube Kids and
+  RetroBat removed; the self-test harness fixed (about 3 minutes now).
+- 1.0.8: Home shows three whole rows and a sliver, no fades; the Home menu compact; every plain
+  window maximized the first time it comes in front (`MaximizeOpenedWindow`); catalog `logoUrl`
+  for apps (YouTube's own); update notes line by line, scrolling in the question; the launcher is
+  "in front" only when shown (an update from desktop mode no longer leaves it unfocused); Steam
+  removed (too slow drawing Big Picture at 4K on the N97); display-signal changes logged
+  (`DisplayState`).
+- 1.0.9: the Home menu in three parts, X (not A) ends a program after asking; Playnite's stale
+  safe-start marker cleared (`launch.clearBeforeStart`); a lighter box (Print Spooler, DiagTrack
+  and the telemetry tasks off, Defender's scan at 04:00 at low priority, Edge pages asleep after
+  30 minutes, overlay planes off for the owner's brief black flashes: a restart after the update);
+  screen-off standby turns Bluetooth off when nothing is paired and wakes the processor less.
+
+In progress (30 Sept, for 1.0.10): Bluetooth off whenever nothing is paired (on while Settings ›
+Bluetooth is open, on for good once something is paired); the automatic keyboard only for real
+text fields (Twitch's switches opened it); the Home menu remembering where the focus was; the
+"installer finished on screen" mechanism removed (no catalog app uses it); updates re-applying
+setup's Update and Power steps too.
+
+Open:
+- The brief black flashes (under a second, random, in several apps, nothing in Windows' logs):
+  see whether 1.0.9's overlay-planes-off helped after the restart; if not, the HDMI link (a Premium
+  or Ultra High Speed cable, another TV port, the TV input's HDMI mode on Auto or 2.0). The
+  launcher logs any display-signal change (`Display signal:` lines).
+- On the owner's box: Steam and `C:\RetroBat` are still installed though no longer in the catalog.
+- From 28 Sept, not revisited: the owner confirming two-factor sign-in on GitHub; the real-phone
+  checks listed below; the open questions at the end.
+
+The 1.0 review (28 September 2026), for the record:
 - the nine-part 1.0 review (network security, privileges, host correctness, long-run
   resilience, setup and clean install, update pipeline, TV UI, phone app, readiness) and all its
   fixes, merged and on GitHub;
@@ -265,12 +363,10 @@ Done:
   release workflow), so nothing was published under those numbers. Immutable releases are on
   since 1.0.3, which the release workflow created, checked and marked latest with it on.
 
-Left, in order:
+Left from then:
 
 1. The owner confirms two-factor sign-in on the GitHub account.
-2. On the owner's box (on 0.1.1): install 1.0 with TV Box Setup rather than Settings › Updates,
-   because 0.1.1's own update code does that update and the new setup steps (Drivers, the phone
-   certificate in the machine store, the sign-in colour) come only from setup. Restart after.
+2. (Done: the owner's box runs 1.0.x since 29 Sept.)
 3. On real phones: QR pairing moves to tv.local only for this box; the iPhone Home Screen app's
    pairing text; quick reconnect after 15 s in the background; no zoom on the copy fields; Send
    link while disconnected keeps the link; the "went to sleep" cover in Sleep/Hibernate mode.

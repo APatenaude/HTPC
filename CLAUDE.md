@@ -18,7 +18,19 @@ loop, merging, releases, the test VM, where 1.0 stands), then [docs/SPEC.md](doc
 - UI: every view in the audit walker (`launcher/ui/audit.js`); run `launcher\dev\Test-Ui.ps1 -SelfTest`
   and look at screenshots before showing a change. Full check: `launcher\dev\Test-All.ps1`.
 - Merge one branch at a time in a scratch worktree (`launcher\dev\Merge-Branch.ps1`), keep both
-  sides of a conflict, run the tests before the main branch moves.
+  sides of a conflict, run the tests before the main branch moves. Nothing is committed while
+  `git grep -n '^<<<<<<< '` finds anything.
+- After every push, watch the Tests workflow to the end and report it. Flaky tests are fixed at
+  their cause, never with longer waits.
+- Every release gets the VM checklist in docs/DEVELOPMENT.md section 6 (the candidate's setup and
+  uninstall before `New-Release.ps1`; the real update from the previous release after it), and
+  the owner is told to update only after that. Release notes are baked into update.json: get them
+  right first.
+- Code edits with an editor that fails when the text is not found; after a scripted edit,
+  `git diff --stat` must show every file meant to change.
+- Never design around UAC: an elevated window or Windows' permission prompt can't take the
+  launcher's controller input, by design.
+- The dev box may be the owner's TV: few helpers, one build at a time, nothing shown on its screen.
 
 ## With the owner
 
@@ -29,3 +41,7 @@ loop, merging, releases, the test VM, where 1.0 stands), then [docs/SPEC.md](doc
   commit work in progress with a per-item status and stop.
 - Product decisions are the owner's; SPEC.md records them. Don't re-propose what was settled
   (e.g. waking from S3 with the controller: the dev box can't).
+- He sends findings in bursts: acknowledge every point (a numbered table with statuses), give short
+  statuses often, and say plainly what was and wasn't tested.
+- New machine or picking the work up: docs/DEVELOPMENT.md section 1 ("What is not in git") and
+  section 8 (where it stands).
