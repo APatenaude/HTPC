@@ -7,7 +7,7 @@ Test-Updates.ps1, LauncherTests\Program.cs). No line numbers here: they move.
 
 Short paths: `src/` = `launcher/src/Launcher/`, `ui/` = `launcher/ui/`, `tests/` = `launcher/tests/`.
 The why of each feature: [launcher/README.md](../launcher/README.md), [setup/README.md](../setup/README.md),
-[SPEC.md](SPEC.md). The catalog's fields: `setup/catalog.json`'s "about".
+[SPEC.md](SPEC.md). The catalog's fields: [CATALOG.md](CATALOG.md).
 
 ## Checks, tools and logs at a glance
 
@@ -311,7 +311,8 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 
 ## Catalog fields (setup/catalog.json)
 
-- One list for setup's picks, the library and the launcher. ASCII, CRLF. Field rules: the "about" line.
+- One list for setup's picks, the library and the launcher. ASCII, CRLF. Each field and its rules:
+  [CATALOG.md](CATALOG.md).
 - Launcher: `AppManager.Parse` -> `CatalogApp` record; validators `QuitWhenWindowlessOf`, `QuitArgsOf`,
   `OwnProcessesOf`, `CropTopOf`, `LaunchEnv`, `ClearBeforeStartOf`, `CategoriesOf`, `MenuKeys.Parse`; also
   `AutostartGuard.Load` (autostart), `PhoneAppKeys` (phoneKeys), `LibraryService` (install.firstRun,
@@ -326,7 +327,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 ## Recipes
 
 ### Add a catalog field
-1. `setup/catalog.json`: the value on the apps that need it (ASCII, CRLF); its rule in the field notes.
+1. `setup/catalog.json`: the value on the apps that need it (ASCII, CRLF); its rule in docs/CATALOG.md.
 2. Launcher: a parameter on `CatalogApp` and its parsing in `AppManager.Parse`, through an `internal
    static XxxOf(JsonElement)` validator that returns off/null for anything out of range.
 3. Setup side, if a script needs it: the reader in `AppCore.ps1` / `AppAutostart.ps1` / `Install-Apps.ps1`.

@@ -3,8 +3,9 @@
 Everything needed to pick the work up on another machine: the tools, the everyday loop, how
 changes are checked and merged, how a release goes out, the test VM, the rules this project runs
 by, and where 1.0 stands. The design is in [SPEC.md](SPEC.md); the files are described in
-[launcher/README.md](../launcher/README.md) and [setup/README.md](../setup/README.md). The owner's
-page is the [README](../README.md).
+[launcher/README.md](../launcher/README.md) and [setup/README.md](../setup/README.md); where each
+feature's code, tests and log lines are, and recipes for the usual changes, in [CODEMAP.md](CODEMAP.md);
+the app catalog's fields in [CATALOG.md](CATALOG.md). The owner's page is the [README](../README.md).
 
 ## 1. A new development machine
 
