@@ -43,6 +43,9 @@ $elevated = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Princi
 $me = $id.User
 
 $work = Join-Path $env:TEMP 'htpc-rightstest'
+# Elevated, setup's Common.ps1 (in the scripts this runs) makes Program Files\HTPC\Setup\temp (its
+# TEMP): the first of those folders this run made goes at the end, never one that was there.
+$pfMade = @('HTPC', 'HTPC\Setup', 'HTPC\Setup\temp' | ForEach-Object { Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $_ } | Where-Object { -not (Test-Path -LiteralPath $_) } | Select-Object -First 1)
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force $work | Out-Null
 
@@ -227,6 +230,7 @@ try {
     }
 } finally {
     if (-not $Keep) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+    foreach ($d in $pfMade) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host ''

@@ -54,6 +54,9 @@ $lib = Join-Path $repo 'setup\lib'
 
 $work = Join-Path $env:TEMP 'htpc-updtest'
 $bin = Join-Path $work 'bin'
+# Elevated, setup's Common.ps1 (in the scripts this runs) makes Program Files\HTPC\Setup\temp (its
+# TEMP): the first of those folders this run made goes at the end, never one that was there.
+$pfMade = @('HTPC', 'HTPC\Setup', 'HTPC\Setup\temp' | ForEach-Object { Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $_ } | Where-Object { -not (Test-Path -LiteralPath $_) } | Select-Object -First 1)
 $pass = 0; $fail = 0
 function Check([bool]$ok, [string]$what) {
     if ($ok) { $script:pass++; Write-Host "  PASS  $what" } else { $script:fail++; Write-Host "  FAIL  $what" -ForegroundColor Red }
@@ -107,7 +110,12 @@ try {
     if (-not $Keep) {
         [void](Wait-For { (& $fromWork).Count -eq 0 } 5)
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $work) {
+            $left = @(Get-ChildItem -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName.Substring($work.Length + 1) })
+            Write-Host "  WARNING: $work could not be removed (still there: $($left -join ', ')...)" -ForegroundColor Yellow
+        }
     }
+    foreach ($d in $pfMade) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host ''
