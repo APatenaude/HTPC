@@ -21,7 +21,6 @@ sealed partial class MainForm
             case "library.install": StartLibraryJob(Str("id")!, "install", m.TryGetProperty("addToHome", out var ah) && ah.GetBoolean()); break;
             case "library.uninstall": StartLibraryJob(Str("id")!, "uninstall", false); break;
             case "library.upgrade": StartLibraryJob(Str("id")!, "upgrade", false); break;
-            case "library.showInstaller": if (!ShowInstaller()) toastWarn("The installer isn’t open"); break;
             case "library.startMenu": PushStartMenu(); break;
             case "library.addProgram": AddProgramTile(Str("name")!); break;
             case "library.addWebsite": AddWebsiteTile(Str("name"), Str("url")); break;
@@ -315,77 +314,6 @@ sealed partial class MainForm
         PushLibraryCatalog();
         PushTiles();
         if (ok) RefreshLogos(); // the app just installed has its icon now
-        if (ReferenceEquals(installerShown, job)) InstallerDone(job, ok);
-    }
-
-    // --- An installer the user finishes on screen (install.interactive: RetroBat) --------------
-    // Its window comes up over the TV as an app's does (Native.ForceForeground, the launcher
-    // hidden behind it: no desktop mode, Explorer is not needed), and while it is in front the
-    // controller is on the plain Mouse preset (UpdateMapper). Home works over it as over an app,
-    // and B goes back to it: the Home menu's current is InstallerId, as the desktop's is
-    // DesktopMode.Id. A on its library card or its home tile brings it up again (library.js). When
-    // it is done the home screen comes back, on the app's tile (or on the one saying it did not
-    // install: A tries again).
-
-    /// <summary>The Home menu's "current" when it was opened over the installer.</summary>
-    const string InstallerId = "installer";
-    LibraryJob? installerShown;   // the job whose installer came up (once each: its "wizard" progress repeats)
-    bool installerSetAside;       // an app was opened over it since: its end does not take the user from that app
-
-    void OnInstallerUp(LibraryJob job)
-    {
-        if (job.BoxJob || job.Action != "install" || ReferenceEquals(installerShown, job)) return;
-        installerShown = job;
-        installerSetAside = false;
-        _ = BringUpInstaller(job);
-    }
-
-    // Its window can take a while: a 2 GB installer reads itself first, and a permission prompt,
-    // if it asks for one, waits for an answer.
-    async Task BringUpInstaller(LibraryJob job)
-    {
-        for (var waited = 0; waited < 300_000; waited += 500)
-        {
-            await Task.Delay(500);
-            if (!ReferenceEquals(library.Current, job)) return;
-            if (library.InstallerWindow() == IntPtr.Zero) continue;
-            // Not in standby (the TV is off): its tile brings it up once the user is back.
-            if (standby.Active) { Log.Info($"Library: the {job.Id} installer came up in standby; left behind"); return; }
-            ShowInstaller();
-            return;
-        }
-        Log.Warn($"Library: the {job.Id} installer showed no window in 5 minutes");
-    }
-
-    /// <summary>The running installer's window in front of everything; false when it has none.</summary>
-    bool ShowInstaller()
-    {
-        var window = library.InstallerWindow();
-        if (window == IntPtr.Zero) return false;
-        var how = Native.ForceForeground(window);
-        Log.Info($"Library: installer in front (foreground {how})");
-        installerSetAside = false;
-        StepAside(InstallerId);
-        return true;
-    }
-
-    /// <summary>B in the Home menu opened over the installer: back to it, or home if it has gone.</summary>
-    void BackToInstaller()
-    {
-        if (ShowInstaller()) return;
-        Post(new { type = "show", view = "home" });
-        Reveal();
-    }
-
-    bool InstallerInFront() => !LauncherActive && library.IsInstallerProcess(Native.ProcessOf(Native.GetForegroundWindow()));
-
-    void InstallerDone(LibraryJob job, bool ok)
-    {
-        installerShown = null;
-        lastForeground = IntPtr.Zero;   // the controller's map is chosen again (UpdateMapper)
-        if (LauncherActive || standby.Active || desktop.Active || installerSetAside) return;
-        Post(new { type = "show", view = "home", focus = ok ? $"tile:{job.Id}" : $"tile:~{job.Id}" });
-        Reveal();
     }
 
     void toast(string text, string? kind) => Post(new { type = "toast", text, kind });

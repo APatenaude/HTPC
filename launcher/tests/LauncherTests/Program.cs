@@ -1044,50 +1044,31 @@ Console.WriteLine("== Keys for an app's own menus (menuKeys)");
     Check(MenuKeys.Parse(L("""{ "start": "do:menu", "whileClass": "Qt*QWindow*" }""")) is null, "no key left: no menu keys");
 }
 
-// ---------------------------------------------------------------- An installer finished on screen
-Console.WriteLine("== Catalog: an installer the user finishes on screen (install.interactive)");
+// ---------------------------------------------------------------- No installer finished on screen
+// install.interactive (an installer the user finished on screen, with install.folder and
+// install.keep for its uninstall) went with RetroBat, its only user: neither setup nor the
+// launcher knows them now, so no catalog entry may use them.
+Console.WriteLine("== Catalog: no installer finished on screen (install.interactive, folder, keep: gone)");
 {
     var root = new DirectoryInfo(AppContext.BaseDirectory);
     while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-    var catalogPath = Path.Combine(root!.FullName, "setup", "catalog.json");
-    var catalogApps = new AppManager(catalogPath);
-    Check(catalogApps.Catalog.Where(a => a.InstallInteractive).All(a => a.Scope == "user" && !a.IsWebsite),
-        "every installer finished on screen runs as the user (SYSTEM has no screen)");
-    Check(catalogApps.Get("vlc") is { InstallInteractive: false }, "a winget app is not interactive");
-    // The catalog has none since RetroBat went (29 Sept 2026): one made up here, as RetroBat's was.
-    var interactiveCatalog = Path.Combine(Path.GetTempPath(), $"htpc-interactive-{Environment.ProcessId}.json");
-    File.WriteAllText(interactiveCatalog, """
-        { "apps": [ { "id": "wizard", "name": "Wizard", "type": "app", "preset": "controller",
-          "launch": { "exe": "C:\\Wizard\\wizard.exe" },
-          "install": { "source": "github", "scope": "user", "repo": "example/wizard", "asset": "^Wizard-setup\\.exe$",
-                       "interactive": true, "folder": "C:\\Wizard", "keep": [ "saves" ] } } ] }
-        """);
-    try
-    {
-        Check(new AppManager(interactiveCatalog).Get("wizard") is { Installable: true, InstallInteractive: true, Scope: "user", InstallSource: "github" },
-            "install.interactive read: a GitHub installer finished on screen, as the user (not through the SYSTEM task)");
-    }
-    finally { File.Delete(interactiveCatalog); }
+    using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(root!.FullName, "setup", "catalog.json")));
+    var found = doc.RootElement.GetProperty("apps").EnumerateArray()
+        .Where(a => a.TryGetProperty("install", out var i) && i.ValueKind == JsonValueKind.Object
+            && (i.TryGetProperty("interactive", out _) || i.TryGetProperty("folder", out _) || i.TryGetProperty("keep", out _)))
+        .Select(a => a.GetProperty("id").GetString()).ToList();
+    Check(found.Count == 0, $"no catalog entry has install.interactive, install.folder or install.keep ({string.Join(", ", found)})");
 
-    // While it is in front the controller is on the plain Mouse preset, whatever Other windows'
-    // map says, and nothing can edit that.
+    // A settings file may name "_installer", the map launchers 1.0.7 to 1.0.9 reserved for such
+    // an installer: the other maps are read as before, and it goes at the next save.
+    var saved = new List<JsonElement>();
     var stored = JsonDocument.Parse("""{ "_other": { "preset": "keyboard" }, "_installer": { "preset": "controller" } }""").RootElement.Clone();
-    var maps = new ButtonMapStore(stored, _ => { });
-    var wizardMap = maps.For(ButtonMapStore.Installer, "mouse");
-    Check(wizardMap is { Name: "mouse", LeftStick: StickRole.Pointer } && wizardMap.Buttons[PadControl.R3] is CommandAction { Command: "keyboard" },
-        "the installer's map: the plain Mouse preset (pointer, R3 the keyboard), not a stored one");
-    Check(maps.For(ButtonMapStore.Other, "mouse")?.Name == "keyboard", "... while Other windows keeps its own");
-    maps.SetPreset(ButtonMapStore.Installer, "keyboard", "mouse");
-    Check(!maps.SetControl(ButtonMapStore.Installer, "a", "key:Space", "mouse") && maps.For(ButtonMapStore.Installer, "mouse")?.Name == "mouse",
-        "the installer's map cannot be edited");
-
-    // The installer's processes: the roots running now and every process they started.
-    using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping -n 4 127.0.0.1 >nul") { CreateNoWindow = true, UseShellExecute = false })!;
-    var me = (uint)Environment.ProcessId;
-    var tree = Native.ProcessTree(new[] { me, 0xFFFFFFF0u });
-    Check(tree.Contains(me) && tree.Contains((uint)child.Id), "process tree from several roots: the running root and its child");
-    Check(!tree.Contains(0xFFFFFFF0u), "process tree from several roots: a root that is not running is left out");
-    try { child.Kill(entireProcessTree: true); } catch (Exception) { }
+    var maps = new ButtonMapStore(stored, saved.Add);
+    Check(maps.For(ButtonMapStore.Other, "mouse")?.Name == "keyboard", "old settings with an _installer map: Other windows' map still read");
+    Check(maps.PresetOf("_installer", "mouse") == "mouse", "... the _installer map is not taken as a tile's");
+    Check(maps.SetControl(ButtonMapStore.Other, "a", "key:Space", "mouse") && saved.Count == 1
+        && saved[0].TryGetProperty(ButtonMapStore.Other, out _) && !saved[0].TryGetProperty("_installer", out _),
+        "... and the next save keeps Other windows' map, without it");
 }
 
 // ---------------------------------------------------------------- Logos (LogoTests.cs)

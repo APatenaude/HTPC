@@ -76,7 +76,7 @@ if ($DryRun) {
     if ($verb -in 'install', 'uninstall', 'upgrade', 'firewall') {
         $app = Get-JobApp $arg
         $scope = Get-AppRunScope $app
-        Write-Host "OK: $verb '$($app.id)' ($($app.install.source)$(if (Test-InteractiveInstall $app) { ', finished on screen' }), scope $scope)"
+        Write-Host "OK: $verb '$($app.id)' ($($app.install.source), scope $scope)"
     } else {
         Write-Host "OK: $verb$(if ($arg) { " '$arg'" })"
     }

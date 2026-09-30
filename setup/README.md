@@ -35,7 +35,7 @@ it with `-Unattended -Only AutoLogon,Power`, then opens TV Box Setup from the me
 |---|---|---|
 | RestorePoint | (in setup.ps1) | System Restore on for C:, restore point first |
 | Winget | `lib/Install-Winget.ps1` | winget from the microsoft/winget-cli GitHub release (LTSC has no Store), when it is missing or does not answer (`-IfMissing`: its updates are the `winget-update` job's, and a run again needs no GitHub) |
-| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC; written by the launcher as the user at its start: nothing elevated writes the user's profile), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service; every installed catalog app's, on each run, so a rerun puts back a missing one). Apps that refuse to install elevated (`install.elevated = false`, Spotify) and installers the user finishes on screen (`install.interactive`) are skipped here and installed from the library instead. Offline, the apps already there are dealt with and the rest named. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
+| Apps | `lib/Install-Apps.ps1` | apps from `catalog.json`: the six default picks, or `-Apps kodi,vlc`, using the shared engine in `lib/AppCore.ps1`. Nothing pops up on the TV: apps an installer starts are closed, `install.firstRun` files answer first-run questions (VLC; written by the launcher as the user at its start: nothing elevated writes the user's profile), `install.blockInbound` programs get a firewall Block rule so Windows does not ask to allow them (Stremio's service; every installed catalog app's, on each run, so a rerun puts back a missing one). Apps that refuse to install elevated (`install.elevated = false`, Spotify) are skipped here and installed from the library instead. Offline, the apps already there are dealt with and the rest named. Then nothing any catalog app set up starts by itself (`lib/AppAutostart.ps1`, see "Apps that start by themselves") |
 | Codecs | `lib/Install-Codecs.ps1` | HEVC Video Extensions for Edge, straight from Microsoft's Store delivery servers (no Store app), newest version for this build, SHA-256 and Microsoft signature checked, for every user |
 | Edge | `lib/Set-EdgePolicy.ps1` | Google search (with fake MDM enrollment); force-installed extensions: uBlock Origin Lite (its "annoyances-others" list on too, which hides Google's "Switch to Chrome", and no first-run page), FrankerFaceZ (Twitch), Video Speed Controller; no first-run, promotions, shopping, sidebar or telemetry; never offers to save a password (one saved before fills without asking for the Windows password); autoplay and hardware acceleration on; nothing of Edge running with no window open (`StartupBoostEnabled` and `BackgroundModeEnabled` 0, the startup boost's HKCU Run value `MicrosoftEdgeAutoLaunch_<hash>` removed); pages off screen asleep after 30 minutes (`SleepingTabsEnabled` 1, `SleepingTabsTimeout` 1800: a tab behind another, or a window covered by another window, frozen until shown again; never the page on screen or one playing sound; a website tile under the launcher's Home screen kept running in the test VM), energy saver off (`EfficiencyModeEnabled` 0: on a PC with no battery it is otherwise off or always on, and on it slows the page in front too, videos included) |
 | Power | `lib/Set-Power.ps1` | Windows never sleeps on its own (the launcher's stay-awake standby); disk never powers down; no self-wake; keyboard and WoL wake, not mouse |
@@ -117,20 +117,6 @@ elevation, run by the launcher itself; their firewall Block rules still need ele
 `firewall:<id>` job adds them through the task first (resolving the interactive user's profile so
 `%LOCALAPPDATA%` points at the real user, not SYSTEM). `Invoke-AppJob.ps1 -DryRun -Catalog <path>`
 validates a token and prints what it would do without installing anything (for tests).
-
-An installer with a wizard and no silent mode (`install.interactive`; none in the catalog
-now: RetroBat's was one, dropped on 29 Sept 2026 because it needs administrator rights) is a per-user job too, finished by the user on screen (`lib/AppCore.ps1`,
-`Install-AppInteractive`): the release asset is downloaded and its GitHub SHA-256 checked as for
-any GitHub app, then started as the signed-in user, not elevated (a UAC prompt shows if the
-installer itself asks for administrator rights). The job waits for it and for what it started, up
-to 90 minutes, saying every 30 s that it is still there (progress phase `wizard`, "Finish the
-installer on screen"); the launcher brings its window up over the TV, the controller on the Mouse
-preset. Installed = `launch.exe` is there afterwards; otherwise the job fails with "The installer
-was closed before it finished". What its last page started from the app's folder is closed (the
-tile opens it), and the 2 GB installer is deleted. Such an installer writes no uninstall entry:
-`install.folder` (RetroBat's was `C:\RetroBat`) is removed by `uninstall:<id>`, as the user, never through a
-link (`Remove-Tree`), keeping `install.keep` (for RetroBat: `roms`, `bios`, `saves`, `screenshots`).
-The Updates screen does not check it (such an app updates from its own menu).
 
 The updates add these verbs (Settings > Updates; launcher/README.md, "Updates"): all but the last
 run as SYSTEM, take no argument unless shown, and first put right an interrupted launcher update.

@@ -85,11 +85,10 @@ function Save-WithProgress([string]$Url, [string]$OutFile, [long]$Size, $App, $R
     } finally { $resp.Dispose() }
 }
 
-# Closes what an installer started (a program that did not run before, from the app's folder:
-# launch.exe's, or -Dir).
-function Stop-StartedByInstaller($App, [int[]]$Before, [string]$Dir) {
-    if (-not $Dir -and -not $App.launch.exe) { return }
-    $dir = if ($Dir) { $Dir.TrimEnd('\') } else { Split-Path ([Environment]::ExpandEnvironmentVariables($App.launch.exe)) -Parent }
+# Closes what an installer started (a program that did not run before, from the app's folder).
+function Stop-StartedByInstaller($App, [int[]]$Before) {
+    if (-not $App.launch.exe) { return }
+    $dir = Split-Path ([Environment]::ExpandEnvironmentVariables($App.launch.exe)) -Parent
     Start-Sleep -Seconds 2
     $started = Get-Process | Where-Object { $Before -notcontains $_.Id -and $_.Path -and $_.Path.StartsWith($dir + '\', [StringComparison]::OrdinalIgnoreCase) }
     foreach ($p in $started) {
@@ -211,146 +210,10 @@ function Disable-AppSelfUpdate($App, [string]$Dir) {
     }
 }
 
-# --- install.interactive: an installer the user finishes on screen (RetroBat) ------------------
-#
-# Some installers have a wizard and no silent mode (RetroBat's: only -lang). The library still
-# installs them from the TV: the job (install.scope user: as the signed-in user, not elevated)
-# downloads the release asset and checks its SHA-256 as for any GitHub app, starts it on the
-# user's screen and waits for it; the launcher brings its window to the front with the controller
-# on the Mouse preset (LibraryService, MainForm.Library.cs). If the installer itself asks for
-# administrator rights, Windows' permission prompt shows. Installed = launch.exe is there after.
-# Setup never runs one (it is unattended): the library only.
-#
-# install.folder is where such an installer puts the app when it writes no uninstall entry of its
-# own (RetroBat: C:\RetroBat): the uninstall removes that folder, never through a link, and keeps
-# install.keep, the user's own files in it (RetroBat's games, BIOS files, saves, screenshots).
-
-$InteractiveLimit = [TimeSpan]::FromMinutes(90)   # a wizard left open longer is closed
-
-function Test-InteractiveInstall($App) {
-    [bool]($App.install -and $App.install.PSObject.Properties['interactive'] -and $App.install.interactive -eq $true)
-}
-
-# install.folder, checked: a plain local folder that holds launch.exe, never a drive's root, nor
-# Windows', Program Files', ProgramData's or the user folders' (nor a folder above one of them).
-function Get-AppFolder($App) {
-    $folder = [string]$App.install.folder
-    if ($folder -notmatch '^[A-Za-z]:(\\[A-Za-z0-9 ._()-]{1,64})+$' -or $folder -match '\\\.+(\\|$)') { throw "unsafe install.folder '$folder'" }
-    $inside = $folder + '\'
-    $exe = [Environment]::ExpandEnvironmentVariables([string]$App.launch.exe)
-    if (-not $exe.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)) { throw "install.folder '$folder' does not hold $exe" }
-    $users = if ($env:USERPROFILE) { Split-Path $env:USERPROFILE -Parent } else { $null }
-    foreach ($system in @($env:SystemRoot, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:USERPROFILE, $users, $env:PUBLIC) | Where-Object { $_ }) {
-        if (($system.TrimEnd('\') + '\').StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)) { throw "install.folder '$folder' is or holds $system" }
-    }
-    $folder
-}
-
-# Waits until the installer and whatever it started are gone (a wizard may start itself again,
-# elevated say, and exit), but not the app it installed: what runs from the app's folder (its last
-# page's "start it now") is the app's. Says every 30 s that it is still there: the launcher gives
-# up on a job that says nothing for 10 minutes. After $InteractiveLimit the installer is closed.
-function Wait-Installer([Diagnostics.Process]$Process, [datetime]$Started, [string]$Folder, $Report, [string]$Message) {
-    $ours = @{ [int]$Process.Id = $true }
-    $inside = $Folder + '\'
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    $said = [TimeSpan]::Zero
-    while ($true) {
-        $all = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate, ExecutablePath, Name -ErrorAction SilentlyContinue)
-        do {
-            $grew = $false
-            foreach ($p in $all) {
-                if (-not $ours.ContainsKey([int]$p.ProcessId) -and $ours.ContainsKey([int]$p.ParentProcessId) -and $p.CreationDate -ge $Started) {
-                    $ours[[int]$p.ProcessId] = $true; $grew = $true
-                }
-            }
-        } while ($grew)
-        # Not a console host either: it stays while the app shares its console, and is not the installer.
-        $left = @($all | Where-Object { $ours.ContainsKey([int]$_.ProcessId) -and $_.Name -ne 'conhost.exe' -and
-            -not ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)) })
-        # The installer's own end as well (a failed process list must not end the wait early).
-        $ended = try { $Process.HasExited } catch { -not @($all | Where-Object { [int]$_.ProcessId -eq $Process.Id }).Count }
-        if (-not $left.Count -and $ended) { return }
-        if ($clock.Elapsed -gt $InteractiveLimit) {
-            foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
-            throw "The installer was left open for over $([int]$InteractiveLimit.TotalMinutes) minutes, so it was closed"
-        }
-        if ($clock.Elapsed - $said -ge [TimeSpan]::FromSeconds(30)) { $said = $clock.Elapsed; Report-Phase $Report 'wizard' $null $Message }
-        Start-Sleep -Seconds 5
-    }
-}
-
-function Install-AppInteractive($App, $Report, $WorkDir) {
-    if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18') {
-        throw "$($App.name)'s installer is finished on the user's screen: it cannot run as SYSTEM (install.scope must be user)"
-    }
-    $folder = Get-AppFolder $App
-    $exe = [Environment]::ExpandEnvironmentVariables($App.launch.exe)
-    if (Test-Path -LiteralPath $exe) { Write-Same "$($App.name) already installed ($folder)"; return }
-
-    $before = @(Get-Process | Select-Object -ExpandProperty Id)
-    $download = Save-GithubAsset $App $Report $WorkDir
-    $message = 'Finish the installer on screen'
-    try {
-        Report-Phase $Report 'wizard' $null $message
-        Write-Host "  Starting $(Split-Path $download.File -Leaf) ($($download.Tag)) on the user's screen"
-        $started = Get-Date
-        # Through the shell (ShellExecute): a normal window, and Windows' permission prompt if the
-        # installer asks for administrator rights. Declined, nothing was installed.
-        try { $process = Start-Process -FilePath $download.File -PassThru }
-        catch {
-            $e = $_.Exception
-            while ($e -and $e -isnot [ComponentModel.Win32Exception]) { $e = $e.InnerException }
-            if ($e -and $e.NativeErrorCode -eq 1223) { throw 'The installer was closed before it finished' }   # ERROR_CANCELLED
-            throw
-        }
-        Wait-Installer $process $started $folder $Report $message
-    } finally {
-        Remove-Item -LiteralPath $download.File -Force -ErrorAction SilentlyContinue   # 2 GB for RetroBat
-    }
-    # The app, if its last page started it: the launcher opens it from its tile.
-    Stop-StartedByInstaller $App $before $folder
-    if (-not (Test-Path -LiteralPath $exe)) { throw 'The installer was closed before it finished' }
-    Write-Change "$($App.name) $($download.Tag) installed in $folder"
-}
-
-# The uninstall of an app that install.folder names: what runs from the folder is closed, then the
-# folder goes, as the user, without ever going through a link (Remove-Tree, lib\Uninstall-Htpc.ps1,
-# which the uninstall job loads: RetroBat's roms folder is often a link to another disk), except
-# install.keep's folders. A folder that is itself a link: the link only.
-function Remove-AppFolder($App, $Report) {
-    if (-not (Get-Command Remove-Tree -ErrorAction SilentlyContinue)) { throw 'Remove-Tree (lib\Uninstall-Htpc.ps1) is not loaded' }
-    $folder = Get-AppFolder $App
-    $item = Get-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
-    if (-not $item) { Write-Same "$folder absent"; return }
-    $inside = $folder + '\'
-    $running = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase) })
-    foreach ($p in $running) {
-        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        Write-Change "closed $($p.ProcessName), which ran from $folder"
-    }
-    if ($running) { Start-Sleep -Seconds 2 }
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Remove-Tree $folder; Write-Change "$folder was a link: the link removed, not what it leads to"; return }
-
-    $keep = @($App.install.keep | Where-Object { $_ })
-    foreach ($name in $keep) { if ($name -notmatch '^[A-Za-z0-9 ._-]{1,64}$' -or $name -match '^\.+$') { throw "unsafe install.keep '$name'" } }
-    $left = @(); $kept = @()
-    foreach ($child in @(Get-ChildItem -LiteralPath $folder -Force)) {
-        if ($keep -contains $child.Name) { $kept += $child.Name; continue }
-        Report-Phase $Report 'install' $null "Removing $($App.name)"   # a big folder takes a while
-        try { Remove-Tree $child.FullName } catch { $left += $child.Name }
-    }
-    if (-not @(Get-ChildItem -LiteralPath $folder -Force).Count) { [IO.Directory]::Delete($folder) }
-    if ($left) { throw "Some of $folder could not be removed: $($left -join ', ')" }
-    Write-Change "$($App.name) removed from $folder$(if ($kept) { " (kept: $($kept -join ', '))" })"
-}
-
-# GitHub entries: a zip unpacked into Program Files\<installDir> (VacuumTube), an installer run
-# silently, or one the user finishes on screen (install.interactive, above). installDir must be a
-# single safe path segment. $Staging must be an admin-only folder.
+# GitHub entries: a zip unpacked into Program Files\<installDir> (VacuumTube), or an installer run
+# silently. installDir must be a single safe path segment. $Staging must be an admin-only folder.
 function Install-AppGithub($App, $Report, $WorkDir) {
     $i = $App.install
-    if (Test-InteractiveInstall $App) { Install-AppInteractive $App $Report $WorkDir; return }
     if ($i.installDir) {
         if ($i.installDir -notmatch '^[A-Za-z0-9 ._-]{1,64}$') { throw "unsafe installDir '$($i.installDir)'" }
         $dir = Join-Path $env:ProgramFiles $i.installDir
@@ -399,8 +262,7 @@ function Install-App($App, $Report, $WorkDir) {
 }
 
 # Uninstalls one app: winget uninstall for winget entries, folder + shortcut removal for a
-# GitHub-zip entry (VacuumTube), install.folder's removal (RetroBat: Remove-AppFolder). Firewall
-# rules added at install are removed.
+# GitHub-zip entry (VacuumTube). Firewall rules added at install are removed.
 function Uninstall-App($App, $Report) {
     Report-Phase $Report 'install' $null "Removing $($App.name)"
     switch ($App.install.source) {
@@ -418,8 +280,6 @@ function Uninstall-App($App, $Report) {
                 $dir = Join-Path $env:ProgramFiles $App.install.installDir
                 if (Test-Path $dir) { Remove-Item $dir -Recurse -Force; Write-Change "$dir removed" }
                 Remove-StartMenuShortcut $App.install.installDir
-            } elseif ($App.install.PSObject.Properties['folder'] -and $App.install.folder) {
-                Remove-AppFolder $App $Report
             } else {
                 $entry = Get-InstalledProgram $App.install.displayName | Select-Object -First 1
                 if ($entry -and $entry.UninstallString) {
