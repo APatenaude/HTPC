@@ -243,6 +243,17 @@ function Get-BoxProcesses([string]$Root) {
     @(Get-Process -Name 'Htpc*' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", 'OrdinalIgnoreCase') })
 }
 
+# What a fake box is doing, for a check that found no launcher running: its watchdog, the job's
+# pause and watch files, its launchers, and the exits its watchdog saw.
+function Get-BoxState([string]$Root) {
+    $state = Join-Path $Root 'PD\HTPC\state'
+    $file = { param($n) $f = Join-Path $state $n; if (Test-Path -LiteralPath $f) { try { [IO.File]::ReadAllText($f).Trim() } catch { '(unreadable)' } } else { 'none' } }
+    $exits = Join-Path $Root 'watchdog-exits.log'
+    "watchdog $(Get-BoxWatchdog $Root), pause $(& $file 'watchdog-pause'), watch $(& $file 'watchdog-watch'), " +
+    "launchers $(@(Get-BoxProcesses $Root | Where-Object Name -eq 'HtpcLauncher' | ForEach-Object { "$($_.Id) $($_.Path.Substring($Root.Length))" }) -join ', '), " +
+    "exits $(if (Test-Path -LiteralPath $exits) { @(Get-Content -LiteralPath $exits) -join ', ' })"
+}
+
 # The id of the watchdog running from a fake box (0 when none; there is at most one).
 function Get-BoxWatchdog([string]$Root) { @(@(Get-BoxProcesses $Root | Where-Object Name -like 'HtpcWatchdog*' | ForEach-Object Id) + 0)[0] }
 

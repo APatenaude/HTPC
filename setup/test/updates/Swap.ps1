@@ -45,7 +45,7 @@ $cases = @(New-Case 'swap-ok' @(
             Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 20 },
         { param($c)
             $root = $c.Root
-            Note $c ($c.RolledBack -and $c.Held) "rollback on request: back on 0.1.0 ($($c.R))"
+            Note $c ($c.RolledBack -and $c.Held) "rollback on request: back on 0.1.0 ($($c.R))$(if (-not $c.Held) { ' -- not running: ' + (Get-BoxState $c.Root) })"
             $wd = "HtpcWatchdog.exe $(Get-BoxFileVersion $root 'HtpcWatchdog.exe'), .bad $(Get-BoxFileVersion $root 'HtpcWatchdog.bad.exe'), .prev '$(Get-BoxFileVersion $root 'HtpcWatchdog.prev.exe')'"
             Note $c ($wd -eq "HtpcWatchdog.exe 0.1.0, .bad 0.2.0, .prev ''" -and (Get-BoxWatchdog $root) -eq $c.Watchdog) "  the old watchdog back in place (still the one running), the release's kept as .bad ($wd)"
             # Its reconcile (no update under way) brought the task's bootstrap in line with lib\.
@@ -71,7 +71,7 @@ foreach ($kind in @(@{ Mode = 'crash'; Version = '0.3.0'; HealthyWait = 25 }, @{
             Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 20 },
         { param($c)
             $root = $c.Root
-            Note $c $c.Held "  and 0.1.0 runs again"
+            Note $c $c.Held "  and 0.1.0 runs again$(if (-not $c.Held) { ' -- not running: ' + (Get-BoxState $c.Root) })"
             # The crash loop the job rolled back was never the watchdog's to act on (no restart of
             # the box, no desktop): the watch covered every exit from the swap on, the rollback's
             # pause the one it stopped.
@@ -99,7 +99,7 @@ $cases += New-Case 'swap-watchdog-new' @(
     { param($c)
         $root = $c.Root
         $wd = "HtpcWatchdog.exe '$(Get-BoxFileVersion $root 'HtpcWatchdog.exe')', .bad $(Get-BoxFileVersion $root 'HtpcWatchdog.bad.exe'), .prev $(Get-BoxFileVersion $root 'HtpcWatchdog.prev.exe')"
-        Note $c ($c.Journal -eq 'rolledback, created watchdog' -and $c.Held -and $wd -eq "HtpcWatchdog.exe '', .bad 0.3.0, .prev 0.1.0" -and $c.Watchdog -and (Get-BoxWatchdog $root) -eq $c.Watchdog) "a watchdog new on the box, then a crash: rolled back, the new watchdog removed again (kept as .bad), the one running left; 0.1.0 runs ($($c.Journal); $wd)"
+        Note $c ($c.Journal -eq 'rolledback, created watchdog' -and $c.Held -and $wd -eq "HtpcWatchdog.exe '', .bad 0.3.0, .prev 0.1.0" -and $c.Watchdog -and (Get-BoxWatchdog $root) -eq $c.Watchdog) "a watchdog new on the box, then a crash: rolled back, the new watchdog removed again (kept as .bad), the one running left; 0.1.0 runs ($($c.Journal); $wd)$(if (-not $c.Held) { ' -- not running: ' + (Get-BoxState $c.Root) })"
         $counted = Get-CountedExits $root
         Note $c ($counted.Count -eq 0 -and (Get-Leftovers $root).Count -eq 0) "  no exit counted by the watchdog, no .new left ($($counted -join '; '))" }) @{ WatchdogFile = 'HtpcWatchdog.prev.exe' }
 
