@@ -7,8 +7,9 @@
     The launcher's layers over apps (the brightness layer, alert cards, the volume indicator)
     are not in it: they are kept out of every screen capture, so the Home menu's backdrop never
     has them (ScreenCapture.LeaveOut). LauncherTests draws them into PNGs instead.
+    Also a copy at -Scale (default half: 960 wide), <name>-small.png, the one to look at; 1: none.
 #>
-param([string]$Path = (Join-Path $env:TEMP 'htpc-screen.png'))
+param([string]$Path = (Join-Path $env:TEMP 'htpc-screen.png'), [double]$Scale = 0.5)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -29,3 +30,4 @@ $g.Dispose()
 $small.Save($Path, [Drawing.Imaging.ImageFormat]::Png)
 $full.Dispose(); $small.Dispose()
 Write-Host "Saved $Path ($($bounds.Width)x$($bounds.Height) screen)"
+if ($Scale -lt 1) { Write-Host "Small copy: $(& (Join-Path $PSScriptRoot 'Save-ScaledImage.ps1') -Path $Path -Scale $Scale)" }

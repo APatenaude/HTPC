@@ -16,9 +16,10 @@
     PNG of each route into -OutDir
     (index.html#<route>; e.g. alerts, menu-alerts, settings/wifi, ?upd=failed#settings/updates,
     audit?page=<an audit page's name>), -ShotSize big (1920x1080 unless said: 1536x864 is the
-    4K TV at 250%). Headless Edge can linger after it has written its output: once the output
-    is there, or after -TimeoutSeconds, this script ends the processes on its own profile
-    (and only those).
+    4K TV at 250%), and a copy at -Scale (default half size, <name>-small.png: the one to look
+    at; 1: none). To read a page as text instead: Describe-Page.ps1. Headless Edge can linger
+    after it has written its output: once the output is there, or after -TimeoutSeconds, this
+    script ends the processes on its own profile (and only those).
 
     All of it runs in real time; only the screenshots keep Edge's virtual time
     (--virtual-time-budget), which since 29 Sept 2026 hung about one long run in two on this box
@@ -42,6 +43,7 @@ param(
     [switch]$SelfTest,
     [string[]]$Shots = @(),
     [string]$ShotSize = '1920x1080',
+    [double]$Scale = 0.5,
     [string]$OutDir = (Join-Path $env:TEMP 'htpc-ui-shots'),
     [string]$Page = '',
     [int]$TimeoutSeconds = 300
@@ -202,7 +204,9 @@ if ($SelfTest) {
     if ($dom -match '(?s)<pre id="audit-results">(.*?)</pre>') {
         ''
         'UI audit in real time (index.html#audit):'
-        [Net.WebUtility]::HtmlDecode($Matches[1]) -split '\r?\n' | Where-Object { $_.Trim() -and $_ -notmatch '^PASS' }
+        $lines = [Net.WebUtility]::HtmlDecode($Matches[1]) -split '\r?\n'
+        $lines | Where-Object { $_.Trim() -and $_ -notmatch '^PASS' }
+        "  $(@($lines | Where-Object { $_ -match '^PASS' }).Count) passed"
         if ($dom -match '<title>AUDIT FAIL') { $failed = 1 }
     } else {
         Write-Warning 'No audit results in the page (a script error, or it did not finish by the load event?)'
@@ -260,7 +264,8 @@ if ($Shots.Count -gt 0) {
         Remove-Item $png -ErrorAction SilentlyContinue
         try {
             Invoke-Edge @("--screenshot=$png", $(if ($route.StartsWith('?')) { "$url$route" } else { "$url#$route" })) (Join-Path $env:TEMP 'htpc-ui-shot.txt') { Test-Path $png } -Size "$shotW,$shotH"
-            "$route -> $png"
+            if ($Scale -lt 1) { "$route -> $(& (Join-Path $PSScriptRoot 'Save-ScaledImage.ps1') -Path $png -Scale $Scale) (full size: $png)" }
+            else { "$route -> $png" }
         } catch { Write-Warning "${route}: $($_.Exception.Message)"; $failed = 1 }
     }
 }
