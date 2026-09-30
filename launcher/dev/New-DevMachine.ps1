@@ -12,9 +12,11 @@
       dotnet-install.ps1 from https://dot.net/v1/dotnet-install.ps1);
     - Microsoft Edge (for the headless UI and phone tests; present on Windows);
     - optional: Hyper-V (Windows Pro/Enterprise) for the test VM (setup\test\New-TestVM.ps1);
-    - optional: the GitHub CLI (winget GitHub.cli) for releases and repo settings;
-    - optional: the Incus client (winget LinuxContainers.Incus) for a test VM on an Incus server.
-    Without -Install it only reports. Nothing here changes Windows settings.
+    - the GitHub CLI (winget GitHub.cli) for releases and repo settings;
+    - the Incus client (winget LinuxContainers.Incus) for the test VM on the owner's Incus server.
+    Without -Install it only reports. Nothing here changes Windows settings. It ends with an Access
+    report: what is not in git (the GitHub CLI's sign-in, the Incus trust, the test VM's keys),
+    each missing piece marked AGENT or OWNER (sign-ins and tokens are the owner's to enter).
 
 .PARAMETER Path
     Where the repo is, or is cloned to. Default: $HOME\src\HTPC.
@@ -82,15 +84,49 @@ $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.ex
 if (Test-Path $edge) { 'Edge: present' } else { $missing += 'Microsoft Edge (the UI tests drive it headless)' }
 
 # Optional
-if (Have gh) { "GitHub CLI: $((gh --version | Select-Object -First 1))" } else { 'GitHub CLI: not installed (optional: winget install GitHub.cli)' }
+if (Have gh) { "GitHub CLI: $((gh --version | Select-Object -First 1))" }
+elseif ($Install) { Winget-Install 'GitHub.cli' }
+else { 'GitHub CLI: not installed (releases need it: winget install GitHub.cli)' }
 $hv = Get-Command Get-VM -ErrorAction SilentlyContinue
 "Hyper-V: $(if ($hv) { 'available (test VM: setup\test\New-TestVM.ps1)' } else { 'not available (optional; Windows Pro/Enterprise)' })"
-# The test VM can also live on an Incus server on the network (off the dev machine): its client.
-if (Have incus) { "Incus client: $((incus version 2>&1 | Select-Object -First 1))" }
-elseif ($Install) { Winget-Install 'LinuxContainers.Incus' }
-else { 'Incus client: not installed (optional, for a test VM on an Incus server: winget install LinuxContainers.Incus)' }
+# The test VM lives on the owner's Incus server on the network (off the dev machine): its client.
+# winget's alias for it may not resolve from PowerShell: the package folder is looked in too.
+function Find-Incus {
+    if (Have incus) { return (Get-Command incus).Source }
+    Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') -Directory -Filter 'LinuxContainers.Incus_*' -ErrorAction SilentlyContinue |
+        ForEach-Object { Get-ChildItem $_.FullName -Recurse -Filter incus.exe -ErrorAction SilentlyContinue } | Select-Object -First 1 -ExpandProperty FullName
+}
+$incus = Find-Incus
+if ($incus) { "Incus client: $((& $incus version 2>&1 | Select-Object -First 1))" }
+elseif ($Install) { Winget-Install 'LinuxContainers.Incus'; $incus = Find-Incus }
+else { 'Incus client: not installed (for the test VM: winget install LinuxContainers.Incus)' }
 
 if ($missing) { ''; 'Missing:'; $missing | ForEach-Object { "  - $_" }; 'Run again with -Install, or install them by hand.'; exit 1 }
+
+# What is not in git (docs/DEVELOPMENT.md section 1): access the owner gives this machine. Only
+# looked at, never set up here: sign-ins and trust tokens are the owner's to enter.
+''
+'Access (not in git; see docs/DEVELOPMENT.md section 1):'
+$todo = @()
+if (Have gh) {
+    & gh auth status 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { '  GitHub CLI: signed in' }
+    else { $todo += 'OWNER: sign the GitHub CLI in (he runs `gh auth login` himself; releases need it)' }
+} else { $todo += 'AGENT: winget install GitHub.cli (then the owner signs it in)' }
+if ($incus) {
+    $remotes = & $incus remote list --format csv 2>&1 | Out-String
+    if ($remotes -match '(?m)^homelab,') {
+        $vm = & $incus list homelab: htpc-test --format csv -c ns 2>&1 | Out-String
+        if ($vm -match 'htpc-test,') { "  Incus: remote 'homelab' reachable, test VM $($vm.Trim())" }
+        else { $todo += "AGENT: the remote 'homelab' is set but htpc-test was not listed ($($vm.Trim())): check the network, or rebuild the VM (section 6)" }
+    } else {
+        $todo += "OWNER: make a trust token on the Incus server (incus config trust add <this machine's name>); AGENT: then open launcher\dev\Connect-Incus.ps1 in its own window for the owner to paste it (never read or type the token yourself). From the Claude desktop app, run it again from a normal PowerShell too."
+    }
+} else { $todo += 'AGENT: winget install LinuxContainers.Incus' }
+$vmDir = Join-Path $env:USERPROFILE 'VMs\htpc-test-incus'
+if (Test-Path (Join-Path $vmDir 'id_ed25519')) { "  Test VM keys: $vmDir" }
+else { $todo += "OWNER: copy $vmDir from the old machine by hand (USB stick; it holds the VM's SSH key), or AGENT: rebuild the VM with setup\test\New-IncusTestVM.ps1 -Force and take the 'before-shell' snapshot again (section 6)" }
+if ($todo) { $todo | ForEach-Object { "  TO DO  $_" } } else { '  all set: try setup\test\Start-IncusTestVM.ps1 -WaitSsh, then Invoke-IncusTestVM.ps1 hostname, then Stop-IncusTestVM.ps1' }
 
 ''
 'Building...'

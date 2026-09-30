@@ -33,6 +33,32 @@ releases and repo settings, and Hyper-V (Windows Pro/Enterprise) or an Incus ser
 - Signing in to GitHub: the first `git push` opens Git Credential Manager's browser sign-in.
   Releases also need the GitHub CLI signed in: `gh auth login` (the owner signs in himself).
 
+### For the agent setting up a new machine
+
+A Claude Code session cannot be moved from one machine to another (local sessions stay where they
+ran; a cloud session has no Windows toolchain, no Incus client and no box), so the work continues
+in a new session from this repo. In that first session:
+
+1. Read `CLAUDE.md`, then this file's section 8 (where it stands) and section 7 (the rules).
+2. Run `powershell -ExecutionPolicy Bypass -File launcher\dev\New-DevMachine.ps1 -Path <the clone> -Install`.
+   It installs Git, the .NET SDK, the GitHub CLI and the Incus client where missing (winget may
+   show the owner a permission prompt), builds, runs `Test-All.ps1 -SkipSetupTests`, and ends with
+   an **Access** report: each line marked AGENT (yours to do) or OWNER (his: sign-ins, tokens,
+   copying the VM key). Ask the owner for the OWNER lines in one dialog, with the exact commands.
+3. Never read, type or store a token or password yourself: the owner runs `gh auth login` and
+   pastes the Incus trust token into `launcher\dev\Connect-Incus.ps1` in a window you open for him.
+4. Run `New-DevMachine.ps1` again (without `-Install`) until the Access report says "all set", then
+   prove the VM: `setup\test\Start-IncusTestVM.ps1 -WaitSsh`, `setup\test\Invoke-IncusTestVM.ps1 hostname`,
+   `setup\test\Stop-IncusTestVM.ps1`.
+5. Run the UI self-test once (`launcher\dev\Test-Ui.ps1 -SelfTest`, about 3 minutes) so you know the
+   harness works on this machine before changing anything.
+6. Check the release state: `gh release list -R APatenaude/HTPC -L 3`, `git log --oneline -5`, and
+   whether section 8's "in progress" items are on the branch (`git log --grep`).
+7. Then tell the owner it is ready and what section 8 says is open.
+
+The dev machine need not be a TV box: the owner's TV updates from GitHub releases. Only on a TV box
+does `launcher\dev\Start-Launcher.ps1` run the repo's launcher (section 3).
+
 ### What is not in git, and how to carry it over
 
 Everything the product needs is in the repo and its GitHub releases. These live only on the machine

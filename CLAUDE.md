@@ -43,5 +43,7 @@ loop, merging, releases, the test VM, where 1.0 stands), then [docs/SPEC.md](doc
   (e.g. waking from S3 with the controller: the dev box can't).
 - He sends findings in bursts: acknowledge every point (a numbered table with statuses), give short
   statuses often, and say plainly what was and wasn't tested.
-- New machine or picking the work up: docs/DEVELOPMENT.md section 1 ("What is not in git") and
-  section 8 (where it stands).
+- New machine or picking the work up: follow docs/DEVELOPMENT.md section 1, "For the agent setting
+  up a new machine" (run `launcher\dev\New-DevMachine.ps1 -Install`; its Access report lists what
+  is yours and what is the owner's), then section 8 (where it stands). Never handle his tokens or
+  passwords: he enters them himself.
