@@ -3,6 +3,8 @@
 A TV box: Windows 11 IoT LTSC on any x64 PC, a launcher as the Windows shell, setup scripts,
 a phone remote, GitHub releases. Start with [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (tools,
 loop, merging, releases, the test VM, where 1.0 stands), then [docs/SPEC.md](docs/SPEC.md).
+To find code: [docs/CODEMAP.md](docs/CODEMAP.md) (each area's files, names to Grep, tests, log
+lines, and recipes for the usual changes).
 
 ## Rules
 
