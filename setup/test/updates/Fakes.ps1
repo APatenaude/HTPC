@@ -91,6 +91,7 @@ static EventWaitHandle Signal(string name) {
   return new EventWaitHandle(true, EventResetMode.ManualReset, name, out created, security);
 }
 static int Main() {
+  if (Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == "--warm") return 0;
   var started = DateTime.UtcNow;
   if ("$Mode" == "crash") { Thread.Sleep(1000); return 1; }
   var dir = AppDomain.CurrentDomain.BaseDirectory;
@@ -131,6 +132,7 @@ class W {
     return false;
   }
   static void Main() {
+  if (Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == "--warm") return;
   var dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
   var exe = Path.Combine(dir, "HtpcLauncher.exe");
   var root = Path.GetFullPath(Path.Combine(dir, @"..\..\.."));
@@ -157,6 +159,16 @@ class W {
     if (child != null) child.WaitForExit(100); else Thread.Sleep(100);
   } } }
 '@).Replace('VERSION', $Version)
+}
+
+# Each fake program run once as soon as it is built, all side by side (with --warm it exits at
+# once). The antivirus looks up a program it has never seen when it first starts, now and then for
+# many seconds (each build is a new program): a case's launcher held that long at its start broke
+# the case (swap-hang in the test VM, while Defender updated itself after a restore). Copies of
+# it are known from then on.
+function Invoke-FakeWarmUp([string[]]$Exes) {
+    $runs = @(foreach ($exe in $Exes) { Start-Child $exe @('--warm') })
+    foreach ($run in $runs) { [void](Receive-Child $run) }
 }
 
 # The version of a file in a fake box's launcher folder ('' when there is none).
@@ -251,8 +263,9 @@ function Get-BoxState([string]$Root) {
     $file = { param($n) $f = Join-Path $state $n; if (Test-Path -LiteralPath $f) { try { [IO.File]::ReadAllText($f).Trim() } catch { '(unreadable)' } } else { 'none' } }
     $exits = Join-Path $Root 'watchdog-exits.log'
     "watchdog $(Get-BoxWatchdog $Root), pause $(& $file 'watchdog-pause'), watch $(& $file 'watchdog-watch'), " +
-    "launchers $(@(Get-BoxProcesses $Root | Where-Object Name -eq 'HtpcLauncher' | ForEach-Object { "$($_.Id) $($_.Path.Substring($Root.Length))" }) -join ', '), " +
-    "exits $(if (Test-Path -LiteralPath $exits) { @(Get-Content -LiteralPath $exits) -join ', ' })"
+    "launchers $(@(Get-BoxProcesses $Root | Where-Object Name -eq 'HtpcLauncher' | ForEach-Object { "$($_.Id) $("$($_.Path)" -replace '^.*\\', '')" }) -join ', '), " +
+    "exits $(if (Test-Path -LiteralPath $exits) { @(Get-Content -LiteralPath $exits) -join ', ' }), " +
+    "launchers of any box with no path yet: $(@(Get-Process -Name 'HtpcLauncher' -ErrorAction SilentlyContinue | Where-Object { -not $_.Path } | ForEach-Object Id) -join ', ')"
 }
 
 # The id of the watchdog running from a fake box (0 when none; there is at most one).

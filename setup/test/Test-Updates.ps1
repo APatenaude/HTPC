@@ -90,6 +90,7 @@ try {
         foreach ($fake in $fakes) { $v, $mode = $fake -split ' '; Get-FakeLauncher $v $mode -Later }
         foreach ($v in $watchdogs) { Get-FakeWatchdog $v -Later }
         Start-FakeGitHub
+        Invoke-FakeWarmUp (@(foreach ($fake in $fakes) { $v, $mode = $fake -split ' '; Get-FakeLauncher $v $mode }) + @(foreach ($v in $watchdogs) { Get-FakeWatchdog $v }))
     }
 
     if (Section 'Download') { . "$PSScriptRoot\updates\Download.ps1" }
