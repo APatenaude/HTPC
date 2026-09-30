@@ -75,9 +75,11 @@ if (Test-Path $work) { Remove-Item $work -Recurse -Force -ErrorAction SilentlyCo
 New-Item -ItemType Directory -Force $bin | Out-Null
 
 try {
+    if (Section 'Core') { . "$PSScriptRoot\updates\Core.ps1" }
+
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) {
-        # The fakes the sections use, all built side by side from here on (while Core runs):
-        # launchers, and the watchdogs of the boxes (0.1.0) and of the releases that ship one.
+        # The fakes the sections below use, all built side by side from here on: launchers, and
+        # the watchdogs of the boxes (0.1.0) and of the releases that ship one.
         $fakes = @('0.2.0 healthy')
         $watchdogs = @('0.2.0')
         if ((Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) {
@@ -89,8 +91,6 @@ try {
         foreach ($v in $watchdogs) { Get-FakeWatchdog $v -Later }
         Start-FakeGitHub
     }
-
-    if (Section 'Core') { . "$PSScriptRoot\updates\Core.ps1" }
 
     if (Section 'Download') { . "$PSScriptRoot\updates\Download.ps1" }
     if (Section 'Swap') { . "$PSScriptRoot\updates\Swap.ps1" }
