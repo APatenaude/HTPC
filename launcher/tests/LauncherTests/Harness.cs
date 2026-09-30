@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Drawing.Imaging;
+using System.Text.Json;
 
 namespace Htpc.Launcher;
 
@@ -73,5 +75,73 @@ static class T
     {
         Console.WriteLine($"{passed} passed, {failed} failed");
         return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>The cases of a table that failed, for a check's text: "none", or them, joined.</summary>
+    public static string Misses(IEnumerable<string> failed) => failed.ToList() is { Count: > 0 } list ? string.Join("; ", list) : "none";
+}
+
+/// <summary>The repository the checks run in: its files, and its catalog read once.</summary>
+static class Repo
+{
+    public static readonly string Root = FindRoot();
+    public static readonly string CatalogPath = In("setup", "catalog.json");
+    static AppManager? apps;
+    static JsonDocument? catalog;
+
+    /// <summary>The catalog as the launcher reads it; shared, so no check may change it (SetCustom: an AppManager of its own).</summary>
+    public static AppManager Apps => apps ??= new AppManager(CatalogPath);
+
+    /// <summary>The catalog's own JSON, for what AppManager does not keep (launch.args, launch.env).</summary>
+    public static JsonElement Catalog => (catalog ??= JsonDocument.Parse(File.ReadAllText(CatalogPath))).RootElement;
+
+    /// <summary>One catalog entry's JSON.</summary>
+    public static JsonElement App(string id) => Catalog.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == id);
+
+    public static string In(params string[] parts) => Path.Combine([Root, .. parts]);
+
+    static string FindRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "setup", "catalog.json"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new InvalidOperationException($"no setup\\catalog.json above {AppContext.BaseDirectory}");
+    }
+}
+
+/// <summary>What several checks make: JSON bits, images, a program file written long ago, a form's boxes.</summary>
+static class Fixtures
+{
+    public static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
+
+    /// <summary>A w x h picture of one colour (clearBorder: a disc on transparent), as PNG or another format.</summary>
+    public static byte[] Png(int w, int h, Color fill, bool clearBorder = false, ImageFormat? format = null)
+    {
+        using var b = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(b))
+        {
+            g.Clear(clearBorder ? Color.Transparent : fill);
+            if (clearBorder) using (var brush = new SolidBrush(fill)) g.FillEllipse(brush, w / 4, h / 4, w / 2, h / 2);
+        }
+        using var ms = new MemoryStream();
+        b.Save(ms, format ?? ImageFormat.Png);
+        return ms.ToArray();
+    }
+
+    /// <summary>A file standing for an installed program (or its shortcut), written and made 30 days ago.</summary>
+    public static string OldFile(string path, string text = "not really a program")
+    {
+        File.WriteAllText(path, text);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-30));
+        File.SetCreationTimeUtc(path, DateTime.UtcNow.AddDays(-30));
+        return path;
+    }
+
+    /// <summary>Each control's box on a form built but never shown (a label as tall as its text); whether they fit and none overlap.</summary>
+    public static (List<Rectangle> Boxes, bool OnScreen, bool Apart) Layout(Form form)
+    {
+        var bounds = new Rectangle(Point.Empty, form.Size);
+        var boxes = form.Controls.Cast<Control>()
+            .Select(c => new Rectangle(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size)).ToList();
+        return (boxes, boxes.All(bounds.Contains), boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x));
     }
 }

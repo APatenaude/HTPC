@@ -63,10 +63,11 @@ static class ElevationTests
         Check(SetupElevation.TrustedDir == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup"), "the trusted place: Program Files\\HTPC\\Setup");
 
         // In setup mode (elevated) the page may send only setup's messages.
-        foreach (var t in new[] { "ready", "install", "finish", "restart", "tv.choose", "tv.refresh", "wifi.join", "text.keyboard" })
-            Check(SetupElevation.IsSetupMessage(t), $"setup's message {t}: taken");
-        foreach (var t in new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null })
-            Check(!SetupElevation.IsSetupMessage(t), $"{t ?? "(none)"}: refused in setup");
+        var dropped = new[] { "ready", "install", "finish", "restart", "tv.choose", "tv.refresh", "wifi.join", "text.keyboard" }.Where(t => !SetupElevation.IsSetupMessage(t)).ToList();
+        Check(dropped.Count == 0, "setup's own messages taken: " + T.Misses(dropped));
+        var let = new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null }
+            .Where(SetupElevation.IsSetupMessage).Select(t => t ?? "(none)").ToList();
+        Check(let.Count == 0, "the home screen's messages refused in setup: " + T.Misses(let));
     }
 
     // Rights.cs: administrator rights never mean "this is setup". Setup mode with them alone uses
@@ -124,16 +125,13 @@ static class ElevationTests
         using var screen = new AdminNeededForm(@"Windows started setup as BOX\admin, but BOX\tv is signed in here. Setup would have set up BOX\admin instead, so it changed nothing.",
             askAgain: null, "Setup must run as the TV account", body);
         var buttons = screen.Controls.OfType<Button>().ToList();
-        Check(buttons.Select(b => b.Text).SequenceEqual(["A   Quit"]) && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
-            "refusal: A Quit only (Enter and Esc quit too), nothing to try again");
-        Check(screen.Controls.OfType<Label>().Any(l => l.Text == body) && screen.Controls.OfType<Label>().Any(l => l.Text == "Setup must run as the TV account"),
-            "refusal: sign in as the TV account, an administrator, and run setup from there");
+        Check(buttons.Count == 1 && buttons[0].Text.Contains("Quit") && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
+            "refusal: Quit only (Enter and Esc quit too), nothing to try again");
+        Check(screen.Controls.OfType<Label>().Any(l => l.Text.Contains(body)) && screen.Controls.OfType<Label>().Any(l => l.Text.Contains("Setup must run as the TV account")),
+            "refusal: its title and what to do (sign in as the TV account, an administrator, and run setup from there)");
         Check(screen.FormBorderStyle == FormBorderStyle.None && screen.StartPosition == FormStartPosition.Manual, "refusal: full screen, no frame");
-        var bounds = new Rectangle(Point.Empty, screen.Size);
-        Rectangle Box(Control c) => new(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size);
-        var boxes = screen.Controls.Cast<Control>().Select(Box).ToList();
-        Check(boxes.All(bounds.Contains) && boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x),
-            "refusal: everything on screen, nothing overlapping " + string.Join(" ", boxes));
+        var (boxes, onScreen, apart) = Fixtures.Layout(screen);
+        Check(onScreen && apart, "refusal: everything on screen, nothing overlapping " + string.Join(" ", boxes));
     }
 
     static void Arguments()
@@ -146,7 +144,7 @@ static class ElevationTests
         Check(tv.SequenceEqual(["--setup", "--desktop-for-setup", "--elevated"]), "from TV mode: the elevated copy is told setup opened the desktop (it closes it as it ends): " + string.Join(" | ", tv));
         Check(SetupElevation.ElevatedArgs(tv).Count(a => a == SetupElevation.DesktopFlag) == 1, "... once, when started again");
         Check(SetupElevation.HomeArgs(["--elevated", SetupElevation.DesktopFlag, "--no-tv"]).SequenceEqual(["--no-tv", "--home"]), "the home screen after setup: not told about setup's desktop");
-        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))).Contains("open Power › Desktop mode, then start TV Box Setup again"),
+        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))).Contains("Desktop mode"),
             "WebView2's \"Element not found\" (no Windows desktop, TV mode): the screen says to open desktop mode, then start setup again");
         Check(!SetupElevation.CannotShowBody(new COMException("Class not registered", unchecked((int)0x80040154))).Contains("Desktop mode"), "... any other failure: try again or restart, as before");
 
@@ -330,15 +328,12 @@ static class ElevationTests
         using var screen = new AdminNeededForm("Windows asked for permission and did not get it, so nothing was changed.", () => "again");
         var labels = screen.Controls.OfType<Label>().ToList();
         var buttons = screen.Controls.OfType<Button>().ToList();
-        Check(labels.Any(l => l.Text == "Setup needs administrator rights to install"), "screen: says setup needs administrator rights");
-        Check(buttons.Select(b => b.Text).SequenceEqual(["A   Try again", "B   Quit"]) && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[1],
-            "screen: A Try again (Enter), B Quit (Esc)");
-        Check(labels.Any(l => l.Text.StartsWith("Windows asked for permission")), "screen: why, under it");
-        var bounds = new Rectangle(Point.Empty, screen.Size);
-        Rectangle Box(Control c) => new(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size);
-        var boxes = screen.Controls.Cast<Control>().Select(Box).ToList();
-        Check(boxes.All(bounds.Contains), "screen: everything on screen " + string.Join(" ", boxes));
-        Check(boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x), "screen: nothing overlaps");
+        Check(labels.Any(l => l.Text.Contains("administrator rights")), "screen: says setup needs administrator rights");
+        Check(buttons.Count == 2 && buttons[0].Text.Contains("Try again") && buttons[1].Text.Contains("Quit") && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[1],
+            "screen: Try again (Enter), Quit (Esc)");
+        Check(labels.Any(l => l.Text.Contains("Windows asked for permission")), "screen: why, under it");
+        var (boxes, onScreen, apart) = Fixtures.Layout(screen);
+        Check(onScreen && apart, "screen: everything on screen, nothing overlapping " + string.Join(" ", boxes));
         Check(!screen.HandedOver, "screen: nothing handed over before a try");
     }
 

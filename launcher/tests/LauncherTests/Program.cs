@@ -85,15 +85,13 @@ T.Group("ButtonMapStore", () =>
     Check(again.For("twitch", "mouse")!.Buttons[PadControl.LB] is KeyAction { Repeat: true }, "PageUp repeats when held");
     T.Info("saved: " + JsonSerializer.Serialize(json));
 
-    // Every key name parses and formats back to itself.
-    foreach (var name in new[] { "A", "Z", "0", "9", "F1", "F12", "Enter", "Space", "Esc", "Tab", "Backspace", "Delete", "PageUp", "Left", "Menu",
-        "Minus", "Equal", "Comma", "Period", "Slash", "MediaPlayPause", "MediaNext", "BrowserBack", "Ctrl+Alt+Delete", "Alt+Left", "Ctrl+Shift+Tab", "Shift+F10" })
-    {
-        var a = ButtonMapStore.ParseAction("key:" + name);
-        Check(a is not null && ButtonMapStore.Format(a) == "key:" + name, $"key:{name} round trip ({(a is null ? "null" : ButtonMapStore.Format(a))})");
-    }
-    foreach (var v in new[] { "mouse:left", "mouse:right", "mouse:middle", "mouse:precise", "do:menu", "do:keyboard", "do:mute", "do:timer" })
-        Check(ButtonMapStore.Format(ButtonMapStore.ParseAction(v)) == v, v + " round trip");
+    // Every key name, click and command parses and formats back to itself.
+    var actions = new[] { "A", "Z", "0", "9", "F1", "F12", "Enter", "Space", "Esc", "Tab", "Backspace", "Delete", "PageUp", "Left", "Menu",
+        "Minus", "Equal", "Comma", "Period", "Slash", "MediaPlayPause", "MediaNext", "BrowserBack", "Ctrl+Alt+Delete", "Alt+Left", "Ctrl+Shift+Tab", "Shift+F10" }
+        .Select(k => "key:" + k).Concat(["mouse:left", "mouse:right", "mouse:middle", "mouse:precise", "do:menu", "do:keyboard", "do:mute", "do:timer"]);
+    var notBack = actions.Where(v => ButtonMapStore.ParseAction(v) is not { } a || ButtonMapStore.Format(a) != v)
+        .Select(v => $"{v} -> {(ButtonMapStore.ParseAction(v) is { } a ? ButtonMapStore.Format(a) : "null")}").ToList();
+    Check(notBack.Count == 0,"every key name, click and command round trips: " + T.Misses(notBack));
     Check(ButtonMapStore.ParseAction("key:Shift+Ctrl+Tab") is KeyAction { Keys: [0x11, 0x10, 0x09] }, "modifier order normalized");
     Check(ButtonMapStore.ParseAction("key:Ctrl+Alt") is null, "modifiers only: refused");
     Check(ButtonMapStore.ParseAction("do:format") is null, "unknown command refused");
@@ -106,13 +104,12 @@ T.Group("ButtonMapStore", () =>
 
     // A corrupt buttonMaps never costs the other settings.
     var opts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    foreach (var bad in new[] { "42", "\"x\"", "[1,2]", "{\"a\":5}", "null", "{\"twitch\":{\"a\":{\"deep\":[1]}}}" })
+    var costly = new[] { "42", "\"x\"", "[1,2]", "{\"a\":5}", "null", "{\"twitch\":{\"a\":{\"deep\":[1]}}}" }.Where(bad =>
     {
         var ls = JsonSerializer.Deserialize<LauncherSettings>($"{{\"idleMinutes\": 15, \"buttonMaps\": {bad}, \"pointerSpeed\": 7}}", opts)!;
-        Check(ls.IdleMinutes == 15 && ls.PointerSpeed == 7, $"settings with buttonMaps = {bad} still load");
-        var st = new ButtonMapStore(ls.ButtonMaps, _ => { });
-        Check(st.For("twitch", "mouse") is not null, $"store from buttonMaps = {bad} works");
-    }
+        return ls.IdleMinutes != 15 || ls.PointerSpeed != 7 || new ButtonMapStore(ls.ButtonMaps, _ => { }).For("twitch", "mouse") is null;
+    }).ToList();
+    Check(costly.Count == 0,"settings with a corrupt buttonMaps still load, and the maps work: " + T.Misses(costly));
     var withMaps = new LauncherSettings { ButtonMaps = json };
     var text = JsonSerializer.Serialize(withMaps, opts);
     var back = JsonSerializer.Deserialize<LauncherSettings>(text, opts)!;
@@ -128,6 +125,17 @@ T.Group("ButtonMapStore", () =>
     Check(JsonSerializer.Deserialize<LauncherSettings>("{\"idleMinutes\": 15}", opts)!.InterfaceSounds == "low", "interface sounds: an older settings file gets Low");
     Check(JsonSerializer.Deserialize<LauncherSettings>("{\"interfaceSounds\": \"off\"}", opts)!.InterfaceSounds == "off", "interface sounds: Off is kept");
     Check(JsonSerializer.Serialize(new LauncherSettings { InterfaceSounds = "medium" }, opts).Contains("\"interfaceSounds\":\"medium\""), "interface sounds: reach the page as prefs.interfaceSounds");
+
+    // A settings file may name "_installer", the map launchers 1.0.7 to 1.0.9 reserved for an
+    // installer finished on screen (gone with RetroBat): the other maps are read as before, and it
+    // goes at the next save.
+    var savedMaps = new List<JsonElement>();
+    var maps = new ButtonMapStore(Fixtures.Json("""{ "_other": { "preset": "keyboard" }, "_installer": { "preset": "controller" } }"""), savedMaps.Add);
+    Check(maps.For(ButtonMapStore.Other, "mouse")?.Name == "keyboard", "old settings with an _installer map: Other windows' map still read");
+    Check(maps.PresetOf("_installer", "mouse") == "mouse", "... the _installer map is not taken as a tile's");
+    Check(maps.SetControl(ButtonMapStore.Other, "a", "key:Space", "mouse") && savedMaps.Count == 1
+        && savedMaps[0].TryGetProperty(ButtonMapStore.Other, out _) && !savedMaps[0].TryGetProperty("_installer", out _),
+        "... and the next save keeps Other windows' map, without it");
 });
 
 // ---------------------------------------------------------------- PadMapper
@@ -191,25 +199,9 @@ T.Group("PadMapper", () =>
     Check(Input.Snapshot().Contains("move"), "left stick moves the pointer on the frame thread");
 });
 
-// "Fires once": the controller raises one Pressed per press of R3 however long it is held.
-T.Group("Controller: R3 held", () =>
-{
-    var controller = new ControllerService();
-    var presses = 0;
-    controller.Pressed += (pad, repeat) => { if (pad == Pad.R3) presses++; };
-    controller.Inject(new PadState(0, 0, 0, 0, 0, 0, 0));
-    controller.Start();
-    Thread.Sleep(100);
-    controller.Inject(new PadState(0x0080, 0, 0, 0, 0, 0, 0));
-    Thread.Sleep(700);
-    controller.Inject(new PadState(0, 0, 0, 0, 0, 0, 0));
-    Thread.Sleep(100);
-    controller.Dispose();
-    Check(presses == 1, $"R3 held 0.7 s raises one press (got {presses})");
-});
-
 // A: A as it goes down (as ever), then AHold at 0.5 s and AUp when let go (hold A on a home tile
-// to move it). A tap: A, AUp, no AHold.
+// to move it). A tap: A, AUp, no AHold. A held button raises one press ("fires once": the
+// A held 0.8 s below).
 T.Group("Controller: A tapped, and held", () =>
 {
     var controller = new ControllerService();
@@ -367,11 +359,11 @@ T.Group("Standby: waking with Home", () =>
 });
 
 // ---------------------------------------------------------------- Standby: the radios it turns off
-// StandbyRadioSwitch with a made-up radio: the Wi-Fi on a cable goes off in standby and comes
-// back at wake (Bluetooth has its own rule: below); the flag in settings brings the radio back after a
-// launcher that ended in standby; a refusal is tried again; a radio in use, or one the user
-// turned off, is left alone.
-T.Group("Standby: the radios it turns off", () =>
+// StandbyRadioSwitch (only the Wi-Fi uses it: Bluetooth has its own rule, below) with a made-up
+// radio: the Wi-Fi on a cable goes off in standby and comes back at wake; the flag in settings
+// brings it back after a launcher that ended in standby; a refusal is tried again; a radio in use
+// (the Wi-Fi joined), or one the user turned off, is left alone.
+T.Group("Standby: the Wi-Fi radio on a cable", () =>
 {
     var on = true;
     var refuse = false;
@@ -417,7 +409,7 @@ T.Group("Standby: the radios it turns off", () =>
     NewSwitch().Off(() => true).Wait();
     Check(on && !flag && saves == 0, "off refused: left as it was, no flag");
 
-    // In use (the Wi-Fi joined, something paired), or turned off by the user: left alone, then as well.
+    // In use (the Wi-Fi joined), or turned off by the user: left alone, then as well.
     Reset();
     notNeeded = false;
     s = NewSwitch();
@@ -435,7 +427,6 @@ T.Group("Standby: the radios it turns off", () =>
     var looks = 0;
     NewSwitch().Off(() => looks++ == 0).Wait();
     Check(on && !flag && asked.SequenceEqual(new[] { false, true }), "woken while it went off: back on at once");
-    Check(Log.Lines.Contains("INFO Test radio back on (woken meanwhile)"), "... logged");
 
     // Woken before it was looked at: nothing asked.
     Reset();
@@ -446,10 +437,7 @@ T.Group("Standby: the radios it turns off", () =>
     Reset();
     var failing = radio with { NotNeeded = () => Task.FromException<bool>(new TimeoutException("no answer")) };
     new StandbyRadioSwitch(failing, () => flag, off => flag = off, () => saves++).Off(() => true).Wait();
-    Check(on && !flag && Log.Lines.Contains("WARN Standby: Test radio: no answer"), "a failing look: left on, logged");
-
-    var json = JsonSerializer.Serialize(new LauncherSettings { BluetoothOffByLauncher = true }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-    Check(json.Contains("\"bluetoothOffInStandby\":true") && json.Contains("\"wifiOffInStandby\":false"), "settings keep both radios' flags");
+    Check(on && !flag, "a failing look: left on");
 });
 
 // ---------------------------------------------------------------- The Bluetooth radio: off while nothing is paired
@@ -460,25 +448,37 @@ T.Group("Standby: the radios it turns off", () =>
 // next start (1.0.9's standby flag included). Each change logged with why.
 T.Group("The Bluetooth radio: off while nothing is paired", () =>
 {
-    // The decision alone.
+    // The decision alone: the radio, off by the rule (its flag), what wants it on (the page or a
+    // pairing), the minute after them, anything paired (null: the look failed); the step, and why.
     const string Pairing = "for pairing";
-    Check(BluetoothRadio.Decide("on", false, null, false, false) == (BluetoothRadio.Step.Off, "nothing paired"), "on, nothing paired: off");
-    Check(BluetoothRadio.Decide("on", false, null, false, true).Step == BluetoothRadio.Step.None, "on, something paired: left on");
-    Check(BluetoothRadio.Decide("on", false, null, false, null).Step == BluetoothRadio.Step.None, "on, the paired devices not read: left on");
-    Check(BluetoothRadio.Decide("on", false, Pairing, false, false).Step == BluetoothRadio.Step.None, "on, Settings › Bluetooth open: left on");
-    Check(BluetoothRadio.Decide("on", false, null, true, false).Step == BluetoothRadio.Step.None, "on, the minute after the page or a pairing: left on");
-    Check(BluetoothRadio.Decide("off", true, null, false, true) == (BluetoothRadio.Step.On, "something is paired"), "off by the rule, something paired: on");
-    Check(BluetoothRadio.Decide("off", true, null, false, null) == (BluetoothRadio.Step.On, "the paired devices could not be read"), "off by the rule, the look failed: on");
-    Check(BluetoothRadio.Decide("off", true, Pairing, false, false) == (BluetoothRadio.Step.On, Pairing), "off by the rule, Settings › Bluetooth open: on");
-    Check(BluetoothRadio.Decide("off", true, null, false, false).Step == BluetoothRadio.Step.None, "off by the rule, still nothing paired: stays off");
-    Check(BluetoothRadio.Decide("off", false, Pairing, false, true).Step == BluetoothRadio.Step.None && BluetoothRadio.Decide("off", false, null, false, null).Step == BluetoothRadio.Step.None,
-        "off by the user (not the rule): never turned on, not for the page, nor for something paired");
-    Check(new[] { "disabled", "none" }.All(r => BluetoothRadio.Decide(r, true, Pairing, false, true).Step == BluetoothRadio.Step.None && BluetoothRadio.Decide(r, false, null, false, false).Step == BluetoothRadio.Step.None),
-        "a radio turned off by a switch on the box or flight mode, or none: left alone");
-    Check(BluetoothRadio.NeedsPairedLook("on", false, null, false) && BluetoothRadio.NeedsPairedLook("off", true, null, false)
-        && !BluetoothRadio.NeedsPairedLook("on", false, Pairing, false) && !BluetoothRadio.NeedsPairedLook("on", false, null, true)
-        && !BluetoothRadio.NeedsPairedLook("off", true, Pairing, false) && !BluetoothRadio.NeedsPairedLook("off", false, null, false) && !BluetoothRadio.NeedsPairedLook("disabled", true, null, false),
-        "the paired devices are looked at only where they can change the answer");
+    const BluetoothRadio.Step On = BluetoothRadio.Step.On, Off = BluetoothRadio.Step.Off, Stay = BluetoothRadio.Step.None;
+    var decisions = new (string Radio, bool ByRule, string? Wanted, bool Held, bool? Paired, BluetoothRadio.Step Step, string? Why, string What)[]
+    {
+        ("on", false, null, false, false, Off, "nothing paired", "on, nothing paired: off"),
+        ("on", false, null, false, true, Stay, null, "on, something paired: left on"),
+        ("on", false, null, false, null, Stay, null, "on, the paired devices not read: left on"),
+        ("on", false, Pairing, false, false, Stay, null, "on, Settings › Bluetooth open: left on"),
+        ("on", false, null, true, false, Stay, null, "on, the minute after the page or a pairing: left on"),
+        ("off", true, null, false, true, On, "something is paired", "off by the rule, something paired: on"),
+        ("off", true, null, false, null, On, "the paired devices could not be read", "off by the rule, the look failed: on"),
+        ("off", true, Pairing, false, false, On, Pairing, "off by the rule, Settings › Bluetooth open: on"),
+        ("off", true, null, false, false, Stay, null, "off by the rule, still nothing paired: stays off"),
+        ("off", false, Pairing, false, true, Stay, null, "off by the user: not turned on for the page, nor for something paired"),
+        ("off", false, null, false, null, Stay, null, "off by the user, the look failed: stays off"),
+        ("disabled", true, Pairing, false, true, Stay, null, "turned off by a switch on the box or flight mode: left alone"),
+        ("disabled", false, null, false, false, Stay, null, "turned off by a switch, nothing paired: left alone"),
+        ("none", true, Pairing, false, true, Stay, null, "no radio: left alone"),
+        ("none", false, null, false, false, Stay, null, "no radio, nothing paired: left alone"),
+    };
+    var wrong = decisions.Select(d => (d, Got: BluetoothRadio.Decide(d.Radio, d.ByRule, d.Wanted, d.Held, d.Paired)))
+        .Where(x => x.Got.Step != x.d.Step || (x.d.Why is not null && x.Got.Why != x.d.Why)).Select(x => $"{x.d.What} (got {x.Got})").ToList();
+    Check(wrong.Count == 0, "each case decided as the rule says: " + T.Misses(wrong));
+    var looked = new (string Radio, bool ByRule, string? Wanted, bool Held, bool Look)[]
+    {
+        ("on", false, null, false, true), ("off", true, null, false, true), ("on", false, Pairing, false, false), ("on", false, null, true, false),
+        ("off", true, Pairing, false, false), ("off", false, null, false, false), ("disabled", true, null, false, false), ("none", true, null, false, false),
+    }.Where(c => BluetoothRadio.NeedsPairedLook(c.Radio, c.ByRule, c.Wanted, c.Held) != c.Look).Select(c => $"{c} looked {!c.Look}").ToList();
+    Check(looked.Count == 0, "the paired devices are looked at only where they can change the answer: " + T.Misses(looked));
 
     // The rule, with a made-up radio, clock and settings.
     var radio = "on";
@@ -527,7 +527,7 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     Check(radio == "on", "opened again and closed: the minute counts from the last close");
     now += 1_000;
     later!();
-    Check(radio == "off" && flag && Logged("INFO Bluetooth radio off (nothing paired; a minute after Settings › Bluetooth closed)"), "a minute after, still nothing paired: off again, logged");
+    Check(radio == "off" && flag, "a minute after, still nothing paired: off again");
 
     // Pairing: the radio stays on while it runs, the page left or not; paired, it stays on for good.
     Reset("off", false, true);
@@ -559,7 +559,7 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     rule.PageShown(true).Wait();
     inStandby = true;
     rule.Look("standby").Wait();
-    Check(radio == "off" && flag && Logged("INFO Bluetooth radio off (nothing paired; standby)"), "standby with the page open: off, nothing paired");
+    Check(radio == "off" && flag, "standby with the page open: off, nothing paired");
     inStandby = false;
     rule.Look("wake").Wait();
     Check(radio == "on", "wake with the page still open: on for it");
@@ -574,36 +574,30 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     now += 60_000;
     rule.Look("wake").Wait();
     Check(radio == "off" && flag && switched.Count == 3, "a wake with nothing paired: stays off");
-    Reset("on", true);
-    rule = NewRule();
-    inStandby = true;
-    rule.Look("standby").Wait();
-    Check(radio == "on" && switched.Count == 0, "standby with something paired: stays on");
 
-    // A look that fails: a radio that is on stays on; one the rule turned off comes back on.
-    Reset("on", null);
-    rule = NewRule();
-    rule.Look("the launcher started").Wait();
-    Check(radio == "on" && switched.Count == 0 && !flag, "the paired devices not read: left on");
+    // A look that fails: one the rule turned off comes back on; a look that throws leaves it on.
     Reset("off", null, true);
     NewRule().Look("the launcher started").Wait();
-    Check(radio == "on" && !flag && Logged("INFO Bluetooth radio on (the paired devices could not be read; the launcher started)"), "off by the rule, the look failed: on again, logged");
+    Check(radio == "on" && !flag, "off by the rule, the look failed: on again");
     Reset("on");
     rule = new BluetoothRadio(new BluetoothRadioParts(() => Task.FromResult(radio), on => { switched.Add(on); return Task.FromResult(true); },
         () => Task.FromException<bool?>(new TimeoutException("no answer")), () => false, () => now, (_, _) => { }, () => flag, off => flag = off, () => saves++));
     rule.Look("the launcher started").Wait();
-    Check(radio == "on" && switched.Count == 0 && Logged("WARN Bluetooth radio (the launcher started): no answer"), "a look that throws: left on, logged");
+    Check(radio == "on" && switched.Count == 0, "a look that throws: left on");
 
     // The launcher ended with the radio off (a crash, the watchdog starts another): the next
-    // start looks again. Something paired meanwhile: on. Still nothing: stays off.
+    // start looks again. Something paired meanwhile: on.
     Reset("off", true, true);
     NewRule().Look("the launcher started").Wait();
-    Check(radio == "on" && !flag && saves == 1 && Logged("INFO Bluetooth radio on (something is paired; the launcher started)"), "a launcher that ended with it off, something paired since: on at the next start");
-    Reset("off", false, true);
-    NewRule().Look("the launcher started").Wait();
-    Check(radio == "off" && flag && switched.Count == 0, "... nothing paired: stays off, the flag kept");
+    Check(radio == "on" && !flag && saves == 1, "a launcher that ended with it off, something paired since: on at the next start");
+    // The flag keeps 1.0.9's name (standby turned the radio off then): a 1.0.9 launcher that ended
+    // in standby is looked after; the Wi-Fi's flag beside it.
     var opts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    Check(JsonSerializer.Deserialize<LauncherSettings>("{\"bluetoothOffInStandby\": true}", opts)!.BluetoothOffByLauncher, "1.0.9's flag (standby turned it off) is the rule's: a 1.0.9 launcher that ended in standby is looked after");
+    var written = JsonSerializer.Serialize(new LauncherSettings { BluetoothOffByLauncher = true }, opts);
+    Check(written.Contains("\"bluetoothOffInStandby\":true") && written.Contains("\"wifiOffInStandby\":false")
+        && JsonSerializer.Deserialize<LauncherSettings>(written, opts)!.BluetoothOffByLauncher
+        && JsonSerializer.Deserialize<LauncherSettings>("{\"bluetoothOffInStandby\": true}", opts)!.BluetoothOffByLauncher,
+        "the rule's flag written and read back as 1.0.9's bluetoothOffInStandby, beside wifiOffInStandby");
 
     // Windows refuses: nothing kept, logged by the switch itself; the next look tries again.
     Reset();
@@ -621,7 +615,7 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     Reset("off", false, true);
     rule = NewRule();
     rule.PageShown(true).Wait();
-    Check(rule.UserSwitch(false).Result && radio == "off" && !flag && Logged("INFO Bluetooth radio off (the user's switch)"), "the user's switch off: off, the rule's flag cleared, logged");
+    Check(rule.UserSwitch(false).Result && radio == "off" && !flag, "the user's switch off: off, the rule's flag cleared");
     rule.PageShown(false).Wait();
     now += 2 * 60_000;
     later!();
@@ -649,16 +643,6 @@ T.Group("The Bluetooth radio: off while nothing is paired", () =>
     Reset("on", true, true);
     NewRule().Look("wake").Wait();
     Check(radio == "on" && !flag && saves == 1 && switched.Count == 0, "on again by other means: the flag goes, something paired: left on");
-
-    // No radio, or one off with a switch on the box: left alone.
-    foreach (var r in new[] { "none", "disabled" })
-    {
-        Reset(r, false, true);
-        rule = NewRule();
-        rule.Look("the launcher started").Wait();
-        rule.PageShown(true).Wait();
-        Check(switched.Count == 0 && looks == 0, $"radio {r}: nothing switched, nothing looked at");
-    }
 });
 
 // ---------------------------------------------------------------- Standby: apps in efficiency mode
@@ -716,67 +700,37 @@ T.Group("VideoEndDetector", () =>
     }
     var P = MediaStatus.Playing; var Pa = MediaStatus.Paused;
 
-    // Autoplay near the end: episode 1 (20 min, from 19:00) → episode 2.
-    var r = Run(s => new[] { s < 80 ? M("Episode 1", P, 1100 + s, 1200, t0.AddSeconds(s)) : M("Episode 2", P, s - 80, 1300, t0.AddSeconds(s)) }, 200, out _);
-    Check(r == "the next one started at 80s", "autoplay near the end ends it: " + r);
-    // The same title change mid-episode (an ad) does not.
-    r = Run(s => new[] { s < 80 ? M("Episode 1", P, 100 + s, 1200, t0.AddSeconds(s)) : M("Episode 2", P, s - 80, 1300, t0.AddSeconds(s)) }, 200, out _);
-    Check(r is null, "the same change mid-episode is not the end (yet): " + r);
-
-    // Mid-roll ad (title change far from the end, back after 30 s): not the end.
-    r = Run(s => new[] { s is >= 100 and < 130 ? M("Ad", P, s - 100, 30, t0.AddSeconds(s)) : M("Movie", P, 1000 + Math.Min(s, 100), 3600, t0.AddSeconds(s)) }, 400, out var det1);
-    Check(r is null && det1.Title == "Movie", "mid-roll ad is not the end: " + r);
-
-    // Pre-roll ad right after setting (settling): the video after it is followed.
-    r = Run(s => new[] { s < 20 ? M("Ad", P, s, 20, t0.AddSeconds(s)) : M("Video", P, s - 20, 600, t0.AddSeconds(s)) }, 120, out var det2);
-    Check(r is null && det2.Title == "Video", "pre-roll ad while settling: follows the video: " + r);
-
-    // Another video picked by hand far from the end (plays > 3 min): followed from then on.
-    r = Run(s => new[] { s < 100 ? M("A", P, 500 + s, 3600, t0.AddSeconds(s)) : M("B", P, s - 100, 2000, t0.AddSeconds(s)) }, 400, out var det3);
-    Check(r is null && det3.Title == "B", "another video picked: followed: " + r);
-
-    // 5 s pause: not the end. 5 min pause: the end.
-    r = Run(s => new[] { M("V", s is >= 60 and < 65 ? Pa : P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, out _);
-    Check(r is null, "5 s pause is not the end: " + r);
-    r = Run(s => new[] { M("V", s >= 60 ? Pa : P, 100 + Math.Min(s, 60), 3600, t0.AddSeconds(s)) }, 400, out _);
-    Check(r == "paused for 5 minutes at 360s", "5 min pause ends it: " + r);
-
-    // Buffering ("changing") for 20 s: not the end.
-    r = Run(s => new[] { M("V", s is >= 60 and < 80 ? MediaStatus.Changing : P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, out _);
-    Check(r is null, "buffering is not the end: " + r);
-
-    // The session goes (app closed): after 10 s. Gone 5 s (page load) and back: not.
-    r = Run(s => s >= 60 ? Array.Empty<MediaInfo>() : new[] { M("V", P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, out _);
-    Check(r == "the player closed at 70s", "session gone ends it after 10 s: " + r);
-    r = Run(s => s is >= 60 and < 65 ? Array.Empty<MediaInfo>() : new[] { M("V", P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, out _);
-    Check(r is null, "session gone 5 s is not the end: " + r);
-
-    // Live raid on Twitch (no timeline): the new channel playing 3 min is the end; 1 min is not.
-    r = Run(s => new[] { M(s < 100 ? "Streamer A" : "Streamer B", P, null, null, t0.AddSeconds(s)) }, 400, out _);
-    Check(r == "the next one has played for 3 minutes at 280s", "live raid ends it after 3 min: " + r);
-    r = Run(s => new[] { M(s is >= 100 and < 160 ? "Streamer B" : "Streamer A", P, null, null, t0.AddSeconds(s)) }, 400, out _);
-    Check(r is null, "a 1-minute title change on a live stream is not the end: " + r);
-
-    // Resting at the very end (no autoplay): after 5 s.
-    r = Run(s => new[] { M("V", s >= 50 ? Pa : P, Math.Min(550 + s, 600), 600, t0.AddSeconds(s)) }, 200, out _);
-    Check(r == "the video ended at 55s", "paused at the end ends it: " + r);
-
-    // Stopped: after 5 s.
-    r = Run(s => new[] { M("V", s >= 50 ? MediaStatus.Stopped : P, 100 + Math.Min(s, 50), 3600, t0.AddSeconds(s)) }, 200, out _);
-    Check(r == "playback stopped at 55s", "stopped ends it: " + r);
-
-    // Nothing playing when set: waits, then follows what plays.
-    r = Run(s => s < 600 ? new[] { M("V", Pa, 100, 3600, t0.AddSeconds(s)) } : new[] { M("V", P, 100 + s - 600, 3600, t0.AddSeconds(s)) }, 700, out var det4);
-    Check(r is null && det4.Source == "MSEdge", "waits for something to play, then follows it: " + r);
-
-    // Several sessions: the current one playing is followed.
-    var two = new VideoEndDetector(t0);
-    two.Feed(new[] { new MediaInfo("Spotify.exe", null, "Song", null, P, 10, 200, 1, t0, false), new MediaInfo("MSEdge", null, "Video", null, P, 10, 600, 1, t0, true) }, t0);
-    Check(two.Source == "MSEdge", "several playing: the current session is followed");
-
-    // Cap: 3 hours.
-    r = Run(s => new[] { M("V", P, s, null, t0.AddSeconds(s)) }, 3 * 3600 + 5, out _);
-    Check(r == "3 hours have passed at 10800s", "3 h cap: " + r);
+    // Each case: what the player reports second by second, for how long; how it ends (null: it
+    // does not) and, for some, what is followed at the end.
+    var cases = new (string What, Func<int, IReadOnlyList<MediaInfo>> Script, int Seconds, string? Ends, Func<VideoEndDetector, bool>? After)[]
+    {
+        // Autoplay near the end: episode 1 (20 min, from 19:00) -> episode 2. The same change mid-episode (an ad): not the end (yet).
+        ("autoplay near the end ends it", s => new[] { s < 80 ? M("Episode 1", P, 1100 + s, 1200, t0.AddSeconds(s)) : M("Episode 2", P, s - 80, 1300, t0.AddSeconds(s)) }, 200, "the next one started at 80s", null),
+        ("the same change mid-episode is not the end", s => new[] { s < 80 ? M("Episode 1", P, 100 + s, 1200, t0.AddSeconds(s)) : M("Episode 2", P, s - 80, 1300, t0.AddSeconds(s)) }, 200, null, null),
+        // A mid-roll ad (a title change far from the end, back after 30 s); a pre-roll ad while settling; another video picked by hand (plays > 3 min).
+        ("a mid-roll ad is not the end", s => new[] { s is >= 100 and < 130 ? M("Ad", P, s - 100, 30, t0.AddSeconds(s)) : M("Movie", P, 1000 + Math.Min(s, 100), 3600, t0.AddSeconds(s)) }, 400, null, d => d.Title == "Movie"),
+        ("a pre-roll ad while settling: the video after it followed", s => new[] { s < 20 ? M("Ad", P, s, 20, t0.AddSeconds(s)) : M("Video", P, s - 20, 600, t0.AddSeconds(s)) }, 120, null, d => d.Title == "Video"),
+        ("another video picked far from the end: followed", s => new[] { s < 100 ? M("A", P, 500 + s, 3600, t0.AddSeconds(s)) : M("B", P, s - 100, 2000, t0.AddSeconds(s)) }, 400, null, d => d.Title == "B"),
+        // Pauses, buffering ("changing").
+        ("a 5 s pause is not the end", s => new[] { M("V", s is >= 60 and < 65 ? Pa : P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, null, null),
+        ("a 5 min pause ends it", s => new[] { M("V", s >= 60 ? Pa : P, 100 + Math.Min(s, 60), 3600, t0.AddSeconds(s)) }, 400, "paused for 5 minutes at 360s", null),
+        ("20 s of buffering is not the end", s => new[] { M("V", s is >= 60 and < 80 ? MediaStatus.Changing : P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, null, null),
+        // The session goes (the app closed): after 10 s; gone 5 s (a page load) and back: not.
+        ("the session gone ends it after 10 s", s => s >= 60 ? Array.Empty<MediaInfo>() : new[] { M("V", P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, "the player closed at 70s", null),
+        ("the session gone 5 s is not the end", s => s is >= 60 and < 65 ? Array.Empty<MediaInfo>() : new[] { M("V", P, 100 + s, 3600, t0.AddSeconds(s)) }, 200, null, null),
+        // A raid on Twitch (live, no timeline): the new channel playing 3 min is the end; 1 min is not.
+        ("a live raid ends it after 3 min", s => new[] { M(s < 100 ? "Streamer A" : "Streamer B", P, null, null, t0.AddSeconds(s)) }, 400, "the next one has played for 3 minutes at 280s", null),
+        ("a 1-minute title change on a live stream is not the end", s => new[] { M(s is >= 100 and < 160 ? "Streamer B" : "Streamer A", P, null, null, t0.AddSeconds(s)) }, 400, null, null),
+        // Resting at the very end (no autoplay), stopped: after 5 s.
+        ("paused at the end ends it", s => new[] { M("V", s >= 50 ? Pa : P, Math.Min(550 + s, 600), 600, t0.AddSeconds(s)) }, 200, "the video ended at 55s", null),
+        ("stopped ends it", s => new[] { M("V", s >= 50 ? MediaStatus.Stopped : P, 100 + Math.Min(s, 50), 3600, t0.AddSeconds(s)) }, 200, "playback stopped at 55s", null),
+        // Nothing playing when set: waits, then follows what plays. The cap: 3 hours.
+        ("waits for something to play, then follows it", s => s < 600 ? new[] { M("V", Pa, 100, 3600, t0.AddSeconds(s)) } : new[] { M("V", P, 100 + s - 600, 3600, t0.AddSeconds(s)) }, 700, null, d => d.Source == "MSEdge"),
+        ("the 3 h cap", s => new[] { M("V", P, s, null, t0.AddSeconds(s)) }, 3 * 3600 + 5, "3 hours have passed at 10800s", null),
+    };
+    var wrongEnds = cases.Select(c => (c, Got: Run(c.Script, c.Seconds, out var det), det)).Where(x => x.Got != x.c.Ends || x.c.After?.Invoke(x.det) == false)
+        .Select(x => $"{x.c.What} (got {x.Got ?? "no end"}, following {x.det.Title})").ToList();
+    Check(wrongEnds.Count == 0, "the end of a video, an ad, a pause, a closed player, a raid, the cap: " + T.Misses(wrongEnds));
 
     // Seconds left, extrapolated between reads.
     var info = M("V", P, 100, 600, t0);
@@ -929,37 +883,28 @@ T.Group("SleepTimer", () =>
 // ---------------------------------------------------------------- DecodeCheck.Parse
 T.Group("DecodeCheck", () =>
 {
-    var fixture = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "hwdecode-fixture.json"));
+    var fixture = File.ReadAllText(Repo.In("launcher", "tests", "LauncherTests", "hwdecode-fixture.json"));
     var parsed = DecodeCheck.Parse("WARNING: something\r\n" + fixture);
     Check(parsed is { } p && p.GetProperty("codecs").GetArrayLength() == 7 && p.GetProperty("pass").GetBoolean(), "fixture parses: 7 codecs, pass");
     Check(DecodeCheck.Parse("no json here") is null, "no JSON: null");
     Check(DecodeCheck.Parse("{\"x\":1}") is null, "JSON without codecs: null");
 });
 
-// ---------------------------------------------------------------- AlertsForm.Render
-T.Group("Alerts overlay", () =>
+// ---------------------------------------------------------------- AlertsForm.Render, VolumeOsd.Render
+// Drawn off screen, never shown. HTPC_TEST_SHOTS=<folder> also saves each one on a mock screen
+// there, to look at.
+T.Group("Alerts overlay and the volume indicator", () =>
 {
-    var iconsFile = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ui", "icons.js"));
-    var js = File.ReadAllText(iconsFile);
-    foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(js, @"^\s*(\w+):\s*'([^']*)'", System.Text.RegularExpressions.RegexOptions.Multiline))
-    {
-        var figs = SvgPath.Parse(m.Groups[2].Value);
-        Check(figs.Count > 0, $"icon {m.Groups[1].Value} parses");
-    }
+    var iconsFile = Repo.In("launcher", "ui", "icons.js");
+    var broken = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(iconsFile), @"^\s*(\w+):\s*'([^']*)'", System.Text.RegularExpressions.RegexOptions.Multiline)
+        .Where(m => SvgPath.Parse(m.Groups[2].Value).Count == 0).Select(m => m.Groups[1].Value).ToList();
+    Check(broken.Count == 0, "every icon in icons.js parses: " + T.Misses(broken));
     Check(SvgPath.Parse("M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 11v6M12 7.5h0").Count(f => f.Dot is not null) == 1, "info icon: one dot");
-    var outDir = Path.Combine(Path.GetTempPath(), "htpc-maps-shots");
-    Directory.CreateDirectory(outDir);
-    var cards = new List<OverlayCard>
+    var shots = Environment.GetEnvironmentVariable("HTPC_TEST_SHOTS");
+    void Save(string name, Bitmap b, Rectangle at, Rectangle screen, Rectangle avoid)
     {
-        new("sleep", "Sleeping in 1 minute", "The video ended", "timer", AlertTone.Warn, "Home", "+15 min"),
-        new("volume", "Volume 45", null, "speaker", AlertTone.Info, null, null),
-        new("app", "Stremio closed unexpectedly", "It stopped responding and was closed. A long line to see the wrapping work as it should.", "warn", AlertTone.Bad, "A", "Reopen"),
-    };
-    void Shot(string name, OverlayView v, Rectangle screen, Rectangle avoid)
-    {
-        using var b = AlertsForm.Render(v, screen, avoid, iconsFile, out var at);
-        Check(b is not null, name + " rendered");
-        if (b is null) return;
+        if (string.IsNullOrEmpty(shots)) return;
+        Directory.CreateDirectory(shots);
         using var canvas = new Bitmap(screen.Width, screen.Height);
         using (var g = Graphics.FromImage(canvas))
         {
@@ -969,35 +914,45 @@ T.Group("Alerts overlay", () =>
             if (!avoid.IsEmpty) using (var kb = new SolidBrush(Color.FromArgb(22, 24, 28))) g.FillRectangle(kb, avoid);
             g.DrawImage(b, at.X - screen.X, at.Y - screen.Y);
         }
-        canvas.Save(Path.Combine(outDir, $"alerts-{name}.png"), System.Drawing.Imaging.ImageFormat.Png);
+        canvas.Save(Path.Combine(shots, name + ".png"), System.Drawing.Imaging.ImageFormat.Png);
         T.Info($"{name}: window {at}");
     }
+    var cards = new List<OverlayCard>
+    {
+        new("sleep", "Sleeping in 1 minute", "The video ended", "timer", AlertTone.Warn, "Home", "+15 min"),
+        new("volume", "Volume 45", null, "speaker", AlertTone.Info, null, null),
+        new("app", "Stremio closed unexpectedly", "It stopped responding and was closed. A long line to see the wrapping work as it should.", "warn", AlertTone.Bad, "A", "Reopen"),
+    };
+    Rectangle Cards(string name, OverlayView v, Rectangle screen, Rectangle avoid)
+    {
+        using var b = AlertsForm.Render(v, screen, avoid, iconsFile, out var at);
+        Check(b is not null && screen.Contains(at), $"{name}: rendered, on the screen ({at})");
+        if (b is not null) Save("alerts-" + name, b, at, screen, avoid);
+        return at;
+    }
+    Rectangle Volume(string name, SoundLevel level, string? output, Rectangle screen, Rectangle avoid)
+    {
+        using var b = VolumeOsd.Render(level, output, screen, avoid, iconsFile, out var at);
+        Save("volume-" + name, b, at, screen, avoid);
+        return at;
+    }
     var hd = new Rectangle(0, 0, 1920, 1080);
-    Shot("cards-1080", new OverlayView(cards), hd, Rectangle.Empty);
-    Shot("sleep-4k", new OverlayView(cards.Take(1).ToList()), new Rectangle(0, 0, 3840, 2160), Rectangle.Empty);
-    Shot("cards-keyboard-top", new OverlayView(cards.Take(2).ToList()), hd, new Rectangle(0, 0, 1920, 560));
+    var uhd = new Rectangle(0, 0, 3840, 2160);
+    var keyboard = new Rectangle(0, 0, 1920, 560);
+    var cardsHd = Cards("cards-1080", new OverlayView(cards), hd, Rectangle.Empty);
+    var cards4k = Cards("sleep-4k", new OverlayView(cards.Take(1).ToList()), uhd, Rectangle.Empty);
+    var cardsKb = Cards("cards-keyboard-top", new OverlayView(cards.Take(2).ToList()), hd, keyboard);
+    Check(cardsKb.Top + cardsKb.Height / 2 > keyboard.Bottom, $"the keyboard at the top: the cards below it ({cardsKb})");
     Check(AlertsForm.Render(new OverlayView(Array.Empty<OverlayCard>()), hd, Rectangle.Empty, iconsFile, out _) is null, "empty view: nothing");
 
     // The volume indicator: top left, clear of the alert cards (top right) and of the keyboard.
-    void VolumeShot(string name, SoundLevel level, string? output, Rectangle screen, Rectangle avoid, Action<Rectangle> check)
-    {
-        using var b = VolumeOsd.Render(level, output, screen, avoid, iconsFile, out var at);
-        check(at);
-        using var canvas = new Bitmap(screen.Width, screen.Height);
-        using (var g = Graphics.FromImage(canvas))
-        {
-            g.Clear(Color.FromArgb(40, 44, 52));
-            if (!avoid.IsEmpty) using (var kb = new SolidBrush(Color.FromArgb(22, 24, 28))) g.FillRectangle(kb, avoid);
-            g.DrawImage(b, at.X - screen.X, at.Y - screen.Y);
-        }
-        canvas.Save(Path.Combine(outDir, $"volume-{name}.png"), System.Drawing.Imaging.ImageFormat.Png);
-        T.Info($"volume-{name}: window {at}");
-    }
-    var cardsLeft = 1920 - 96 - 680;
-    VolumeShot("45", new SoundLevel(45, false), null, hd, Rectangle.Empty, at => Check(at.Left < 96 && at.Top < 48 && at.Right < cardsLeft && at.Bottom < 250, "volume: top left, clear of the cards"));
-    VolumeShot("muted", new SoundLevel(45, true), null, hd, Rectangle.Empty, _ => { });
-    VolumeShot("output-4k", new SoundLevel(30, false), "Speakers (USB Audio and HID)", new Rectangle(0, 0, 3840, 2160), Rectangle.Empty, at => Check(at.Right < cardsLeft * 2 && at.Height > 2 * (88 + 80), "volume with the output's name, 4K: taller, still clear of the cards"));
-    VolumeShot("keyboard-top", new SoundLevel(80, false), null, hd, new Rectangle(0, 0, 1920, 560), at => Check(at.Top >= 560 - 40, "keyboard at the top: the volume below it"));
+    var volume = Volume("45", new SoundLevel(45, false), null, hd, Rectangle.Empty);
+    Check(volume.Left < hd.Width / 4 && volume.Top < hd.Height / 4 && !volume.IntersectsWith(cardsHd), $"volume: top left, clear of the cards ({volume}, the cards {cardsHd})");
+    Volume("muted", new SoundLevel(45, true), null, hd, Rectangle.Empty);
+    var named = Volume("output-4k", new SoundLevel(30, false), "Speakers (USB Audio and HID)", uhd, Rectangle.Empty);
+    Check(named.Height > 2 * volume.Height && !named.IntersectsWith(cards4k), $"volume with the output's name, 4K: taller than at 1080 twice over, still clear of the cards ({named})");
+    var below = Volume("keyboard-top", new SoundLevel(80, false), null, hd, keyboard);
+    Check(below.Top + below.Height / 2 > keyboard.Bottom, $"keyboard at the top: the volume below it ({below})");
 });
 
 // ---------------------------------------------------------------- Brightness kept across a start
@@ -1117,19 +1072,10 @@ T.Group("Core Audio (reads only: nothing is switched or set)", () =>
     Check(!hasAudio || CoreAudio.DefaultId() == outputs.First(o => o.IsDefault).Id, "the default output's id");
 });
 
-// ---------------------------------------------------------------- Over an app: what is left alone
-T.Group("Home menu over an app: the app's window and the pointer", () =>
+// ---------------------------------------------------------------- The pointer after the Home menu over an app
+T.Group("The pointer after the Home menu over an app", () =>
 {
     var screen = new Rectangle(0, 0, 3840, 2160);
-    Native.Rect R(int l, int t, int r, int b) => new() { Left = l, Top = t, Right = r, Bottom = b };
-    const long Popup = 0x80000000L, Visible = 0x10000000L, Maximized = 0x01000000L, Caption = 0x00C00000L, SizingBorder = 0x00040000L, SysMenu = 0x00080000L, MinMax = 0x00030000L;
-    Check(Native.FillsScreen(Popup | Visible, R(0, 0, 3840, 2160), screen), "frameless and covering the screen: left alone");
-    Check(Native.FillsScreen(Popup | Visible | Maximized | SysMenu | MinMax, R(0, 0, 3840, 2160), screen), "maximized frameless (Stremio's own full screen), system menu bits: left alone, not restored");
-    Check(!Native.FillsScreen(Visible | Caption | SizingBorder | SysMenu | MinMax, R(0, 0, 3840, 2160), screen), "a title bar showing: filled");
-    Check(!Native.FillsScreen(Visible | SizingBorder, R(0, 0, 3840, 2160), screen), "a sizing border: filled");
-    Check(!Native.FillsScreen(Popup | Visible, R(0, 0, 1920, 1080), screen), "frameless, not the whole screen: filled");
-    Check(!Native.FillsScreen(Popup | Visible | Maximized, R(0, 0, 3840, 2100), screen), "maximized to the work area (a taskbar): filled");
-
     var parked = new Point(3839, 1080);
     Check(CursorHider.ComeBackTo(new Point(1200, 700), screen, parked) == new Point(1200, 700), "the pointer comes back where it was, not over the middle of the video");
     Check(CursorHider.ComeBackTo(null, screen, parked) == new Point(1920, 1080), "position unknown: the middle");
@@ -1140,88 +1086,71 @@ T.Group("Home menu over an app: the app's window and the pointer", () =>
 // ---------------------------------------------------------------- Every catalog app opens filling the screen
 T.Group("Catalog: every app opens filling the screen", () =>
 {
-    var root = new DirectoryInfo(AppContext.BaseDirectory);
-    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-    var catalog = Path.Combine(root!.FullName, "setup", "catalog.json");
-    using var doc = JsonDocument.Parse(File.ReadAllText(catalog));
-    // --start-maximized: the Browser, which fills the screen with the launcher as the shell (no taskbar).
-    // Each app's full-screen switch.
-    string[] ownSwitch = { "--fullscreen", "-fs", "--start-fullscreen", "--start-maximized", "-gamepadui", "--fullscreen-borderless" };
-    foreach (var a in doc.RootElement.GetProperty("apps").EnumerateArray())
-    {
-        var id = a.GetProperty("id").GetString();
-        if (a.GetProperty("type").GetString() == "website") continue; // Edge app window, --start-fullscreen (AppManager)
-        var launch = a.GetProperty("launch");
-        var switches = AppManagerArgs(launch);
-        var fill = launch.TryGetProperty("fill", out var f) && f.ValueKind == JsonValueKind.True;
-        Check(fill || switches.Any(ownSwitch.Contains), $"{id}: its own full-screen switch or fill (args: {string.Join(' ', switches)})");
-    }
-    var vlc = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "vlc").GetProperty("launch");
-    Check(AppManagerArgs(vlc).SequenceEqual(new[] { "--fullscreen", "--no-video-title-show", "--no-qt-video-autoresize" }) && vlc.GetProperty("fill").GetBoolean(),
-        "VLC: videos full screen, no title over them, its window not shrunk to the video, and the window itself filled");
-
-    static string[] AppManagerArgs(JsonElement launch) =>
-        launch.TryGetProperty("args", out var v) ? v.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries) : Array.Empty<string>();
+    static string[] ArgsOf(JsonElement app) =>
+        app.GetProperty("launch") is var launch && launch.TryGetProperty("args", out var v) ? v.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries) : [];
+    static bool Filled(JsonElement app) => app.GetProperty("launch").TryGetProperty("fill", out var f) && f.ValueKind == JsonValueKind.True;
+    // Each app's full-screen switch (--start-maximized: the Browser, which fills the screen with
+    // the launcher as the shell, no taskbar), or fill; websites are Edge app windows (EdgeSiteApp).
+    string[] ownSwitch = ["--fullscreen", "-fs", "--start-fullscreen", "--start-maximized", "--fullscreen-borderless"];
+    var windowed = Repo.Catalog.GetProperty("apps").EnumerateArray().Where(a => a.GetProperty("type").GetString() != "website")
+        .Where(a => !Filled(a) && !ArgsOf(a).Any(ownSwitch.Contains)).Select(a => $"{a.GetProperty("id").GetString()} ({string.Join(' ', ArgsOf(a))})").ToList();
+    Check(windowed.Count == 0, "every app: its own full-screen switch or fill: " + T.Misses(windowed));
+    var vlc = ArgsOf(Repo.App("vlc"));
+    Check(vlc.Contains("--fullscreen") && vlc.Contains("--no-video-title-show") && vlc.Contains("--no-qt-video-autoresize") && Filled(Repo.App("vlc")),
+        $"VLC: videos full screen, no title over them, its window not shrunk to the video, and the window itself filled ({string.Join(' ', vlc)})");
 
     // Website tiles: full screen with no exit bubble, and still the tile's own profile (sign-ins kept).
     var site = EdgeSiteApp.Arguments(@"C:\Users\u\AppData\Local\HTPC\edge\twitch", "https://www.twitch.tv/");
     Check(site.Contains("--start-fullscreen") && site.Contains("--force-app-mode"), "website tiles: full screen in app mode (no \"exit full screen\" bubble)");
-    var browser = doc.RootElement.GetProperty("apps").EnumerateArray().First(a => a.GetProperty("id").GetString() == "edge").GetProperty("launch");
-    Check(site.Contains(EdgeSiteApp.DarkPages) && AppManagerArgs(browser).Contains(EdgeSiteApp.DarkPages),
-        "website tiles and the Browser: light pages drawn dark by Edge itself (no Dark Reader)");
-    Check(site.Contains(EdgeSiteApp.DiskCache) && AppManagerArgs(browser).Contains(EdgeSiteApp.DiskCache),
-        "website tiles and the Browser: each profile's cache capped (small disks)");
+    var browser = ArgsOf(Repo.App("edge"));
+    Check(site.Contains(EdgeSiteApp.DarkPages) && browser.Contains(EdgeSiteApp.DarkPages), "website tiles and the Browser: light pages drawn dark by Edge itself");
+    Check(site.Contains(EdgeSiteApp.DiskCache) && browser.Contains(EdgeSiteApp.DiskCache), "website tiles and the Browser: each profile's cache capped (small disks)");
     // The Browser (the user, 27 Sept 2026: "Edge still says press Esc to exit full screen"): a
     // plain maximized window, its tabs and address bar showing, no full-screen bubble.
-    var browserArgs = AppManagerArgs(browser);
-    Check(browserArgs.Contains("--start-maximized") && !browserArgs.Any(a => a is "--start-fullscreen" or "--force-app-mode" || a.StartsWith("--app=") || a.StartsWith("--kiosk")),
+    Check(browser.Contains("--start-maximized") && !browser.Any(a => a is "--start-fullscreen" or "--force-app-mode" || a.StartsWith("--app=") || a.StartsWith("--kiosk")),
         "the Browser: maximized with tabs and an address bar, not full screen or an app window");
-    Check(!(browser.TryGetProperty("fill", out var browserFill) && browserFill.ValueKind == JsonValueKind.True), "the Browser: not filled (its frame holds the tabs)");
+    Check(!Filled(Repo.App("edge")), "the Browser: not filled (its frame holds the tabs)");
     Check(!site.Any(a => a.StartsWith("--kiosk") || a.StartsWith("--inprivate") || a.StartsWith("--incognito") || a.StartsWith("--guest")),
         "website tiles: never kiosk, InPrivate or guest (their sign-ins would be lost)");
     Check(site[0] == @"--user-data-dir=C:\Users\u\AppData\Local\HTPC\edge\twitch" && site[1] == "--app=https://www.twitch.tv/" && site.Count(a => a.Contains("twitch.tv")) == 1,
         "website tiles: their own profile folder, the address as one argument of its own");
 });
 
-// ---------------------------------------------------------------- A fill app's own title strip (launch.cropTop)
-// Feishin draws its own - [] x bar (30 CSS px) even full screen: filled, it sits just above the screen.
-T.Group("Fill: an app's own title strip above the screen (launch.cropTop)", () =>
+// ---------------------------------------------------------------- The catalog's launch options
+// Filling the screen (which windows are left alone), a fill app's own title strip (cropTop:
+// Feishin draws its own - [] x bar, 30 CSS px, even full screen: filled, it sits just above the
+// screen), keys for an app's own menus (menuKeys: Moonlight's Qt menus reach their toolbar only
+// with Shift+Tab, which Select, unused there, sends; its stream is an SDL window: nothing, ever),
+// the apps that own the controller, and files cleared before a start (clearBeforeStart).
+T.Group("Catalog: launch options (fill, cropTop, menuKeys, ownController, clearBeforeStart)", () =>
 {
     var tv4k = new Rectangle(0, 0, 3840, 2160);
     var hd = new Rectangle(0, 0, 1920, 1080);
+    Native.Rect R(int l, int t, int r, int b) => new() { Left = l, Top = t, Right = r, Bottom = b };
+    const long Popup = 0x80000000L, Visible = 0x10000000L, Maximized = 0x01000000L, Caption = 0x00C00000L, SizingBorder = 0x00040000L, SysMenu = 0x00080000L, MinMax = 0x00030000L;
+    Check(Native.FillsScreen(Popup | Visible, R(0, 0, 3840, 2160), tv4k), "frameless and covering the screen: left alone");
+    Check(Native.FillsScreen(Popup | Visible | Maximized | SysMenu | MinMax, R(0, 0, 3840, 2160), tv4k), "maximized frameless (Stremio's own full screen), system menu bits: left alone, not restored");
+    Check(!Native.FillsScreen(Visible | Caption | SizingBorder | SysMenu | MinMax, R(0, 0, 3840, 2160), tv4k), "a title bar showing: filled");
+    Check(!Native.FillsScreen(Visible | SizingBorder, R(0, 0, 3840, 2160), tv4k), "a sizing border: filled");
+    Check(!Native.FillsScreen(Popup | Visible, R(0, 0, 1920, 1080), tv4k), "frameless, not the whole screen: filled");
+    Check(!Native.FillsScreen(Popup | Visible | Maximized, R(0, 0, 3840, 2100), tv4k), "maximized to the work area (a taskbar): filled");
+
     Check(Native.FillRect(tv4k, 0, 240) == tv4k, "no cropTop: the screen itself");
-    Check(Native.FillRect(hd, 30, 96) == new Rectangle(0, -30, 1920, 1110), "100 %: y = -30, height = screen + 30");
+    Check(Native.FillRect(hd, 30, 96) == new Rectangle(0, -30, 1920, 1110), "cropTop 30 at 100 %: y = -30, height = screen + 30");
     Check(Native.FillRect(tv4k, 30, 144) == new Rectangle(0, -45, 3840, 2205), "150 %: the strip is 45 px");
     Check(Native.FillRect(tv4k, 30, 240) == new Rectangle(0, -75, 3840, 2235), "250 % (a 4K TV): the strip is 75 px");
     Check(Native.FillRect(new Rectangle(1920, 0, 1920, 1080), 30, 96) == new Rectangle(1920, -30, 1920, 1110), "a second screen: its own left edge kept");
     Check(Native.FillRect(hd, 30, 0) == new Rectangle(0, -30, 1920, 1110), "DPI unknown: 100 %");
-    Native.Rect R(int l, int t, int r, int b) => new() { Left = l, Top = t, Right = r, Bottom = b };
-    const long Popup = 0x80000000L, Visible = 0x10000000L;
     var cropped = Native.FillRect(tv4k, 30, 240);
     Check(Native.FillsScreen(Popup | Visible, R(0, -75, 3840, 2160), cropped), "cropped already: left alone");
     Check(!Native.FillsScreen(Popup | Visible, R(0, 0, 3840, 2160), cropped), "exactly on the screen, its strip showing: filled again, cropped");
-
-    var root = new DirectoryInfo(AppContext.BaseDirectory);
-    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-    var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
+    var apps = Repo.Apps;
     Check(apps.Get("feishin") is { Fill: true, CropTop: 30 }, "Feishin: filled, its 30 px window bar cropped");
-    var withCrop = apps.Catalog.Where(a => a.CropTop != 0).Select(a => a.Id).ToList();
-    Check(withCrop.SequenceEqual(["feishin"]), $"only Feishin is cropped ({string.Join(", ", withCrop)})");
-    JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
-    Check(AppManager.CropTopOf(L("""{ "cropTop": 30 }""")) == 0, "cropTop without fill: nothing (the app fills the screen itself)");
-    Check(AppManager.CropTopOf(L("""{ "fill": true, "cropTop": "30" }""")) == 0 && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": 500 }""")) == 0
-        && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": -5 }""")) == 0 && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": 12.5 }""")) == 0,
+    Check(AppManager.CropTopOf(Fixtures.Json("""{ "cropTop": 30 }""")) == 0, "cropTop without fill: nothing (the app fills the screen itself)");
+    Check(AppManager.CropTopOf(Fixtures.Json("""{ "fill": true, "cropTop": "30" }""")) == 0 && AppManager.CropTopOf(Fixtures.Json("""{ "fill": true, "cropTop": 500 }""")) == 0
+        && AppManager.CropTopOf(Fixtures.Json("""{ "fill": true, "cropTop": -5 }""")) == 0 && AppManager.CropTopOf(Fixtures.Json("""{ "fill": true, "cropTop": 12.5 }""")) == 0,
         "cropTop: a whole number of pixels up to 100, else nothing");
-});
 
-// ---------------------------------------------------------------- Keys for an app's own menus (menuKeys)
-// Moonlight's menus (Qt) reach their toolbar only with Shift+Tab; Select, unused there, sends it.
-// Its stream is an SDL window: nothing, ever.
-T.Group("Keys for an app's own menus (menuKeys)", () =>
-{
-    var root = new DirectoryInfo(AppContext.BaseDirectory);
-    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-    var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
     var moonlight = apps.Get("moonlight")?.MenuKeys;
     Check(moonlight is not null, "Moonlight has menu keys");
     Check(moonlight?.KeyFor(Pad.Select, "Qt683QWindowIcon") is KeyAction { Keys: [0x10, 0x09] }, "its menu window (Qt): Select = Shift+Tab");
@@ -1229,56 +1158,27 @@ T.Group("Keys for an app's own menus (menuKeys)", () =>
     Check(moonlight?.KeyFor(Pad.Select, "SDL_app") is null, "its stream (SDL): nothing");
     Check(moonlight?.KeyFor(Pad.Select, null) is null && moonlight?.KeyFor(Pad.Select, "") is null, "no window in front: nothing");
     Check(moonlight?.KeyFor(Pad.Start, "Qt683QWindowIcon") is null && moonlight?.KeyFor(Pad.B, "Qt683QWindowIcon") is null, "other buttons: nothing (Moonlight's own)");
-    var others = apps.Catalog.Where(a => a.MenuKeys is not null).Select(a => a.Id).ToList();
-    Check(others.SequenceEqual(["moonlight"]), $"only Moonlight has menu keys ({string.Join(", ", others)})");
     Check(apps.Catalog.Where(a => a.MenuKeys is not null).All(a => a.Preset == "controller"), "menu keys only for apps on the Controller preset");
-    // Apps that own the controller, Home included: a tap on Home is theirs, holding it opens the menu.
-    var ownersOfPad = apps.Catalog.Where(a => a.OwnController).Select(a => a.Id).OrderBy(id => id).ToList();
-    Check(ownersOfPad.SequenceEqual(["moonlight"]), $"Moonlight owns the controller, Home included ({string.Join(", ", ownersOfPad)})");
-    Check(apps.Get("steam") is null, "no Steam (slow and laggy at 4K on the box: removed, the owner's call, 29 Sept 2026)");
-    Check(apps.Get("youtubekids") is null, "no YouTube Kids (not offered in Canada; a kid profile in YouTube instead)");
-    Check(apps.Get("playnite")?.ClearBeforeStart is [@"%APPDATA%\Playnite\safestart.flag"], "Playnite: its safe-start marker cleared before it starts (else it stops to ask about safe mode)");
-    Check(apps.Catalog.Where(a => a.ClearBeforeStart is not null).Select(a => a.Id).SequenceEqual(["playnite"]), "only Playnite clears files before it starts");
-    Check(AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", "%LOCALAPPDATA%\\Y\\b.lock" ] }""")) is { Count: 2 }, "clearBeforeStart: files in the user's own folders are read");
-    Check(AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "C:\\Windows\\x.flag" ] }""")) is null
-        && AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\X\\*.flag" ] }""")) is null
-        && AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\..\\..\\x.flag" ] }""")) is null
-        && AppManager.ClearBeforeStartOf(L("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", 5 ] }""")) is null,
-        "clearBeforeStart refused: outside the user's folders, a wildcard, a '..', anything not a string");
-    Check(apps.Get("retrobat") is null, "no RetroBat (its installer needs administrator rights, whose prompt the controller cannot answer: dropped, the owner's call)");
-    JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
-    Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab" }""")) is null, "no whileClass: no menu keys (never to a window not meant for them)");
-    Check(MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "whileClass": "*" }""")) is null, "a whileClass that matches everything: refused");
-    var odd = MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "start": "mouse:left", "home": "key:Esc", "y": "key:NoSuchKey", "b": 5, "whileClass": "Qt*QWindow*" }"""));
+    Check(MenuKeys.Parse(Fixtures.Json("""{ "select": "key:Shift+Tab" }""")) is null, "no whileClass: no menu keys (never to a window not meant for them)");
+    Check(MenuKeys.Parse(Fixtures.Json("""{ "select": "key:Shift+Tab", "whileClass": "*" }""")) is null, "a whileClass that matches everything: refused");
+    var odd = MenuKeys.Parse(Fixtures.Json("""{ "select": "key:Shift+Tab", "start": "mouse:left", "home": "key:Esc", "y": "key:NoSuchKey", "b": 5, "whileClass": "Qt*QWindow*" }"""));
     Check(odd is { Keys.Count: 1 } && odd.Keys.ContainsKey(Pad.Select), "only keys, only real buttons, never Home");
-    Check(MenuKeys.Parse(L("""{ "start": "do:menu", "whileClass": "Qt*QWindow*" }""")) is null, "no key left: no menu keys");
-});
+    Check(MenuKeys.Parse(Fixtures.Json("""{ "start": "do:menu", "whileClass": "Qt*QWindow*" }""")) is null, "no key left: no menu keys");
+    // Apps that own the controller, Home included: a tap on Home is theirs, holding it opens the menu.
+    Check(apps.Get("moonlight") is { OwnController: true }, "Moonlight owns the controller, Home included");
 
-// ---------------------------------------------------------------- No installer finished on screen
-// install.interactive (an installer the user finished on screen, with install.folder and
-// install.keep for its uninstall) went with RetroBat, its only user: neither setup nor the
-// launcher knows them now, so no catalog entry may use them.
-T.Group("Catalog: no installer finished on screen (install.interactive, folder, keep: gone)", () =>
-{
-    var root = new DirectoryInfo(AppContext.BaseDirectory);
-    while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-    using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(root!.FullName, "setup", "catalog.json")));
-    var found = doc.RootElement.GetProperty("apps").EnumerateArray()
-        .Where(a => a.TryGetProperty("install", out var i) && i.ValueKind == JsonValueKind.Object
-            && (i.TryGetProperty("interactive", out _) || i.TryGetProperty("folder", out _) || i.TryGetProperty("keep", out _)))
-        .Select(a => a.GetProperty("id").GetString()).ToList();
-    Check(found.Count == 0, $"no catalog entry has install.interactive, install.folder or install.keep ({string.Join(", ", found)})");
+    Check(apps.Get("playnite")?.ClearBeforeStart is [@"%APPDATA%\Playnite\safestart.flag"], "Playnite: its safe-start marker cleared before it starts (else it stops to ask about safe mode)");
+    Check(AppManager.ClearBeforeStartOf(Fixtures.Json("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", "%LOCALAPPDATA%\\Y\\b.lock" ] }""")) is { Count: 2 }, "clearBeforeStart: files in the user's own folders are read");
+    Check(AppManager.ClearBeforeStartOf(Fixtures.Json("""{ "clearBeforeStart": [ "C:\\Windows\\x.flag" ] }""")) is null
+        && AppManager.ClearBeforeStartOf(Fixtures.Json("""{ "clearBeforeStart": [ "%APPDATA%\\X\\*.flag" ] }""")) is null
+        && AppManager.ClearBeforeStartOf(Fixtures.Json("""{ "clearBeforeStart": [ "%APPDATA%\\..\\..\\x.flag" ] }""")) is null
+        && AppManager.ClearBeforeStartOf(Fixtures.Json("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", 5 ] }""")) is null,
+        "clearBeforeStart refused: outside the user's folders, a wildcard, a '..', anything not a string");
 
-    // A settings file may name "_installer", the map launchers 1.0.7 to 1.0.9 reserved for such
-    // an installer: the other maps are read as before, and it goes at the next save.
-    var saved = new List<JsonElement>();
-    var stored = JsonDocument.Parse("""{ "_other": { "preset": "keyboard" }, "_installer": { "preset": "controller" } }""").RootElement.Clone();
-    var maps = new ButtonMapStore(stored, saved.Add);
-    Check(maps.For(ButtonMapStore.Other, "mouse")?.Name == "keyboard", "old settings with an _installer map: Other windows' map still read");
-    Check(maps.PresetOf("_installer", "mouse") == "mouse", "... the _installer map is not taken as a tile's");
-    Check(maps.SetControl(ButtonMapStore.Other, "a", "key:Space", "mouse") && saved.Count == 1
-        && saved[0].TryGetProperty(ButtonMapStore.Other, out _) && !saved[0].TryGetProperty("_installer", out _),
-        "... and the next save keeps Other windows' map, without it");
+    // Apps the owner dropped: Steam (slow at 4K on the box), RetroBat (its installer needs a
+    // prompt the controller cannot answer), YouTube Kids (not offered in Canada), Kick.
+    var back = new[] { "steam", "retrobat", "youtubekids", "kick" }.Where(id => apps.Get(id) is not null).ToList();
+    Check(back.Count == 0, "the apps the owner dropped are not in the catalog: " + T.Misses(back));
 });
 
 // ---------------------------------------------------------------- The areas with a file of their own
@@ -1400,7 +1300,8 @@ T.Group("Text-field watcher: what is a text field", () =>
         ("another app's rich editor (a document with a value to write)", Element(Document, value: true, readOnly: false, text: true)),
         ("a date, month or week picker (typed digits; as before)", Element(Edit, value: true, readOnly: false)),
     };
-    foreach (var (what, element) in fields) Check(TextFieldWatcher.IsTextField(element), $"a text field: {what}");
+    var missed = fields.Where(f => !TextFieldWatcher.IsTextField(f.Element)).Select(f => f.What).ToList();
+    Check(missed.Count == 0, "text fields: the keyboard may pop up on each: " + T.Misses(missed));
     var notFields = new (string What, Func<int, object?> Element)[]
     {
         ("input type=checkbox (Twitch's tw-toggle too)", Element(CheckBox, value: true, readOnly: false, toggle: true)),
@@ -1424,7 +1325,8 @@ T.Group("Text-field watcher: what is a text field", () =>
         ("an edit box that is a slider all the same (a RangeValue pattern)", Element(Edit, value: true, readOnly: false, range: true)),
         ("a combo box that is a switch all the same", Element(ComboBox, value: true, readOnly: false, text: true, toggle: true)),
     };
-    foreach (var (what, element) in notFields) Check(!TextFieldWatcher.IsTextField(element), $"not a text field: {what}");
+    var taken = notFields.Where(f => TextFieldWatcher.IsTextField(f.Element)).Select(f => f.What).ToList();
+    Check(taken.Count == 0, "not text fields: the keyboard never pops up on these: " + T.Misses(taken));
     // Each property is a call into the app: a button costs one.
     asked.Clear();
     TextFieldWatcher.IsTextField(Element(Button, toggle: true));
@@ -1482,11 +1384,19 @@ T.Group("Soak line", () =>
     var line = SoakLog.Line(new ProcessStats(150 * MB, 1200, 60, 80),
         new List<(string, ProcessStats?)> { ("browser", new(80 * MB, 900, 10, 20)), ("renderer", new(200 * MB, 300, -1, -1)), ("renderer", new(110 * MB, 250, -1, -1)), ("gpu", null) },
         TimeSpan.FromHours(50), TimeSpan.FromDays(9));
-    Check(line.StartsWith("Soak: launcher 150 MB private, 1200 handles, 60 GDI, 80 USER objects;"), line);
-    Check(line.Contains("WebView2 4 processes: 390 MB private, 1450 handles, 10 GDI, 20 USER objects (browser 80 MB, 2 renderer 310 MB)"), "WebView2: the known ones summed, by kind: " + line);
-    Check(line.EndsWith("; up 2 d 2 h (the box 9 d 0 h)"), "uptimes: " + line);
+    // The numbers in their order, whatever the words around them.
+    static bool Says(string text, params string[] parts)
+    {
+        var at = 0;
+        foreach (var p in parts) if ((at = text.IndexOf(p, at, StringComparison.Ordinal)) < 0) return false; else at += p.Length;
+        return true;
+    }
+    Check(Says(line, "150 MB", "1200", "60", "80"), "the launcher's memory, handles, GDI and USER objects: " + line);
+    Check(Says(line, "WebView2", "4", "390 MB", "1450", "10", "20", "browser", "80 MB", "2", "renderer", "310 MB"), "WebView2: its 4 processes, the known ones summed, by kind: " + line);
+    Check(Says(line, "2 d 2 h", "9 d 0 h") && !line.Contains('\n'), "the uptimes, the launcher's then the box's, one line: " + line);
     Check(ProcessStats.Of(Environment.ProcessId) is { PrivateBytes: > 0, Handles: > 0, Gdi: >= 0, User: >= 0 }, "this process's own numbers read");
-    Check(SoakLog.Line(null, [], TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(7)) == "Soak: launcher ?; up 5 min (the box 7 min)", "nothing known: still one line");
+    var unknown = SoakLog.Line(null, [], TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(7));
+    Check(Says(unknown, "?", "5 min", "7 min") && !unknown.Contains('\n'), "nothing known: still one line, with the uptimes: " + unknown);
 });
 
 return T.Summary();

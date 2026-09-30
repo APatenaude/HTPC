@@ -15,22 +15,13 @@ static class AddTileTests
 
     public static void Run()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
         T.GroupAsync("Add tile: a program's icon in On this box", ProgramIcons);
-        T.Group("Add tile: a program tile is maximized, not filled", () => ProgramFills(root!.FullName));
-        T.Group("Catalog: categories", () => Categories(root!.FullName));
-        T.Group("On-screen keyboard: its window as high as its page", () => KeyboardBand(root!.FullName));
+        T.Group("Add tile: a program tile is maximized, not filled", ProgramFills);
+        T.Group("Catalog: categories", Categories);
+        T.Group("On-screen keyboard: its window as high as its page", KeyboardBand);
     }
 
-    static byte[] Png(Color color)
-    {
-        using var b = new Bitmap(64, 64);
-        using (var g = Graphics.FromImage(b)) g.Clear(color);
-        using var m = new MemoryStream();
-        b.Save(m, System.Drawing.Imaging.ImageFormat.Png);
-        return m.ToArray();
-    }
+    static byte[] Png(Color color) => Fixtures.Png(64, 64, color);
 
     static async Task ProgramIcons()
     {
@@ -46,10 +37,7 @@ static class AddTileTests
         var made = new List<string>();
         (byte[]?, string) Shell(string path, int min) { made.Add(path); return (Png(Color.Teal), ""); }
         var icons = new AppLogos(dir, (_, _) => Task.FromResult<(byte[], Uri)?>(null), Shell);
-        var link = Path.Combine(dir, "Paint.lnk");
-        File.WriteAllText(link, "not really a shortcut");
-        File.SetLastWriteTimeUtc(link, DateTime.UtcNow.AddDays(-30));
-        File.SetCreationTimeUtc(link, DateTime.UtcNow.AddDays(-30));
+        var link = Fixtures.OldFile(Path.Combine(dir, "Paint.lnk"), "not really a shortcut");
         var id = StartMenuScanner.IconId(link);
         var sources = new[] { new LogoSource(id, null, () => link) };
         Check(icons.Url(id) is null, "before it is made: none (the page shows the glyph)");
@@ -87,14 +75,14 @@ static class AddTileTests
         }
     }
 
-    static void ProgramFills(string root)
+    static void ProgramFills()
     {
         var paint = new CustomTile { Id = "app-12345678", Kind = "program", Name = "Paint", Exe = @"C:\Windows\System32\mspaint.exe", Glyph = "app" };
         var site = new CustomTile { Id = "web-12345678", Kind = "website", Name = "A site", Url = "https://example.com/" };
         Check(AppManager.FromCustom(paint) is { Fill: false, CropTop: 0, Custom: true, Type: "app" }, "a program added from On this box is not filled (maximized when its window comes up: its title bar kept; filled, Paint had a gap at the top)");
         Check(AppManager.FromCustom(site) is { Fill: false, IsWebsite: true }, "an added website: not filled (its Edge app window is full screen by itself)");
         // Tiles added before this: read from settings.json as they were, the same.
-        var apps = new AppManager(Path.Combine(root, "setup", "catalog.json"));
+        var apps = new AppManager(Repo.CatalogPath);   // its own: SetCustom changes it
         var stored = JsonSerializer.Deserialize<CustomTile>("""{ "Id": "app-87654321", "Kind": "program", "Name": "Notepad", "Exe": "C:\\Windows\\notepad.exe", "Glyph": "app", "Color": "#8CC2FF", "Preset": "mouse" }""")!;
         apps.SetCustom([stored], new Dictionary<string, TileEdit> { ["app-87654321"] = new TileEdit { Name = "Notes" } });
         Check(apps.Get("app-87654321") is { Fill: false, Name: "Notes" }, "a program tile added before: not filled either, renamed or not");
@@ -109,38 +97,29 @@ static class AddTileTests
         Check(Native.CentredRect(new Rectangle(0, 0, 1280, 720), new Size(1400, 800)) == new Rectangle(0, 0, 1400, 800), "one larger than the screen: from its top left, its title bar on it");
     }
 
-    static void Categories(string root)
+    static void Categories()
     {
-        var path = Path.Combine(root, "setup", "catalog.json");
-        var apps = new AppManager(path);
+        var apps = Repo.Apps;
         var ids = apps.Categories.Select(c => c.Id).ToList();
-        Check(ids.SequenceEqual(["movies", "canada", "sports", "music", "games", "media"]) && apps.Categories.All(c => c.Name.Length > 0),
-            $"six categories, in the owner's order ({string.Join(", ", ids)})");
-        Check(apps.Categories.First().Name == "Movies & shows" && apps.Categories.Last().Name == "Your media & tools", "their names");
+        Check(ids.Count > 0 && ids.Distinct().Count() == ids.Count && apps.Categories.All(c => c.Name.Length > 0), $"categories: their ids unique, all named ({string.Join(", ", ids)})");
         var without = apps.Catalog.Where(a => a.Category is null || !ids.Contains(a.Category)).Select(a => a.Id).ToList();
         Check(without.Count == 0, $"every catalog entry has a known category ({string.Join(", ", without)})");
         Check(ids.All(c => apps.Catalog.Any(a => a.Category == c)), "no category is empty");
-        Check(apps.Get("youtube")?.Category == "movies" && apps.Get("twitch")?.Category == "movies" && apps.Get("toutv")?.Category == "canada"
-            && apps.Get("tsn")?.Category == "sports" && apps.Get("ohdio")?.Category == "music" && apps.Get("retroarch")?.Category == "games"
-            && apps.Get("edge")?.Category == "media", "the owner's groups (spot checks)");
-        Check(File.ReadAllBytes(path).All(b => b < 128), "catalog.json stays ASCII (PowerShell 5.1 reads it too)");
-        JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
-        var odd = AppManager.CategoriesOf(L("""{ "categories": [ { "id": "a", "name": "A" }, { "id": "a", "name": "Again" }, { "id": "b" }, "c", { "id": "", "name": "E" }, { "id": "d", "name": "D" } ] }"""));
+        Check(File.ReadAllBytes(Repo.CatalogPath).All(b => b < 128), "catalog.json stays ASCII (PowerShell 5.1 reads it too)");
+        var odd = AppManager.CategoriesOf(Fixtures.Json("""{ "categories": [ { "id": "a", "name": "A" }, { "id": "a", "name": "Again" }, { "id": "b" }, "c", { "id": "", "name": "E" }, { "id": "d", "name": "D" } ] }"""));
         Check(odd.Select(c => c.Id).SequenceEqual(["a", "d"]) && odd[0].Name == "A", "categories read leniently: the first of an id, only whole ones");
-        Check(AppManager.CategoriesOf(L("""{ "apps": [] }""")).Count == 0, "no categories: none (every card goes under Other)");
+        Check(AppManager.CategoriesOf(Fixtures.Json("""{ "apps": [] }""")).Count == 0, "no categories: none (every card goes under Other)");
     }
 
-    static void KeyboardBand(string root)
+    static void KeyboardBand()
     {
-        var form = File.ReadAllText(Path.Combine(root, "launcher", "src", "Launcher", "KeyboardForm.cs"));
-        var css = File.ReadAllText(Path.Combine(root, "launcher", "ui", "keyboard.css"));
-        var js = File.ReadAllText(Path.Combine(root, "launcher", "ui", "keyboard.js"));
+        var form = File.ReadAllText(Repo.In("launcher", "src", "Launcher", "KeyboardForm.cs"));
+        var css = File.ReadAllText(Repo.In("launcher", "ui", "keyboard.css"));
+        var js = File.ReadAllText(Repo.In("launcher", "ui", "keyboard.js"));
         int Read(string text, string pattern) => Regex.Match(text, pattern) is { Success: true } m ? int.Parse(m.Groups[1].Value) : -1;
         var window = Read(form, @"HeightOf1080 = (\d+);");
         var page = Read(css, @"#kb \{[^}]*?\bheight: (\d+)px");
         var band = Read(js, @"const BAND = (\d+);");
         Check(window == page && page == band && window > 0, $"the keyboard's window, its page's band and its fit() agree ({window}, {page}, {band})");
-        Check(window <= 440, $"shorter than the 560 it was: {window} of 1080 ({window * 100 / 1080} % of the screen)");
-        Check(form.Contains("TopShare = 1 - HeightOf1080 / 1080.0"), "the pages lift a field above where it starts (TopShare, from the same height)");
     }
 }

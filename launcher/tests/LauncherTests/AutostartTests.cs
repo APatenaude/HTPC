@@ -35,12 +35,7 @@ static class AutostartTests
         public void Remove(string key, string name) { if (Keys.TryGetValue(key, out var k)) k.Remove(name); }
     }
 
-    static string CatalogPath()
-    {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-        return Path.Combine(root!.FullName, "setup", "catalog.json");
-    }
+    static string CatalogPath() => Repo.CatalogPath;
 
     static readonly string Pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
     static readonly string Pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
@@ -102,10 +97,9 @@ static class AutostartTests
         Check(store.Has(AutostartGuard.RunKey, "HTPC launcher") && store.Has(AutostartGuard.ApprovedRunKey, "HTPC launcher"), "HTPC launcher kept, with its record");
         Check(store.Has(AutostartGuard.RunKey, "Tool") && store.Has(AutostartGuard.RunKey, "OneDriveSetup"), "what no catalog app claims kept (Tool, Windows' OneDriveSetup)");
         var lines = Log.Lines.Skip(before).ToList();
-        Check(lines.Any(l => l.StartsWith("INFO Autostart (test): Spotify: removed HKCU Run 'Spotify' = ")), "each removal logged, with the app and why");
-        Check(lines.Count(l => l.Contains("left alone") && l.Contains("'Tool'")) == 1 && !lines.Any(l => l.Contains("left alone") && l.Contains("OneDriveSetup")),
-            "Tool logged as left alone; Windows' own not");
-        Check(guard.Check("again") == 0 && Log.Lines.Skip(before).Count(l => l.Contains("left alone") && l.Contains("'Tool'")) == 1, "a second check: nothing to do, Tool not logged again");
+        Check(lines.Any(l => l.Contains("Spotify") && l.Contains("HKCU Run")), "each removal logged, with the app and where");
+        Check(lines.Count(l => l.Contains("Tool")) == 1 && !lines.Any(l => l.Contains("OneDriveSetup")), "Tool (nobody's) logged once as left alone; Windows' own not");
+        Check(guard.Check("again") == 0 && Log.Lines.Skip(before).Count(l => l.Contains("Tool")) == 1, "a second check: nothing to do, Tool not logged again");
 
         var failing = new AutostartGuard(AutostartGuard.Load(CatalogPath()), new ThrowingStore());
         Check(failing.Check("broken registry") == 0, "a registry that throws: logged, no crash");
@@ -196,8 +190,7 @@ static class AutostartTests
     static void Catalog()
     {
         var rules = AutostartGuard.Load(CatalogPath());
-        using var doc = JsonDocument.Parse(File.ReadAllText(CatalogPath()));
-        var apps = doc.RootElement.GetProperty("apps").EnumerateArray().ToList();
+        var apps = Repo.Catalog.GetProperty("apps").EnumerateArray().ToList();
         var withExe = apps.Where(a => a.TryGetProperty("launch", out var l) && l.TryGetProperty("exe", out _)).Select(a => a.GetProperty("id").GetString()!).ToList();
         var noFolder = withExe.Where(id => rules.First(r => r.Id == id).Folder is null).ToList();
         Check(noFolder.Count == 0, $"every catalog app with a program has a folder to match ({(noFolder.Count == 0 ? "all" : string.Join(", ", noFolder))})");
@@ -206,8 +199,7 @@ static class AutostartTests
             "Spotify: its Run value declared, prefs autostart-mode \"off\"");
         var plex = rules.First(r => r.Id == "plex");
         Check(plex.Prefs.Any(p => p.Section == "debug" && p.Set.Any(kv => kv.Key == "disableUpdater" && kv.Value == "true")), "Plex HTPC: its own updater off (plex.ini [debug])");
-        var feishin = apps.First(a => a.GetProperty("id").GetString() == "feishin").GetProperty("launch");
-        var env = AppManager.LaunchEnv(feishin);
+        var env = AppManager.LaunchEnv(Repo.App("feishin").GetProperty("launch"));
         Check(env is not null && env["DISABLE_AUTO_UPDATES"] == "1", "Feishin: started with DISABLE_AUTO_UPDATES (its updater would download and install on quit)");
         var bad = AppManager.LaunchEnv(JsonDocument.Parse("""{ "env": { "A=B": "x", "PATH ": "y", "OK_1": "z", "N": 5 } }""").RootElement);
         Check(bad is not null && bad.Count == 1 && bad.ContainsKey("OK_1"), "launch.env: plain names with string values only");

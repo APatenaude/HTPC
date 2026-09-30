@@ -81,13 +81,11 @@ static class WindowlessQuitTests
         }
 
         // The catalog.
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-        var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
+        var apps = Repo.Apps;
         check(apps.Get("stremio") is { QuitWhenWindowless: 60 }, "Stremio (hides to a notification area the TV lacks): ended after 60 s without a window");
         var odd = apps.Catalog.Where(a => a.QuitWhenWindowless > 0 && (a.IsWebsite || a.Exe is null)).Select(a => a.Id).ToList();
         check(odd.Count == 0, $"every watched app is a program of its own, not a website ({string.Join(", ", odd)})");
-        JsonElement L(string json) => JsonDocument.Parse(json).RootElement.Clone();
+        static JsonElement L(string json) => Fixtures.Json(json);
         check(AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": "60" }""")) == 0 && AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": 5 }""")) == 0
             && AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": 86400 }""")) == 0 && AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": 60.5 }""")) == 0
             && AppManager.QuitWhenWindowlessOf(L("""{ "quitWhenWindowless": 90 }""")) == 90,

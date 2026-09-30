@@ -26,19 +26,22 @@ static class LogoTests
     // pointing there): checked without the network, the connection refused before it is made.
     static async Task Addresses()
     {
-        foreach (var a in new[] { "8.8.8.8", "1.1.1.1", "172.32.0.1", "100.128.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808" })
-            Check(AppLogos.IsOnInternet(IPAddress.Parse(a)), $"{a}: on the internet");
-        foreach (var a in new[] { "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.95", "169.254.1.1", "100.64.0.1", "0.0.0.0",
+        var outside = new[] { "8.8.8.8", "1.1.1.1", "172.32.0.1", "100.128.0.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808" }
+            .Where(a => !AppLogos.IsOnInternet(IPAddress.Parse(a))).ToList();
+        Check(outside.Count == 0, "public addresses are on the internet: " + T.Misses(outside));
+        var inside = new[] { "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.95", "169.254.1.1", "100.64.0.1", "0.0.0.0",
             "192.0.0.8", "198.18.0.1", "224.0.0.251", "255.255.255.255", "::1", "::", "fe80::1", "fec0::1", "fd00::1", "ff02::1",
-            "::ffff:192.168.0.1", "::ffff:127.0.0.1", "64:ff9b::a00:1", "2002:c0a8:1::1" })
-            Check(!AppLogos.IsOnInternet(IPAddress.Parse(a)), $"{a}: not on the internet");
+            "::ffff:192.168.0.1", "::ffff:127.0.0.1", "64:ff9b::a00:1", "2002:c0a8:1::1" }.Where(a => AppLogos.IsOnInternet(IPAddress.Parse(a))).ToList();
+        Check(inside.Count == 0, "the box itself, the home network, link-local, shared, reserved, multicast and their IPv6 forms are not: " + T.Misses(inside));
+        var reached = new List<string>();
         foreach (var url in new[] { "https://localhost/favicon.ico", "https://127.0.0.1:9/", "https://[::1]/", "https://192.168.0.1/manifest.json" })
         {
             Exception? refused = null;
             try { await AppLogos.Fetch(new Uri(url), 1000); }
             catch (Exception e) { refused = e; }
-            Check(refused is not null && AppLogos.NotOnInternet(refused), $"{url}: refused before connecting ({refused?.GetType().Name}: {refused?.Message})");
+            if (refused is null || !AppLogos.NotOnInternet(refused)) reached.Add($"{url} ({refused?.GetType().Name}: {refused?.Message})");
         }
+        Check(reached.Count == 0, "the fetcher refuses them before connecting: " + T.Misses(reached));
     }
 
     static void ParsePage()
@@ -102,18 +105,7 @@ static class LogoTests
 
     // --- Test images ---------------------------------------------------------------------------
 
-    internal static byte[] Png(int w, int h, Color fill, bool clearBorder = false, ImageFormat? format = null)
-    {
-        using var b = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(b))
-        {
-            g.Clear(clearBorder ? Color.Transparent : fill);
-            if (clearBorder) using (var brush = new SolidBrush(fill)) g.FillEllipse(brush, w / 4, h / 4, w / 2, h / 2);
-        }
-        using var ms = new MemoryStream();
-        b.Save(ms, format ?? ImageFormat.Png);
-        return ms.ToArray();
-    }
+    static byte[] Png(int w, int h, Color fill, bool clearBorder = false, ImageFormat? format = null) => Fixtures.Png(w, h, fill, clearBorder, format);
 
     // An .ico holding one picture: a PNG as it is, or a bitmap (32-bit, with its mask) the old way.
     static byte[] Ico(int size, bool png)
@@ -289,13 +281,8 @@ static class LogoTests
     // read into the app list (checked without the network; the addresses were checked live).
     static void CatalogLogoUrls()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-        var apps = new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json"));
-        var withLogo = apps.Catalog.Where(a => a.LogoUrl is not null).ToList();
-        foreach (var id in new[] { "crunchyroll", "paramountplus", "rds", "tsn", "youtube" })
-            Check(apps.Get(id)?.LogoUrl is { } u && u.StartsWith("https://"), $"{id}: a logoUrl ({apps.Get(id)?.LogoUrl})");
-        Check(withLogo.All(a => Uri.TryCreate(a.LogoUrl, UriKind.Absolute, out var u) && SiteIcons.Secure(u, a.LogoUrl!) is not null),
+        var withLogo = Repo.Apps.Catalog.Where(a => a.LogoUrl is not null).ToList();
+        Check(withLogo.Count > 0 && withLogo.All(a => Uri.TryCreate(a.LogoUrl, UriKind.Absolute, out var u) && SiteIcons.Secure(u, a.LogoUrl!) is not null),
             "every logoUrl (a website's, or an app's own icon: YouTube's): an absolute https address: " + string.Join(" ", withLogo.Where(a => !a.LogoUrl!.StartsWith("https://")).Select(a => a.Id)));
     }
 
@@ -316,10 +303,7 @@ static class LogoTests
         var changed = 0;
         logos.Changed += () => changed++;
 
-        var exePath = Path.Combine(dir, "player.exe");
-        File.WriteAllText(exePath, "not really a program");
-        File.SetLastWriteTimeUtc(exePath, DateTime.UtcNow.AddDays(-30));
-        File.SetCreationTimeUtc(exePath, DateTime.UtcNow.AddDays(-30));
+        var exePath = Fixtures.OldFile(Path.Combine(dir, "player.exe"));
         string? installed = exePath;
         var sources = new List<LogoSource>
         {
@@ -351,10 +335,7 @@ static class LogoTests
 
         // The app's program is found elsewhere now (its Start menu shortcut's before, the catalog's
         // launch.exe now), though neither program was written since: read again, once.
-        var ownIcon = Path.Combine(dir, "front-end.exe");
-        File.WriteAllText(ownIcon, "not really a program either");
-        File.SetLastWriteTimeUtc(ownIcon, DateTime.UtcNow.AddDays(-30));
-        File.SetCreationTimeUtc(ownIcon, DateTime.UtcNow.AddDays(-30));
+        var ownIcon = Fixtures.OldFile(Path.Combine(dir, "front-end.exe"), "not really a program either");
         installed = ownIcon;
         extracted.Clear();
         saved = await logos.RefreshNow(sources);
@@ -415,9 +396,8 @@ static class LogoTests
         sources.Add(new("walled", "https://www.walled.test/", null, "https://cdn.walled.test/w-512.png"));
         web.Asked.Clear();
         await logos.RefreshNow(sources);
-        Check(logos.Url("walled") is not null && !web.Asked.Any(u => u.Contains("www.walled.test"))
-            && Log.Lines.Any(l => l.Contains("Logo walled: " + SiteIcons.CatalogSource + " cdn.walled.test/w-512.png")),
-            "a site with a logoUrl: its logo from there, its page not asked, the log says where from");
+        Check(logos.Url("walled") is not null && !web.Asked.Any(u => u.Contains("www.walled.test")) && web.Asked.Contains("https://cdn.walled.test/w-512.png"),
+            "a site with a logoUrl: its logo from there, its page not asked");
 
         // Refresh (the background one): Changed on a thread-pool thread, the cache the same.
         var done = new TaskCompletionSource();

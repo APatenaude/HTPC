@@ -9,7 +9,7 @@ namespace Htpc.Launcher;
 readonly record struct ProcUse(uint Pid, uint Parent, long Created, string Name, uint Session, long Cpu, long Memory);
 
 /// <summary>
-/// A program as the resource view counts it: an app with its whole process tree ("app:steam"),
+/// A program as the resource view counts it: an app with its whole process tree ("app:playnite"),
 /// the launcher with its WebView2 ("self"), a part of Windows ("win:windows-update"), or every
 /// process of one program file ("exe:foo.exe").
 /// </summary>
@@ -77,9 +77,9 @@ static class ResourceRules
     /// The sample's processes as programs. The launcher (self) and the WebView2 processes it
     /// started (the browser process, and the renderer, GPU and utility ones under it) are one
     /// "TV launcher" row, never stoppable. Each open app (apps: its tracked process) takes its
-    /// whole process tree, a game Steam started included; so does a copy of an app the launcher
-    /// did not start, found by its program's name (appOfProgram: Steam opened from the desktop,
-    /// its steamwebhelper.exe too). Windows' known programs get a row each (Known); anything else
+    /// whole process tree, a game Playnite started included; so does a copy of an app the launcher
+    /// did not start, found by its program's name (appOfProgram: Stremio opened from the
+    /// desktop). Windows' known programs get a row each (Known); anything else
     /// is grouped by its program file. The Idle process is left out: its time is the CPU's rest.
     /// A process made before its "parent" is not its child: that parent's id was used again.
     /// </summary>
