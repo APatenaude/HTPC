@@ -243,6 +243,9 @@ function Get-BoxProcesses([string]$Root) {
     @(Get-Process -Name 'Htpc*' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", 'OrdinalIgnoreCase') })
 }
 
+# The id of the watchdog running from a fake box (0 when none; there is at most one).
+function Get-BoxWatchdog([string]$Root) { @(@(Get-BoxProcesses $Root | Where-Object Name -like 'HtpcWatchdog*' | ForEach-Object Id) + 0)[0] }
+
 # Its watchdog told to stop, and ended first with the rest (so it starts nothing more): true once
 # nothing runs from the box.
 function Stop-FakeBox([string]$Root) {

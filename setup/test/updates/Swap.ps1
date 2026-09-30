@@ -3,15 +3,17 @@
 
 Write-Host 'Swap'
 Set-Scenario 'normal'
-# One release per kind of launcher, each its own version, so the cases can run side by side.
+# One release per kind of launcher, each its own version, so the cases can run side by side. The
+# healthy and crashing ones ship their watchdog, as real releases do; the others the launcher alone.
 Publish-FakeRelease '0.2.0' 'healthy'
 Publish-FakeRelease '0.3.0' 'crash'
-Publish-FakeRelease '0.4.0' 'hang'
-Publish-FakeRelease '0.5.0' 'healthy' -BrokenRunner
-Publish-FakeRelease '0.6.0' 'healthy' -WrongHash
+Publish-FakeRelease '0.4.0' 'hang' -NoWatchdog
+Publish-FakeRelease '0.5.0' 'healthy' -BrokenRunner -NoWatchdog
+Publish-FakeRelease '0.6.0' 'healthy' -WrongHash -NoWatchdog
 
 $cases = @(New-Case 'swap-ok' @(
         { param($c)
+            $c.Watchdog = Get-BoxWatchdog $c.Root
             $c.Bootstrap = Join-Path $c.Root 'PF\HTPC\Launcher\Start-Job.ps1'
             Add-Content -LiteralPath $c.Bootstrap '# an older copy of the bootstrap'
             # What an update that rolled back keeps of each part (.bad; the crashing release's case
@@ -33,6 +35,10 @@ $cases = @(New-Case 'swap-ok' @(
             Note $c ((Get-Leftovers $root).Count -eq 0) 'no .new left'
             $bad = @(Get-ChildItem (Join-Path $root 'PF\HTPC\Launcher'), (Join-Path $root 'PD\HTPC') -Filter '*.bad*' -ErrorAction SilentlyContinue)
             Note $c ($bad.Count -eq 0) "  the .bad copies an earlier rollback kept: removed once an update works ($($bad.Count) left: $($bad.Name -join ', '))"
+            # The release's watchdog is swapped in beside the launcher, not started: the one running
+            # goes on from its .prev name until the next sign-in, and started the new launcher.
+            $wd = "HtpcWatchdog.exe $(Get-BoxFileVersion $root 'HtpcWatchdog.exe'), .prev $(Get-BoxFileVersion $root 'HtpcWatchdog.prev.exe')"
+            Note $c (@($j.roles) -contains 'watchdog' -and $wd -eq 'HtpcWatchdog.exe 0.2.0, .prev 0.1.0' -and $c.Watchdog -and (Get-BoxWatchdog $root) -eq $c.Watchdog) "the release's watchdog in place, the old one kept as .prev and still the one running ($wd; roles $(@($j.roles) -join ','))"
             $c.Job = Start-FakeJob $root 'Invoke-LauncherRollback -Paths $paths' },
         { param($c)
             $c.RolledBack = $c.R -eq 'ok' -and (Get-Journal $c.Root).step -eq 'rolledback'
@@ -40,6 +46,8 @@ $cases = @(New-Case 'swap-ok' @(
         { param($c)
             $root = $c.Root
             Note $c ($c.RolledBack -and $c.Held) "rollback on request: back on 0.1.0 ($($c.R))"
+            $wd = "HtpcWatchdog.exe $(Get-BoxFileVersion $root 'HtpcWatchdog.exe'), .bad $(Get-BoxFileVersion $root 'HtpcWatchdog.bad.exe'), .prev '$(Get-BoxFileVersion $root 'HtpcWatchdog.prev.exe')'"
+            Note $c ($wd -eq "HtpcWatchdog.exe 0.1.0, .bad 0.2.0, .prev ''" -and (Get-BoxWatchdog $root) -eq $c.Watchdog) "  the old watchdog back in place (still the one running), the release's kept as .bad ($wd)"
             # Its reconcile (no update under way) brought the task's bootstrap in line with lib\.
             Note $c ((Get-FileHash $c.Bootstrap).Hash -eq (Get-FileHash (Join-Path $root 'PF\HTPC\Launcher\lib\Start-Job.ps1')).Hash) "the task's bootstrap is lib\'s copy again"
             $c.Job = Start-PowerShell $c.Bootstrap @('-Job', 'reconcile', '-DryRun') },
@@ -58,7 +66,8 @@ foreach ($kind in @(@{ Mode = 'crash'; Version = '0.3.0'; HealthyWait = 25 }, @{
         { param($c)
             $root = $c.Root
             $j = Get-Journal $root
-            Note $c ($j.step -eq 'rolledback' -and (Get-ExeVersion $root) -eq '0.1.0') "$($c.Label) rolls back ($($j.message))"
+            # The crashing release ships a watchdog: it goes back too.
+            Note $c ($j.step -eq 'rolledback' -and (Get-ExeVersion $root) -eq '0.1.0' -and (Get-BoxFileVersion $root 'HtpcWatchdog.exe') -eq '0.1.0') "$($c.Label) rolls back, the watchdog 0.1.0 too ($($j.message))"
             Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 20 },
         { param($c)
             $root = $c.Root
@@ -71,9 +80,28 @@ foreach ($kind in @(@{ Mode = 'crash'; Version = '0.3.0'; HealthyWait = 25 }, @{
             Note $c ($counted.Count -eq 0 -and ($c.Mode -ne 'crash' -or $covered.Count -ge 2) -and
                 -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-watch')) -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause'))) "  no exit counted by the watchdog ($($covered.Count) covered by the job; counted: $($counted -join '; ')), watch and pause gone"
             # Kept until an update works (swap-ok checks that one removes them).
-            Note $c ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left' }
+            Note $c ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe')) -and
+                ($c.Mode -ne 'crash' -or (Get-BoxFileVersion $root 'HtpcWatchdog.bad.exe') -eq $c.Version)) '  the failed one is kept as .bad (its watchdog too), no .new left' }
     ) $kind
 }
+
+# A box with no watchdog at HtpcWatchdog.exe (it runs from another name): the release's is new
+# there (the journal's "created"), so its rollback removes it again (kept as .bad), and leaves
+# the one running as it is.
+$cases += New-Case 'swap-watchdog-new' @(
+    { param($c)
+        $c.Watchdog = Get-BoxWatchdog $c.Root
+        $c.Job = Start-FakeJob $c.Root 'Invoke-LauncherUpdate -Version 0.3.0 -Source $src -Paths $paths' },
+    { param($c)
+        $j = Get-Journal $c.Root
+        $c.Journal = "$($j.step), created $(@($j.created) -join ',')"
+        Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 20 },
+    { param($c)
+        $root = $c.Root
+        $wd = "HtpcWatchdog.exe '$(Get-BoxFileVersion $root 'HtpcWatchdog.exe')', .bad $(Get-BoxFileVersion $root 'HtpcWatchdog.bad.exe'), .prev $(Get-BoxFileVersion $root 'HtpcWatchdog.prev.exe')"
+        Note $c ($c.Journal -eq 'rolledback, created watchdog' -and $c.Held -and $wd -eq "HtpcWatchdog.exe '', .bad 0.3.0, .prev 0.1.0" -and $c.Watchdog -and (Get-BoxWatchdog $root) -eq $c.Watchdog) "a watchdog new on the box, then a crash: rolled back, the new watchdog removed again (kept as .bad), the one running left; 0.1.0 runs ($($c.Journal); $wd)"
+        $counted = Get-CountedExits $root
+        Note $c ($counted.Count -eq 0 -and (Get-Leftovers $root).Count -eq 0) "  no exit counted by the watchdog, no .new left ($($counted -join '; '))" }) @{ WatchdogFile = 'HtpcWatchdog.prev.exe' }
 
 # An app in front the whole time: the download goes ahead, the swap never does. It is given
 # up after 3 s here (3 hours on the box).
@@ -105,7 +133,7 @@ $cases += New-Case 'swap-badhash' @(
         $root = $c.Root; $r = $c.R
         Note $c ($r -like 'refused*free disk space*' -and (Get-Journal $root).step -eq 'aborted' -and (Get-ExeVersion $root) -eq '0.1.0' -and (Get-Leftovers $root).Count -eq 0) "not enough free space: refused before the download, nothing left ($r)"
         New-Item -ItemType File -Force (Join-Path $root 'stop-watchdog') | Out-Null
-        Wait-Case $c { param($c) -not @(Get-BoxProcesses $c.Root | Where-Object Name -like 'HtpcWatchdog*').Count } 10 },
+        Wait-Case $c { param($c) -not (Get-BoxWatchdog $c.Root) } 10 },
     { param($c) $c.Job = Start-FakeJob $c.Root $update },
     { param($c)
         Note $c ($c.R -like 'refused*watchdog*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "no watchdog running: refused ($($c.R))" })

@@ -3,9 +3,10 @@
 
 Write-Host 'Faults (the job ended hard after each step, then reconcile)'
 Set-Scenario 'normal'
+# Both ship their watchdog, as real releases do: it has its own steps, after the launcher's.
 Publish-FakeRelease '0.2.0' 'healthy'
 Publish-FakeRelease '0.3.0' 'crash'
-$steps = 'download', 'staged', 'ready', 'swapping', 'moved-launcher', 'placed-launcher', 'moved-setup:lib', 'placed-setup:lib',
+$steps = 'download', 'staged', 'ready', 'swapping', 'moved-launcher', 'placed-launcher', 'moved-watchdog', 'placed-watchdog', 'moved-setup:lib', 'placed-setup:lib',
     'moved-setup:jobs', 'placed-setup:jobs', 'moved-setup:catalog.json', 'placed-setup:catalog.json', 'moved-setup:', 'placed-setup:', 'swapped', 'verifying'
 # One check per cut, of every part (the line names the parts that failed).
 $cases = @(foreach ($step in $steps) {
@@ -30,10 +31,11 @@ $cases = @(foreach ($step in $steps) {
                 $next = Resolve-FakeRunner $root
                 $c.Parts["the old launcher and journal aborted or rolled back, or the new one and done ($v, $($j.step))"] = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
                 $c.Parts["the kept setup the launcher's version (setup $kept)"] = $kept -eq $v
+                $c.Parts["the watchdog the launcher's version ($(Get-BoxFileVersion $root 'HtpcWatchdog.exe'))"] = (Get-BoxFileVersion $root 'HtpcWatchdog.exe') -eq $v
                 $c.Parts["$v running"] = $c.Held
                 $c.Parts["no .new left ($($left.Name -join ', '))"] = $left.Count -eq 0
                 $c.Parts["the task's next runner $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"] = $next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v
-                Note-Parts $c "after '$($c.Step)': the runner that began it found; reconciled to $v on disk and running, journal $($j.step), setup $kept, the next runner $v's ($($c.R))" $c.Parts }
+                Note-Parts $c "after '$($c.Step)': the runner that began it found; reconciled to $v on disk and running, journal $($j.step), setup $kept, watchdog $v, the next runner $v's ($($c.R))" $c.Parts }
         ) @{ Step = $step }
     })
 
@@ -51,8 +53,9 @@ $finish = @(
         $j = Get-Journal $root
         $v = Get-ExeVersion $root
         $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
-        Note $c ($c.Cut -eq 'rollingback' -and $c.Pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $c.Held -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($c.Release)) cut after '$($c.Step)' ($($c.Cut)): finished, 0.1.0 on disk and running, setup $kept ($r; $($j.message))" })
-foreach ($step in 'rollingback', 'restored-launcher', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') {
+        $wd = Get-BoxFileVersion $root 'HtpcWatchdog.exe'
+        Note $c ($c.Cut -eq 'rollingback' -and $c.Pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $wd -eq '0.1.0' -and $c.Held -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($c.Release)) cut after '$($c.Step)' ($($c.Cut)): finished, 0.1.0 on disk and running, setup $kept, watchdog $wd ($r; $($j.message))" })
+foreach ($step in 'rollingback', 'restored-launcher', 'restored-watchdog', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') {
     # The crashing release (0.3.0): the update rolls back by itself, cut after $step.
     $cases += New-Case "fault-rb-crash-$($step -replace '[:.]', '_')" (@(
             { param($c) $c.Job = Start-FakeJob $c.Root 'Invoke-LauncherUpdate -Version 0.3.0 -Source $src -Paths $paths' $c.Step }) + $finish

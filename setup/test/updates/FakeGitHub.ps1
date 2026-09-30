@@ -16,17 +16,23 @@ function Start-FakeGitHub {
 function Set-Scenario([string]$Name) { [IO.File]::WriteAllText((Join-Path $serverRoot 'scenario'), $Name) }
 $source = New-UpdateSource -Repo 'test/htpc' -BaseUrl "http://127.0.0.1:$port" -AllowedHosts @('127.0.0.1') -RedirectDomains @('localhost') -MaxRetryWaitSec 5
 
-# Release v<Version> on the fake GitHub: the launcher in the given mode, setup.zip, update.json.
-# Made once (the same release asked for again is left as it is).
+# Release v<Version> on the fake GitHub: the launcher in the given mode, its watchdog (role
+# "watchdog", as Build-Release ships it; -NoWatchdog: none, the launcher alone), setup.zip,
+# update.json. Made once (the same release asked for again is left as it is).
 $published = @{}
-function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switch]$BrokenRunner, [switch]$WrongHash) {
-    $kind = "$Mode $([bool]$BrokenRunner) $([bool]$WrongHash)"
+function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switch]$BrokenRunner, [switch]$WrongHash, [switch]$NoWatchdog) {
+    $kind = "$Mode $([bool]$BrokenRunner) $([bool]$WrongHash) $([bool]$NoWatchdog)"
     if ($published[$Version] -eq $kind) { return }
     $published[$Version] = $null
     $dir = Join-Path $serverRoot "v$Version"
     if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
     New-Item -ItemType Directory -Force $dir | Out-Null
     Copy-Item (Get-FakeLauncher $Version $Mode) (Join-Path $dir 'TV-Box-Setup.exe')
+    $roles = @(@('TV-Box-Setup.exe', 'launcher'), @('setup.zip', 'setup'))
+    if (-not $NoWatchdog) {
+        Copy-Item (Get-FakeWatchdog $Version) (Join-Path $dir 'HtpcWatchdog.exe')
+        $roles += , @('HtpcWatchdog.exe', 'watchdog')
+    }
     # setup.zip as Build-Release writes it (an entry per file, "/" between folders), straight from
     # the template (a fresh copy of it is read, and scanned, all over again: a second a release),
     # with this release's own files; its job runner broken on request (it no longer parses).
@@ -47,7 +53,7 @@ function Publish-FakeRelease([string]$Version, [string]$Mode = 'healthy', [switc
             try { $writer.Write($own[$rel]) } finally { $writer.Dispose() }
         }
     } finally { $zip.Dispose() }
-    $files = foreach ($pair in @(@('TV-Box-Setup.exe', 'launcher'), @('setup.zip', 'setup'))) {
+    $files = foreach ($pair in $roles) {
         $n, $role = $pair
         $f = Join-Path $dir $n
         $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()

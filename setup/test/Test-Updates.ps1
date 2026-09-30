@@ -15,7 +15,8 @@
                 (Watchdog.cs compiled with checks), the machine steps an update applies
       Download  pinned redirects, lying lengths, rate limits, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken runner, not newer, no space,
-                never back at Home; the fake watchdog counts none of its exits
+                never back at Home; the fake watchdog counts none of its exits; the release's
+                watchdog swapped in and rolled back (and, new on a box, removed again)
       Faults    the job ended hard after each journal step, then reconcile: never half of each
       Planting  junctions, user-owned files and ACL entries refused; the app jobs' work folders
                 (run it as SYSTEM in the VM too: -Only Planting)
@@ -74,14 +75,17 @@ try {
     if (Section 'Core') { . "$PSScriptRoot\updates\Core.ps1" }
 
     if ((Section 'Download') -or (Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) {
-        # The fakes the sections below use, all built side by side from here on.
+        # The fakes the sections below use, all built side by side from here on: launchers, and
+        # the watchdogs of the boxes (0.1.0) and of the releases that ship one.
         $fakes = @('0.2.0 healthy')
+        $watchdogs = @('0.2.0')
         if ((Section 'Swap') -or (Section 'Faults') -or (Section 'Planting')) {
             $fakes += '0.1.0 healthy', '0.1.0 busy', '0.3.0 crash', '0.4.0 hang', '0.5.0 healthy', '0.6.0 healthy'
-            Get-FakeWatchdog -Later
+            $watchdogs += '0.1.0', '0.3.0'
             [void](Get-NativeDll -Later)
         }
         foreach ($fake in $fakes) { $v, $mode = $fake -split ' '; Get-FakeLauncher $v $mode -Later }
+        foreach ($v in $watchdogs) { Get-FakeWatchdog $v -Later }
         Start-FakeGitHub
     }
 
