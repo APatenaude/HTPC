@@ -1,10 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Checks for the button maps, PadMapper, the video-end detector, the sleep timer, the logos, the
-       decode-check parser, the alerts overlay, the autostart guard, setup's elevation, the
-       WebViews' recovery, desktop mode's tray icon, apps left running with no window, and Add a tile's
-       program icons, program tiles filling the screen, the catalog's categories, the keyboard's
-       height, the Home menu's resource view, and standby (waking with Home, the radios it turns
-       off, the apps' efficiency mode): dotnet run (in this folder). -->
+  <!-- The launcher's checks, one group per area (Program.cs lists them, Harness.cs runs them):
+       dotnet run -c Release (in this folder); -v prints every check. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>

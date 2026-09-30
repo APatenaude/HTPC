@@ -36,6 +36,7 @@ sealed unsafe class ResourceWatch
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     readonly AppManager apps;
+    readonly int everyMs;
     readonly uint self = (uint)Environment.ProcessId;
     readonly uint session;
 
@@ -57,9 +58,11 @@ sealed unsafe class ResourceWatch
     /// <summary>The process list's part of it (NtQuerySystemInformation and reading it), in ms.</summary>
     public double LastListMs { get; private set; }
 
-    public ResourceWatch(AppManager apps)
+    /// <param name="everyMs">A report every so often while watched: 2 s; shorter only for the tests.</param>
+    public ResourceWatch(AppManager apps, int everyMs = EveryMs)
     {
         this.apps = apps;
+        this.everyMs = everyMs;
         using var me = Process.GetCurrentProcess();
         session = (uint)me.SessionId;
     }
@@ -165,7 +168,7 @@ sealed unsafe class ResourceWatch
                     if (Environment.TickCount64 >= nextReportAt)
                     {
                         Report(held);
-                        nextReportAt = Environment.TickCount64 + EveryMs;
+                        nextReportAt = Environment.TickCount64 + everyMs;
                     }
                     wait = (int)Math.Max(1, nextReportAt - Environment.TickCount64);
                 }
@@ -424,8 +427,6 @@ sealed unsafe class ResourceWatch
 
     bool open;
     Dictionary<string, string>? appByProgram;
-    List<(System.Text.RegularExpressions.Regex Pattern, string Id)>? appByOwnProcess;
-    readonly Dictionary<string, string?> appOfProgram = new(StringComparer.OrdinalIgnoreCase);
 
     void Open()
     {
@@ -436,27 +437,18 @@ sealed unsafe class ResourceWatch
         ifRow = NativeMemory.AllocZeroed(IfRowSize);
         OpenDisks();
         PickAdapters();
-        // The apps' programs by file name, for copies the launcher did not start (Steam opened
+        // The apps' programs by file name, for copies the launcher did not start (Stremio opened
         // from the desktop). Not Edge's: it is every website's, and the Browser's.
         appByProgram = new(StringComparer.OrdinalIgnoreCase);
-        appByOwnProcess = new();
         foreach (var a in apps.All)
         {
             if (a.IsWebsite) continue;
             if (a.Exe is { } exe && Path.GetFileName(exe) is { Length: > 0 } file && !file.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase))
                 appByProgram.TryAdd(file, a.Id);
-            foreach (var pattern in a.OwnProcesses ?? []) appByOwnProcess.Add((pattern, a.Id));
         }
-        appOfProgram.Clear();
     }
 
-    string? AppOfProgram(string name)
-    {
-        if (appOfProgram.TryGetValue(name, out var id)) return id;
-        id = appByProgram!.GetValueOrDefault(name) ?? appByOwnProcess!.Find(o => o.Pattern.IsMatch(name)).Id;
-        appOfProgram[name] = id;
-        return id;
-    }
+    string? AppOfProgram(string name) => appByProgram!.GetValueOrDefault(name);
 
     void Release()
     {

@@ -36,8 +36,6 @@ Readers: the launcher's `AppManager.Parse` (`launcher/src/Launcher/AppManager.cs
 - `icon`: `{ "glyph", "color" }`, the glyph (`launcher/ui/icons.js`) and colour shown until the
   app's own logo is cached (the launcher takes it from the installed program or the website:
   AppLogos).
-- `logoExe`: the program whose icon is the app's logo, when `launch.exe` is a front end with an icon
-  of its own (a launcher that runs another program).
 - `logoUrl`: an app's or a website's own icon (an app's instead of its program's: YouTube's, not
   VacuumTube's), an https PNG, JPEG or ICO of at least 64 px, fetched before the site's page, for
   a site that turns the logo fetcher away (a bot challenge or a refused request) or names no large
@@ -80,25 +78,18 @@ Environment variables are expanded; websites open in their own Edge app window.
   markers it leaves when it was ended rather than quit, which make its next start stop and ask a
   question no one sees (Playnite's `safestart.flag`: start in safe mode?). At most 8, each under
   `%APPDATA%` or `%LOCALAPPDATA%`, no wildcard, no `..`; never a link.
-- `launch.quitWhenWindowless`: seconds, 30 to 3600. An app that outlives its window (Steam after
-  Exit Big Picture: steam.exe and its web helpers kept running with no window, there being no
-  notification area without Explorer; Stremio hides to one with its streaming server when its
-  window closes) is asked to quit once neither it nor any program it started has had a visible
-  window for that long, and ended 20 s later if it is still there. Never before it has had a window
-  (Steam updates itself windowless at start), in the first minute after it opened, while a program
-  it started runs (a game) or another program covers the screen in front, or while the Home menu is
-  over it; a window coming back starts the count over (the launcher's `WindowlessQuit.cs`).
-- `launch.quitArgs`: what asks the running app to quit, run with its own program (Steam:
-  `-shutdown`); the launcher's Close uses them too, before it ends anything; without them the app is
-  ended. 1 to 8 plain arguments of at most 128 characters.
-- `launch.ownProcesses`: for an app that starts other programs (Steam's games), its own programs
-  besides `launch.exe` (`*` a wildcard, names ending in `.exe` with 4 characters at least besides
-  `*`; Steam's from its own folders): anything else in its process tree is one it started, and
-  keeps it from being quit; without it only windows count.
-- Left without the last three on purpose: Playnite (quits from its menu; games it starts through
-  other launchers run outside its tree), Spotify (music may play with no window in front), Plex
-  HTPC (quits with its window; Plex Media Server is a separate program, not in the catalog) and the
-  apps that quit with their window.
+- `launch.quitWhenWindowless`: seconds, 30 to 3600. An app that outlives its window (Stremio hides
+  to a notification area, which the TV lacks without Explorer, with its streaming server when its
+  window closes) is ended once neither it nor any program it started has had a visible window for
+  that long. Never before it has had a window (it may be starting or updating itself), in the first
+  minute after it opened, while another program covers the screen in front, or while the Home menu
+  is over it; a window coming back starts the count over (the launcher's `WindowlessQuit.cs`).
+  (`launch.quitArgs` and `launch.ownProcesses`, Steam's way to be asked to quit and its own programs,
+  left with Steam: the owner, 30 Sept 2026.)
+- Left without it on purpose: Playnite (quits from its menu; games it starts through other
+  launchers run outside its tree), Spotify (music may play with no window in front), Plex HTPC
+  (quits with its window; Plex Media Server is a separate program, not in the catalog) and the apps
+  that quit with their window.
 
 ## install: how it gets onto the box
 
@@ -146,7 +137,8 @@ What the app sets up to start or run by itself, beyond what runs from its `launc
 
 ## Checks
 
-LauncherTests: the "Catalog: ..." groups in `Program.cs` (every app fills the screen, cropTop,
-menuKeys, no installer left on screen) and `AddTileTests.Categories` (categories, ASCII);
+LauncherTests: the "Catalog: ..." groups in `Program.cs` (every app fills the screen; launch
+options: fill, cropTop, menuKeys, ownController, clearBeforeStart; the apps dropped stay out),
+`WindowlessQuitTests.cs` (quitWhenWindowless) and `AddTileTests.Categories` (categories, ASCII);
 `AutostartTests.cs` and `setup\test\Test-Autostart.ps1 -Only Catalog` (autostart entries); PhoneTests
 (phoneKeys).

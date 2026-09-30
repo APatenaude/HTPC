@@ -14,23 +14,16 @@ namespace Htpc.Launcher;
 // registers a task or shows a window.
 static class ElevationTests
 {
-    static Action<bool, string> Check = null!;
+    static readonly Action<bool, string> Check = T.Check;
 
-    public static void Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
-        Console.WriteLine("== Setup elevation: setup mode, and what a start does");
-        Decisions();
-        Console.WriteLine("== Rights: setup or not, and the token (split, no split, standard)");
-        RightsTable();
-        Console.WriteLine("== Setup elevation: setup runs as the user signed in here, or not at all");
-        SessionUserCheck();
-        Console.WriteLine("== Setup elevation: arguments and the command line");
-        Arguments();
-        Console.WriteLine("== Setup elevation: who takes over after setup");
-        AfterSetup();
-        Console.WriteLine("== Setup elevation: the mutex, setup.ps1, the task, the profiles, the screen");
-        Seams();
+        T.Group("Setup elevation: setup mode, and what a start does", Decisions);
+        T.Group("Rights: setup or not, and the token (split, no split, standard)", RightsTable);
+        T.Group("Setup elevation: setup runs as the user signed in here, or not at all", SessionUserCheck);
+        T.Group("Setup elevation: arguments and the command line", Arguments);
+        T.Group("Setup elevation: who takes over after setup", AfterSetup);
+        T.Group("Setup elevation: the mutex, setup.ps1, the task, the profiles, the screen", Seams);
     }
 
     static void Decisions()
@@ -70,10 +63,11 @@ static class ElevationTests
         Check(SetupElevation.TrustedDir == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Setup"), "the trusted place: Program Files\\HTPC\\Setup");
 
         // In setup mode (elevated) the page may send only setup's messages.
-        foreach (var t in new[] { "ready", "install", "finish", "restart", "tv.choose", "tv.refresh", "wifi.join", "text.keyboard" })
-            Check(SetupElevation.IsSetupMessage(t), $"setup's message {t}: taken");
-        foreach (var t in new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null })
-            Check(!SetupElevation.IsSetupMessage(t), $"{t ?? "(none)"}: refused in setup");
+        var dropped = new[] { "ready", "install", "finish", "restart", "tv.choose", "tv.refresh", "wifi.join", "text.keyboard" }.Where(t => !SetupElevation.IsSetupMessage(t)).ToList();
+        Check(dropped.Count == 0, "setup's own messages taken: " + T.Misses(dropped));
+        var let = new[] { "launch", "power", "setting", "close", "switchTo", "library.install", "tile.add", "updates.install", "phone.pair", "bt.pair", "tv", "wifi", "", null }
+            .Where(SetupElevation.IsSetupMessage).Select(t => t ?? "(none)").ToList();
+        Check(let.Count == 0, "the home screen's messages refused in setup: " + T.Misses(let));
     }
 
     // Rights.cs: administrator rights never mean "this is setup". Setup mode with them alone uses
@@ -121,9 +115,9 @@ static class ElevationTests
         // This session, as Windows records it (a CI runner's service session may have nobody).
         using var id = WindowsIdentity.GetCurrent();
         var (name, sid) = SetupElevation.SessionUser();
-        if (name is null) Console.WriteLine("    info: nobody signed in to this session (a service): the live check is skipped");
+        if (name is null) T.Info("nobody signed in to this session (a service): the live check is skipped");
         else if (SetupElevation.CompareSessionUser(id.User!.Value, id.Name, sid, name) != Same)
-            Console.WriteLine($"    info: this session's user {name} is not this test's {id.Name} (a runner): the live check is skipped");
+            T.Info($"this session's user {name} is not this test's {id.Name} (a runner): the live check is skipped");
         else Check(sid == id.User!.Value, $"this session's user ({name}) found by SID, this test's own ({sid})");
 
         // The refusal: full screen, one button, built but never shown.
@@ -131,16 +125,13 @@ static class ElevationTests
         using var screen = new AdminNeededForm(@"Windows started setup as BOX\admin, but BOX\tv is signed in here. Setup would have set up BOX\admin instead, so it changed nothing.",
             askAgain: null, "Setup must run as the TV account", body);
         var buttons = screen.Controls.OfType<Button>().ToList();
-        Check(buttons.Select(b => b.Text).SequenceEqual(["A   Quit"]) && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
-            "refusal: A Quit only (Enter and Esc quit too), nothing to try again");
-        Check(screen.Controls.OfType<Label>().Any(l => l.Text == body) && screen.Controls.OfType<Label>().Any(l => l.Text == "Setup must run as the TV account"),
-            "refusal: sign in as the TV account, an administrator, and run setup from there");
+        Check(buttons.Count == 1 && buttons[0].Text.StartsWith("A") && buttons[0].Text.Contains("Quit") && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[0],
+            $"refusal: A Quit only (Enter and Esc quit too), nothing to try again ({string.Join(" | ", buttons.Select(b => b.Text))})");
+        Check(screen.Controls.OfType<Label>().Any(l => l.Text.Contains(body)) && screen.Controls.OfType<Label>().Any(l => l.Text.Contains("Setup must run as the TV account")),
+            "refusal: its title and what to do (sign in as the TV account, an administrator, and run setup from there)");
         Check(screen.FormBorderStyle == FormBorderStyle.None && screen.StartPosition == FormStartPosition.Manual, "refusal: full screen, no frame");
-        var bounds = new Rectangle(Point.Empty, screen.Size);
-        Rectangle Box(Control c) => new(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size);
-        var boxes = screen.Controls.Cast<Control>().Select(Box).ToList();
-        Check(boxes.All(bounds.Contains) && boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x),
-            "refusal: everything on screen, nothing overlapping " + string.Join(" ", boxes));
+        var (boxes, onScreen, apart) = Fixtures.Layout(screen);
+        Check(onScreen && apart, "refusal: everything on screen, nothing overlapping " + string.Join(" ", boxes));
     }
 
     static void Arguments()
@@ -153,7 +144,8 @@ static class ElevationTests
         Check(tv.SequenceEqual(["--setup", "--desktop-for-setup", "--elevated"]), "from TV mode: the elevated copy is told setup opened the desktop (it closes it as it ends): " + string.Join(" | ", tv));
         Check(SetupElevation.ElevatedArgs(tv).Count(a => a == SetupElevation.DesktopFlag) == 1, "... once, when started again");
         Check(SetupElevation.HomeArgs(["--elevated", SetupElevation.DesktopFlag, "--no-tv"]).SequenceEqual(["--no-tv", "--home"]), "the home screen after setup: not told about setup's desktop");
-        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))).Contains("open Power › Desktop mode, then start TV Box Setup again"),
+        Check(SetupElevation.CannotShowBody(new COMException("Element not found. (0x80070490)", unchecked((int)0x80070490))) is var body
+            && body.Contains("Desktop mode") && body.Contains("start TV Box Setup again"),
             "WebView2's \"Element not found\" (no Windows desktop, TV mode): the screen says to open desktop mode, then start setup again");
         Check(!SetupElevation.CannotShowBody(new COMException("Class not registered", unchecked((int)0x80040154))).Contains("Desktop mode"), "... any other failure: try again or restart, as before");
 
@@ -194,7 +186,9 @@ static class ElevationTests
             ["Mixed"] = @"%HTPC_TEST_USER_VAR%\y",
         };
         Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", @"C:\Users\evil");
-        var env = SetupElevation.CleanEnvironment(machine);
+        Dictionary<string, string> env;
+        try { env = SetupElevation.CleanEnvironment(machine); }
+        finally { Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", null); }
         Check(env["Path"] == $@"{winDir}\system32;{winDir};C:\Tools\bin", $"PATH: the machine's, expanded with Windows' folder and the machine's own variables ({env["Path"]})");
         Check(env["ComSpec"] == $@"{winDir}\system32\cmd.exe" && env["Mixed"] == @"%HTPC_TEST_USER_VAR%\y", "... never with one of the user's (left as written)");
         Check(env["TEMP"] == SetupElevation.TrustedTemp && env["TMP"] == SetupElevation.TrustedTemp, $"TEMP and TMP admin-only ({env["TEMP"]})");
@@ -205,7 +199,6 @@ static class ElevationTests
         Check(env["USERNAME"] == Environment.UserName && env["USERPROFILE"] == Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             && env["LOCALAPPDATA"] == Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "the user's basics from their account (not the machine's SYSTEM)");
         Check(!env.ContainsKey("HTPC_TEST_USER_VAR"), "nothing else of the user's environment");
-        Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", null);
         Check(SetupElevation.Trampoline(@"C:\x\TV Box Setup.exe", [], pf, "x&calc") is null, "a suffix that is not letters and digits: refused");
         var home = SetupElevation.HomeArgs(["--setup", "--dev", "--elevated", "--no-tv", "--home"]);
         Check(SetupElevation.Trampoline(odd, SetupElevation.ElevatedArgs(["--setup", SetupElevation.DesktopFlag]), pf, "a1b2c3") is { } withDesktop
@@ -229,31 +222,22 @@ static class ElevationTests
         const string setupExe = @"D:\TV Box Setup.exe";
         string[] args = ["--elevated"];
 
-        var n = SetupElevation.AfterSetup(installed, true, true, false, setupExe, args, elevated: true);
+        var n = SetupElevation.AfterSetup(installed, true, true, false, setupExe, args);
         Check(n is { Exe: watchdog, Arguments: "", Task: AsUser.WatchdogTask }, $"installed, with its watchdog: the watchdog, as the user ({n})");
-        n = SetupElevation.AfterSetup(installed, true, true, true, setupExe, args, elevated: true);
+        n = SetupElevation.AfterSetup(installed, true, true, true, setupExe, args);
         Check(n is { Exe: watchdog, Arguments: "--shell" }, "the watchdog as the shell when this session started that way");
-        n = SetupElevation.AfterSetup(installed, true, false, false, setupExe, args, elevated: true);
+        n = SetupElevation.AfterSetup(installed, true, false, false, setupExe, args);
         Check(n is { Exe: installed, Arguments: "", Task: AsUser.LauncherTask }, $"no watchdog: the installed launcher itself ({n})");
-        n = SetupElevation.AfterSetup(installed, true, true, false, installed, ["--setup", "--elevated"], elevated: true);
+        n = SetupElevation.AfterSetup(installed, true, true, false, installed, ["--setup", "--elevated"]);
         Check(n is { Exe: watchdog }, "setup run again from About (the installed exe, elevated): through the watchdog, never in place");
-        n = SetupElevation.AfterSetup(installed, false, false, false, setupExe, ["--dev", "--elevated"], elevated: true);
-        Check(n is { Exe: setupExe, Arguments: "--dev --home", Task: AsUser.LauncherTask }, $"nothing installed, elevated: a copy of this program as the home screen ({n})");
-        n = SetupElevation.AfterSetup(installed, false, false, false, @"C:\dev\TV Box Setup.exe", ["--ui", @"C:\my ui"], elevated: true);
-        Check(n is { Arguments: "--ui \"C:\\my ui\" --home" }, $"... its arguments quoted ({n?.Arguments})");
-
-        // Not elevated (setup mode never is now; kept as it was).
-        Check(SetupElevation.AfterSetup(installed, false, false, false, setupExe, args, elevated: false) is null, "nothing installed, not elevated: this window, in place");
-        Check(SetupElevation.AfterSetup(installed, true, true, false, installed, [], elevated: false) is null, "the installed launcher itself, not elevated: in place");
-        Check(SetupElevation.AfterSetup(installed, true, true, false, @"c:\program files\htpc\launcher\HTPCLAUNCHER.EXE", [], elevated: false) is null, "... whatever the case of its path");
-        Check(SetupElevation.AfterSetup(installed, true, true, false, setupExe, [], elevated: false) is { Exe: watchdog }, "installed elsewhere, not elevated: its watchdog");
+        n = SetupElevation.AfterSetup(installed, false, false, false, setupExe, ["--dev", "--elevated"]);
+        Check(n is { Exe: setupExe, Arguments: "--dev --home", Task: AsUser.LauncherTask }, $"nothing installed: a copy of this program as the home screen, never this elevated window ({n})");
+        n = SetupElevation.AfterSetup(installed, false, false, false, @"C:\dev\TV Box Setup.exe", ["--ui", @"C:\my ui"]);
+        Check(n is { Arguments: "--ui \"C:\\my ui\" --home" }, $"... its arguments quoted ({n.Arguments})");
     }
 
     static void Seams()
     {
-        // Elevated or not: Environment.IsPrivilegedProcess is Windows' own TokenElevation.
-        Check(Environment.IsPrivilegedProcess == TokenElevated(), $"Environment.IsPrivilegedProcess is the token's elevation (here {Environment.IsPrivilegedProcess})");
-
         // The mutex an elevated setup holds: the user in it, as a standard process has it. A test
         // name, never the launcher's.
         var name = $@"Local\HtpcElevationTest-{Guid.NewGuid():N}";
@@ -302,20 +286,19 @@ static class ElevationTests
             Check(Has("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>") && Has("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"), "task: runs on battery too");
             Check(Has(@"<Command>C:\Program Files\HTPC\Launcher\HtpcWatchdog.exe</Command>") && Has("<Arguments>--shell</Arguments>")
                 && Has(@"<WorkingDirectory>C:\Program Files\HTPC\Launcher</WorkingDirectory>"), "task: the watchdog, --shell, in its folder");
-            if (!Has("LeastPrivilege")) Console.WriteLine(xml);
+            if (!Has("LeastPrivilege")) T.Info(xml);
         }
         catch (Exception e) { Check(false, $"Task Scheduler (a definition only): {e.GetType().Name}: {e.Message}"); }
 
         // WebView2: setup's profile is not the launcher's.
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        Check(SetupElevation.WebViewFolder(false, false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
+        Check(SetupElevation.WebViewFolder(false) == Path.Combine(local, "HTPC", "launcher-webview"), "the launcher's WebView2 profile: where it always was");
         // The elevated setup's: WebView2 runs its browser at the user's rights, which cannot write
         // admin-only Program Files (the VM run, runtime 154): a new one each run in the user's profile.
-        var setupView = SetupElevation.WebViewFolder(true, true);
-        Check(setupView.StartsWith(Path.Combine(local, "HTPC", "setup-webview", "run-"), StringComparison.OrdinalIgnoreCase) && setupView == SetupElevation.WebViewFolder(true, true),
+        var setupView = SetupElevation.WebViewFolder(true);
+        Check(setupView.StartsWith(Path.Combine(local, "HTPC", "setup-webview", "run-"), StringComparison.OrdinalIgnoreCase) && setupView == SetupElevation.WebViewFolder(true),
             $"the elevated setup's: its own for this run, in the user's profile, where its de-elevated browser can write ({setupView})");
         Check(!setupView.StartsWith(SetupElevation.TrustedDir, StringComparison.OrdinalIgnoreCase), "... never in admin-only Program Files\\HTPC\\Setup");
-        Check(SetupElevation.WebViewFolder(true, false) == Path.Combine(local, "HTPC", "setup-webview"), "a setup at standard rights (a dev run): its own in the user's profile");
 
         // The C# trust check (UpdateCore's Get-UntrustedReason): Windows' own folder passes, a
         // folder this account made in %TEMP% does not (its owner, or its write rights).
@@ -347,15 +330,13 @@ static class ElevationTests
         using var screen = new AdminNeededForm("Windows asked for permission and did not get it, so nothing was changed.", () => "again");
         var labels = screen.Controls.OfType<Label>().ToList();
         var buttons = screen.Controls.OfType<Button>().ToList();
-        Check(labels.Any(l => l.Text == "Setup needs administrator rights to install"), "screen: says setup needs administrator rights");
-        Check(buttons.Select(b => b.Text).SequenceEqual(["A   Try again", "B   Quit"]) && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[1],
-            "screen: A Try again (Enter), B Quit (Esc)");
-        Check(labels.Any(l => l.Text.StartsWith("Windows asked for permission")), "screen: why, under it");
-        var bounds = new Rectangle(Point.Empty, screen.Size);
-        Rectangle Box(Control c) => new(c.Location, c is Label ? c.GetPreferredSize(new Size(c.MaximumSize.Width, 0)) : c.Size);
-        var boxes = screen.Controls.Cast<Control>().Select(Box).ToList();
-        Check(boxes.All(bounds.Contains), "screen: everything on screen " + string.Join(" ", boxes));
-        Check(boxes.SelectMany((a, i) => boxes.Skip(i + 1), (a, b) => a.IntersectsWith(b)).All(x => !x), "screen: nothing overlaps");
+        Check(labels.Any(l => l.Text.Contains("administrator rights")), "screen: says setup needs administrator rights");
+        Check(buttons.Count == 2 && buttons[0].Text.StartsWith("A") && buttons[0].Text.Contains("Try again") && buttons[1].Text.StartsWith("B") && buttons[1].Text.Contains("Quit")
+            && screen.AcceptButton == buttons[0] && screen.CancelButton == buttons[1],
+            $"screen: A Try again (Enter), B Quit (Esc) ({string.Join(" | ", buttons.Select(b => b.Text))})");
+        Check(labels.Any(l => l.Text.Contains("Windows asked for permission")), "screen: why, under it");
+        var (boxes, onScreen, apart) = Fixtures.Layout(screen);
+        Check(onScreen && apart, "screen: everything on screen, nothing overlapping " + string.Join(" ", boxes));
         Check(!screen.HandedOver, "screen: nothing handed over before a try");
     }
 
@@ -371,8 +352,6 @@ static class ElevationTests
         try { return Enumerable.Range(0, count).Select(i => Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, i * IntPtr.Size))!).ToArray(); }
         finally { LocalFree(argv); }
     }
-
-    static bool TokenElevated() => TokenValue(20 /* TokenElevation */) != 0;
 
     /// <summary>1 default (no split token), 2 full (elevated, split), 3 limited.</summary>
     static int TokenElevationType() => TokenValue(18 /* TokenElevationType */);

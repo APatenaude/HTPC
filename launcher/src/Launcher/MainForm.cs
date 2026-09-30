@@ -103,8 +103,8 @@ sealed partial class MainForm : Form
             // Neither waits for the other (a frozen player held the TV's poll up), and one still
             // running is not started again on top of itself.
             if (++ticks % 5 != 0) return;
-            // Apps left running with no window (Steam after Exit Big Picture): asked to quit, then
-            // ended (catalog launch.quitWhenWindowless); not while the Home menu is over one.
+            // Apps left running with no window (Stremio hidden to a notification area the TV
+            // lacks): ended (catalog launch.quitWhenWindowless); not while the Home menu is over one.
             if (!setupMode) apps.CheckWindowless(id => menuOver == id && LauncherActive);
             if (!setupMode && idleCheck is not { IsCompleted: false }) idleCheck = Logged(standby.Tick(), "Idle check");
             if (tvPoll is not { IsCompleted: false }) tvPoll = Logged(tv.Poll(), "TV poll");
@@ -272,7 +272,7 @@ sealed partial class MainForm : Form
     async Task InitWebView()
     {
         // Setup (elevated) has a profile of its own, new each run: SetupElevation.WebViewFolder.
-        var dataDir = SetupElevation.WebViewFolder(options.Setup, Rights.SetupElevated);
+        var dataDir = SetupElevation.WebViewFolder(options.Setup);
         // The controller's presses reach the page as web messages, not user gestures: without
         // this the page's interface sounds (sounds.js) would stay silent until a key or a click.
         // No error dialogs of the browser's own ("can't read and write to its data directory"):

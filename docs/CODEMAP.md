@@ -14,7 +14,7 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 
 | Need | Use |
 |---|---|
-| Build + the 4 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
+| Build + the 3 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
 | Everything (TvLab, setup tests, phone page) | `launcher\dev\Test-All.ps1` |
 | The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
 | TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
@@ -28,10 +28,13 @@ Setup elevated: `Program Files\HTPC\Setup\logs\launcher.log`). Setup: `C:\Progra
 `system-before.json`, `watchdog-pause`, `watchdog-watch`, `autostart.log`). The user's settings:
 `%LOCALAPPDATA%\HTPC\settings.json` (`LauncherSettings` in `src/Standby.cs`).
 
-Test conventions: LauncherTests `Check(ok, what)` with `== Group` headers, sub-files are static
-classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs`; AlertsTests
-`T.Group(...)`/`T.Check` in `*Checks` classes; PhoneTests groups in `Main`; TileTests covers
-`TileStore.cs`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
+Test conventions: LauncherTests `T.Group("Area: what", () => { ... Check(ok, what) ... })`
+(`Harness.cs`: each group timed and in a try of its own, the log cleared; the output is the
+groups and the failures, `-v` every check and `T.Info` details, any other argument picks groups by
+name: `dotnet run -c Release -- -v Logos`); sub-files are static classes with `Run()` called near
+the end of `tests/LauncherTests/Program.cs` (`TileStoreTests.cs` covers `TileStore.cs`); a list
+of cases is one check that names the ones that failed. AlertsTests `T.Group(...)`/`T.Check` in
+`*Checks` classes; PhoneTests groups in `Main`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
 (text, menu, home, network, settings, tiles, maps, resources, logos, addtile, sounds, notes): each
 `selftestGroup(({ check, sent, lastSent, ... }) => { ... })` with `check('Prefix: what', ok, detail)`
 in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are registered with
@@ -68,7 +71,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 - Tests: selftest "Cards", "Home: three whole rows..." (`ui/selftest/home.js`), "Home: tiles in place,
   Tile options..." (`tiles.js`); audit (`ui/audit/home.js`) 'home', 'home with the phone card', 'home
   with alert cards', 'home, moving a tile', 'home with apps installing'; LauncherTests "Catalog: every
-  app opens filling the screen", "Fill: ... (launch.cropTop)".
+  app opens filling the screen", "Catalog: launch options" (fill, cropTop).
 - Log: `Started {id}: {exe} {args} (pid {n})`, `{id} window up after {ms} ms`, `Launcher hidden behind {id}`,
   `Launcher up in {ms} ms (...)`.
 
@@ -85,8 +88,8 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 - Tests: selftest "The Home menu's alert rows", "Where the Home menu opens / quick buttons"
   (`ui/selftest/menu.js`), "The Home menu over an app says what its buttons do" (`maps.js`), "The Home
   menu's resource view" (`resources.js`); audit (`ui/audit/home.js`) 'home menu over an app', '... over
-  the home screen', '..., nothing open', 'home menu in desktop mode'; LauncherTests "Home menu over an
-  app", "Home menu backdrop: scaling and the JPEG", `ResourceTests.cs`.
+  the home screen', '..., nothing open', 'home menu in desktop mode'; LauncherTests "The pointer after
+  the Home menu over an app", "Home menu backdrop: scaling and the JPEG", `ResourceTests.cs`.
 - Log: `Home over {app}: backdrop ready {ms} ms after Home`, `Home menu: page ready {ms} ms after Home`,
   `Screen capture ready`, `Resource view: {n} samples...`.
 
@@ -100,7 +103,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `PushStartMenu`, `AddProgramTile`, `AddWebsiteTile`, `RenameTile`, `RemoveTile`, `StartLibraryJob`;
   `LibraryService.Enqueue`, `EnqueueBoxJob`, `Run`, `RunThroughTask`, `Follow`; `TileStore.TryWebsiteUrl`,
   `CleanName`, `NewId`; `StartMenuScanner.Scan`.
-- Tests: TileTests; LauncherTests `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
+- Tests: LauncherTests `TileStoreTests.cs`, `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
   (`ui/selftest/tiles.js`), "Add a tile, Rename, setup's apps..." (`addtile.js`); audit (`ui/audit/home.js`)
   'tile options', 'rename', 'change icon', 'add tile: library', 'add tile: on this box', 'add tile:
   website', 'add tile: website, a long address typed'.
@@ -141,8 +144,8 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `PadMapper.Update`; `MainForm.UpdateMapper`, `OnPad`, `OnChord`; `RunMappedCommand`, `OnMapsMessage`
   (maps.*), `PostMaps`; `OnControllerMessage`; buttons.js views `maps`, `buttons`, `openEditor`,
   `choosePreset`, `startPicking`, `pickPress`. Catalog `preset`, `menuKeys` (`MenuKeys.Parse` in AppManager.cs).
-- Tests: LauncherTests "ButtonMapStore", "PadMapper", "Start + D-pad (StartChord)", "Keys for an app's own
-  menus (menuKeys)"; selftest "Button maps..." (`ui/selftest/maps.js`), "Settings: opening, moving..."
+- Tests: LauncherTests "ButtonMapStore", "PadMapper", "Start + D-pad (StartChord)", "Catalog: launch
+  options" (menuKeys); selftest "Button maps..." (`ui/selftest/maps.js`), "Settings: opening, moving..."
   ('Controller:', `settings.js`); audit (`ui/audit/settings.js`) 'button maps', 'button map editor' (+ its
   choice, key combination, presets), 'settings: Controller', 'settings: Controller, button test'. Without a controller: `launcher\dev\Send-Pad.ps1` (a `--dev` launcher).
 - Log: `Controller connected in slot {n}`, `Home down` / `Home held` / `Home up after {ms} ms`,
@@ -159,7 +162,8 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   notices.js `noticeUpdate`, `renderNotices`, `noticeRowsHtml`, `noticePillsHtml`, `noticeAct`;
   `VolumeOsd.Show`, `Render`.
 - Tests: AlertsTests (App exits, Alerts: where and when / Home / standby / noise and threads, Internet);
-  LauncherTests "Alerts overlay" (renders to PNG); selftest "The Home menu's alert rows"
+  LauncherTests "Alerts overlay and the volume indicator" (renders off screen; HTPC_TEST_SHOTS=<folder>
+  saves them as PNGs); selftest "The Home menu's alert rows"
   (`ui/selftest/menu.js`), "Cards" (`home.js`); audit 'home with alert cards' (`ui/audit/home.js`).
 - Log: `Alert {id}`, `Alert {id}: "{action}"`, `Alert {id} dismissed`, `{id} ended: {kind} (exit code ...)`.
 
@@ -190,7 +194,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 - Names: `Standby.Enter`, `Wake`, `Sleep`, `RealSleep`, `Tick`, `RadiosBack`; `LauncherSettings.Load`,
   `Save`, `Set`; `SleepTimer.Set`, `SetVideo`, `Extend`; `InitTimer`, `SetSleepTimer`, `OnTimerMessage`
   (timer.*); `MainForm.OnStandbyChanged`.
-- Tests: LauncherTests "Standby: waking with Home", "Standby: the radios it turns off", "Standby: apps in
+- Tests: LauncherTests "Standby: waking with Home", "Standby: the Wi-Fi radio on a cable", "Standby: apps in
   efficiency mode", "VideoEndDetector", "SleepTimer", "Settings: an unreadable settings.json"; AlertsTests
   "Alerts: standby"; selftest 'Sleep timer:', 'Power:' (`ui/selftest/settings.js`); audit 'sleep timer',
   'power' (`ui/audit/home.js`), 'settings: Sleep & power' (`ui/audit/settings.js`). On a box: `launcher\dev\Measure-StandbyPower.ps1`.
@@ -292,7 +296,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `ui/app.js` (`appIcon`: `https://logos.htpc/<id>.png`, glyph fallback), `ui/app/host.js` (`demoLogo`).
 - Names: `AppLogos.Refresh`, `RefreshNow`, `FromProgram`, `FromSite`, `Forget`, `IsOnInternet`;
   `SiteIcons.ParseManifest`, `LogoImage.ToPng`, `Normalize`; `StartLogos`, `RefreshLogos`. Catalog
-  `logoUrl`, `logoExe`.
+  `logoUrl`.
 - Tests: LauncherTests `LogoTests.cs`; selftest 'Logos:' (`ui/selftest/logos.js`); audit 'change icon',
   'add tile: on this box' (`ui/audit/home.js`).
   Demo: `index.html#home?logos=1`.
@@ -336,15 +340,16 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 
 - One list for setup's picks, the library and the launcher. ASCII, CRLF. Each field and its rules:
   [CATALOG.md](CATALOG.md).
-- Launcher: `AppManager.Parse` -> `CatalogApp` record; validators `QuitWhenWindowlessOf`, `QuitArgsOf`,
-  `OwnProcessesOf`, `CropTopOf`, `LaunchEnv`, `ClearBeforeStartOf`, `CategoriesOf`, `MenuKeys.Parse`; also
+- Launcher: `AppManager.Parse` -> `CatalogApp` record; validators `QuitWhenWindowlessOf`,
+  `CropTopOf`, `LaunchEnv`, `ClearBeforeStartOf`, `CategoriesOf`, `MenuKeys.Parse`; also
   `AutostartGuard.Load` (autostart), `PhoneAppKeys` (phoneKeys), `LibraryService` (install.firstRun,
   blockInbound), `UpdateService` (install.selfUpdate).
 - PowerShell: `AppCore.ps1` (install.*), `Install-Apps.ps1` (default, install.elevated), `AppAutostart.ps1`
   (`Get-AutostartRules`: autostart.*), `AppUpdaters.ps1`, `tools/Get-AppUpdates.ps1`, `Set-PhoneRemote.ps1`
   (install.allowInbound), `Job-Common.ps1` `Get-JobApp` (the trusted copy in Program Files).
-- Tests: LauncherTests "Catalog: ..." sections in Program.cs (full screen, cropTop, menuKeys,
-  no installer on screen) and `AddTileTests.Categories` (categories, ASCII); `Test-Autostart -Only Catalog`;
+- Tests: LauncherTests "Catalog: ..." groups in Program.cs (full screen; launch options: fill,
+  cropTop, menuKeys, ownController, clearBeforeStart), `WindowlessQuitTests.cs` and
+  `AddTileTests.Categories` (categories, ASCII); `Test-Autostart -Only Catalog`;
   PhoneTests (phoneKeys).
 
 ## Recipes

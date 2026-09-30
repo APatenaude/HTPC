@@ -19,7 +19,8 @@ sealed class VolumeOsd : Form
 
     // Design units (1920 wide): top left, clear of the alert cards (top right) and subtitles
     // (bottom).
-    const float CardLeft = 96, CardTop = 48, CardWidth = 520, RowHeight = 88, NameHeight = 40, Shade = 40;
+    const float CardLeft = 96, CardTop = 48, CardWidth = 520, RowHeight = 88, NameHeight = 40;
+    internal const float Shade = 40;   // the shadow's room around the card, in the window (the tests take it off)
 
     // The speaker with a cross instead of its waves (icons.js has no muted speaker).
     const string MutedIcon = "M4 9h4l5-4v14l-5-4H4zM16 9l6 6M22 9l-6 6";

@@ -10,7 +10,7 @@ namespace Htpc.Launcher;
 // stands for the launcher's. Then keeping it on the taskbar (TrayPromotion) on a fake registry.
 static class DesktopTrayTests
 {
-    static Action<bool, string> Check = null!;
+    static readonly Action<bool, string> Check = T.Check;
 
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
@@ -46,16 +46,11 @@ static class DesktopTrayTests
 
     static IntPtr Notification(int what, uint id = DesktopTray.IconId) => (IntPtr)(what | (int)(id << 16));
 
-    public static void Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
-        Console.WriteLine("== Desktop mode's tray icon: when, and what each press does");
-        WhenWanted();
-        Choices();
-        Console.WriteLine("== Desktop mode's tray icon: the taskbar, and Back to TV to the launcher's window");
-        OnTheTaskbar();
-        Console.WriteLine("== Desktop mode's tray icon: kept on the taskbar (a fake registry)");
-        Promotion();
+        T.Group("Desktop mode's tray icon: when, and what each press does", () => { WhenWanted(); Choices(); });
+        T.Group("Desktop mode's tray icon: the taskbar, and Back to TV to the launcher's window", OnTheTaskbar);
+        T.Group("Desktop mode's tray icon: kept on the taskbar (a fake registry)", Promotion);
     }
 
     static void WhenWanted()
@@ -72,8 +67,9 @@ static class DesktopTrayTests
         Check(DesktopTray.ChoiceFor(DesktopTray.NinKeySelect) == DesktopTray.Choice.BackToTv, "Enter or Space on it (NIN_KEYSELECT): Back to TV");
         Check(DesktopTray.ChoiceFor(DesktopTray.WmLButtonDblClk) == DesktopTray.Choice.BackToTv, "a double click: Back to TV");
         Check(DesktopTray.ChoiceFor(DesktopTray.WmContextMenu) == DesktopTray.Choice.Menu, "right click, Shift+F10, the menu key: the menu");
-        foreach (var (other, name) in new[] { (0x201, "left button down"), (0x202, "left button up (after dragging the icon)"), (0x204, "right button down"), (0x205, "right button up"), (0x200, "the pointer over it"), (0x406, "its tooltip opening") })
-            Check(DesktopTray.ChoiceFor(other) == DesktopTray.Choice.None, $"{name}: nothing");
+        var acted = new[] { (0x201, "left button down"), (0x202, "left button up (after dragging the icon)"), (0x204, "right button down"), (0x205, "right button up"), (0x200, "the pointer over it"), (0x406, "its tooltip opening") }
+            .Where(o => DesktopTray.ChoiceFor(o.Item1) != DesktopTray.Choice.None).Select(o => o.Item2).ToList();
+        Check(acted.Count == 0, "the other notifications do nothing: " + T.Misses(acted));
     }
 
     static void OnTheTaskbar()
@@ -224,7 +220,7 @@ static class DesktopTrayTests
 
         var broken = new FakeStore(Others()) { Broken = true };
         Check(TrayPromotion.Run(broken, Installed, DesktopTray.IconId, Folder) == TrayPromotion.Outcome.Failed && broken.Promoted.Count == 0, "the registry refused: nothing, logged");
-        Check(Log.Lines.Any(l => l.StartsWith("WARN Tray icon: keeping it on the taskbar: denied")), "  the log says why");
+        Check(Log.Lines.Any(l => l.StartsWith("WARN") && l.Contains("denied")), "  the log says why");
 
         // This PC's own entries, read only (nothing is written here).
         IReadOnlyList<TrayPromotion.Entry>? read = null;

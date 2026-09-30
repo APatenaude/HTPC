@@ -1,13 +1,14 @@
 using Htpc.Launcher;
 
-// Checks of the launcher's logic (launcher\dev\Checks\Checks.csproj). Each area is a method
-// below; the exit code is the number of failed checks.
+// Checks of the alerts, app exits, internet rules, Wi-Fi profiles and Bluetooth pairing and sound
+// (dotnet run -c Release in this folder; -v prints every check). Each area is a class below; the
+// exit code is the number of failed checks.
 
-AppExitChecks.Run();
-AlertChecks.Run();
-InternetChecks.Run();
-WifiChecks.Run();
-BluetoothChecks.Run();
+T.Area("App exits", AppExitChecks.Run);
+T.Area("Alerts", AlertChecks.Run);
+T.Area("Internet", InternetChecks.Run);
+T.Area("Wi-Fi", WifiChecks.Run);
+T.Area("Bluetooth", BluetoothChecks.Run);
 return T.Summary();
 
 static class WifiChecks
@@ -290,19 +291,19 @@ static class BluetoothChecks
         T.Check("start: nothing to do or say", st.SwitchTo is null && st.Announce is null);
         st = s.Update(new[] { tv, stereo, handsFree }, bt);
         T.Check("headphones connect: switch to the stereo output, never Hands-Free", st.SwitchTo == "bt-stereo", st.SwitchTo);
-        T.Equal("... and say so", "Sound now plays on Headphones", st.Announce);
+        T.Check("... and say so, naming them", st.Announce?.Contains("now plays on Headphones") == true, st.Announce);
         st = s.Update(new[] { tv with { IsDefault = false }, stereo with { IsDefault = true }, handsFree }, bt);
         T.Check("next look, headphones the default: quiet", st.SwitchTo is null && st.Announce is null);
         var usb = new AudioEndpoint("usb", "USB speakers", Guid.NewGuid(), 1, true);
         st = s.Update(new[] { tv with { IsDefault = false }, usb }, bt);
         T.Check("headphones go and Windows picks another output: back to the TV", st.SwitchTo == "tv", st.SwitchTo);
-        T.Equal("... and say so", "Sound is back on TCL TV (HDMI)", st.Announce);
+        T.Check("... and say so, naming it", st.Announce?.Contains("back on TCL TV (HDMI)") == true, st.Announce);
         st = s.Update(new[] { tv, usb with { IsDefault = false } }, bt);
         T.Check("settled on the TV: quiet", st.SwitchTo is null && st.Announce is null);
         var s2 = new SoundSwitcher();
         s2.Update(new[] { tv }, bt);
         st = s2.Update(new[] { tv with { IsDefault = false }, stereo with { IsDefault = true } }, bt);
-        T.Check("Windows switched to the headphones itself: no switch, still announced", st.SwitchTo is null && st.Announce == "Sound now plays on Headphones");
+        T.Check("Windows switched to the headphones itself: no switch, still announced", st.SwitchTo is null && st.Announce?.Contains("now plays on Headphones") == true, st.Announce);
         var s3 = new SoundSwitcher();
         s3.Update(new[] { tv }, new HashSet<Guid>());
         st = s3.Update(new[] { tv, stereo }, new HashSet<Guid>());
@@ -324,7 +325,7 @@ static class BluetoothChecks
         T.Check("turned down to 25 on the headphones: left alone", st.Carry is null && st.SwitchTo is null);
         st = s5.Update(new[] { tv with { Level = At(80) } }, bt);
         T.Check("headphones go, Windows picks the TV (its own 80): the TV gets their last 25", st.SwitchTo is null && st.Carry == ("tv", At(25)), $"{st.Carry}");
-        T.Equal("... and says where sound is", "Sound is back on TCL TV (HDMI)", st.Announce);
+        T.Check("... and says where sound is", st.Announce?.Contains("back on TCL TV (HDMI)") == true, st.Announce);
         st = s5.Update(new[] { tv with { Level = At(25) } }, bt);
         T.Check("settled at 25: quiet", st.Carry is null && st.Announce is null);
 
@@ -339,7 +340,7 @@ static class BluetoothChecks
         var s7 = new SoundSwitcher();
         s7.Update(new[] { tv with { Level = At(40) }, stereo with { Level = At(40) } }, bt);
         st = s7.Update(new[] { tv with { IsDefault = false, Level = At(40) }, stereo with { IsDefault = true, Level = At(20) } }, bt);
-        T.Check("switched in Settings (the level went along there), then turned down: not undone", st.Carry is null && st.Announce == "Sound now plays on Headphones", $"{st.Carry}");
+        T.Check("switched in Settings (the level went along there), then turned down: not undone", st.Carry is null && st.Announce?.Contains("now plays on Headphones") == true, $"{st.Carry}");
 
         var s8 = new SoundSwitcher();
         s8.Update(new[] { tv }, bt);

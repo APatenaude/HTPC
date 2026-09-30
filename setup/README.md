@@ -383,8 +383,8 @@ From its installer's source or on this box (27 Sept 2026).
   with its streaming server; its updater checks every 12 h and downloads.
   Done: closed after the install (`Stop-StartedByInstaller`); updater off (`launch.args` endpoint); the
   launcher's Close ends it after 4 s when it only hides (no tray without Explorer), and so does its
-  windowless watch when it has hidden some other way for 60 s (`launch.quitWhenWindowless`; no
-  `quitArgs`: it has no way to be asked); link handlers left (they only act on a link opened on the box).
+  windowless watch when it has hidden some other way for 60 s (`launch.quitWhenWindowless`); link
+  handlers left (they only act on a link opened on the box).
 - **Jellyfin Media Player** (machine, WiX). Does: a desktop shortcut; at start, asks GitHub for a newer
   version and shows a notice (Download opens the browser; `main.checkForUpdates` in
   `%LOCALAPPDATA%\JellyfinMediaPlayer\jellyfinmediaplayer.conf`, JSON); no service, Run value, link
@@ -420,15 +420,14 @@ From its installer's source or on this box (27 Sept 2026).
 Catalog `launch.quitWhenWindowless`, the launcher's `WindowlessQuit.cs` and `AppManager.CheckWindowless`:
 
 - With no visible window of their own or of anything they started for that many seconds, they are
-  asked to quit (`launch.quitArgs`, run with their own program) and ended 20 s later if still there;
-  with no `quitArgs`, ended. Checked every 5 s, each step in `launcher.log`.
-- Never before the app has had a window (Steam updates itself windowless at start; a copy the launcher
-  took over already windowless is left alone), in the first minute after it opened, while a program it
-  started runs (`launch.ownProcesses`: anything else in its process tree), while another program covers
-  the screen in front (a game started through another store's launcher, outside its tree), or while
-  the Home menu is over it. Each of these, and a window coming back, starts the count over.
-- Set for Stremio (60 s); Steam had it too (60 s, `-shutdown`) until it left the catalog on 29 Sept
-  2026.
+  ended. Checked every 5 s, each step in `launcher.log`.
+- Never before the app has had a window (an app may start or update itself windowless; a copy the
+  launcher took over already windowless is left alone), in the first minute after it opened, while
+  another program covers the screen in front (a game started through another store's launcher,
+  outside its tree), or while the Home menu is over it. Each of these, and a window coming back,
+  starts the count over.
+- Set for Stremio (60 s). Steam had it too until it left the catalog on 29 Sept 2026; its
+  `launch.quitArgs` (asked to quit) and `launch.ownProcesses` (its own programs) went on 30 Sept.
 - Left without it: Playnite (quits from its own menu, and the games it starts through other launchers
   run outside its tree, so a windowless check could end it mid-game), Spotify (music may play with no
   window in front), Plex HTPC (quits with its window; Plex Media Server is a separate program, not in

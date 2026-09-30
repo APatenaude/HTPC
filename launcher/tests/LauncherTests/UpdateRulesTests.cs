@@ -5,9 +5,17 @@ namespace Htpc.Launcher;
 // when the quiet check is due after one that failed. No network.
 static class UpdateRulesTests
 {
-    public static void Run(Action<bool, string> check)
+    static readonly Action<bool, string> check = T.Check;
+
+    public static void Run()
     {
-        Console.WriteLine("== Update rules: versions and GitHub's redirects");
+        T.Group("Update rules: versions and GitHub's redirects", Redirects);
+        T.Group("Update rules: releases/latest", Latest);
+        T.Group("Update rules: rate limits and when to check", WhenToCheck);
+    }
+
+    static void Redirects()
+    {
         check(UpdateRules.ParseSemVer("0.10.0") > UpdateRules.ParseSemVer("0.9.9"), "0.10.0 is newer than 0.9.9");
         check(UpdateRules.ParseSemVer("v1.2.3") == new Version(1, 2, 3), "v1.2.3 is 1.2.3");
         check(UpdateRules.ParseSemVer("1.2.3-beta") is null && UpdateRules.ParseSemVer("1.2") is null, "a pre-release or 1.2 is not a version here");
@@ -28,8 +36,10 @@ static class UpdateRulesTests
         })
             check((UpdateRules.RefusedHop(new Uri(url)) is null) == ok, $"{(ok ? "followed" : "refused")}: {url}");
         check(UpdateRules.RefusedHop(new Uri("https://github.com/Someone/HTPC/releases/download/v1/x"))?.Contains("moved") == true, "  another repository's path on github.com says the repository moved");
+    }
 
-        Console.WriteLine("== Update rules: releases/latest");
+    static void Latest()
+    {
         check(UpdateRules.LatestTag(new Uri("https://github.com/APatenaude/HTPC/releases/tag/v0.2.0")) == "v0.2.0", "a release: its tag");
         check(UpdateRules.LatestTag(new Uri("https://github.com/APatenaude/HTPC/releases")) is null, "no release yet: none");
         foreach (var moved in new[] { "https://github.com/NewOwner/HTPC/releases/tag/v0.2.0", "https://github.com/APatenaude/HTPC-old/releases/tag/v0.2.0", "https://example.com/APatenaude/HTPC/releases/tag/v0.2.0" })
@@ -38,8 +48,10 @@ static class UpdateRulesTests
             try { UpdateRules.LatestTag(new Uri(moved)); } catch (InvalidOperationException) { threw = true; }
             check(threw, $"an error, not \"no release\": {moved}");
         }
+    }
 
-        Console.WriteLine("== Update rules: rate limits and when to check");
+    static void WhenToCheck()
+    {
         check(UpdateRules.IsRateLimit(429, false, null), "429: a rate limit");
         check(UpdateRules.IsRateLimit(403, false, "0") && UpdateRules.IsRateLimit(403, true, null), "403 with X-RateLimit-Remaining: 0 or a Retry-After: a rate limit");
         check(!UpdateRules.IsRateLimit(403, false, null) && !UpdateRules.IsRateLimit(403, false, "42"), "any other 403: not a rate limit");

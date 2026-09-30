@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Dev: the quick check after a change, with short output: the Release build and the four test
+    Dev: the quick check after a change, with short output: the Release build and the three test
     projects, one line each, and only what failed.
 
 .DESCRIPTION
-    Builds the launcher (Release), then runs LauncherTests, AlertsTests, TileTests and PhoneTests
+    Builds the launcher (Release), then runs LauncherTests, AlertsTests and PhoneTests
     (`dotnet run -c Release`, one at a time: the box is small) and prints one line per project:
 
         build         OK, 0 warnings, 24 s
-        LauncherTests 955 passed, 0 failed, 12 s
+        LauncherTests 600 passed, 0 failed, 12 s
 
     plus, for a failure only, the failing checks' lines, compiler errors and an unhandled
     exception's first lines. Exit code 1 on any failure, 0 when all passed.
@@ -21,7 +21,7 @@
     The full pass (TvLab, setup\test, the phone page) stays Test-All.ps1.
 
 .PARAMETER Only
-    Some of the parts: LauncherTests, AlertsTests, TileTests, PhoneTests, TvLab, Build, Ui (comma
+    Some of the parts: LauncherTests, AlertsTests, PhoneTests, TvLab, Build, Ui (comma
     separated). The build runs whenever a .NET project does. -Only Ui runs the UI checks alone.
 .PARAMETER Ui
     Also the UI self-test and audit (Test-Ui.ps1 -SelfTest).
@@ -49,7 +49,7 @@ $failedParts = New-Object Collections.Generic.List[string]
 
 # -File passes "a,b" as one string.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-$projects = @('LauncherTests', 'AlertsTests', 'TileTests', 'PhoneTests')
+$projects = @('LauncherTests', 'AlertsTests', 'PhoneTests')
 $known = $projects + @('TvLab', 'Build', 'Ui')
 foreach ($o in $Only) {
     if ($known -notcontains $o) { Write-Host "-Only: unknown part '$o' (one of $($known -join ', '))"; exit 2 }

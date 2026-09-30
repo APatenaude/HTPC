@@ -69,37 +69,27 @@ sealed partial class MainForm
 
     /// <summary>
     /// Setup done: the installed launcher takes over (the setup exe may be on a USB stick about
-    /// to be pulled out), started as the signed-in user: this window is elevated. Without an
-    /// installed copy (a dev build, or the Launcher step failed) this program becomes the home
-    /// screen, as a copy started the same way (SetupElevation.AfterSetup); in place only when this
-    /// one is not elevated. A desktop setup opened for itself (TV mode) closes first: the launcher
-    /// comes back in TV mode, and the watchdog is found to be the shell again.
+    /// to be pulled out), started as the signed-in user: this window is elevated (setup always
+    /// is). Without an installed copy (a dev build, or the Launcher step failed) this program
+    /// becomes the home screen, as a copy started the same way (SetupElevation.AfterSetup). A
+    /// desktop setup opened for itself (TV mode) closes first: the launcher comes back in TV mode,
+    /// and the watchdog is found to be the shell again.
     /// </summary>
     void FinishSetup()
     {
         SetupElevation.CloseOwnDesktop();
         var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "HTPC", "Launcher", "HtpcLauncher.exe");
-        var elevated = Rights.SetupElevated;
         var next = SetupElevation.AfterSetup(installed, File.Exists(installed), File.Exists(Path.Combine(Path.GetDirectoryName(installed)!, "HtpcWatchdog.exe")),
-            DesktopMode.WatchdogIsShell(), Environment.ProcessPath!, Environment.GetCommandLineArgs().Skip(1), elevated);
-        if (next is not null)
+            DesktopMode.WatchdogIsShell(), Environment.ProcessPath!, Environment.GetCommandLineArgs().Skip(1));
+        Log.Info($"Setup finished: starting {next.Exe} {next.Arguments}");
+        try
         {
-            Log.Info($"Setup finished: starting {next.Exe} {next.Arguments}");
-            try
-            {
-                StartInstalled(next); // MainForm.Shell.cs: as the signed-in user
-                Close();
-                return;
-            }
-            catch (Exception e) { Log.Error("Starting the launcher after setup", e); }
-            // Never this window instead: apps opened from it would run elevated.
-            if (elevated) { Post(new { type = "toast", text = "The home screen did not start. Restart the box to get to it.", kind = "warn" }); return; }
+            StartInstalled(next); // MainForm.Shell.cs: as the signed-in user
+            Close();
+            return;
         }
-        setupMode = false;
-        SetupElevation.HandedOver = true;   // this window is the home screen now (not elevated)
-        tv.InSetup = false;
-        uiReady = false;
-        Log.Info("Setup finished: home screen");
-        web.CoreWebView2?.Navigate("https://launcher.htpc/index.html");
+        catch (Exception e) { Log.Error("Starting the launcher after setup", e); }
+        // Never this window instead: apps opened from it would run elevated.
+        Post(new { type = "toast", text = "The home screen did not start. Restart the box to get to it.", kind = "warn" });
     }
 }

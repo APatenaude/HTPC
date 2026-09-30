@@ -325,8 +325,8 @@ static class Native
     public static HashSet<uint> ProcessTree(uint root) => Descendants(new[] { root }, ProcessParents().Children);
 
     /// <summary>
-    /// The process and all its descendants, each with its program's file name (steamwebhelper.exe;
-    /// empty for a root that is not running), from one snapshot.
+    /// The process and all its descendants, each with its program's file name (empty for a root
+    /// that is not running), from one snapshot.
     /// </summary>
     public static Dictionary<uint, string> ProcessTreeNames(uint root)
     {

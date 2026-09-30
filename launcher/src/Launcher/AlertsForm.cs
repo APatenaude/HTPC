@@ -56,7 +56,8 @@ sealed class AlertsForm : Form
     };
 
     // Design units (1920 wide).
-    const float CardWidth = 680, CardsRight = 96, CardsTop = 48, CardGap = 14, Shade = 40;
+    const float CardWidth = 680, CardsRight = 96, CardsTop = 48, CardGap = 14;
+    internal const float Shade = 40;   // the shadows' room around the cards, in the window (the tests take it off)
 
     OverlayView? view;
     bool suppressed;
