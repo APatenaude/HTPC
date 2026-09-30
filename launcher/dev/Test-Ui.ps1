@@ -214,21 +214,25 @@ if ($SelfTest) {
                 $pageUrl = 'file:///' + ((Join-Path $uiDir $r.Page) -replace '\\', '/') + "?run=$n#$($r.Route)"
                 $script:pageErrors = ''
                 $clock = [Diagnostics.Stopwatch]::StartNew()
+                $navError = ''
                 if ($session) {
-                    # The same Edge: the page's size (the window's own: none set), then the page.
+                    # The same Edge: the page's size (the window's own: none set), what the pages
+                    # before it stored (file: pages share one origin: localStorage), then the page.
                     $w, $h = $r.Size -split 'x'
                     if ($r.Size -eq $windowSize) { [void](Invoke-Cdp $session 'Emulation.clearDeviceMetricsOverride') }
                     else { [void](Invoke-Cdp $session 'Emulation.setDeviceMetricsOverride' @{ width = [int]$w; height = [int]$h; deviceScaleFactor = 1; mobile = $false }) }
-                    [void](Invoke-Cdp $session 'Page.navigate' @{ url = $pageUrl } 10000)
+                    [void](Invoke-Cdp $session 'Storage.clearDataForOrigin' @{ origin = 'file://'; storageTypes = 'all' } 5000)
+                    $nav = Invoke-Cdp $session 'Page.navigate' @{ url = $pageUrl } 10000
+                    if ($nav -and $nav.errorText) { $navError = "; it did not load: $($nav.errorText)" }
                 } else {
                     if ($edgeRun) { Stop-TestEdge $edgeRun }
                     $edgeRun = Start-TestEdge @('--remote-debugging-port=0', $pageUrl) -PageSize $r.Size
                     $windowSize = $r.Size
                     $session = Connect-TestPage $edgeRun
                 }
-                if ($session) { $result = Wait-Results $edgeRun $session $r.Pre $r.Title $n }
+                if ($session -and -not $navError) { $result = Wait-Results $edgeRun $session $r.Pre $r.Title $n }
                 if (-not $result) {
-                    $why = if ($script:pageErrors) { "; the page's errors: $($script:pageErrors)" } else { '' }
+                    $why = if ($script:pageErrors) { "; the page's errors: $($script:pageErrors)" } else { $navError }
                     $next = if ($attempt -eq 1) { '; trying again in a new Edge' } else { '' }
                     Write-Warning "$($r.Page) at $($r.Size): no results in $([int]$clock.Elapsed.TotalSeconds) s$why$next"
                     if ($session) { $session.Socket.Dispose(); $session = $null }
