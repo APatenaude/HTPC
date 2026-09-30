@@ -29,7 +29,7 @@ try
 
     switch (command)
     {
-        case "roku" when args.Contains("--update-golden"): await RokuLab.UpdateGolden(); break;
+        case "roku" when args.Contains("--update-golden"): await Check.Group("Roku: golden traces rewritten", RokuLab.UpdateGolden); break;
         case "roku": await Check.Group("Roku: golden traces", RokuLab.Compare); break;
         case "checks": await TvChecks.RunAll(); break;
         case "unit": await UnitChecks.RunAll(); break;

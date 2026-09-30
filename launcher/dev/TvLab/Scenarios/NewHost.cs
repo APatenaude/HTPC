@@ -45,9 +45,12 @@ sealed class NewHost : IDisposable
 
     public bool StandbyActive => standbyActive;
 
-    public Task Boot(TimeSpan uptime) => Tv.Startup(uptime, startedAgain: null);
+    /// <summary>The calls that may turn the TV on (boot, wake, resume, test): the golden traces' input keys are at most as many.</summary>
+    public int TurnOns;
+
+    public Task Boot(TimeSpan uptime) { TurnOns++; return Tv.Startup(uptime, startedAgain: null); }
     public Task Sleep() => StandbyChanged(true);
-    public Task Wake() => StandbyChanged(false);
+    public Task Wake() { TurnOns++; return StandbyChanged(false); }
 
     /// <summary>Real sleep (S3): Standby.GoingDown turns the TV off, waiting at most 3 s on the thread pool.</summary>
     public Task SleepS3()
@@ -58,7 +61,7 @@ sealed class NewHost : IDisposable
     }
 
     /// <summary>Back from a real sleep: PowerModeChanged(Resume) turns the TV on.</summary>
-    public Task Resume() => Tv.TurnOn();
+    public Task Resume() { TurnOns++; return Tv.TurnOn(); }
 
     async Task StandbyChanged(bool active)
     {
@@ -75,7 +78,7 @@ sealed class NewHost : IDisposable
     }
 
     public Task Tick() => Tv.Poll();
-    public Task<bool> Test() => Tv.Test();
+    public Task<bool> Test() { TurnOns++; return Tv.Test(); }
 
     /// <summary>A pairing still waiting is cancelled first (it would write its key after the folder is gone).</summary>
     public void Dispose()
