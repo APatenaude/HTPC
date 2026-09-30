@@ -127,7 +127,7 @@ sealed class AppManager
         lock (running)
         {
             closing[id] = why;
-            if (running.TryGetValue(id, out var p)) windowless.Remove(p); // ended elsewhere: not asked to quit on top of it
+            if (running.TryGetValue(id, out var p)) windowless.Remove(p); // ended elsewhere: not ended again by its windowless watch
         }
     }
 

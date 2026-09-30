@@ -51,8 +51,8 @@ sealed partial class MainForm
 
     readonly System.Windows.Forms.Timer revealTimer = new() { Interval = 400 };
     // The app the Home menu (or Power menu) was opened over, until an app comes forward, the page
-    // goes home or standby: while it is up over that app, the app is never asked to quit for
-    // want of a window (AppManager.CheckWindowless).
+    // goes home or standby: while it is up over that app, the app is never ended for want of a
+    // window (AppManager.CheckWindowless).
     string? menuOver;
     bool revealPending;
     long menuAskedAt;                              // the Home that ShowOver's pending menu is for

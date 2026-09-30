@@ -70,11 +70,12 @@ static class T
 
     public static void GroupAsync(string name, Func<Task> body) => Group(name, () => body().GetAwaiter().GetResult());
 
-    /// <summary>The last line: what Test-Quick and CI read. The exit code: 0 when all passed.</summary>
+    /// <summary>The last line: what Test-Quick and CI read. The exit code: 0 when all passed (and some ran).</summary>
     public static int Summary()
     {
         Console.WriteLine($"{passed} passed, {failed} failed");
-        return failed == 0 ? 0 : 1;
+        if (passed + failed == 0) Console.WriteLine($"FAIL no check ran: no group's name has {string.Join(" or ", only.Select(o => $"'{o}'"))}");
+        return failed == 0 && passed > 0 ? 0 : 1;
     }
 
     /// <summary>The cases of a table that failed, for a check's text: "none", or them, joined.</summary>

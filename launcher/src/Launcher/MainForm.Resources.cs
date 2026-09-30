@@ -82,7 +82,7 @@ sealed partial class MainForm
         var group = resources?.Find(key);
         if (key.StartsWith("app:") && apps.Get(key[4..]) is { } app)
         {
-            // A copy the launcher did not start (Steam opened from the desktop) is taken over first.
+            // A copy the launcher did not start (Stremio opened from the desktop) is taken over first.
             if (!apps.IsRunning(app.Id)) apps.Adopt(app.Id);
             if (apps.IsRunning(app.Id))
             {
