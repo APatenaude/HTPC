@@ -64,9 +64,16 @@ $lines | Where-Object { $_ -match '^\s*FAIL|WARN' } | Select-Object -First 12
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
 $profileDir = Join-Path $env:TEMP 'htpc-testall-edge'
 $page = 'file:///' + ("$l\dev\phone-test.html" -replace '\\', '/')
-# --disable-extensions: not the extensions TV Box Setup forces into every Edge profile (Test-Ui.ps1).
-$dom = & $edge --headless=new --do-not-de-elevate --disable-gpu --disable-extensions "--user-data-dir=$profileDir" --virtual-time-budget=30000 --dump-dom $page 2>$null | Out-String
-if ($dom -match 'ALL PASSED') { 'phone-test => ALL PASSED' } else { $failed++; 'phone-test => FAILED ' + ([regex]::Match($dom, '\d+ FAILED').Value) }
+# --disable-extensions: not the extensions TV Box Setup forces into every Edge profile (Test-Ui.ps1);
+# --allow-file-access-from-files: the layout audit looks inside the page's frames (file:// pages).
+$dom = & $edge --headless=new --do-not-de-elevate --disable-gpu --disable-extensions --allow-file-access-from-files "--user-data-dir=$profileDir" --virtual-time-budget=30000 --dump-dom $page 2>$null | Out-String
+# The results block only (the page's own comment says "ALL PASSED" too); empty when the time budget ran out first.
+$results = [regex]::Match($dom, '<pre id="results">([\s\S]*?)</pre>').Groups[1].Value
+if ($results -match 'ALL PASSED\s*$') { 'phone-test => ALL PASSED' } else {
+    $failed++
+    'phone-test => FAILED ' + $(if ($results) { [regex]::Match($results, '\d+ FAILED').Value } else { '(no results: the page did not finish in its time budget)' })
+    $results -split "`r?`n" | Where-Object { $_ -match '^FAIL' } | Select-Object -First 6
+}
 Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like "*htpc-testall-edge*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
