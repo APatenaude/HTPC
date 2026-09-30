@@ -171,6 +171,18 @@ function Get-LauncherProcesses($Paths) {
         Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $Paths.Exe, [StringComparison]::OrdinalIgnoreCase) })
 }
 
+# For a rollback to end: every launcher running from the launcher's own folder under a name an
+# update gives its file (HtpcLauncher.exe, .new/.prev/.bad, a set-aside .old-*). A start Windows
+# held while the rollback renamed the file can come up under the new name. Nothing else.
+function Get-LauncherProcessesToEnd($Paths) {
+    $dir = $Paths.LauncherDir.TrimEnd('\')
+    @(Get-CimInstance Win32_Process -Filter "Name LIKE 'HtpcLauncher%'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ExecutablePath -and [string]::Equals((Split-Path $_.ExecutablePath -Parent), $dir, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path $_.ExecutablePath -Leaf) -match '^HtpcLauncher(\.[A-Za-z0-9-]+)*\.exe(\.old-[0-9a-f]{8})?$'
+        })
+}
+
 # The launcher's "I'm healthy" signal: a named event in its own session, which this job (in
 # session 0) opens through the Session\<n>\ prefix. Nothing is read from a folder the user can
 # write to.
@@ -708,7 +720,7 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
     # pause comes before the watch (if any) goes: the launcher this stops is never counted either.
     Save-LauncherJournal $Paths $Journal 'rollingback' $Reason
     Set-WatchdogPause $Paths
-    foreach ($p in Get-LauncherProcesses $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+    foreach ($p in Get-LauncherProcessesToEnd $Paths) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
     foreach ($step in @($plan)) {
         $slot = $step.Slot; $names = $step.Names
@@ -731,7 +743,7 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
     $quiet = [DateTime]::UtcNow
     $until = $quiet.AddSeconds(5)
     while (([DateTime]::UtcNow - $quiet).TotalMilliseconds -lt 500 -and [DateTime]::UtcNow -lt $until) {
-        $late = @(Get-LauncherProcesses $Paths)
+        $late = @(Get-LauncherProcessesToEnd $Paths)
         foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
         if ($late.Count) { $quiet = [DateTime]::UtcNow }
         Start-Sleep -Milliseconds 100
