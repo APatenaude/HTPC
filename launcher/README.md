@@ -10,8 +10,15 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
 - `ui/`: the web UI: Home, Home menu, Power, Sleep timer, Settings, Button maps. Laid out at
   1920x1080 and scaled to the screen. In a normal browser it runs on demo data with the keyboard
   as the controller (arrows, Enter = A, Esc = B, X, H = Home, P = hold Home).
-- `src/MainForm.cs`: the full-screen window hosting the UI; routes the controller, apps, power,
-  volume, brightness and the sleep timer.
+- `ui/app.js`: the page's core (state, send, render, the extension API, go/back); each area in
+  `ui/app/`: `home.js` (top bar, tiles), `menu.js` (the Home menu), `dialogs.js` (Power, Sleep
+  timer, closing an app, the shared question), `settings.js` (the sections, Sleep & power),
+  `focus.js` (the focus and the D-pad), `input.js` (presses, what A does), `host.js` (the host's
+  messages, the demo data, the start). Plain scripts loaded in index.html's order, sharing globals.
+- `src/MainForm.cs`: the full-screen window hosting the UI (its WebView, the page's messages); each
+  area in a partial `src/MainForm.<Area>.cs`: `Controller` (the pad, button maps, windows
+  maximized), `Apps` (opening and switching apps, the launcher coming back), `HomeMenu` (the menu
+  over an app and its backdrop), `Keyboard`, `Power` (and standby), `Setup`, and the features below.
 - How features plug in: `settingsSection`, `addView`, `onAction`, `hostMessage`, `ask` in
   `ui/app.js`; `[UiMessages("prefix.")]` and `[UiReady]` methods in any MainForm part
   (`src/MainForm.Messages.cs`).
@@ -26,9 +33,10 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
   - None while the launcher is hidden or blank, while a text field has the focus, or in setup.
   - The WebView starts with `--autoplay-policy=no-user-gesture-required`: the controller's presses
     reach the page as host messages, not gestures.
-- `ui/selftest.js`, `ui/audit.js`: the page's own checks (`dev/Test-Ui.ps1 -SelfTest`) and the UI
-  audit, a focus walker over every view in a stress state (below, "Build and run on the box").
-  **Every new view must be in the audit walker.**
+- `ui/selftest.js`, `ui/audit.js`: the page's own checks (`dev/Test-Ui.ps1 -SelfTest`; each area's
+  in `ui/selftest/<area>.js`) and the UI audit, a focus walker over every view in a stress state
+  (its pages in `ui/audit/<area>.js`; below, "Build and run on the box"). **Every new view must be
+  in the audit walker.**
 
 ### The launcher's WebViews (`src/WebViewGuard.cs`, `LauncherOrigin.cs`, `WebViewRecovery.cs`)
 
@@ -758,8 +766,9 @@ go, when the quiet check is due, an hour's wait after a failed one.
 
 ### Its checks
 
-- `setup\test\Test-Updates.ps1` (elevated; `-Only Core,Download,Swap,Faults,Planting,Wua`) runs the
-  update jobs against fakes under `%TEMP%\htpc-updtest`. Nothing on the machine changes.
+- `setup\test\Test-Updates.ps1` (elevated; `-Only Core,Download,Swap,Faults,Planting,Wua`, each
+  section in `setup\test\updates\<Section>.ps1`) runs the update jobs against fakes under
+  `%TEMP%\htpc-updtest`. Nothing on the machine changes.
 - The fakes: a fake GitHub on 127.0.0.1 (`Serve-FakeRelease.ps1`: bad redirects, lying lengths, 429,
   404, wrong hashes), fake launchers (healthy, crashing, hanging) and a fake watchdog, the job ended
   hard after every journal step, planted junctions / foreign owners / writable folders, and a faked
@@ -858,7 +867,7 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
 - The page's own checks: `launcher\dev\Test-Ui.ps1 -SelfTest`; screenshots:
   `-Shots alerts,settings/wifi,"?wifi=password#settings/wifi"`.
 
-### The UI audit (`ui/audit.js`, a "focus walker")
+### The UI audit (`ui/audit.js`, a "focus walker"; its pages in `ui/audit/<area>.js`)
 
 - The self-test ends with it. Every page is set up in a stress state (24 tiles, 20 library apps, 15
   Wi-Fi networks, 10 Bluetooth devices, long names...) and walked with the D-pad through `press()`, the
@@ -877,8 +886,9 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
 - The launcher again at 1920x1080, 1536x864 (a 4K TV at Windows' 250 %: the page the owner's TV gets),
   1280x720, 2560x1080 and 1920x1200 (the TV or monitor may be any size and shape: the stage scales and
   letterboxes).
-- **Every new view must be in the walker**: an `auditPage()` in audit.js for each view (`addView`), each
-  Settings section and each setup step (what to set up, how to open it); one without fails the audit.
+- **Every new view must be in the walker**: an `auditPage()` in `ui/audit/<area>.js` for each view
+  (`addView`), each Settings section and each setup step (what to set up, how to open it); one without
+  fails the audit.
 - `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element; `-ShotSize
   1536x864` takes it at the TV's size. As text: `Describe-Page.ps1 -Route "audit?page=home"`.
 
