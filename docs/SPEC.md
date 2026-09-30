@@ -63,7 +63,10 @@ user) are folded into the items below; what was dropped is listed under "Not now
   ends it (any other program), never Windows' own or the launcher; A does nothing there. The
   menu's column is in three parts, a line between them: the open apps (and the way home), the
   controls (volume, brightness, Buttons, Timer, Settings, Power), then this monitor, small, so
-  that all of it fits over an app with two apps open and an alert. Any change of the volume,
+  that all of it fits over an app with two apps open and an alert. It opens over an app on Home
+  screen; over the home screen on the first open app, else on the control used last (Volume at
+  first); up and down into the quick buttons land on the one used last (the owner, 30 Sept
+  2026). Any change of the volume,
   from anywhere, shows a small indicator for 2 s (with the output's name when sound moves).
 - **N5 Hardware video decoding everywhere**, whatever the GPU's maker, with a check in
   Settings › Display that asks the graphics driver (H.264, HEVC, VP9, AV1) and plays no clips.

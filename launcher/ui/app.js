@@ -256,6 +256,28 @@ function renderMenu() {
   if ($('menu-app')) patchHtml($('menu-app'), typeof menuAppCard === 'function' ? menuAppCard() : '');
 }
 
+// The Home menu's controls used last this session (a slider changed, a quick button pressed): the
+// control, and the quick button, by data-id; null: none yet. The menu opens on the control over
+// the home screen with no app open (menuOpening), and up and down into the quick buttons land on
+// the quick button (move), in place of Volume and of the one nearest the middle (the owner, 30 Sept 2026).
+const menuUsed = { control: null, quick: null };
+
+function menuUse(el) {
+  if (state.view !== 'menu' || !el || !el.closest('[data-part="controls"]')) return;
+  menuUsed.control = el.dataset.id;
+  if (el.classList.contains('quick')) menuUsed.quick = el.dataset.id;
+}
+
+// Where the Home menu opens, unless an alert with something to do on screen takes it (the host's
+// focus, noticeHomeFocus). Over an app, on its Home screen row (over the desktop, on Back to TV,
+// its first row, as ever); over the home screen, on the first open app, else on the control
+// used last this session (Volume at first).
+function menuOpening() {
+  if (state.current) return state.current === 'desktop' ? 'back-tv' : 'home';
+  const open = state.tiles.find((t) => t.running);
+  return open ? `app:${open.id}` : menuUsed.control || 'volume';
+}
+
 // The Home menu's hints follow the focus: X only where it does something (an alert's row: it
 // dismisses it; an open app's row, or the app the menu is over: it closes it), left/right on a
 // slider (A does nothing there). A program's row in the resource view: resources.js's own.
@@ -666,11 +688,17 @@ function scrollerOf(el) {
 // quick button. Up and down go along the column, into and out of the resource view as anywhere.
 // (Its programs were a card of their own, up and down kept in it: with the launcher's and
 // Windows' rows taking no focus, on the TV that often left one row, and the focus could not
-// move but back out to the left.)
+// move but back out to the left.) Into its row of quick buttons from above or below (the
+// brightness, the monitor): the quick button used last this session (menuUsed); none yet, the
+// one nearest, as before.
 function move(dir) {
   const cur = focusedEl();
   if (!cur) { restoreFocus(); return; }
-  const best = nearest(cur, dir, items(), state.view === 'menu');
+  let best = nearest(cur, dir, items(), state.view === 'menu');
+  if (best && state.view === 'menu' && (dir === 'up' || dir === 'down') && best.classList.contains('quick') && !cur.classList.contains('quick')) {
+    const used = menuUsed.quick && $('menu').querySelector(`.quicks [data-id="${menuUsed.quick}"]`);
+    if (used) best = used;
+  }
   if (best) setFocus(best);
 }
 
@@ -1064,12 +1092,13 @@ function press(button, held) {
   switch (button) {
     case 'up': case 'down': move(button); break;
     case 'left': case 'right':
-      if (el && el.dataset.slider) adjust(el, button === 'right' ? 5 : -5);
+      if (el && el.dataset.slider) { menuUse(el); adjust(el, button === 'right' ? 5 : -5); }
       else if (el && el.dataset.setting) changeSetting(el.dataset.setting, button === 'right' ? 1 : -1);
       else move(button);
       break;
     case 'a':
-      if (el && el.dataset.setting) changeSetting(el.dataset.setting, 1); else activate(el);
+      if (el && el.dataset.setting) changeSetting(el.dataset.setting, 1);
+      else { if (el && el.classList.contains('quick')) menuUse(el); activate(el); }
       break;
     case 'b': back(); break;
     case 'x': {
@@ -1090,9 +1119,8 @@ function press(button, held) {
     case 'home':
       if (state.view === 'home') {
         state.current = null; state.backdrop = null;
-        // An actionable alert on screen: the menu opens on its row; otherwise where it was left.
-        const f = noticeHomeFocus();
-        if (f) state.memory.menu = f;
+        // An actionable alert on screen: the menu opens on its row; otherwise as menuOpening says.
+        state.memory.menu = noticeHomeFocus() || menuOpening();
         go('menu');
       }
       else back();
@@ -1207,6 +1235,7 @@ function onHost(msg) {
         // section: the Settings section to open (an alert's action).
         if (msg.focus) state.memory[msg.view] = msg.focus;
         else if (msg.view === 'settings') state.memory.settings = null;   // on the section list
+        else if (msg.view === 'menu') state.memory.menu = menuOpening();
         if (msg.section) state.section = msg.section;
         reset(msg.view);
       };

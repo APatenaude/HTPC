@@ -113,6 +113,7 @@ function auditTiles(n) {
 function auditFresh() {
   state.moving = null; state.current = null; state.backdrop = null; state.confirm = null; state.timer = null;
   state.phone = null; state.stack = []; state.memory = {}; state.desktop = false;
+  menuUsed.control = null; menuUsed.quick = null;
   if (typeof more === 'object' && more.testing) { more.testing = false; more.pad = null; }
   bt.scanning = false; bt.pin = null; bt.pairing = null;
   if (WifiUI.joining) WifiUI.stop();
