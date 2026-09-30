@@ -13,6 +13,8 @@ namespace Htpc.Launcher;
 static partial class Program
 {
     static void Check(bool ok, string what) => T.Check(ok, what);
+    static void CheckAll<TCase>(IEnumerable<TCase> cases, Func<TCase, bool> ok, string what, Func<TCase, string>? name = null) => T.CheckAll(cases, ok, what, name);
+    static Task CheckAllAsync<TCase>(IEnumerable<TCase> cases, Func<TCase, Task<bool>> ok, string what, Func<TCase, string>? name = null) => T.CheckAllAsync(cases, ok, what, name);
 
     static PhoneCommand? P(string json) => PhoneProtocol.Parse(Encoding.UTF8.GetBytes(json));
 
@@ -46,9 +48,8 @@ static partial class Program
     {
         Check(P("{\"t\":\"key\",\"k\":\"up\"}") is KeyCommand { Key: PhoneKey.Up }, "key up");
         Check(P("{\"t\":\"key\",\"k\":\"shiftTab\"}") is KeyCommand { Key: PhoneKey.ShiftTab }, "key shiftTab");
-        foreach (var bad in new[] { "LWin", "win", "lwin", "alt", "F4", "0x5B", "" })
-            Check(P($"{{\"t\":\"key\",\"k\":\"{bad}\"}}") is null, $"key \"{bad}\" rejected");
-        Check(P("{\"t\":\"key\",\"k\":91}") is null, "key as a number rejected");
+        CheckAll(new[] { "\"LWin\"", "\"win\"", "\"lwin\"", "\"alt\"", "\"F4\"", "\"0x5B\"", "\"\"", "91" }, k => P($"{{\"t\":\"key\",\"k\":{k}}}") is null,
+            "keys that are not the remote's rejected (the Windows key, Alt, F4, a key code)");
         Check(P("{\"t\":\"type\",\"text\":\"" + new string('a', 256) + "\"}") is TypeCommand { Text.Length: 256 }, "type 256 characters");
         Check(P("{\"t\":\"type\",\"text\":\"" + new string('a', 257) + "\"}") is null, "type 257 characters rejected");
         Check(P("{\"t\":\"type\",\"back\":2,\"text\":\"a\\tb\\nc\\u0000\"}") is TypeCommand { Back: 2, Text: "abc" }, "control characters stripped");
@@ -70,10 +71,10 @@ static partial class Program
 
     static void LinkTests()
     {
-        foreach (var bad in new[] { "file:///C:/Windows/win.ini", "ms-settings:display", "https://a --renderer-cmd-prefix=x",
+        CheckAll(new[] { "file:///C:/Windows/win.ini", "ms-settings:display", "https://a --renderer-cmd-prefix=x",
             "javascript:alert(1)", "https://user:pw@example.com/", "https://a\t--x", "ftp://example.com", "\\\\server\\share",
-            "C:\\Windows\\notepad.exe", "--app=https://x", "about:blank", "", "   " })
-            Check(PhoneLinks.Route(bad) is null, $"link rejected: {bad.Replace("\t", "\\t")}");
+            "C:\\Windows\\notepad.exe", "--app=https://x", "about:blank", "", "   " }, bad => PhoneLinks.Route(bad) is null,
+            "links that are no web page, carry a password or smuggle a switch rejected", bad => $"\"{bad.Replace("\t", "\\t")}\"");
         var yt = PhoneLinks.Route("https://youtu.be/dQw4w9WgXcQ?t=5");
         Check(yt is { Kind: LinkKind.YouTubeVideo, VideoId: "dQw4w9WgXcQ" } && yt.DeepLink!.AbsoluteUri == "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtu.be: video id, deep link rebuilt from it");
         Check(PhoneLinks.Route("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x") is { VideoId: "dQw4w9WgXcQ" }, "watch?v=");
@@ -99,8 +100,8 @@ static partial class Program
         var l = Ctx(launcher: true, app: null);
         Check(PhoneRouter.Route(PhoneKey.Up, l) is ToLauncher { Button: "up" } && PhoneRouter.Route(PhoneKey.Ok, l) is ToLauncher { Button: "a" }, "launcher: D-pad and OK as controller buttons");
         Check(PhoneRouter.Route(PhoneKey.Back, l) is ToLauncher { Button: "b" } && PhoneRouter.Route(PhoneKey.Options, l) is ToLauncher { Button: "start" }, "launcher: Back = B, Options = Start");
-        foreach (var k in new[] { PhoneKey.Enter, PhoneKey.Backspace, PhoneKey.Tab, PhoneKey.ShiftTab })
-            Check(PhoneRouter.Route(k, l) is Ignore, $"launcher: {k} ignored (never SendInput over the launcher)");
+        CheckAll(new[] { PhoneKey.Enter, PhoneKey.Backspace, PhoneKey.Tab, PhoneKey.ShiftTab }, k => PhoneRouter.Route(k, l) is Ignore,
+            "launcher: Enter, Backspace, Tab, Shift+Tab ignored (never SendInput over the launcher)");
         var kb = Ctx(keyboard: true, map: ButtonMap.Mouse);
         Check(PhoneRouter.Route(PhoneKey.Left, kb) is ToKeyboard { Button: "left" } && PhoneRouter.Route(PhoneKey.Back, kb) is ToKeyboard { Button: "b" }, "on-screen keyboard: driven like the controller");
         var edge = Ctx(map: ButtonMap.Mouse);
@@ -166,7 +167,8 @@ static partial class Program
         now = now.AddSeconds(30);
         var again = p.NewCode();
         Check(again.Code is null && again.Left == TimeSpan.FromSeconds(90) && p.ShownCode == code, "asking again while it shows: its time left, the same code");
-        for (var i = 1; i <= 4; i++) Check(p.TryCode(Wrong(code!), "iPhone") is { Outcome: PairOutcome.Wrong } r && r.TriesLeft == 5 - i, $"wrong code {i}: {5 - i} left");
+        CheckAll(Enumerable.Range(1, 4), i => p.TryCode(Wrong(code!), "iPhone") is { Outcome: PairOutcome.Wrong } r && r.TriesLeft == 5 - i,
+            "wrong codes 1 to 4: 4, 3, 2, 1 tries left", i => $"wrong code {i}");
         Check(p.TryCode(Wrong(code!), "iPhone").Outcome == PairOutcome.Locked && p.LockedFor == TimeSpan.FromMinutes(1), "5th wrong code: locked 1 minute");
         Check(p.TryCode(code!, "iPhone").Outcome == PairOutcome.Locked && p.NewCode().Code is null, "while locked: no code works, none is made");
         now = now.AddMinutes(1).AddSeconds(1);
@@ -218,13 +220,13 @@ static partial class Program
     static void HostTests()
     {
         var a = new HostAllowlist { Port = 80 };
-        foreach (var h in new[] { "tv.local", "TV.LOCAL.", "tv.local:80", "tv", "localhost", "127.0.0.1", "[::1]", "[::1]:80", Environment.MachineName })
-            Check(a.IsAllowedHost(h), $"host allowed: {h}");
-        foreach (var h in new[] { "tv.local:8080", "evil.com", "tv.local.evil.com", "", null, "[::1", "127.0.0.2", "tv.local:abc" })
-            Check(!a.IsAllowedHost(h), $"host refused: {h ?? "(none)"}");
+        CheckAll(new[] { "tv.local", "TV.LOCAL.", "tv.local:80", "tv", "localhost", "127.0.0.1", "[::1]", "[::1]:80", Environment.MachineName }, h => a.IsAllowedHost(h),
+            "the box's own names allowed as Host");
+        CheckAll(new[] { "tv.local:8080", "evil.com", "tv.local.evil.com", "", null, "[::1", "127.0.0.2", "tv.local:abc" }, h => !a.IsAllowedHost(h),
+            "other hosts and ports refused (DNS rebinding)", h => h ?? "(none)");
         Check(a.IsAllowedOrigin("http://tv.local") && a.IsAllowedOrigin("http://TV.local"), "origin tv.local");
-        foreach (var o in new[] { "https://tv.local", "http://evil.com", "null", "", null, "http://tv.local:81", "http://tv.local/x", "file://" })
-            Check(!a.IsAllowedOrigin(o), $"origin refused: {o ?? "(none)"}");
+        CheckAll(new[] { "https://tv.local", "http://evil.com", "null", "", null, "http://tv.local:81", "http://tv.local/x", "file://" }, o => !a.IsAllowedOrigin(o),
+            "other origins refused", o => o ?? "(none)");
         a.Port = 8765;
         Check(a.IsAllowedHost("tv.local:8765") && !a.IsAllowedHost("tv.local:80") && a.IsAllowedOrigin("http://tv.local:8765") && !a.IsAllowedOrigin("http://tv.local"), "port 8765");
     }
@@ -243,14 +245,12 @@ static partial class Program
         Check((await http.GetAsync("/phone.js")).Content.Headers.ContentType?.MediaType == "text/javascript", "phone.js");
         Check((await http.GetAsync("/nope.txt")).StatusCode == HttpStatusCode.NotFound, "unknown file 404");
         Check((await http.PostAsync("/index.html", null)).StatusCode == HttpStatusCode.MethodNotAllowed, "POST a file 405");
-        foreach (var path in new[] { "/../README.md", "/%2e%2e/README.md", "/..%2fREADME.md", "/icons/../../README.md", "/%2e%2e/src/Launcher/Launcher.csproj",
-            "/.hidden", "/C:/Windows/win.ini", "/..\\README.md", "//index.html" })
-        {
-            var raw = await Raw(port, $"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            Check(raw.StartsWith("HTTP/1.1 404") || raw.StartsWith("HTTP/1.1 400"), $"path refused: {path} ({raw.Split('\r')[0]})");
-        }
-        foreach (var h in new[] { "evil.com", "tv.local.evil.com", $"127.0.0.1:{port + 1}" })
-            Check((await Raw(port, $"GET / HTTP/1.1\r\nHost: {h}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 421"), $"foreign Host 421: {h}");
+        await CheckAllAsync(new[] { "/../README.md", "/%2e%2e/README.md", "/..%2fREADME.md", "/icons/../../README.md", "/%2e%2e/src/Launcher/Launcher.csproj",
+            "/.hidden", "/C:/Windows/win.ini", "/..\\README.md", "//index.html" },
+            async path => await Raw(port, $"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n") is var raw && (raw.StartsWith("HTTP/1.1 404") || raw.StartsWith("HTTP/1.1 400")),
+            "paths out of the web app's folder, hidden or doubled: 404 or 400 (path traversal)");
+        await CheckAllAsync(new[] { "evil.com", "tv.local.evil.com", $"127.0.0.1:{port + 1}" },
+            async h => (await Raw(port, $"GET / HTTP/1.1\r\nHost: {h}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 421"), "a foreign Host: 421");
         Check((await Raw(port, $"GET / HTTP/1.1\r\nHost: tv.local:{port}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 200"), "Host tv.local on our port allowed");
 
         // Pairing over HTTP.
@@ -274,16 +274,14 @@ static partial class Program
         var second = await Post("/api/pair/start", "{}", origin);
         Check(second.StatusCode == HttpStatusCode.OK && (await Json(second)).GetProperty("seconds").GetInt32() > 0 && host.Shown == 1 && host.Code == code,
             "asked again: the same code, not shown again (no hijack, no menu pulled up)");
-        for (var i = 1; i <= 4; i++)
-        {
-            var r = await Post("/api/pair", $"{{\"code\":\"{Wrong(code)}\"}}", origin);
-            Check(r.StatusCode == HttpStatusCode.Forbidden && (await Json(r)).GetProperty("left").GetInt32() == 5 - i, $"wrong code {i}: 403, {5 - i} left");
-        }
+        await CheckAllAsync(Enumerable.Range(1, 4), async i => await Post("/api/pair", $"{{\"code\":\"{Wrong(code)}\"}}", origin) is var r
+            && r.StatusCode == HttpStatusCode.Forbidden && (await Json(r)).GetProperty("left").GetInt32() == 5 - i, "wrong codes 1 to 4: 403, 4, 3, 2, 1 left", i => $"wrong code {i}");
         var locked = await Post("/api/pair", $"{{\"code\":\"{Wrong(code)}\"}}", origin);
-        Check((int)locked.StatusCode == 429 && (await Json(locked)).GetProperty("retry").GetInt32() == 60 && host.Events.Contains("hide paired=False"), "5th wrong code: 429 for 60 s, code taken off the TV");
-        Check((int)(await Post("/api/pair", $"{{\"code\":\"{code}\"}}", origin)).StatusCode == 429, "right code refused while locked");
+        var rightWhileLocked = await Post("/api/pair", $"{{\"code\":\"{code}\"}}", origin);
         var startLocked = await Post("/api/pair/start", "{}", origin);
-        Check((int)startLocked.StatusCode == 429 && (await Json(startLocked)).GetProperty("error").GetString() == "locked", "no new code while locked");
+        Check((int)locked.StatusCode == 429 && (await Json(locked)).GetProperty("retry").GetInt32() == 60 && host.Events.Contains("hide paired=False")
+            && (int)rightWhileLocked.StatusCode == 429 && (int)startLocked.StatusCode == 429 && (await Json(startLocked)).GetProperty("error").GetString() == "locked",
+            $"5th wrong code: 429 for 60 s, the code off the TV; then the right code {(int)rightWhileLocked.StatusCode} and a new code {(int)startLocked.StatusCode} (429 both)");
         Check((int)(await Post("/api/pair", "{\"code\":\"12a4\"}", origin)).StatusCode is 400 or 429, "malformed code refused");
         box.Now = box.Now.AddSeconds(61);
         await Post("/api/pair/start", "{}", origin);
@@ -312,8 +310,8 @@ static partial class Program
         var (unpaired, _) = await Ws(port, origin, null);
         var hello = unpaired is null ? null : await Receive(unpaired);
         Check(hello?.GetProperty("paired").GetBoolean() == false && hello?.GetProperty("v").GetInt32() == PhoneProtocol.Version
-            && hello?.GetProperty("state").ValueKind == JsonValueKind.Null, "unpaired phone: hello without state");
-        Check(unpaired is not null && await Receive(unpaired) is null && (int?)unpaired.CloseStatus == 4001, "then closed (4001)");
+            && hello?.GetProperty("state").ValueKind == JsonValueKind.Null && await Receive(unpaired!) is null && (int?)unpaired!.CloseStatus == 4001,
+            "unpaired phone: hello without state, then closed (4001)");
         Check((await Ws(port, "http://evil.com", cookie)).Status == 403 && (await Ws(port, null, cookie)).Status == 403, "socket from another site or without Origin 403");
         var (ws, _) = await Ws(port, origin, cookie);
         hello = await Receive(ws!);

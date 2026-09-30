@@ -36,6 +36,19 @@ static class T
         else lock (failures) failures.Add("  FAIL " + what);
     }
 
+    /// <summary>One check for a table of cases, each tried once, in order: its text names the cases that failed.</summary>
+    public static void CheckAll<TCase>(IEnumerable<TCase> cases, Func<TCase, bool> ok, string what, Func<TCase, string>? name = null) =>
+        Missed(cases.Where(c => !ok(c)).Select(c => name?.Invoke(c) ?? $"{c}").ToList(), what);
+
+    public static async Task CheckAllAsync<TCase>(IEnumerable<TCase> cases, Func<TCase, Task<bool>> ok, string what, Func<TCase, string>? name = null)
+    {
+        var misses = new List<string>();
+        foreach (var c in cases) if (!await ok(c)) misses.Add(name?.Invoke(c) ?? $"{c}");
+        Missed(misses, what);
+    }
+
+    static void Missed(List<string> misses, string what) => Check(misses.Count == 0, misses.Count == 0 ? what : $"{what} -- failed for: {string.Join("; ", misses)}");
+
     /// <summary>A detail worth seeing when asked for (-v): a measurement, what was read, the log.</summary>
     public static void Info(string line)
     {

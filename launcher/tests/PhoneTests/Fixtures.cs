@@ -132,7 +132,9 @@ static partial class Program
         return Encoding.ASCII.GetString(buf, 0, n);
     }
 
-    static async Task<(ClientWebSocket? Socket, int Status)> Ws(int port, string? origin, string? cookie)
+    /// <summary>A WebSocket as a page opens it (its Origin, its cookies): the socket and 101, or null and the refusal's HTTP status.</summary>
+    /// <param name="via">How to reach the server (HTTPS: the handler that checks the certificate as a phone does).</param>
+    static async Task<(ClientWebSocket? Socket, int Status)> Ws(Uri url, string? origin, string? cookie, HttpMessageInvoker? via = null)
     {
         var ws = new ClientWebSocket();
         if (origin is not null) ws.Options.SetRequestHeader("Origin", origin);
@@ -140,11 +142,15 @@ static partial class Program
         ws.Options.CollectHttpResponseDetails = true;
         try
         {
-            await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws"), CancellationToken.None);
+            await ws.ConnectAsync(url, via, CancellationToken.None);
             return (ws, 101);
         }
         catch (WebSocketException) { return (null, (int)ws.HttpStatusCode); }
     }
+
+    /// <summary>The same to ws://127.0.0.1:port/ws (query: "?share=1&amp;url=...").</summary>
+    static Task<(ClientWebSocket? Socket, int Status)> Ws(int port, string? origin, string? cookie, string query = "") =>
+        Ws(new Uri($"ws://127.0.0.1:{port}/ws{query}"), origin, cookie);
 
     static async Task<JsonElement?> Receive(ClientWebSocket ws, int ms = 3000)
     {

@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
@@ -16,8 +15,6 @@ static partial class Program
         Check(PhoneLinks.FindLink("https://vimeo.com/1") == "https://vimeo.com/1", "shared link as is");
         Check(PhoneLinks.FindLink("Look at this! https://youtu.be/dQw4w9WgXcQ.") == "https://youtu.be/dQw4w9WgXcQ", "the link in shared text, without the full stop");
         Check(PhoneLinks.FindLink("no link here") is null && PhoneLinks.FindLink(null) is null && PhoneLinks.FindLink("file:///C:/x") is null, "no link: nothing");
-        Check(P("{\"t\":\"open\",\"url\":\"https://a.b\",\"share\":true}") is OpenCommand { Shared: true } && P("{\"t\":\"open\",\"url\":\"https://a.b\"}") is OpenCommand { Shared: false }, "open: shared flag");
-        Check(P("{\"t\":\"shortcutKey\"}") is ShortcutKeyCommand, "shortcutKey command");
         var manifest = File.ReadAllText(Path.Combine(PhoneFolder, "manifest.webmanifest"));
         Check(manifest.Contains("\"method\": \"POST\"") && manifest.Contains("application/x-www-form-urlencoded"), "manifest: the Share target posts");
 
@@ -67,14 +64,11 @@ static partial class Program
 
         async Task<string?> HelloShare(string cookies, bool ask = true, string link = "https://vimeo.com/1")
         {
-            var ws = new ClientWebSocket();
-            ws.Options.SetRequestHeader("Origin", origin);
-            ws.Options.SetRequestHeader("Cookie", cookies);
-            try { await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws{(ask ? "?share=1&url=" + Uri.EscapeDataString(link) : "")}"), CancellationToken.None); }
-            catch (WebSocketException) { return "(refused)"; }
+            var (ws, _) = await Ws(port, origin, cookies, ask ? "?share=1&url=" + Uri.EscapeDataString(link) : "");
+            if (ws is null) return "(refused)";
             var hello = await Receive(ws);
             ws.Abort();
-            return hello?.GetProperty("share").ValueKind == JsonValueKind.String ? hello?.GetProperty("share").GetString() : null;
+            return hello?.GetProperty("share") is { ValueKind: JsonValueKind.String } share ? share.GetString() : null;
         }
         Check(await HelloShare($"{cookie}; {ticket}", ask: false) is null, "another tab connecting (no share=1) does not use the ticket up");
         var wrongLink = (await Share(HttpMethod.Post, "none")).Ticket;

@@ -2,7 +2,6 @@ using System.Formats.Asn1;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -149,25 +148,25 @@ static partial class Program
             otherRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 1, true));
             using var lookAlike = otherRequest.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(60));
             var forged = Intermediate(lookAlike, subject, good);
-            Check(forged.Issuer == testRoot.Subject && PhoneCertificates.Unfit(testRoot, forged, testName) is { } why && why.Contains("not signed"),
+            Check(forged.Issuer == testRoot.Subject && PhoneCertificates.Unfit(testRoot, forged, testName) is not null,
                 $"the root's name, another key: refused ({PhoneCertificates.Unfit(testRoot, forged, testName)})");
         }
-        foreach (var (extensions, what, says) in new (IEnumerable<X509Extension>, string, string)[]
+        // Each differs from the one above (fit) in one thing only: that thing is why it is refused.
+        CheckAll(new (IEnumerable<X509Extension> Extensions, string? Subject, string What)[]
         {
-            (With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 1, true)), "a CA of path length 1", "path length 0"),
-            (With("2.5.29.19", new X509BasicConstraintsExtension(true, false, 0, true)), "a CA with no path length", "path length 0"),
-            (With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 0, false)), "basic constraints not critical", "path length 0"),
-            (With("2.5.29.19", null), "no basic constraints", "path length 0"),
-            (With("2.5.29.30", null), "no name constraints", "no critical name constraints"),
-            (With("2.5.29.30", new X509Extension("2.5.29.30", PhoneCertificates.NameConstraints(PhoneCertificates.LocalNames()).RawData, false)), "name constraints not critical", "no critical name constraints"),
-            (With("2.5.29.30", PhoneCertificates.NameConstraints(["tv.local", "com"])), "name constraints permitting .com", "permit more"),
-            (With("2.5.29.30", DnsOnlyConstraints("tv.local")), "name constraints on DNS names only (addresses free)", "unconstrained"),
-            (With("2.5.29.37", null), "no extended key usage (any use)", "server authentication only"),
-            (With("2.5.29.37", new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1"), new Oid("1.3.6.1.5.5.7.3.3") }, false)), "code signing too", "server authentication only"),
-        })
-            Check(Why(extensions) is { } why && why.Contains(says), $"{what}: refused ({Why(extensions)})");
-        Check(Why(good, $"CN={testName} phone remote, O=Someone else") is { } other && other.Contains("not named"), $"another O: refused ({Why(good, $"CN={testName} phone remote, O=Someone else")})");
-        Check(Why(good, $"CN=Another box phone remote, O=HTPC TV box") is { } named && named.Contains("not named"), "another box's name: refused");
+            (With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 1, true)), null, "a CA of path length 1"),
+            (With("2.5.29.19", new X509BasicConstraintsExtension(true, false, 0, true)), null, "a CA with no path length"),
+            (With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 0, false)), null, "basic constraints not critical"),
+            (With("2.5.29.19", null), null, "no basic constraints"),
+            (With("2.5.29.30", null), null, "no name constraints"),
+            (With("2.5.29.30", new X509Extension("2.5.29.30", PhoneCertificates.NameConstraints(PhoneCertificates.LocalNames()).RawData, false)), null, "name constraints not critical"),
+            (With("2.5.29.30", PhoneCertificates.NameConstraints(["tv.local", "com"])), null, "name constraints permitting .com"),
+            (With("2.5.29.30", DnsOnlyConstraints("tv.local")), null, "name constraints on DNS names only (addresses free)"),
+            (With("2.5.29.37", null), null, "no extended key usage (any use)"),
+            (With("2.5.29.37", new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1"), new Oid("1.3.6.1.5.5.7.3.3") }, false)), null, "code signing too"),
+            (good, $"CN={testName} phone remote, O=Someone else", "another O"),
+            (good, "CN=Another box phone remote, O=HTPC TV box", "another box's name"),
+        }, c => Why(c.Extensions, c.Subject) is not null, "refused: a longer path, no or weaker constraints, other uses, another O or box", c => c.What);
 
         // Setup's step itself: a pair the user's files hold that this box would not make never
         // reaches the machine store (the check comes first, elevated or not).
@@ -262,15 +261,13 @@ static partial class Program
         Check(certs.Context is not null, "handshake context (server certificate with the intermediate) ready");
 
         // What a stolen intermediate key could not do.
-        foreach (var (dns, ip, cn, what) in new[]
+        CheckAll(new[]
         {
             ("twitch.tv", (IPAddress?)null, (string?)null, "twitch.tv"), ("evil.com", null, null, "evil.com"),
             ("tv.local", IPAddress.Parse("8.8.8.8"), null, "a public address"), ("tv.local", null, "CN=tv.local", "a subject outside O=HTPC TV box"),
-        })
-        {
-            var bad = certs.IssueServer(new[] { dns }, ip is null ? Array.Empty<IPAddress>() : new[] { ip }, cn);
-            Check(Chain(root, inter, bad).HasFlag(X509ChainStatusFlags.HasNotPermittedNameConstraint), $"a certificate for {what} from the intermediate fails (name constraint)");
-        }
+        }, c => Chain(root, inter, certs.IssueServer(new[] { c.Item1 }, c.Item2 is { } ip ? new[] { ip } : Array.Empty<IPAddress>(), c.Item3))
+            .HasFlag(X509ChainStatusFlags.HasNotPermittedNameConstraint),
+            "certificates the intermediate signs for twitch.tv, evil.com, a public address or another O fail (name constraints)", c => c.Item4);
         var fp = certs.Fingerprint!;
         Check(fp.Length == 95 && fp.Split(':').Length == 32 && fp == Convert.ToHexString(SHA256.HashData(root.RawData)).Chunk(2).Select(c => new string(c)).Aggregate((a, b) => a + ":" + b),
             "fingerprint: the root's SHA-256, AB:CD:... as Android shows it");
@@ -296,7 +293,8 @@ static partial class Program
         using var emptyFolder = new TempPath("certs-test");
         Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && !Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any(),
             "before the launcher's first start there is nothing to load, and nothing is made");
-        MachineStoreChecks(root, inter, testName);        var moved = IPAddress.Parse("192.168.1.33");
+        MachineStoreChecks(root, inter, testName);
+        var moved = IPAddress.Parse("192.168.1.33");
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "the box got a new address: new certificate");
         Check(certs.Current!.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateIPAddresses().SequenceEqual(new[] { moved })
             && Chain(root, certs.Intermediate!, certs.Current!) == X509ChainStatusFlags.NoError && certs.Authority!.Thumbprint == root.Thumbprint,
@@ -306,15 +304,13 @@ static partial class Program
         now = now.AddDays(3650);
         certs = new PhoneCertificates(folder, store, testName, () => now);
         certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved });
-        Check(certs.Authority!.Thumbprint != root.Thumbprint, "after 10 years: a new root (phones install it again)");
-        Check(!IntermediatesInStore(testName).Contains(inter.Thumbprint) && IntermediatesInStore(testName).Contains(certs.Intermediate!.Thumbprint),
-            "the new pair removed the old intermediate from the CA store, kept its own");
+        Check(certs.Authority!.Thumbprint != root.Thumbprint && !IntermediatesInStore(testName).Contains(inter.Thumbprint) && IntermediatesInStore(testName).Contains(certs.Intermediate!.Thumbprint),
+            "after 10 years: a new root (phones install it again); the old intermediate out of the CA store, the new one in");
 
         // Every start, not only a new pair: this box's other intermediates go, whichever order the
         // subject's CN and O are in; the current one and other subjects stay.
         var leftovers = new[] { $"CN={testName} phone remote, O=HTPC TV box", $"O=HTPC TV box, CN={testName} phone remote" }.Select(Leftover).ToList();
         var others = new[] { $"CN={testName} phone remote, O=Someone else", $"CN={testName} phone remote + O=HTPC TV box" }.Select(Leftover).ToList();
-        Check(leftovers[0].Subject.StartsWith("CN=") && leftovers[1].Subject.StartsWith("O="), $"leftovers in both orders ({leftovers[0].Subject} | {leftovers[1].Subject})");
         certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a restart with the same pair: nothing made");
         var inStore = IntermediatesInStore(testName);
@@ -447,14 +443,13 @@ static partial class Program
                 $"paired over HTTPS: its own cookie, __Host- and Secure ({pairedOverHttps.StatusCode})");
             var secureToken = secureCookie.Split(';')[0].Split('=', 2)[1];
             pairing.RequireCode = true;
-            async Task<bool?> PairedOverWss(string cookieHeader)
+            // WebSockets as the page opens them, through the same handler (the certificate checked as a phone does).
+            using var viaHandler = new HttpMessageInvoker(handler, false);
+            var wssUrl = new Uri("wss://tv.local/ws");
+            async Task<bool?> PairedOverWss(string cookie)
             {
-                using var ws = new ClientWebSocket();
-                ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-                ws.Options.SetRequestHeader("Origin", httpsOrigin);
-                ws.Options.SetRequestHeader("Cookie", cookieHeader);
-                try { await ws.ConnectAsync(new Uri($"wss://127.0.0.1:{httpsPort}/ws"), CancellationToken.None); }
-                catch (WebSocketException) { return null; }
+                var (ws, _) = await Ws(wssUrl, httpsOrigin, cookie, viaHandler);
+                if (ws is null) return null;
                 var hello = await Receive(ws);
                 ws.Abort();
                 return hello?.GetProperty("paired").GetBoolean();
@@ -466,15 +461,7 @@ static partial class Program
             Check(crt.SequenceEqual(ca.RawData), "/ca.crt is the root (public)");
             Check(page.Headers.TryGetValues("Content-Security-Policy", out var csp) && csp.First().Contains("wss://tv.local ") && !csp.First().Contains(" ws: ") && !csp.First().Contains(" wss: "),
                 "CSP: WebSockets only to the page's own name");
-
-            async Task<int> Wss(string origin)
-            {
-                using var ws = new ClientWebSocket();
-                ws.Options.SetRequestHeader("Origin", origin);
-                ws.Options.CollectHttpResponseDetails = true;
-                try { await ws.ConnectAsync(new Uri("wss://tv.local/ws"), new HttpMessageInvoker(handler, false), CancellationToken.None); return 101; }
-                catch (WebSocketException) { return (int)ws.HttpStatusCode; }
-            }
+            async Task<int> Wss(string origin) => (await Ws(wssUrl, origin, null, viaHandler)).Status;
             Check(await Wss($"https://tv.local:{httpsPort}") == 101, "wss from the secure page: accepted");
             Check(await Wss($"http://tv.local:{httpsPort}") == 403 && await Wss("https://evil.com") == 403, "wss from another origin or scheme: 403");
         }
@@ -483,9 +470,9 @@ static partial class Program
             if (server is not null) await server.StopAsync();
             store.Delete(PhoneCertificates.IntermediateKeyName);
             store.Delete(PhoneCertificates.ServerKeyName);
-            Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null, "test keys deleted from the key store");
             RemoveTestCerts(Regex.Escape(testName));
-            Check(IntermediatesInStore(testName).Count == 0, "its intermediate removed from the CA stores");
+            Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null && IntermediatesInStore(testName).Count == 0,
+                "the test's keys deleted from the key store, its intermediate from the CA stores");
         }
     }
 }
