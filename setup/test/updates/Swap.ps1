@@ -14,6 +14,14 @@ $cases = @(New-Case 'swap-ok' @(
         { param($c)
             $c.Bootstrap = Join-Path $c.Root 'PF\HTPC\Launcher\Start-Job.ps1'
             Add-Content -LiteralPath $c.Bootstrap '# an older copy of the bootstrap'
+            # What an update that rolled back keeps of each part (.bad; the crashing release's case
+            # below checks it does), until an update works.
+            $dir = Join-Path $c.Root 'PF\HTPC\Launcher'
+            $data = Join-Path $c.Root 'PD\HTPC'
+            foreach ($pair in @(@("$dir\HtpcLauncher.exe", "$dir\HtpcLauncher.bad.exe"), @("$dir\HtpcWatchdog.exe", "$dir\HtpcWatchdog.bad.exe"), @("$dir\lib", "$dir\lib.bad"),
+                    @("$dir\jobs", "$dir\jobs.bad"), @("$dir\catalog.json", "$dir\catalog.bad.json"), @("$data\setup", "$data\setup.bad"))) {
+                Copy-Item -LiteralPath $pair[0] $pair[1] -Recurse
+            }
             $c.Job = Start-FakeJob $c.Root $update },
         { param($c)
             $root = $c.Root; $r = $c.R
@@ -23,6 +31,8 @@ $cases = @(New-Case 'swap-ok' @(
             Note $c ((Format-SemVer (Get-FileSemVer (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.prev.exe'))) -eq '0.1.0') 'the old one is kept as .prev'
             Note $c ((Get-DirVersion (Join-Path $root 'PD\HTPC\setup')) -eq '0.2.0' -and (Get-DirVersion (Join-Path $root 'PD\HTPC\setup.prev')) -eq '0.1.0') 'the kept setup is the new one, the old one kept'
             Note $c ((Get-Leftovers $root).Count -eq 0) 'no .new left'
+            $bad = @(Get-ChildItem (Join-Path $root 'PF\HTPC\Launcher'), (Join-Path $root 'PD\HTPC') -Filter '*.bad*' -ErrorAction SilentlyContinue)
+            Note $c ($bad.Count -eq 0) "  the .bad copies an earlier rollback kept: removed once an update works ($($bad.Count) left: $($bad.Name -join ', '))"
             $c.Job = Start-FakeJob $root 'Invoke-LauncherRollback -Paths $paths' },
         { param($c)
             $c.RolledBack = $c.R -eq 'ok' -and (Get-Journal $c.Root).step -eq 'rolledback'
@@ -60,14 +70,8 @@ foreach ($kind in @(@{ Mode = 'crash'; Version = '0.3.0'; HealthyWait = 25 }, @{
             $covered = @(Get-Content -LiteralPath (Join-Path $root 'watchdog-exits.log') -ErrorAction SilentlyContinue | Where-Object { $_ -like 'covered*' })
             Note $c ($counted.Count -eq 0 -and ($c.Mode -ne 'crash' -or $covered.Count -ge 2) -and
                 -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-watch')) -and -not (Test-Path (Join-Path $root 'PD\HTPC\state\watchdog-pause'))) "  no exit counted by the watchdog ($($covered.Count) covered by the job; counted: $($counted -join '; ')), watch and pause gone"
-            Note $c ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left'
-            # Kept only until an update works.
-            if ($c.Mode -eq 'crash') { $c.Job = Start-FakeJob $root $update } },
-        { param($c)
-            if ($c.Mode -ne 'crash') { return }
-            $root = $c.Root
-            $bad = @(Get-ChildItem (Join-Path $root 'PF\HTPC\Launcher'), (Join-Path $root 'PD\HTPC') -Filter '*.bad*' -ErrorAction SilentlyContinue)
-            Note $c ((Get-Journal $root).step -eq 'done' -and $bad.Count -eq 0) "  the next update that works removes the .bad copies ($($c.R), $($bad.Count) left)" }
+            # Kept until an update works (swap-ok checks that one removes them).
+            Note $c ((Get-Leftovers $root).Count -eq 0 -and (Test-Path (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.bad.exe'))) '  the failed one is kept as .bad, no .new left' }
     ) $kind
 }
 
