@@ -830,16 +830,17 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
     powershell -ExecutionPolicy Bypass -File launcher\dev\Start-Launcher.ps1 -Restore  # back to the installed launcher
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screen.ps1
     powershell -ExecutionPolicy Bypass -File launcher\dev\Send-Pad.ps1 -Press A      # controller input without a controller
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1           # Mouse preset, end to end, on a test page
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Presets.ps1 -Keyboard # on-screen keyboard: click a field, type
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Show-Presets.ps1           # by hand, never on the TV unasked: Mouse preset on a test page
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Show-Presets.ps1 -Keyboard # the same: on-screen keyboard, click a field, type
     powershell -ExecutionPolicy Bypass -File launcher\dev\Publish-Setup.ps1          # launcher\dist\TV Box Setup.exe (68 MB, self-contained; 12 MB of it Kestrel)
 
-- Send-Pad, Test-Presets and `Measure-StandbyPower.ps1` (the processor's power awake and in standby,
-  and what wakes it) drive the launcher through window messages (`HtpcLauncher.Pad`,
-  `HtpcLauncher.Standby`) that only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`,
-  with `-NoTv` while nobody watches the TV); a release, and the setup exe, ignore them.
+- Send-Pad, Show-Presets (a demo run by hand: full-screen Edge, the real pointer) and
+  `Measure-StandbyPower.ps1` (the processor's power awake and in standby, and what wakes it)
+  drive the launcher through window messages (`HtpcLauncher.Pad`, `HtpcLauncher.Standby`) that
+  only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`, with `-NoTv` while
+  nobody watches the TV); a release, and the setup exe, ignore them.
 - Also in `dev/`: `Build-Icon.ps1` (the launcher's icon from `art/`), `input-test.html` (a page showing
-  the keys and clicks it gets, for Test-Presets), `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`,
+  the keys and clicks it gets, for Show-Presets), `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`,
   `Run-NetProbe.ps1`, `TvLab` (above).
 - Screenshots (Save-Screenshots, Test-Ui `-Shots`, Save-Screen) also write a half-size `-small.png`
   (`-Scale`, `Save-ScaledImage.ps1`) for a quick look; judge details on the full-size one.
