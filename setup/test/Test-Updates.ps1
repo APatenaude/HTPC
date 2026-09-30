@@ -667,14 +667,33 @@ static class Checks {
         $ran = New-Object Collections.ArrayList
         $fake = { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)) }
         Update-MachineSettings $mp $fake
-        Check (($ran -join ',') -eq 'Set-EdgePolicy.ps1,Set-SystemPolicy.ps1') "an update applies the machine part of the Edge and System steps ($($ran -join ','))"
+        Check (($ran -join ',') -eq 'Set-EdgePolicy.ps1,Set-Power.ps1,Set-UpdatePolicy.ps1,Set-SystemPolicy.ps1') "an update applies the machine part of the Edge, Power, Updates and System steps ($($ran -join ','))"
         $ran.Clear(); Update-MachineSettings $mp $fake
         Check ($ran.Count -eq 0) '  not again while their scripts stay the same'
-        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-EdgePolicy.ps1') '# changed'
-        Add-Content (Join-Path $mp.LauncherDir 'lib\Set-SystemPolicy.ps1') '# changed'
-        $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*') { throw 'failed' } }
+        foreach ($s in 'Set-EdgePolicy.ps1', 'Set-Power.ps1', 'Set-UpdatePolicy.ps1', 'Set-SystemPolicy.ps1') { Add-Content (Join-Path $mp.LauncherDir "lib\$s") '# changed' }
+        $ran.Clear(); Update-MachineSettings $mp { param($Script) [void]$ran.Add((Split-Path $Script -Leaf)); if ($Script -like '*System*' -or $Script -like '*Power*') { throw 'failed' } }
         $ran.Clear(); Update-MachineSettings $mp $fake
-        Check (($ran -join ',') -eq 'Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
+        Check (($ran -join ',') -eq 'Set-Power.ps1,Set-SystemPolicy.ps1') "  again for the ones that changed, and a failed one at the next reconcile ($($ran -join ','))"
+        # A record from before Power and Updates were machine steps (1.0.9: Edge and System only):
+        # the next update applies those two, and only those.
+        $applied = [IO.File]::ReadAllText((Join-Path $mp.StateRoot 'machine-settings.json')) | ConvertFrom-Json
+        Write-AtomicText (Join-Path $mp.StateRoot 'machine-settings.json') ([pscustomobject]@{ Edge = $applied.Edge; System = $applied.System } | ConvertTo-Json -Compress)
+        $ran.Clear(); Update-MachineSettings $mp $fake
+        Check (($ran -join ',') -eq 'Set-Power.ps1,Set-UpdatePolicy.ps1') "  a box whose record has only Edge and System gets Power and Updates ($($ran -join ','))"
+
+        # Each machine step's script as an update runs it: it takes -MachineOnly, and the Power and
+        # Updates steps, applied whole, touch nothing of a user's (as SYSTEM, HKCU and the profile
+        # folders would be SYSTEM's own).
+        foreach ($s in $MachineSteps.Values) {
+            $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $s), [ref]$null, [ref]$null)
+            $takes = @($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'MachineOnly' }).Count -eq 1
+            Check $takes "  $s takes -MachineOnly"
+        }
+        foreach ($s in 'Set-Power.ps1', 'Set-UpdatePolicy.ps1') {
+            $text = [IO.File]::ReadAllText((Join-Path $lib $s)) -replace '(?s)<#.*?#>', ''
+            $user = [regex]::Matches($text, 'HKCU:|HKEY_CURRENT_USER|HKEY_USERS|\$env:(APPDATA|LOCALAPPDATA|USERPROFILE|USERNAME)|\$HOME\b') | ForEach-Object { $_.Value }
+            Check (-not $user) "  $s is all the machine's$(if ($user) { ': ' + ($user -join ', ') })"
+        }
 
         # The System step's record of what it turned off, for the uninstall (Save-FirstValue): the
         # first value of each kept, so a run again never records the step's own setting; a record

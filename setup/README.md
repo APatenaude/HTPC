@@ -143,6 +143,8 @@ reconcile after an update made by an older runner, or after one that failed):
 | Step | Applied by an update | Needs TV Box Setup again |
 |---|---|---|
 | Edge | every Edge policy (HKLM: extensions and uBOL's lists, search, password saving, startup boost...) | the startup boost's HKCU Run value (the launcher and the jobs remove it anyway) |
+| Power | all of it: the Balanced plan's values and the plan itself, hibernate, Fast Startup off, no maintenance wake, the devices' wake (the network adapter's only when it differs: a change restarts the adapter) | nothing |
+| Updates | all of it: Windows Update's policies (manual, no drivers, no notifications) and the Store's (apps on demand) | nothing |
 | System | the HKLM values, the services, Windows' telemetry tasks, Defender's scan settings, the overlay switch (it takes a restart: the box's next one, or say so in the release notes), the sign-in screen's picture and colour | this user's settings (HKCU: notifications, accessibility keys, dark mode, location consent), the networks, the "Networks private" task, the computer name |
 | PhoneRemote | nothing (the firewall rules name the same exe) | the certificate: made as the signed-in user and put in the machine's CA store (Settings > Phone says "Run TV Box Setup again for Android's Share" when it is missing) |
 | every other step | nothing | all of it |

@@ -385,8 +385,9 @@ function Test-BoxJob($Paths) {
 # applies"): the machine part of these steps, run again from the trusted runner (lib\, admin-only)
 # whenever its script differs from the one last applied (state\machine-settings.json). Each is
 # idempotent and reads nothing a user can write. The parts that need the signed-in user (HKCU,
-# the phone remote's certificate, made as the user) wait for TV Box Setup.
-$MachineSteps = [ordered]@{ Edge = 'Set-EdgePolicy.ps1'; System = 'Set-SystemPolicy.ps1' }
+# the phone remote's certificate, made as the user) wait for TV Box Setup. In setup's order;
+# Power and Updates are all the machine's (the power plan, Windows Update's policies).
+$MachineSteps = [ordered]@{ Edge = 'Set-EdgePolicy.ps1'; Power = 'Set-Power.ps1'; Updates = 'Set-UpdatePolicy.ps1'; System = 'Set-SystemPolicy.ps1' }
 
 # $Run (tests): runs one script with -MachineOnly; by default in its own PowerShell. A failed step
 # is tried again at the next reconcile; the update itself stands.

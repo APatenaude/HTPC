@@ -13,8 +13,13 @@
     decodes video stays as tested.
     Windows' own update notifications, restart warnings included, are off: nothing pops up over
     the TV (the TV's Updates screen says when a restart is needed).
+
+.PARAMETER MachineOnly
+    Changes nothing here: every value this step sets is the machine's (HKLM policies). What a
+    launcher update passes when it applies the step again, as SYSTEM, after this script changed
+    (lib\LauncherUpdate.ps1).
 #>
-param()
+param([switch]$MachineOnly)
 
 . "$PSScriptRoot\Common.ps1"
 Assert-Admin

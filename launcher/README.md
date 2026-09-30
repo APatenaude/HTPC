@@ -277,9 +277,10 @@ GitHub's redirects may go, when the quiet check is due, an hour's wait after a f
   write-through renames) and waits up to 3 minutes for the new launcher to say it is healthy
   (the event `Local\HtpcHealthy_<version>_<pid>`, once its UI is ready and the controller thread
   runs), otherwise it puts the old one back. A power cut at any step is put right when Windows
-  starts (`reconcile`). Once the new launcher is healthy, the machine part of setup's Edge and
-  System steps runs again when their scripts changed (setup/README.md, "What an update applies");
-  whatever needs the signed-in user (HKCU, the phone remote's certificate) waits for TV Box Setup.
+  starts (`reconcile`). Once the new launcher is healthy, the machine part of setup's Edge,
+  Power, Updates and System steps runs again when their scripts changed (setup/README.md, "What
+  an update applies"); whatever needs the signed-in user (HKCU, the phone remote's certificate)
+  waits for TV Box Setup.
 - **A newer WebView2 runtime** (Edge's updater installs it) is taken at the next standby: the
   launcher's WebViews close and open again, no restart.
 - **The apps' own updaters** are off where they can be: VacuumTube's (catalog
