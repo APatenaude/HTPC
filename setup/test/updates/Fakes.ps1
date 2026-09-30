@@ -150,7 +150,8 @@ class W {
     // boxes side by side, reading every launcher's path ten times a second costs).
     var running = child != null;
     if (!running) foreach (var p in Process.GetProcessesByName("HtpcLauncher")) { try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) running = true; } catch (Exception) { } }
-    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(exe); } catch (Exception) { } }
+    // Started as the real one starts it (CreateProcess, not the shell's ShellExecute).
+    if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) { try { child = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = dir }); } catch (Exception) { } }
     // Waits on the launcher itself, so its exit is judged at once (as the real watchdog waits on
     // its mutex): a sleep could miss a rollback's short pause on a loaded box.
     if (child != null) child.WaitForExit(100); else Thread.Sleep(100);
