@@ -366,8 +366,8 @@ Console.WriteLine("== Standby: waking with Home");
 }
 
 // ---------------------------------------------------------------- Standby: the radios it turns off
-// StandbyRadioSwitch with a made-up radio: the Wi-Fi on a cable and Bluetooth with nothing paired
-// go off in standby and come back at wake; the flag in settings brings the radio back after a
+// StandbyRadioSwitch with a made-up radio: the Wi-Fi on a cable goes off in standby and comes
+// back at wake (Bluetooth has its own rule: below); the flag in settings brings the radio back after a
 // launcher that ended in standby; a refusal is tried again; a radio in use, or one the user
 // turned off, is left alone.
 Console.WriteLine("== Standby: the radios it turns off");
@@ -447,8 +447,217 @@ Console.WriteLine("== Standby: the radios it turns off");
     new StandbyRadioSwitch(failing, () => flag, off => flag = off, () => saves++).Off(() => true).Wait();
     Check(on && !flag && Log.Lines.Contains("WARN Standby: Test radio: no answer"), "a failing look: left on, logged");
 
-    var json = JsonSerializer.Serialize(new LauncherSettings { BluetoothOffInStandby = true }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    var json = JsonSerializer.Serialize(new LauncherSettings { BluetoothOffByLauncher = true }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
     Check(json.Contains("\"bluetoothOffInStandby\":true") && json.Contains("\"wifiOffInStandby\":false"), "settings keep both radios' flags");
+}
+
+// ---------------------------------------------------------------- The Bluetooth radio: off while nothing is paired
+// BluetoothRadio with a made-up radio and clock (the owner, 30 Sept 2026): off while nothing is
+// paired, awake as in standby; on while Settings › Bluetooth shows, kept on for a minute after it
+// closes and while a pairing runs; anything paired, or a look at the paired devices that fails,
+// keeps it on; the user's own switch wins; a launcher that ended with it off looks again at its
+// next start (1.0.9's standby flag included). Each change logged with why.
+Console.WriteLine("== The Bluetooth radio: off while nothing is paired");
+{
+    // The decision alone.
+    const string Pairing = "for pairing";
+    Check(BluetoothRadio.Decide("on", false, null, false, false) == (BluetoothRadio.Step.Off, "nothing paired"), "on, nothing paired: off");
+    Check(BluetoothRadio.Decide("on", false, null, false, true).Step == BluetoothRadio.Step.None, "on, something paired: left on");
+    Check(BluetoothRadio.Decide("on", false, null, false, null).Step == BluetoothRadio.Step.None, "on, the paired devices not read: left on");
+    Check(BluetoothRadio.Decide("on", false, Pairing, false, false).Step == BluetoothRadio.Step.None, "on, Settings › Bluetooth open: left on");
+    Check(BluetoothRadio.Decide("on", false, null, true, false).Step == BluetoothRadio.Step.None, "on, the minute after the page or a pairing: left on");
+    Check(BluetoothRadio.Decide("off", true, null, false, true) == (BluetoothRadio.Step.On, "something is paired"), "off by the rule, something paired: on");
+    Check(BluetoothRadio.Decide("off", true, null, false, null) == (BluetoothRadio.Step.On, "the paired devices could not be read"), "off by the rule, the look failed: on");
+    Check(BluetoothRadio.Decide("off", true, Pairing, false, false) == (BluetoothRadio.Step.On, Pairing), "off by the rule, Settings › Bluetooth open: on");
+    Check(BluetoothRadio.Decide("off", true, null, false, false).Step == BluetoothRadio.Step.None, "off by the rule, still nothing paired: stays off");
+    Check(BluetoothRadio.Decide("off", false, Pairing, false, true).Step == BluetoothRadio.Step.None && BluetoothRadio.Decide("off", false, null, false, null).Step == BluetoothRadio.Step.None,
+        "off by the user (not the rule): never turned on, not for the page, nor for something paired");
+    Check(new[] { "disabled", "none" }.All(r => BluetoothRadio.Decide(r, true, Pairing, false, true).Step == BluetoothRadio.Step.None && BluetoothRadio.Decide(r, false, null, false, false).Step == BluetoothRadio.Step.None),
+        "a radio turned off by a switch on the box or flight mode, or none: left alone");
+    Check(BluetoothRadio.NeedsPairedLook("on", false, null, false) && BluetoothRadio.NeedsPairedLook("off", true, null, false)
+        && !BluetoothRadio.NeedsPairedLook("on", false, Pairing, false) && !BluetoothRadio.NeedsPairedLook("on", false, null, true)
+        && !BluetoothRadio.NeedsPairedLook("off", true, Pairing, false) && !BluetoothRadio.NeedsPairedLook("off", false, null, false) && !BluetoothRadio.NeedsPairedLook("disabled", true, null, false),
+        "the paired devices are looked at only where they can change the answer");
+
+    // The rule, with a made-up radio, clock and settings.
+    var radio = "on";
+    bool? paired = false;
+    var inStandby = false;
+    var refuse = false;
+    long now = 10_000_000;
+    var flag = false;
+    var saves = 0;
+    var looks = 0;
+    var switched = new List<bool>();
+    Action? later = null;
+    var laterDelay = TimeSpan.Zero;
+    BluetoothRadio NewRule() => new(new BluetoothRadioParts(
+        () => Task.FromResult(radio),
+        on => { switched.Add(on); if (refuse) return Task.FromResult(false); radio = on ? "on" : "off"; return Task.FromResult(true); },
+        () => { looks++; return Task.FromResult(paired); },
+        () => inStandby, () => now, (delay, look) => { laterDelay = delay; later = look; },
+        () => flag, off => flag = off, () => saves++));
+    void Reset(string r = "on", bool? p = false, bool f = false)
+    {
+        radio = r; paired = p; flag = f; inStandby = false; refuse = false; saves = 0; looks = 0; switched.Clear(); later = null;
+    }
+    bool Logged(string line) => Log.Lines.Contains(line);
+
+    // Nothing paired: off at start; Settings › Bluetooth turns it on while it shows, and off again
+    // a minute after it closes, not sooner.
+    Reset();
+    var rule = NewRule();
+    rule.Look("the launcher started").Wait();
+    Check(radio == "off" && flag && saves == 1 && looks == 1, "start, nothing paired: off, and settings say the rule did it");
+    Check(Logged("INFO Bluetooth radio off (nothing paired; the launcher started)"), "... logged with why");
+    rule.PageShown(true).Wait();
+    Check(radio == "on" && !flag && saves == 2 && looks == 1, "Settings › Bluetooth opened: on at once (nothing looked at: it changes nothing)");
+    Check(Logged("INFO Bluetooth radio on (for pairing; Settings › Bluetooth opened)"), "... logged with why");
+    rule.PageShown(false).Wait();
+    Check(radio == "on" && later is not null && laterDelay == BluetoothRadio.Grace && BluetoothRadio.Grace == TimeSpan.FromMinutes(1),
+        "closed: still on, a look a minute later");
+    now += 30_000;
+    rule.Look("wake").Wait();
+    Check(radio == "on" && switched.Count == 2, "... half a minute after (a controller still pairing): still on");
+    rule.PageShown(true).Wait();
+    rule.PageShown(false).Wait();
+    now += 59_000;
+    rule.Look("some look").Wait();
+    Check(radio == "on", "opened again and closed: the minute counts from the last close");
+    now += 1_000;
+    later!();
+    Check(radio == "off" && flag && Logged("INFO Bluetooth radio off (nothing paired; a minute after Settings › Bluetooth closed)"), "a minute after, still nothing paired: off again, logged");
+
+    // Pairing: the radio stays on while it runs, the page left or not; paired, it stays on for good.
+    Reset("off", false, true);
+    rule = NewRule();
+    rule.PageShown(true).Wait();
+    rule.PairingStarted();
+    rule.PageShown(false).Wait();
+    now += 5 * 60_000;
+    later!();
+    Check(radio == "on", "a pairing still running after the page's minute: on");
+    paired = true;
+    rule.PairingEnded().Wait();
+    Check(radio == "on" && !flag, "the pairing ended, the controller paired: stays on");
+    inStandby = true;
+    rule.Look("standby").Wait();
+    Check(radio == "on", "... in standby too (the controller wakes the box)");
+    inStandby = false;
+    rule.Look("the launcher started").Wait();
+    Check(radio == "on" && switched.Count == 1, "... and at the next start");
+    paired = false;
+    rule.PairingStarted();
+    rule.PairingEnded().Wait();
+    Check(radio == "off" && flag, "a pairing that ended with nothing paired, the page's minute long gone: off");
+
+    // Standby: off with nothing paired, even with the page open or its minute running; a wake
+    // with nothing paired leaves it off (1.0.9 turned it back on); the page open at the wake: on.
+    Reset();
+    rule = NewRule();
+    rule.PageShown(true).Wait();
+    inStandby = true;
+    rule.Look("standby").Wait();
+    Check(radio == "off" && flag && Logged("INFO Bluetooth radio off (nothing paired; standby)"), "standby with the page open: off, nothing paired");
+    inStandby = false;
+    rule.Look("wake").Wait();
+    Check(radio == "on", "wake with the page still open: on for it");
+    rule.PageShown(false).Wait();
+    inStandby = true;
+    rule.Look("standby").Wait();
+    Check(radio == "off", "standby within the page's minute: off all the same");
+    inStandby = false;
+    now += 10_000;
+    rule.Look("wake").Wait();
+    Check(radio == "off" && switched.Count == 3, "wake within that minute: not turned on again for it (only the page does)");
+    now += 60_000;
+    rule.Look("wake").Wait();
+    Check(radio == "off" && flag && switched.Count == 3, "a wake with nothing paired: stays off");
+    Reset("on", true);
+    rule = NewRule();
+    inStandby = true;
+    rule.Look("standby").Wait();
+    Check(radio == "on" && switched.Count == 0, "standby with something paired: stays on");
+
+    // A look that fails: a radio that is on stays on; one the rule turned off comes back on.
+    Reset("on", null);
+    rule = NewRule();
+    rule.Look("the launcher started").Wait();
+    Check(radio == "on" && switched.Count == 0 && !flag, "the paired devices not read: left on");
+    Reset("off", null, true);
+    NewRule().Look("the launcher started").Wait();
+    Check(radio == "on" && !flag && Logged("INFO Bluetooth radio on (the paired devices could not be read; the launcher started)"), "off by the rule, the look failed: on again, logged");
+    Reset("on");
+    rule = new BluetoothRadio(new BluetoothRadioParts(() => Task.FromResult(radio), on => { switched.Add(on); return Task.FromResult(true); },
+        () => Task.FromException<bool?>(new TimeoutException("no answer")), () => false, () => now, (_, _) => { }, () => flag, off => flag = off, () => saves++));
+    rule.Look("the launcher started").Wait();
+    Check(radio == "on" && switched.Count == 0 && Logged("WARN Bluetooth radio (the launcher started): no answer"), "a look that throws: left on, logged");
+
+    // The launcher ended with the radio off (a crash, the watchdog starts another): the next
+    // start looks again. Something paired meanwhile: on. Still nothing: stays off.
+    Reset("off", true, true);
+    NewRule().Look("the launcher started").Wait();
+    Check(radio == "on" && !flag && saves == 1 && Logged("INFO Bluetooth radio on (something is paired; the launcher started)"), "a launcher that ended with it off, something paired since: on at the next start");
+    Reset("off", false, true);
+    NewRule().Look("the launcher started").Wait();
+    Check(radio == "off" && flag && switched.Count == 0, "... nothing paired: stays off, the flag kept");
+    var opts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    Check(JsonSerializer.Deserialize<LauncherSettings>("{\"bluetoothOffInStandby\": true}", opts)!.BluetoothOffByLauncher, "1.0.9's flag (standby turned it off) is the rule's: a 1.0.9 launcher that ended in standby is looked after");
+
+    // Windows refuses: nothing kept, logged by the switch itself; the next look tries again.
+    Reset();
+    refuse = true;
+    rule = NewRule();
+    rule.Look("the launcher started").Wait();
+    Check(radio == "on" && !flag && saves == 0, "off refused: left as it was, no flag");
+    refuse = false;
+    rule.Look("wake").Wait();
+    Check(radio == "off" && flag, "... the next look: off");
+
+    // The user's switch wins. Off: the page no longer turns it on, nothing does; a paired
+    // controller stays off with it. On: on; with nothing paired it rests a minute after the page
+    // closes (the page turns it on whenever it shows, so the switch never shows it off).
+    Reset("off", false, true);
+    rule = NewRule();
+    rule.PageShown(true).Wait();
+    Check(rule.UserSwitch(false).Result && radio == "off" && !flag && Logged("INFO Bluetooth radio off (the user's switch)"), "the user's switch off: off, the rule's flag cleared, logged");
+    rule.PageShown(false).Wait();
+    now += 2 * 60_000;
+    later!();
+    rule.PageShown(true).Wait();
+    inStandby = true;
+    rule.Look("standby").Wait();
+    inStandby = false;
+    rule.Look("wake").Wait();
+    paired = true;
+    rule.Look("the launcher started").Wait();
+    Check(radio == "off" && switched.SequenceEqual(new[] { true, false }), "... then: not turned on by the page, standby, a wake, a start, nor something paired");
+    Check(rule.UserSwitch(true).Result && radio == "on" && !flag, "the user's switch on: on");
+    paired = false;
+    rule.PageShown(false).Wait();
+    now += 2 * 60_000;
+    later!();
+    Check(radio == "off" && flag, "... with nothing paired, off a minute after the page closed");
+    rule.PageShown(true).Wait();
+    Check(radio == "on", "... and on again as the page shows it");
+    refuse = true;
+    Check(!rule.UserSwitch(false).Result && radio == "on" && !flag, "the user's switch refused by Windows: as it was");
+
+    // Turned on elsewhere (Windows' own switch in desktop mode) after the rule turned it off: no
+    // longer the rule's; with something paired, left on.
+    Reset("on", true, true);
+    NewRule().Look("wake").Wait();
+    Check(radio == "on" && !flag && saves == 1 && switched.Count == 0, "on again by other means: the flag goes, something paired: left on");
+
+    // No radio, or one off with a switch on the box: left alone.
+    foreach (var r in new[] { "none", "disabled" })
+    {
+        Reset(r, false, true);
+        rule = NewRule();
+        rule.Look("the launcher started").Wait();
+        rule.PageShown(true).Wait();
+        Check(switched.Count == 0 && looks == 0, $"radio {r}: nothing switched, nothing looked at");
+    }
 }
 
 // ---------------------------------------------------------------- Standby: apps in efficiency mode

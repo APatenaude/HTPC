@@ -154,7 +154,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
   networks too; location allowed for the launcher, which Windows requires for the list).
   Bluetooth: headphones, speakers, controllers and keyboards (a keyboard pairs only with a PIN);
   sound follows headphones; setup installs the adapter's own driver from Windows Update and
-  keeps Windows' generic one when there is none. Sound: one volume level for the box whatever
+  keeps Windows' generic one when there is none. The radio is off while nothing is paired, awake
+  or in standby (the owner, 30 Sept 2026: Windows' Bluetooth services kept the processor busy
+  all day for no one); Settings › Bluetooth turns it on while it shows and a minute after (to
+  pair); anything paired keeps it on. The page's switch is the user's: turned off there, the
+  radio stays off. Sound: one volume level for the box whatever
   the output.
 - **W4 First-run setup.** Welcome, controller check, Wi-Fi (only without a cable), find the TV,
   the TV's input, pick apps, install, done. The phone remote is not a step.

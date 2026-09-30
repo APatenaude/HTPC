@@ -149,8 +149,8 @@ sealed partial class MainForm : Form
             standby = new Standby(controller, settings, media);
             standby.Changed += OnStandbyChanged;
             InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
-            InitStandbyBluetooth(); // MainForm.Bluetooth.cs: the Bluetooth radio off in standby, nothing paired
             _ = standby.RadiosBack("the launcher started"); // if the launcher before this one ended in standby
+            StartBluetoothRadio(); // MainForm.Bluetooth.cs: the Bluetooth radio off while nothing is paired
             standby.GoingDown += () =>
             {
                 Post(new { type = "show", view = "home" });

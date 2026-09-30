@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Htpc.Launcher;
 
@@ -71,8 +72,14 @@ sealed class LauncherSettings
     /// <summary>Standby turned the Wi-Fi radio off (on a cable): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
     public bool WifiOffInStandby { get; set; }
 
-    /// <summary>Standby turned the Bluetooth radio off (nothing paired): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
-    public bool BluetoothOffInStandby { get; set; }
+    /// <summary>
+    /// The launcher turned the Bluetooth radio off (nothing paired, awake or in standby:
+    /// BluetoothRadio.cs): on again when something needs it, and looked at again at the next
+    /// start if the launcher ended meanwhile. Under 1.0.9's name, when only standby turned it off:
+    /// a 1.0.9 launcher put back by a reinstall turns the radio back on at its start, as it did then.
+    /// </summary>
+    [JsonPropertyName("bluetoothOffInStandby")]
+    public bool BluetoothOffByLauncher { get; set; }
 
     /// <summary>
     /// The time of the elevated setup's copy (SetupCopyPath) this user's file last took in; null
@@ -241,16 +248,16 @@ sealed class LauncherSettings
 }
 
 /// <summary>
-/// What standby needs of a radio it may turn off (the Wi-Fi: MainForm.Wifi.cs; Bluetooth:
-/// MainForm.Bluetooth.cs): its state ("on", "off", "disabled", "none"), switching it, and whether
-/// nothing needs it through standby (the Wi-Fi: the box is on its cable with the Wi-Fi joined to
-/// nothing; Bluetooth: nothing is paired). Name and Why: for the log.
+/// What standby needs of a radio it may turn off (the Wi-Fi: MainForm.Wifi.cs): its state ("on",
+/// "off", "disabled", "none"), switching it, and whether nothing needs it through standby (the
+/// Wi-Fi: the box is on its cable with the Wi-Fi joined to nothing). Name and Why: for the log.
+/// (Bluetooth has a rule of its own, awake as in standby: BluetoothRadio.cs.)
 /// </summary>
 sealed record StandbyRadio(string Name, Func<Task<string>> State, Func<bool, Task<bool>> Switch, Func<Task<bool>> NotNeeded, string Why);
 
 /// <summary>
 /// One radio standby turns off and waking turns back on (StandbyRadio). Its flag in settings
-/// (WifiOffInStandby, BluetoothOffInStandby) is set once the radio is off and cleared only once
+/// (WifiOffInStandby) is set once the radio is off and cleared only once
 /// it is on again: a launcher that ended in standby turns it back on at its next start, and one
 /// Windows refused is tried again at the next wake or start, never left off for good. Only a
 /// radio that is on: one the user turned off stays off. Checked in launcher\tests\LauncherTests.
@@ -305,10 +312,11 @@ sealed class StandbyRadioSwitch(StandbyRadio radio, Func<bool> turnedOff, Action
 /// the controller's dongle among them (its USB polling is what lets Home wake the box at once;
 /// S3 cannot: every interface of the dongle reports "deepest wake: S0", no USB remote wakeup).
 /// What standby can switch off without touching that wake is done here and in MainForm: the
-/// Wi-Fi radio on a cable, the Bluetooth radio with nothing paired (below), the apps' faster
+/// Wi-Fi radio on a cable (below), the apps' faster
 /// timers (AppManager.SetEfficiencyMode), and the launcher's own polling it does not need for
-/// waking (ControllerService.NoControllerWait, MainForm's 200 ms watch). The rest needs a wall
-/// meter (launcher\dev\Measure-StandbyPower.ps1).
+/// waking (ControllerService.NoControllerWait, MainForm's 200 ms watch). The Bluetooth radio with
+/// nothing paired is off awake too (BluetoothRadio.cs). The rest needs a wall meter
+/// (launcher\dev\Measure-StandbyPower.ps1).
 /// </summary>
 sealed class Standby
 {
@@ -429,7 +437,7 @@ sealed class Standby
         foreach (var radio in Radios()) await radio.Off(() => Active);
     }
 
-    StandbyRadioSwitch? wifi, bluetooth;
+    StandbyRadioSwitch? wifi;
 
     /// <summary>
     /// The Wi-Fi radio, for standby (MainForm.Wifi.cs sets it); unset: left alone. On a cable it
@@ -443,21 +451,7 @@ sealed class Standby
         set => wifi = new(value, () => settings.WifiOffInStandby, off => settings.WifiOffInStandby = off, settings.Save);
     }
 
-    /// <summary>
-    /// The Bluetooth radio, for standby (MainForm.Bluetooth.cs sets it); unset: left alone. With
-    /// nothing paired it goes off, back on at wake: no controller, keyboard or headphones of the
-    /// box can be on it, and Windows' Bluetooth services stay busy while it is on (on the box,
-    /// 29 Sept 2026, with nothing paired: bthserv, BthAvctpSvc and DeviceAssociationService woke
-    /// the processor about 1,500 times a second and used 160 million cycles a second, steadily
-    /// since the box started). A paired device, or a look at the paired devices that fails,
-    /// leaves it on (a Bluetooth controller must still wake the box).
-    /// </summary>
-    public StandbyRadio Bluetooth
-    {
-        set => bluetooth = new(value, () => settings.BluetoothOffInStandby, off => settings.BluetoothOffInStandby = off, settings.Save);
-    }
-
-    IEnumerable<StandbyRadioSwitch> Radios() => new[] { wifi, bluetooth }.OfType<StandbyRadioSwitch>();
+    IEnumerable<StandbyRadioSwitch> Radios() => new[] { wifi }.OfType<StandbyRadioSwitch>();
 
     /// <summary>The radios standby turned off back on (at wake, or a start after a launcher that ended in standby).</summary>
     public async Task RadiosBack(string why)
