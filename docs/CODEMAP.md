@@ -365,7 +365,8 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
    the user's things with it (as `Set-SystemPolicy.ps1`); a new such step goes into `$MachineSteps` in
    `setup/lib/LauncherUpdate.ps1` (`Update-MachineSettings` re-runs a script whose hash changed, as SYSTEM).
 3. Uninstall: record the value before changing it (`Save-FirstValue` into `state\system-before.json`, as
-   Set-SystemPolicy.ps1 does), and put it back in `$UninstallSteps` in `setup/lib/Uninstall-Htpc.ps1`
+   Set-SystemPolicy.ps1 does; a DWORD: `Set-KeptValue`, which the uninstall's `reg:` entries put back
+   by themselves), and put it back in `$UninstallSteps` in `setup/lib/Uninstall-Htpc.ps1`
    (before the Files step, which deletes ProgramData\HTPC); list it in setup/README.md's tables.
 4. Tests: `Test-Updates -Only Core` (the `$MachineSteps` order, MachineOnly declared, no HKCU in
    machine-only scripts, the before-record), `Test-Rights`; then the VM: `Test-ReleaseInVm.ps1 -Candidate

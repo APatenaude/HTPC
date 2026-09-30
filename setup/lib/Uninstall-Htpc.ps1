@@ -15,15 +15,18 @@
 #   Firewall    the "HTPC" rule group and the apps' "HTPC block inbound" rules
 #   Certificates the phone remote's certificates (O=HTPC TV box) from the CA stores
 #   System      the sign-in screen and the desktop back to Windows' look (default wallpaper),
-#               Windows Search and SysMain back on; Print Spooler, Fax, Windows Error Reporting's
-#               service and Windows' telemetry tasks as they were before setup (its record,
-#               state\system-before.json); Defender's scheduled scan and multiplane overlay as
-#               Windows has them (the overlay at the next restart); the computer name kept
+#               Windows Search and SysMain back on; the services, Windows' tasks and the values
+#               it changed (Defender's real-time protection, memory integrity, VBS, Credential
+#               Guard, WPBT, advertising ID, activity history, AIT, device encryption) as they were
+#               before setup (its record, state\system-before.json); Defender's scheduled scan and
+#               multiplane overlay as Windows has them (these at the next restart); the computer
+#               name kept
 #   Files       the launcher and watchdog ended; a copy of the box's logs, and of this setup (to
 #               run it again), in Documents\HTPC logs; Program Files\HTPC and ProgramData\HTPC
 #               removed
 # Kept (and said so): the apps, winget, the HEVC extension, power settings, the privacy and
-# no-pop-up settings, dark mode, Private networks, automatic time zone, the computer name, and
+# no-pop-up settings of before 1.0.11, dark mode, Private networks, automatic time zone, the
+# computer name, the apps the System step removed (the new Outlook, Dev Home, CrossDevice), and
 # %LOCALAPPDATA%\HTPC (the launcher's settings and the website tiles' Edge profiles, with their
 # sign-ins). A System Restore point from before setup is the other way back (setup/README.md).
 
@@ -327,8 +330,10 @@ $UninstallSteps = [ordered]@{
                 Write-Change "service $($service.Name) back on ($mode)"
             } else { Write-Same "service $($service.Name) $($s.StartType)" }
         }
-        # What the System step turned off, as it was before: the services' start types and Windows'
-        # telemetry tasks, from its record (state\system-before.json, read here before the Files
+        # What the System step turned off, as it was before: the services' start types, Windows'
+        # tasks and the values it kept (Defender's real-time protection and notifications, memory
+        # integrity, VBS, Credential Guard, WPBT, the privacy policies, device encryption), from
+        # its record (state\system-before.json, read here before the Files
         # step removes ProgramData\HTPC). No record (a second run: the first put them back, and the
         # record went with ProgramData\HTPC): nothing to put back.
         $beforeFile = Join-Path $HtpcData 'state\system-before.json'
@@ -338,6 +343,7 @@ $UninstallSteps = [ordered]@{
             catch { Write-Attention "$beforeFile unreadable ($($_.Exception.Message)): what the System step turned off stays off" }
         } else { Write-Same 'no record of services or tasks the System step turned off' }
         $scStart = @{ Automatic = 'auto'; AutomaticDelayedStart = 'delayed-auto'; Manual = 'demand'; Disabled = 'disabled' }
+        $vbs = $false; $realtime = $false
         foreach ($entry in @(if ($before) { $before.PSObject.Properties })) {
             $kind, $name = $entry.Name -split ':', 2
             $was = [string]$entry.Value
@@ -357,9 +363,20 @@ $UninstallSteps = [ordered]@{
                     if (-not $task) { continue }
                     if ($was -eq 'Enabled' -and "$($task.State)" -eq 'Disabled') { $task | Enable-ScheduledTask | Out-Null; Write-Change "task $name enabled again" }
                     else { Write-Same "task $name $($task.State)" }
+                } elseif ($kind -eq 'reg') {
+                    # A value Set-KeptValue changed: its old number back, or gone where there was none.
+                    $cut = $name.LastIndexOf('\')
+                    $key = $name.Substring(0, $cut); $value = $name.Substring($cut + 1)
+                    if ($was -eq '') { Remove-RegValue $key $value; Remove-EmptyKey $key }
+                    else { Set-RegValue $key $value ([int]$was) }
+                    if ($key -match 'DeviceGuard|\\Lsa$') { $vbs = $true }
+                    if ($key -like '*\Real-Time Protection') { $realtime = $true }
                 }
             } catch { Write-Attention "$($entry.Name) not put back ($($_.Exception.Message))" }
         }
+        # Both are read when Windows (Defender) starts.
+        if ($vbs) { Add-RestartReason 'memory integrity and Credential Guard as before' }
+        if ($realtime) { Add-RestartReason 'Microsoft Defender real-time protection back on' }
         # Microsoft Defender's scheduled scan as Windows sets it: normal priority, 50% of the
         # processor, 02:00, started at a random time up to 4 hours later (only while idle and no
         # catch-up scan are Windows' own already).

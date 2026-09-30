@@ -137,8 +137,10 @@ $record = Join-Path $mp.StateRoot 'system-before.json'
 Save-FirstValue $record $mp.DataRoot 'service:Spooler' 'Automatic'
 Save-FirstValue $record $mp.DataRoot 'task:\Microsoft\Windows\Autochk\Proxy' 'Enabled'
 Save-FirstValue $record $mp.DataRoot 'service:Spooler' 'Disabled'
+Save-FirstValue $record $mp.DataRoot 'reg:HKLM:\SOFTWARE\X\Y' ''   # a value there was none of
+Save-FirstValue $record $mp.DataRoot 'reg:HKLM:\SOFTWARE\X\Y' '1'
 $kept = [IO.File]::ReadAllText($record) | ConvertFrom-Json
-Check ($kept.'service:Spooler' -eq 'Automatic' -and $kept.'task:\Microsoft\Windows\Autochk\Proxy' -eq 'Enabled') "the System step's record keeps the first value of each ($($kept | ConvertTo-Json -Compress))"
+Check ($kept.'service:Spooler' -eq 'Automatic' -and $kept.'task:\Microsoft\Windows\Autochk\Proxy' -eq 'Enabled' -and $kept.'reg:HKLM:\SOFTWARE\X\Y' -eq '') "the System step's record keeps the first value of each ($($kept | ConvertTo-Json -Compress))"
 $acl = Get-Acl -LiteralPath $record
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'Modify', 'Allow'))
 Set-Acl -LiteralPath $record -AclObject $acl
@@ -148,14 +150,21 @@ Check $refused '  a record Users can change is refused'
 
 # What the System step turns off, read from the script an update runs: never what the box
 # uses (Bluetooth, audio, the network, Windows Update, Defender, Edge's and WebView2's
-# updaters, the \HTPC tasks).
+# updaters, the \HTPC tasks) nor Windows' upkeep (TRIM, component cleanup, NGEN, restore
+# points, feature flags, disk checks, Automatic Maintenance).
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $lib 'Set-SystemPolicy.ps1'), [ref]$null, [ref]$null)
 $off = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and "$($n.Left)" -eq '$telemetryTasks' }, $true) |
         ForEach-Object { $_.Right.FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) } | ForEach-Object { $_.Value })
 $off += @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.HashtableAst] -and @($n.KeyValuePairs | ForEach-Object { "$($_.Item1)" }) -contains 'Start' }, $true) |
         ForEach-Object { $_.KeyValuePairs | Where-Object { "$($_.Item1)" -eq 'Name' } | ForEach-Object { $_.Item2.Extent.Text.Trim("'") } })
-$used = @($off | Where-Object { $_ -match 'Bluetooth|\bBth|Audio|Netw|Nla|Dhcp|Dns|Wlan|wuauserv|UsoSvc|UpdateOrchestrator|WindowsUpdate|Defender|WinDefend|MpsSvc|EdgeUpdate|WebView|\\HTPC\\' })
+$used = @($off | Where-Object { $_ -match 'Bluetooth|\bBth|Audio|Netw|Nla|Dhcp|Dns|Wlan|wuauserv|UsoSvc|UpdateOrchestrator|WindowsUpdate|Defender|WinDefend|MpsSvc|EdgeUpdate|WebView|\\HTPC\\|Defrag|ComponentCleanup|NGEN|\.NET|SystemRestore|Flighting|Chkdsk|TaskScheduler' })
 Check ($off.Count -ge 10 -and -not $used.Count) "the System step turns off none of what the box uses ($($off.Count) services and tasks$(if ($used) { ': ' + ($used -join ', ') }))"
+# What the owner kept (30 Sept 2026), never a name in the step's code: Widevine's component
+# updates and asset delivery in Edge; Defender's cloud protection, signature updates, SmartScreen.
+foreach ($t in @('Set-EdgePolicy.ps1', '^(ComponentUpdatesEnabled|EdgeAssetDeliveryServiceEnabled)$'), @('Set-SystemPolicy.ps1', '^(SpynetReporting|DisableAntiSpyware|DisableAntiVirus|DisableBlockAtFirstSeen|EnableSmartScreen|SmartScreenEnabled|Signature\w*)$')) {
+    $names = @([Management.Automation.Language.Parser]::ParseFile((Join-Path $lib $t[0]), [ref]$null, [ref]$null).FindAll({ param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst] }, $true) | Where-Object { $_.Value -match $t[1] } | ForEach-Object Value)
+    Check (-not $names.Count) "  $($t[0]) leaves alone what the owner kept$(if ($names) { ': ' + ($names -join ', ') })"
+}
 
 # The watchdog compiled above, with its checks.
 $built = Receive-Child $wdBuild

@@ -237,7 +237,8 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jel
 | The non-Roku TV drivers were built without those TVs | Marked beta; "No TV control" (the TV's own remote) always works |
 | Testing needs Windows, a TV and a controller | The real box first; a Hyper-V VM for the clean install; TvLab's simulated TVs; the page's self-test and UI audit; the launcher writes logs |
 | LTSC has no Store/winget; Edge 4K web video needs HEVC codec | Setup script installs winget and the codec |
-| Edge ignores search-engine policies on non-managed PCs | Fake MDM enrollment registry keys; side effect: Defender Tamper Protection shows as managed |
+| Edge ignores search-engine policies on non-managed PCs | Fake MDM enrollment registry keys; side effect: Defender turns Tamper Protection off at its next start (shown as managed) |
+| A lighter Windows (the owner, 30 Sept 2026): Defender's real-time protection, memory integrity, VBS and Credential Guard off; the new Outlook, Dev Home, CrossDevice removed | Kept: the nightly quick scan, signature updates, cloud protection, SmartScreen, Edge's component updates (Widevine). Where Tamper Protection, a firmware lock or a policy keeps protection on, setup says so and leaves it; the uninstall puts the values back |
 | uBlock Origin Lite is weaker than full uBO, especially on Twitch | Accepted; revisit (e.g. a second browser for Twitch) if ads get through |
 | Launcher crash leaves a blank screen | Watchdog restart, then the desktop with a message; Ctrl+Alt+Del and Task Manager still work |
 | Anyone who can publish a release here ships code to every box (no signing key) | Pinned repository, HTTPS, hashes; the owner turns on two-factor sign-in, immutable releases and a v* tag ruleset on GitHub |

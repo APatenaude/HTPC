@@ -372,6 +372,8 @@ What the 29-30 Sept releases brought, from the owner's testing on the TV:
   "installer finished on screen" mechanism removed; updates re-applying setup's Power and Updates
   steps too (from a 1.0.9 box they apply at the first reconcile, the next Windows start: the old
   runner performs the update itself).
+- 1.0.11 (in progress): the owner's lighter Windows of 30 Sept (Defender real-time protection, memory
+  integrity/VBS/Credential Guard off, more services, tasks and Edge policies, three apps removed; a restart).
 
 Made for agents (30 Sept, no product change): `docs/CODEMAP.md` (each area's files, names to
 Grep, tests, log lines; recipes), `launcher\dev\Test-Quick.ps1` (build and tests, a line each),
