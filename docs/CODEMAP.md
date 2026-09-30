@@ -17,7 +17,7 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 | Build + the 3 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
 | Everything (TvLab, setup tests, phone page) | `launcher\dev\Test-All.ps1` |
 | The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
-| TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
+| TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (all; or `roku`, `checks`, `unit`, `brands`; `-- roku --update-golden` rewrites the golden traces: review them with git diff) |
 | Setup's scripts on fakes | `setup\test\Test-Updates.ps1` (admin; `-Only Core,Download,Swap,Faults,Planting,Wua`: each in `setup\test\updates\<Section>.ps1`, the fakes in `updates\Fakes.ps1`, `FakeGitHub.ps1`, `Cases.ps1`), `Test-Autostart.ps1` (`-Only Match,Guard,Prefs,Catalog`), `Test-Rights.ps1` (`-Only Walker,Acl,JobParams`), `Test-Drivers.ps1`; `Test-Library.ps1` in the VM only |
 | The release in the test VM | `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build`, then `-UpdateFrom <previous>` (DEVELOPMENT.md section 6) |
 
@@ -179,7 +179,7 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   `TurnOff`, `TurnOffBeforeShutdown`, `Poll`, `Resume`, `Forget`; `TvDrivers.Create`; `CreateTv`, `StartTv`,
   `PostTv`, `OnTvMessage` (tv.*). `--no-tv` sends nothing.
 - Tests: TvLab `Scenarios/RokuScenarios.cs` (golden traces), `TvChecks.cs` (binding, doubts, `--no-tv`,
-  Wake-on-LAN), `PhaseBChecks.cs` (LG, Google), `SonySamsungChecks.cs`, `UnitChecks.cs` (EDID fixtures,
+  Wake-on-LAN), `BrandChecks.cs` (LG, Google TV, Sony, Samsung), `UnitChecks.cs` (EDID fixtures,
   credentials); selftest 'TV' (`ui/selftest/settings.js`); audit (`ui/audit/settings.js`) 'tv: how the
   box controls it' (+ every brand), 'settings: TV', 'settings: TV, pairing keypad'; (`ui/audit/setup.js`)
   'setup: find the TV', 'setup: TV pairing keypad', 'setup: the TV input'.

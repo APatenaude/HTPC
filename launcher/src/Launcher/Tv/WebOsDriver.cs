@@ -142,14 +142,12 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
         var stored = credentials?.Get(tv.Key);
         var key = pairing ? null : stored?.Value;
         if (!pairing && string.IsNullOrEmpty(key)) return null;
-        // Once a key exists the scheme is the one it was paired over (TLS unless the TV had only
-        // the plain port): a key never goes out in clear because TLS failed once. Pairing (no key
-        // yet) tries the plain port only when the TLS port refuses outright (a TV too old for it).
         // Over TLS with a pin, only the TV with that key gets as far as the key.
         var plain = new UriBuilder(tv.Address) { Scheme = "ws", Port = plainPort }.Uri;
         var pin = pairing || stored?.Scheme == "ws" ? null : stored?.Pin;
-        var (session, refused, other) = await WebOsSession.Connect(!pairing && stored?.Scheme == "ws" ? plain : tv.Address, pin, cancel);
-        if (session is null && pairing && refused) (session, _, _) = await WebOsSession.Connect(plain, null, cancel);
+        var first = Plain(pairing, stored?.Scheme, tlsRefused: false);
+        var (session, refused, other) = await WebOsSession.Connect(first ? plain : tv.Address, pin, cancel);
+        if (session is null && !first && Plain(pairing, stored?.Scheme, refused)) (session, _, _) = await WebOsSession.Connect(plain, null, cancel);
         if (session is null)
         {
             // Silent, as a TV that does not answer (the poll comes back every few seconds: logged once).
@@ -181,6 +179,13 @@ sealed class WebOsDriver : ITvDriver, ITvPairing
         failedAt.TryRemove(tv.Key, out _);
         return session;
     }
+
+    /// <summary>
+    /// Over the plain port (ws)? Once a key exists, the scheme it was paired over (TLS unless the TV
+    /// had only the plain port): a key never goes out in clear because TLS failed once. Pairing (no
+    /// key yet) goes plain only after the TLS port refused outright (a TV too old for it).
+    /// </summary>
+    internal static bool Plain(bool pairing, string? pairedScheme, bool tlsRefused) => pairing ? tlsRefused : pairedScheme == "ws";
 
     public async Task<bool> Pair(TvDevice tv, Action<string, string> step, Func<CancellationToken, Task<string?>> nextCode, CancellationToken cancel)
     {

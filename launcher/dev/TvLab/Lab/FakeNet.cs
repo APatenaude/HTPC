@@ -58,14 +58,42 @@ sealed class FakeNet : ITvNet
 
     public Task<IReadOnlyList<MdnsService>> Mdns(string service, TimeSpan wait, CancellationToken cancel) =>
         Task.FromResult<IReadOnlyList<MdnsService>>(MdnsResponders.SelectMany(r => r(service)).ToList());
+
+    /// <summary>The other fakes gone from the network (another TV takes the address).</summary>
+    public void Clear() { Responders.Clear(); MdnsResponders.Clear(); WakeTargets.Clear(); }
 }
 
-/// <summary>Notices recorded for checks.</summary>
+/// <summary>Notices recorded for checks; the trace gets the id only (a reworded title is no change of behaviour).</summary>
 sealed class FakeNotices : ITvNotices
 {
     readonly Trace trace;
-    public readonly List<TvNotice> Raised = new();
+    readonly List<TvNotice> raised = new();
     public FakeNotices(Trace trace) => this.trace = trace;
-    public void Raise(TvNotice notice) { Raised.Add(notice); trace.Add($"notice {notice.Id}: {notice.Title}"); }
+    /// <summary>A copy: a driver's background task may raise one meanwhile.</summary>
+    public List<TvNotice> Raised { get { lock (raised) return raised.ToList(); } }
+    public void Raise(TvNotice notice) { lock (raised) raised.Add(notice); trace.Add($"notice {notice.Id}"); }
     public void Clear(string id) => trace.Add($"notice cleared {id}");
+}
+
+/// <summary>What the brand checks ask of every fake brand TV (LG, Google TV, Sony, Samsung).</summary>
+interface IBrandFake : IDisposable
+{
+    string Label { get; }
+    string Name { get; }
+    IPAddress Ip { get; }
+    /// <summary>Connections to its control channel (Sony: registrations and requests with a cookie).</summary>
+    int Opened { get; }
+    /// <summary>A connection to it is still open or being handled (Sony's HTTP: never, each answer is over before the box goes on).</summary>
+    bool Busy { get; }
+    /// <summary>What reached it beyond reads (a register, cookie, token or key; a prompt, PIN or code shown; a command), or "".</summary>
+    string Got { get; }
+    /// <summary>The code it shows while pairing (Sony's PIN, Google TV's code), else null.</summary>
+    string? Code { get; }
+    IEnumerable<string> Macs { get; }
+    /// <summary>It answers the network's searches and hears its Wake-on-LAN.</summary>
+    void Join(FakeNet net);
+
+    /// <summary>"2 prompt, 1 command": the counts that are not zero.</summary>
+    static string Describe(params (string What, int Count)[] counts) =>
+        string.Join(", ", counts.Where(c => c.Count > 0).Select(c => $"{c.Count} {c.What}"));
 }

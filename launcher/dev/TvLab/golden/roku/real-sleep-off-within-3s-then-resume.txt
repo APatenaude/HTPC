@@ -4,6 +4,8 @@
 +   0.0s host GoingDown TurnOff done within 3 s
 +1800.0s -- resume
 +1800.0s roku GET /query/device-info -> 200
++1800.0s wol 02:00:00:00:00:01
++1800.0s wol 02:00:00:00:00:02
 +1800.0s roku POST /keypress/PowerOn -> 200
 +1801.0s roku GET /query/device-info -> 200
 +1802.0s roku GET /query/device-info -> 200

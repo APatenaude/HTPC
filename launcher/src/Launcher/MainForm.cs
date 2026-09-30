@@ -490,6 +490,7 @@ sealed partial class MainForm : Form
         volumeWatch.Dispose();
         textFields.Dispose();
         keyboard.Dispose();
+        tv.Dispose(); // Google TV's client key file in the user's profile goes with it
         tray?.Dispose(); // MainForm.Shell.cs: no icon left behind in the taskbar
         cursor.Restore();
         dimmer.Close();

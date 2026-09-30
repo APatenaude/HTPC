@@ -27,7 +27,7 @@ sealed record TvParts(
 /// - after the box's own on/off, the TV's state is not its remote's until it gets there (or the
 ///   driver's quiet time passes).
 /// </summary>
-sealed class TvService
+sealed class TvService : IDisposable
 {
     readonly TvParts parts;
     readonly Dictionary<string, TvProfile> profiles;
@@ -311,6 +311,13 @@ sealed class TvService
         pairCancel = null;
         codes = null;
         if (Pairing is { Stage: not ("done" or "failed") }) Pairing = Pairing with { Stage = "failed", Message = "Pairing cancelled." };
+    }
+
+    /// <summary>The launcher ends: a pairing in progress cancelled, the drivers' connections and keys let go (Google TV's client key file with them).</summary>
+    public void Dispose()
+    {
+        CancelPairing();
+        foreach (var d in parts.Drivers) (d as IDisposable)?.Dispose();
     }
 
     /// <summary>Whether this TV is paired (true for methods without pairing).</summary>

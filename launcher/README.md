@@ -506,7 +506,7 @@ simulated TVs by `dev/TvLab`.
 | `Host/MainForm.Tv.cs` | The launcher's side: the service built from its parts, the `tv.*` messages of setup's TV steps and Settings › TV (`ui/tv.*`). |
 
 `dev/TvLab` (not shipped) compiles those sources, without `Host\`, against simulated TVs on
-127.0.0.1 with a virtual clock, where minutes of TV behaviour replay in a moment:
+loopback addresses of its own with a virtual clock, where minutes of TV behaviour replay in a moment:
 `dotnet run --project launcher\dev\TvLab` runs every check that needs no network (the golden
 Roku traces, binding, doubts, `--no-tv`, notices, EDID fixtures, Wake-on-LAN packets, the
 credentials file, the LG, Google, Sony and Samsung fakes); `-- discover` searches the real

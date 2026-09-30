@@ -1,5 +1,7 @@
 +   0.0s roku GET /query/device-info -> 200
 +   0.0s roku GET /query/device-info -> 200
++   0.0s wol 02:00:00:00:00:01
++   0.0s wol 02:00:00:00:00:02
 +   0.0s roku POST /keypress/PowerOn -> 200
 +   1.0s roku GET /query/device-info -> 200
 +   2.0s roku GET /query/device-info -> 200

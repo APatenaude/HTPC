@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- TV control test bench (dev only, not shipped): the launcher's TV sources against fake TVs
-       on 127.0.0.1 with a virtual clock. See README.md next to this file. -->
+       on loopback addresses with a virtual clock. Its commands: Program.cs; launcher\README.md
+       ("TV control") tells how it fits. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <!-- The launcher's framework: DPAPI (ProtectedData) and file ACLs come with the desktop pack. -->
