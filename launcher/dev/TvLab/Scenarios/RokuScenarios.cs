@@ -1,28 +1,13 @@
 namespace Htpc.TvLab;
 
-/// <summary>MainForm's calls into the TV code, so the same scenario runs on the baseline and on the new code.</summary>
-interface IRokuHost
-{
-    Task Boot(TimeSpan uptime);
-    Task Sleep();
-    Task Wake();
-    Task SleepS3();
-    Task Resume();
-    Task Tick();
-    Task<bool> Test();
-    void Bind(FakeRoku fake, int input, string edidKey);
-    string? BoundId(string edidKey);
-    bool StandbyActive { get; }
-}
-
-/// <summary>One run: a fresh virtual clock, trace and fake TVs.</summary>
+/// <summary>One run: a fresh virtual clock, trace and fake TVs; the launcher in it (a NewHost) sets itself as Host.</summary>
 sealed class RokuWorld : IDisposable
 {
     public const string EdidKey = "TCL-0000-00000000-65S41CA";
     public VirtualClock Clock { get; } = new();
     public Trace Trace { get; }
     public List<FakeRoku> Fakes { get; } = new();
-    public IRokuHost Host { get; set; } = null!;
+    public NewHost Host { get; set; } = null!;
 
     public RokuWorld() => Trace = new Trace(Clock);
 
@@ -49,9 +34,10 @@ sealed class RokuWorld : IDisposable
 }
 
 /// <summary>
-/// The Roku behaviours the refactor must keep (recorded from the baseline as golden traces):
-/// on at boot, wake and resume with as few keys as possible, the second PowerOn, off within
-/// GoingDown's 3 s, Test, a new IP address, Limited mode, and following the TV's own remote.
+/// The Roku behaviours to keep, as golden traces (first recorded from the code before the driver
+/// refactor): on at boot, wake and resume with as few keys as possible (at most one input key per
+/// turn-on), the second PowerOn, off within GoingDown's 3 s, Test, a new IP address, Limited mode,
+/// and following the TV's own remote.
 /// </summary>
 static class RokuScenarios
 {
@@ -226,20 +212,17 @@ static class RokuScenarios
     /// <summary>
     /// A trace in comparable form: requests at the same virtual instant from different fakes
     /// arrive in any order (discovery asks them in parallel), so each same-time block is ordered
-    /// by source, keeping each source's own order. Wake-on-LAN lines are compared separately.
+    /// by source, keeping each source's own order. Notes, events, host lines and Wake-on-LAN
+    /// packets stay where they are.
     /// </summary>
     public static List<string> Normalize(IEnumerable<string> lines)
     {
         var result = new List<string>();
-        // Only runs of fake-TV lines are reordered; notes, events and host lines stay where they are.
         static bool FromFake(string l) => l[9..] is var s && !s.StartsWith("-- ") && !s.StartsWith("event ") && !s.StartsWith("host ") && !s.StartsWith("wol ");
-        foreach (var block in lines.Where(l => !l[9..].StartsWith("wol ")).GroupAdjacent(l => FromFake(l) ? l[..9] : l))
+        foreach (var block in lines.GroupAdjacent(l => FromFake(l) ? l[..9] : l))
             result.AddRange(block.Select((l, i) => (l, i)).OrderBy(x => x.l[9..].Split(' ')[0], StringComparer.Ordinal).ThenBy(x => x.i).Select(x => x.l));
         return result;
     }
-
-    /// <summary>The Wake-on-LAN packets of a trace (compared on their own).</summary>
-    public static List<string> WakePackets(IEnumerable<string> lines) => lines.Where(l => l[9..].StartsWith("wol ")).ToList();
 
     static IEnumerable<List<string>> GroupAdjacent(this IEnumerable<string> lines, Func<string, string> key)
     {

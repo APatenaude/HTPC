@@ -16,6 +16,8 @@
 +  60.0s roku GET /query/device-info -> 200
 +  60.0s -- wake
 +  60.0s roku GET /query/device-info -> 200
++  60.0s wol 02:00:00:00:00:01
++  60.0s wol 02:00:00:00:00:02
 +  60.0s roku POST /keypress/PowerOn -> 200
 +  61.0s roku GET /query/device-info -> 200
 +  62.0s roku GET /query/device-info -> 200

@@ -8,12 +8,16 @@
 +  25.0s roku GET /query/device-info -> 200
 +  30.0s roku GET /query/device-info -> 200
 +  30.0s roku GET /query/device-info -> 200
++  30.0s wol 02:00:00:00:00:01
++  30.0s wol 02:00:00:00:00:02
 +  30.0s roku POST /keypress/PowerOn -> 200
 +  31.0s roku GET /query/device-info -> 200
 +  32.0s roku GET /query/device-info -> 200
 +  33.0s roku GET /query/device-info -> 200
 +  34.0s roku GET /query/device-info -> 200
 +  35.0s roku GET /query/device-info -> 200
++  35.0s wol 02:00:00:00:00:01
++  35.0s wol 02:00:00:00:00:02
 +  35.0s roku POST /keypress/PowerOn -> 200
 +  36.0s roku GET /query/device-info -> 200
 +  37.0s roku GET /query/device-info -> 200

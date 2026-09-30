@@ -14,7 +14,7 @@ namespace Htpc.TvLab;
 /// needs that cookie. On its own loopback address; every call goes to the trace, marked with the
 /// cookie it carried (never the cookie itself).
 /// </summary>
-sealed class FakeSony : IDisposable
+sealed class FakeSony : IBrandFake
 {
     readonly Trace trace;
     readonly FakeHttp http;
@@ -36,7 +36,14 @@ sealed class FakeSony : IDisposable
     public bool RenewSilently { get; set; }
     /// <summary>Its actRegister answers 307 to this host.</summary>
     public Uri? RedirectRegisterTo { get; set; }
-    public int Registers;
+    public int Registers, PinsShown;
+
+    public int Opened => Registers + Authenticated;
+    public bool Busy => false;
+    public string Got => IBrandFake.Describe(("register", Registers), ("request with a cookie", Authenticated), ("PIN shown", PinsShown));
+    public string? Code => Pin;
+    public IEnumerable<string> Macs => new[] { Mac };
+    public void Join(FakeNet net) { net.Responders.Add(Ssdp); net.WakeTargets.Add(WakePacket); }
 
     public FakeSony(string label, IPAddress ip, int port, string udn, Trace trace)
     {
@@ -84,6 +91,7 @@ sealed class FakeSony : IDisposable
                     return new FakeResponse(401, "{\"error\":[401,\"Unauthorized\"]}");
                 }
                 Pin = RandomNumberGenerator.GetInt32(0, 10000).ToString("D4");
+                Interlocked.Increment(ref PinsShown);
                 trace.Add($"{Label} shows a PIN");
                 return new FakeResponse(401, "{\"error\":[401,\"Unauthorized\"]}");
         }
@@ -111,12 +119,12 @@ sealed class FakeSony : IDisposable
 /// and the remote channel over TLS WebSocket (:8002) giving a token once "Allow" is chosen;
 /// KEY_POWER toggles. Every channel opened and every key goes to the trace (never the token).
 /// </summary>
-sealed class FakeSamsung : IDisposable
+sealed class FakeSamsung : IBrandFake
 {
     readonly Trace trace;
     readonly FakeHttp rest;
     readonly System.Net.Sockets.TcpListener ws;
-    readonly X509Certificate2Holder cert = new();
+    readonly LabCertificate cert = new();
     public string Label { get; }
     public IPAddress Ip { get; }
     public string Id { get; set; }
@@ -132,6 +140,14 @@ sealed class FakeSamsung : IDisposable
     /// <summary>Its remote channel now has another TLS key (another TV behind the same REST answer).</summary>
     public void ReplaceChannelKey() => cert.Replace();
 
+    int open;
+    public int Opened => Channels;
+    public bool Busy => open > 0;
+    public string Got => IBrandFake.Describe(("channel", Channels), ("prompt", Prompts), ("key", Keys));
+    public string? Code => null;
+    public IEnumerable<string> Macs => new[] { Mac };
+    public void Join(FakeNet net) { net.Responders.Add(Ssdp); net.WakeTargets.Add(WakePacket); }
+
     public FakeSamsung(string label, IPAddress ip, int restPort, int wsPort, string id, Trace trace)
     {
         Label = label; Ip = ip; Id = id; this.trace = trace;
@@ -142,7 +158,11 @@ sealed class FakeSamsung : IDisposable
                 ? new JsonObject { ["id"] = $"uuid:{Id}", ["name"] = Name, ["modelName"] = "QN65Q80C", ["type"] = "Samsung SmartTV", ["wifiMac"] = Mac, ["PowerState"] = On ? "on" : "standby" }
                 : new JsonObject { ["id"] = $"uuid:{Id}", ["name"] = Name, ["modelName"] = "UN55TU7000", ["type"] = "Samsung SmartTV", ["wifiMac"] = Mac },
         }.ToJsonString(), "application/json"), ip, restPort);
-        ws = LabTls.Listen(ip, wsPort, () => cert.Get(), false, () => !Reachable, Serve, n => { if (n == "connection") Interlocked.Increment(ref Channels); });
+        ws = LabTls.Listen(ip, wsPort, () => cert.Get(), false, () => !Reachable, Serve, n =>
+        {
+            if (n == "connection") { Interlocked.Increment(ref Channels); Interlocked.Increment(ref open); }
+            else if (n == "closed") Interlocked.Decrement(ref open);
+        });
     }
 
     public IEnumerable<SsdpReply> Ssdp(string st) => st == TizenDriver.SearchTarget && Reachable
@@ -189,5 +209,6 @@ sealed class FakeSamsung : IDisposable
     {
         rest.Dispose();
         ws.Stop();
+        cert.Dispose();
     }
 }

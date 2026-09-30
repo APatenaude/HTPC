@@ -1,55 +1,61 @@
 using Htpc.TvLab;
 
-// TvLab: the launcher's TV control against fake TVs on 127.0.0.1 with a virtual clock.
-//   TvLab all                      every check that needs no network (the default)
-//   TvLab roku                     the current code against the golden Roku traces
-//   TvLab roku --record-baseline   golden Roku traces from the pre-refactor code (Baseline\)
-//   TvLab checks                   new behaviour: Wake-on-LAN, binding, doubts, --no-tv, notices, invariants
-//   TvLab unit                     EDID fixtures, adapter filter, Wake-on-LAN packets, credentials file
-//   TvLab edid --write-fixtures    (re)writes the EDID fixtures
-//   TvLab discover                 read-only search of this network with every method (SSDP, mDNS, plain reads)
-//   -v                             log lines as they happen
+// TvLab: the launcher's TV drivers against fake TVs on this run's loopback addresses, with a virtual clock.
+//   TvLab [all]                   every section below (what Test-All and CI run)
+//   TvLab roku                    the Roku scenarios against the golden traces (golden\roku)
+//   TvLab roku --update-golden    rewrites those traces from the current code: review them with git diff
+//   TvLab checks                  Wake-on-LAN, binding, doubts, --no-tv, notices
+//   TvLab unit                    EDID fixtures, adapter filter, Wake-on-LAN packets, credentials file, setup's take-in
+//   TvLab brands                  LG, Google TV, Sony, Samsung (phaseb: the same)
+//   TvLab edid --write-fixtures   rewrites the EDID fixtures
+//   TvLab discover                read-only search of this network with every method (SSDP, mDNS, plain reads)
+//   -v                            the log lines and details as they happen
+// Output: one "== group (time)" line per group with its failures under it, then "N passed, M failed".
 
-Htpc.Launcher.Log.Verbose = args.Contains("-v");
+Check.Verbose = Htpc.Launcher.Log.Verbose = args.Contains("-v");
 // No proxy for anything here: the first request of a process otherwise waits on Windows' proxy
-// auto-detection (WPAD), which can outlast a TV's 4 s timeout. (The drivers set UseProxy = false
-// themselves; this also covers the baseline's plain HttpClient.)
+// auto-detection (WPAD), which can outlast a TV's 4 s timeout.
 HttpClient.DefaultProxy = new System.Net.WebProxy();
 var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "all";
 
-// The first HTTP request of a cold process (JIT, handler set-up) can take seconds on a busy box,
-// longer than a TV's 4 s timeout: one throwaway request first, so scenario timings are the TV's.
-using (var warm = new FakeHttp(_ => new FakeResponse(200)))
+try
 {
-    using var client = Htpc.Launcher.TvHttp.Create(TimeSpan.FromSeconds(30));
-    await client.GetStringAsync(warm.BaseUrl);
-    using var plain = new HttpClient();
-    await plain.GetStringAsync(warm.BaseUrl);
+    // The first HTTP request of a cold process (JIT, handler set-up) can take seconds on a busy box,
+    // longer than a TV's 4 s timeout: one throwaway request first, so scenario timings are the TV's.
+    using (var warm = new FakeHttp(_ => new FakeResponse(200)))
+    using (var client = Htpc.Launcher.TvHttp.Create(TimeSpan.FromSeconds(30)))
+        await client.GetStringAsync(warm.BaseUrl);
+
+    switch (command)
+    {
+        case "roku" when args.Contains("--update-golden"): await RokuLab.UpdateGolden(); break;
+        case "roku": await Check.Group("Roku: golden traces", RokuLab.Compare); break;
+        case "checks": await TvChecks.RunAll(); break;
+        case "unit": await UnitChecks.RunAll(); break;
+        case "brands" or "phaseb": await BrandChecks.RunAll(); break;
+        case "edid" when args.Contains("--write-fixtures"): UnitChecks.WriteEdidFixtures(); break;
+        case "discover": await Discover.Run(); break;
+        case "all":
+            await Check.Group("Roku: golden traces", RokuLab.Compare);
+            await TvChecks.RunAll();
+            await UnitChecks.RunAll();
+            await BrandChecks.RunAll();
+            break;
+        default:
+            Console.WriteLine($"Unknown command {command}");
+            return 2;
+    }
+}
+finally
+{
+    // Certificates the drivers made and never dispose (Google TV's client key, as the launcher
+    // keeps it) delete their key files in the user's profile when finalized: a process exit runs
+    // no finalizer, so they run here.
+    LabCertificate.DisposeShared();
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    LabRun.CleanUp();
 }
 
-switch (command)
-{
-    case "roku" when args.Contains("--record-baseline"): await RokuLab.RecordBaseline(); break;
-    case "roku": await RokuLab.CompareWithBaseline(); break;
-    case "checks": await TvChecks.RunAll(); break;
-    case "unit": UnitChecks.RunAll(); break;
-    case "phaseb": await PhaseBChecks.RunAll(); await SonySamsungChecks.RunAll(); break;
-    case "edid" when args.Contains("--write-fixtures"): UnitChecks.WriteEdidFixtures(); break;
-    case "discover": await Discover.Run(); break;
-    case "all":
-        await RokuLab.CompareWithBaseline();
-        await TvChecks.RunAll();
-        UnitChecks.RunAll();
-        await PhaseBChecks.RunAll();
-        await SonySamsungChecks.RunAll();
-        break;
-    default:
-        Console.WriteLine($"Unknown command {command}");
-        return 2;
-}
-
-Console.WriteLine();
-Console.ForegroundColor = Check.Failures == 0 ? ConsoleColor.Green : ConsoleColor.Red;
 Console.WriteLine($"{Check.Passes} passed, {Check.Failures} failed");
-Console.ResetColor();
 return Check.Failures == 0 ? 0 : 1;

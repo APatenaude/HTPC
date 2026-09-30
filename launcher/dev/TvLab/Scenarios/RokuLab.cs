@@ -1,65 +1,44 @@
 namespace Htpc.TvLab;
 
-/// <summary>Records the baseline's Roku traces, and compares the current code's traces with them.</summary>
+/// <summary>The Roku scenarios against their golden traces, or (--update-golden) the traces rewritten from the current code.</summary>
 static class RokuLab
 {
-    public static async Task RecordBaseline()
+    public static async Task Compare()
     {
-        Console.WriteLine("Recording golden Roku traces from the baseline (commit 0e5db69's Tv.cs)");
         foreach (var (name, run) in RokuScenarios.All)
         {
-            var lines = await RunOne(run, w => new Baseline.BaselineHost(w.Clock, w.Trace, w.Fakes, RokuWorld.EdidKey, "TCL", "65S41CA"));
+            var path = LabPaths.Golden("roku", name);
+            if (!File.Exists(path)) { Check.That(false, $"{name}: no golden trace (TvLab roku --update-golden)"); continue; }
+            var expected = File.ReadAllText(path).Replace("\r\n", "\n").TrimEnd('\n').Split('\n').ToList(); // a checkout may have made them CRLF
+            var actual = await RunOne(run);
+            Check.That(expected.SequenceEqual(actual), $"{name}: trace differs from golden\\roku\\{name}.txt{Diff(expected, actual)}");
+        }
+    }
+
+    /// <summary>Writes the current code's traces as the golden ones: review the change with git diff before committing it.</summary>
+    public static async Task UpdateGolden()
+    {
+        foreach (var (name, run) in RokuScenarios.All)
+        {
             var path = LabPaths.Golden("roku", name);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, string.Join("\n", RokuScenarios.Normalize(lines)) + "\n");
-            Console.WriteLine($"  {name}: {lines.Count} lines");
+            File.WriteAllText(path, string.Join("\n", await RunOne(run)) + "\n");
         }
+        Console.WriteLine($"  {RokuScenarios.All.Length} traces written to {Path.GetDirectoryName(LabPaths.Golden("roku", "x"))}: review them with git diff");
     }
 
-    public static async Task CompareWithBaseline()
-    {
-        Console.WriteLine("Roku: the current code against the baseline's golden traces");
-        foreach (var (name, run) in RokuScenarios.All)
-        {
-            var path = LabPaths.Golden("roku", name);
-            if (!File.Exists(path)) { Check.That(false, $"{name}: no golden trace (run: TvLab roku --record-baseline)"); continue; }
-            var expected = File.ReadAllText(path).Replace("\r\n", "\n").TrimEnd('\n').Split('\n').ToList(); // a checkout may have made them CRLF
-            var lines = await RunOne(run, NewHostFactory);
-            var actual = RokuScenarios.Normalize(lines);
-            var same = expected.SequenceEqual(actual);
-            Check.That(same, $"{name}: trace differs from the baseline");
-            Console.WriteLine($"  {(same ? "same" : "DIFFERENT")}  {name}");
-            if (!same) Diff(expected, actual);
-        }
-    }
-
-    /// <summary>The refactored code's host.</summary>
-    public static Func<RokuWorld, IRokuHost> NewHostFactory = w => new NewHost(w);
-
-    static async Task<List<string>> RunOne(Func<RokuWorld, Task> run, Func<RokuWorld, IRokuHost> host)
+    static async Task<List<string>> RunOne(Func<RokuWorld, Task> run)
     {
         using var world = new RokuWorld();
-        world.Host = host(world);
-        try { await run(world); }
-        finally { (world.Host as IDisposable)?.Dispose(); }
-        var wol = RokuScenarios.WakePackets(world.Trace.Lines);
-        if (wol.Count > 0) Console.WriteLine($"      ({wol.Count} Wake-on-LAN packets, first {wol[0].Trim()})");
-        return world.Trace.Lines;
+        using var host = new NewHost(world);
+        await run(world);
+        return RokuScenarios.Normalize(world.Trace.Lines);
     }
 
-    static void Diff(List<string> expected, List<string> actual)
-    {
-        var n = Math.Max(expected.Count, actual.Count);
-        for (var i = 0; i < n; i++)
-        {
-            var e = i < expected.Count ? expected[i] : "(nothing)";
-            var a = i < actual.Count ? actual[i] : "(nothing)";
-            if (e == a) continue;
-            Console.WriteLine($"      line {i + 1}:\n        expected {e}\n        actual   {a}");
-            if (--budget == 0) break;
-        }
-        budget = 6;
-    }
-
-    static int budget = 6;
+    /// <summary>The first lines that differ (six at most).</summary>
+    static string Diff(List<string> expected, List<string> actual) =>
+        string.Concat(Enumerable.Range(0, Math.Max(expected.Count, actual.Count))
+            .Select(i => (i, e: i < expected.Count ? expected[i] : "(nothing)", a: i < actual.Count ? actual[i] : "(nothing)"))
+            .Where(x => x.e != x.a).Take(6)
+            .Select(x => $"\n      line {x.i + 1}:\n        expected {x.e}\n        actual   {x.a}"));
 }

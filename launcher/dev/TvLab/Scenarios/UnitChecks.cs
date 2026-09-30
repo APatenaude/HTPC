@@ -10,18 +10,13 @@ namespace Htpc.TvLab;
 /// <summary>EDID parsing, the LAN adapter filter, the credentials file, Wake-on-LAN packets.</summary>
 static class UnitChecks
 {
-    public static void RunAll()
+    public static async Task RunAll()
     {
-        Console.WriteLine("EDID");
-        Edids();
-        Console.WriteLine("LAN adapters");
-        Adapters();
-        Console.WriteLine("Wake-on-LAN packets");
-        WakePackets();
-        Console.WriteLine("Credentials file");
-        Credentials();
-        Console.WriteLine("Setup's TV files, taken in by the launcher");
-        SetupTakeIn();
+        await Check.Group("EDID", Edids);
+        await Check.Group("LAN adapters", Adapters);
+        await Check.Group("Wake-on-LAN packets", WakePackets);
+        await Check.Group("Credentials file", Credentials);
+        await Check.Group("Setup's TV files, taken in by the launcher", SetupTakeIn);
     }
 
     // --- EDID -------------------------------------------------------------------------------------
@@ -58,8 +53,6 @@ static class UnitChecks
             Check.Equal(1, e.Port, "the box's TV: HDMI 1");
             Check.Equal("TCL", e.Brand, "the box's TV: brand");
         }
-        // The screen Windows reports right now (read-only), for the record.
-        if (Edid.Current() is { } now) Console.WriteLine($"  this box's screen now: {now.Key}, input {now.Port}");
     }
 
     public static void WriteEdidFixtures()
@@ -175,8 +168,6 @@ static class UnitChecks
             Check.That(TvNet.Pick(all).SequenceEqual(expected), $"adapters: {what}");
         Check.Equal("192.168.50.255", TvNet.SubnetBroadcast(ip, mask)?.ToString(), "subnet broadcast /24");
         Check.Equal("10.1.255.255", TvNet.SubnetBroadcast(IPAddress.Parse("10.1.2.3"), IPAddress.Parse("255.255.0.0"))?.ToString(), "subnet broadcast /16");
-        // Read-only, on this box: which adapters it would search on.
-        Console.WriteLine($"  this box: {string.Join(", ", TvNet.Adapters().Select(a => $"{a.Name} ({a.Type})"))}; wired {TvNet.Wired()}");
     }
 
     static void WakePackets()
@@ -194,7 +185,7 @@ static class UnitChecks
 
     static void Credentials()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "tvlab-cred-" + Guid.NewGuid().ToString("N")[..8]);
+        var dir = LabRun.Dir("cred");
         try
         {
             var files = new TvFiles(dir);
@@ -232,7 +223,7 @@ static class UnitChecks
     /// </summary>
     static void SetupTakeIn()
     {
-        var root = Path.Combine(Path.GetTempPath(), "tvlab-takein-" + Guid.NewGuid().ToString("N")[..8]);
+        var root = LabRun.Dir("takein");
         try
         {
             var setup = new TvFiles(Path.Combine(root, "setup", "tv"));

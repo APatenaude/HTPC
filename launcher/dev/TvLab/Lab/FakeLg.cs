@@ -15,10 +15,10 @@ namespace Htpc.TvLab;
 /// subscriptions, getinfo MACs, turnOff (then it drops the connection and stops answering until a
 /// magic packet), switchInput. On its own loopback address; everything it gets goes to the trace.
 /// </summary>
-sealed class FakeLg : IDisposable
+sealed class FakeLg : IBrandFake
 {
     readonly Trace trace;
-    readonly X509Certificate2Holder cert = new();
+    readonly LabCertificate cert = new();
     readonly System.Net.Sockets.TcpListener tls;
     readonly FakeHttp description;
     readonly List<(WebSocket Socket, string Id, string Kind)> subscriptions = new();
@@ -32,10 +32,19 @@ sealed class FakeLg : IDisposable
     public int Input { get; set; } = 1;
     public string? Key { get; set; }
     public bool AcceptPrompt { get; set; } = true;
-    public int Prompts;
+    public int Prompts, Registers, Commands;
     public int Connections;
     public string WiredMac { get; set; } = "02:00:00:00:1a:01";
     public string WifiMac { get; set; } = "02:00:00:00:1a:02";
+
+    int open;
+    bool tlsDown;
+    public int Opened => Connections;
+    public bool Busy => open > 0;
+    public string Got => IBrandFake.Describe(("register", Registers), ("prompt", Prompts), ("command", Commands));
+    public string? Code => null;
+    public IEnumerable<string> Macs => new[] { WiredMac, WifiMac };
+    public void Join(FakeNet net) { net.Responders.Add(Ssdp); net.WakeTargets.Add(WakePacket); }
 
     /// <summary>Connections to its plain ws port (a key must never come in clear there).</summary>
     public int PlainConnections;
@@ -57,8 +66,8 @@ sealed class FakeLg : IDisposable
         });
     }
 
-    /// <summary>Its TLS port stops listening (connections refused), while it still answers searches.</summary>
-    public void StopTls() => tls.Stop();
+    /// <summary>Its TLS port drops every connection from now on (counted, then reset), while it still answers searches.</summary>
+    public void StopTls() => tlsDown = true;
 
     /// <summary>Another TLS key from now on (someone else answering as this TV).</summary>
     public void ReplaceKey() => cert.Replace();
@@ -69,7 +78,13 @@ sealed class FakeLg : IDisposable
         description = new FakeHttp(_ => new FakeResponse(200,
             $"<?xml version=\"1.0\"?><root xmlns=\"urn:schemas-upnp-org:device-1-0\"><device><friendlyName>{Name}</friendlyName>" +
             $"<manufacturer>LG Electronics</manufacturer><modelName>{Model}</modelName><UDN>uuid:{Udn}</UDN></device></root>"), ip);
-        tls = LabTls.Listen(ip, port, () => cert.Get(), false, () => !On, Serve, n => { if (n == "connection") Interlocked.Increment(ref Connections); });
+        tls = LabTls.Listen(ip, port, () => cert.Get(), false, () => !On || tlsDown, Serve, Note);
+    }
+
+    void Note(string n)
+    {
+        if (n == "connection") { Interlocked.Increment(ref Connections); Interlocked.Increment(ref open); }
+        else if (n == "closed") Interlocked.Decrement(ref open);
     }
 
     /// <summary>Its SSDP answer (the LOCATION on its own address, as a real one's).</summary>
@@ -118,6 +133,7 @@ sealed class FakeLg : IDisposable
         if (type == "register")
         {
             var offered = m["payload"]?["client-key"]?.GetValue<string>();
+            Interlocked.Increment(ref Registers);
             trace.Add($"{Label} register {(offered is null ? "without a key" : offered == Key ? "with its key" : "with another key")}");
             if (offered is not null && offered == Key) { await Send(socket, new JsonObject { ["type"] = "registered", ["id"] = id, ["payload"] = new JsonObject { ["client-key"] = Key } }); return; }
             Interlocked.Increment(ref Prompts);
@@ -132,6 +148,7 @@ sealed class FakeLg : IDisposable
             else await Send(socket, new JsonObject { ["type"] = "error", ["id"] = id, ["error"] = "403 User denied access" });
             return;
         }
+        Interlocked.Increment(ref Commands);
         trace.Add($"{Label} {type} {uri}");
         JsonObject payload = new() { ["returnValue"] = true };
         switch (uri)
@@ -198,13 +215,6 @@ sealed class FakeLg : IDisposable
         tls.Stop();
         plain?.Stop();
         description.Dispose();
+        cert.Dispose();
     }
-}
-
-/// <summary>One certificate per fake, made when first needed.</summary>
-sealed class X509Certificate2Holder
-{
-    System.Security.Cryptography.X509Certificates.X509Certificate2? cert;
-    public System.Security.Cryptography.X509Certificates.X509Certificate2 Get() => cert ??= LabTls.Certificate("fake-tv");
-    public void Replace() => cert = LabTls.Certificate("another-tv");
 }

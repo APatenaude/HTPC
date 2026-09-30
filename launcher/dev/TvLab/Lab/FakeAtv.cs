@@ -13,10 +13,10 @@ namespace Htpc.TvLab;
 /// keys), both over TLS requiring the client's certificate; only a paired client gets the remote.
 /// Its mDNS answers carry its Bluetooth MAC and, for the cast service, its model.
 /// </summary>
-sealed class FakeAtv : IDisposable
+sealed class FakeAtv : IBrandFake
 {
     readonly Trace trace;
-    readonly X509Certificate2Holder cert = new();
+    readonly LabCertificate cert = new(rsa: true); // the pairing secret hashes its RSA modulus
     readonly System.Net.Sockets.TcpListener pairing, remote;
     readonly HashSet<string> pairedClients = new();
     SslStream? live;
@@ -30,8 +30,13 @@ sealed class FakeAtv : IDisposable
     public bool Reachable { get; set; } = true;
     /// <summary>The code on its screen during pairing.</summary>
     public string? Code { get; private set; }
-    public int Connections;
+    public int Connections, PairingRequests, CodesShown;
     public readonly List<int> Keys = new();
+
+    public int Opened => Connections;
+    public string Got { get { lock (Keys) return IBrandFake.Describe(("pairing request", PairingRequests), ("code shown", CodesShown), ("key", Keys.Count)); } }
+    public IEnumerable<string> Macs => Array.Empty<string>(); // it takes no Wake-on-LAN
+    public void Join(FakeNet net) => net.MdnsResponders.Add(Mdns);
 
     public FakeAtv(string label, IPAddress ip, Trace trace)
     {
@@ -40,7 +45,14 @@ sealed class FakeAtv : IDisposable
         remote = LabTls.Listen(ip, 6466, () => cert.Get(), true, () => !Reachable, ServeRemote, Note);
     }
 
-    void Note(string n) { if (n == "connection") Interlocked.Increment(ref Connections); }
+    int open;
+    public bool Busy => open > 0;
+
+    void Note(string n)
+    {
+        if (n == "connection") { Interlocked.Increment(ref Connections); Interlocked.Increment(ref open); }
+        else if (n == "closed") Interlocked.Decrement(ref open);
+    }
 
     /// <summary>Another TV took this address: a different certificate from now on.</summary>
     public void BecomeAnotherTv() => cert.Replace();
@@ -62,11 +74,12 @@ sealed class FakeAtv : IDisposable
         {
             var m = await ProtoMessage.ReadFramed(ssl, CancellationToken.None);
             if (m is null) return;
-            if (m.Has(10)) { trace.Add($"{Label} pairing request"); await ssl.WriteAsync(Outer(11, new ProtoWriter().String(1, "fake"))); }
+            if (m.Has(10)) { Interlocked.Increment(ref PairingRequests); trace.Add($"{Label} pairing request"); await ssl.WriteAsync(Outer(11, new ProtoWriter().String(1, "fake"))); }
             else if (m.Has(20)) await ssl.WriteAsync(Outer(20, new ProtoWriter().Message(1, new ProtoWriter().Varint(1, 3).Varint(2, 6)).Varint(3, 1)));
             else if (m.Has(30))
             {
                 Code = Convert.ToHexString(new[] { Hash(client, nonce)[0] }) + Convert.ToHexString(nonce);
+                Interlocked.Increment(ref CodesShown);
                 trace.Add($"{Label} shows a pairing code");
                 await ssl.WriteAsync(Outer(31, new ProtoWriter()));
             }
@@ -128,5 +141,6 @@ sealed class FakeAtv : IDisposable
         pairing.Stop();
         remote.Stop();
         live?.Dispose();
+        cert.Dispose();
     }
 }
