@@ -844,8 +844,8 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   `HtpcLauncher.Standby`) that only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`,
   with `-NoTv` while nobody watches the TV); a release, and the setup exe, ignore them.
 - Also in `dev/`: `Build-Icon.ps1` (the launcher's icon from `art/`), `input-test.html` (a page showing
-  the keys and clicks it gets, for Test-Presets), `library-uitest.html` (the library screens' checks),
-  `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`, `Run-NetProbe.ps1`, `TvLab` (above).
+  the keys and clicks it gets, for Test-Presets), `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`,
+  `Run-NetProbe.ps1`, `TvLab` (above).
 - Screenshots (Save-Screenshots, Test-Ui `-Shots`, Save-Screen) also write a half-size `-small.png`
   (`-Scale`, `Save-ScaledImage.ps1`) for a quick look; judge details on the full-size one.
 

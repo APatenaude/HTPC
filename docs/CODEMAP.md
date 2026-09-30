@@ -93,7 +93,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 ## Library, Add a tile, tile options
 
 - Files: `ui/library.js` (one IIFE), `src/MainForm.Library.cs`, `src/LibraryService.cs`, `src/TileStore.cs`,
-  `src/StartMenuScanner.cs`; dev page `launcher/dev/library-uitest.html`.
+  `src/StartMenuScanner.cs`.
 - Names: views `tileopts`, `rename`, `changeicon`, `addtile`; `openAddTile`, `setTab`, `libraryTabHtml`,
   `onboxTabHtml`, `websiteTabHtml`, `saveWebsite`, `startMove`/`moveTile`/`dropTile`, `installApp`,
   `hostMessage('library.')`; `OnLibraryMessage` (library.*, tile.*), `PostLibraryReady`, `PushLibraryCatalog`,
