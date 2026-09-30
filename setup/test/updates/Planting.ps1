@@ -56,8 +56,7 @@ Invoke-Cases @(
             { param($c)
                 $root = $c.Root; $r = $c.R
                 Note $c ($r -like 'refused*' -and @(Get-ChildItem $c.Elsewhere).Count -eq 0 -and (Get-ExeVersion $root) -eq '0.1.0') "a junction for state\staging: refused, nothing written through it ($r)"
-                cmd /c rmdir "$root\PD\HTPC\state\staging" | Out-Null
-                Remove-FakeBox $root })),
+                cmd /c rmdir "$root\PD\HTPC\state\staging" | Out-Null })),
     (New-Case 'plant-owner' @(
             { param($c)
                 $planted = Join-Path $c.Root 'PF\HTPC\Launcher\HtpcLauncher.new.exe'
@@ -65,8 +64,7 @@ Invoke-Cases @(
                 & icacls $planted /setowner "*$me" | Out-Null
                 $c.Job = Start-FakeJob $c.Root $update },
             { param($c)
-                Note $c ($c.R -like 'refused*owned*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "a .new file owned by someone else: refused ($($c.R))"
-                Remove-FakeBox $c.Root })),
+                Note $c ($c.R -like 'refused*owned*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "a .new file owned by someone else: refused ($($c.R))" })),
     (New-Case 'plant-ace' @(
             { param($c)
                 $stateDir = Join-Path $c.Root 'PD\HTPC\state'
@@ -74,8 +72,7 @@ Invoke-Cases @(
                 & icacls $stateDir /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
                 $c.Job = Start-FakeJob $c.Root $update },
             { param($c)
-                Note $c ($c.R -like 'refused*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "state\ that Users can change: refused ($($c.R))"
-                Remove-FakeBox $c.Root })))
+                Note $c ($c.R -like 'refused*' -and (Get-ExeVersion $c.Root) -eq '0.1.0') "state\ that Users can change: refused ($($c.R))" })))
 
 # ProgramData\HTPC made at standard rights (TV Box Setup's log before it asked for the
 # rights), so the user's, with state\, setup\ and a journal of theirs in it: the lock

@@ -3,21 +3,34 @@
 
 # --- Cases side by side ----------------------------------------------------------------------------
 
-# A case: a fake box of its own (its launcher $With.Box, healthy by default), then steps run one
-# after the other, each given the case $c ($c.Root its box; what a step keeps there, the next
-# reads). A step may start one program into $c.Job: the next runs once it ended, its result in
-# $c.R; or wait for a condition (Wait-Case) without holding up the other cases. Its checks (Note)
-# print once it is done, in the cases' order. Steps read the case only through $c (never a
-# variable of the loop that made them: they run later).
+# A case: a fake box of its own (its launcher $With.Box, healthy by default; its watchdog started
+# as $With.WatchdogFile), then steps run one after the other, each given the case $c ($c.Root its
+# box; what a step keeps there, the next reads), then the box goes. A step may start one program
+# into $c.Job: the next runs once it ended, its result in $c.R; or wait for a condition
+# (Wait-Case) without holding up the other cases. Its checks (Note) print once it is done, in the
+# cases' order. Steps read the case only through $c (never a variable of the loop that made them:
+# they run later).
 function New-Case([string]$Name, [scriptblock[]]$Steps, [hashtable]$With = @{}) {
-    $case = @{ Name = $Name; Next = 0; Job = $null; R = $null; Root = $null; Notes = (New-Object Collections.ArrayList); Done = $false; Heavy = $false; Box = 'healthy'; Until = $null }
+    $case = @{ Name = $Name; Next = 0; Job = $null; R = $null; Root = $null; Notes = (New-Object Collections.ArrayList); Done = $false; Heavy = $false; Box = 'healthy'; WatchdogFile = 'HtpcWatchdog.exe'; Until = $null; Held = $false }
     foreach ($k in $With.Keys) { $case[$k] = $With[$k] }
-    $box = { param($c) $c.Root = New-FakeBox $c.Name $c.Box -NoWait; Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 20 }
-    $case.Steps = @($box) + $Steps
+    $box = { param($c) $c.Root = New-FakeBox $c.Name $c.Box -WatchdogFile $c.WatchdogFile -NoWait; Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 20 }
+    # Its watchdog told to stop and everything from the box ended (waited for as the other steps
+    # are), then its folder removed.
+    $down = @(
+        { param($c) Wait-Case $c { param($c) Stop-FakeBox $c.Root } 15 },
+        { param($c) if (-not $Keep) { Remove-Item -LiteralPath $c.Root -Recurse -Force -ErrorAction SilentlyContinue } })
+    $case.Steps = @($box) + $Steps + $down
     $case
 }
 function Note($Case, [bool]$Ok, [string]$What) { [void]$Case.Notes.Add(@{ Ok = $Ok; What = $What }) }
-# The case's next step waits until the condition (given the case) holds, at most $Seconds.
+# One check of several parts (an ordered table: what each part says -> whether it holds): its line
+# names the parts that failed.
+function Note-Parts($Case, [string]$What, $Parts) {
+    $failed = @($Parts.Keys | Where-Object { -not $Parts[$_] })
+    Note $Case ($failed.Count -eq 0) $(if ($failed) { "$What -- failed: $($failed -join '; ')" } else { $What })
+}
+# The case's next step waits until the condition (given the case) holds, at most $Seconds; it
+# finds in $c.Held whether it did.
 function Wait-Case($Case, [scriptblock]$Condition, [int]$Seconds) { $Case.Until = $Condition; $Case.UntilDeadline = (Get-Date).AddSeconds($Seconds) }
 
 # A case cut short (a step threw, or the test is stopping): its job ended, its box removed.
@@ -48,6 +61,7 @@ function Invoke-Cases([object[]]$Cases) {
                     $poolReady = try { [bool](& $poolCase.Until $poolCase) } catch { $false }
                     if (-not $poolReady -and (Get-Date) -lt $poolCase.UntilDeadline) { continue }
                     $poolCase.Until = $null
+                    $poolCase.Held = $poolReady
                 }
                 if ($poolCase.Job) {
                     if (-not $poolCase.Job.Process.HasExited) {

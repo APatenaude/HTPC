@@ -18,17 +18,18 @@ $cases = @(foreach ($step in $steps) {
                 Note $c ($pick.Whole -and $pick.LibFrom -eq '0.1.0' -and $pick.JobsFrom -eq '0.1.0') "after '$($c.Step)': the task's bootstrap finds the whole runner that began the update (lib $($pick.LibFrom), jobs $($pick.JobsFrom))"
                 $c.Job = Start-FakeJob $c.Root $reconcile -Lib $pick.Lib },
             { param($c)
-                $root = $c.Root; $r = $c.R
+                $root = $c.Root
+                $c.V = Get-ExeVersion $root
+                Wait-Case $c { param($c) Get-Running $c.Root $c.V } 25 },
+            { param($c)
+                $root = $c.Root; $r = $c.R; $v = $c.V
                 $j = Get-Journal $root
-                $v = Get-ExeVersion $root
                 $consistent = ($v -eq '0.1.0' -and $j.step -in 'aborted', 'rolledback') -or ($v -eq '0.2.0' -and $j.step -eq 'done')
                 $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
                 $sameSetup = ($v -eq '0.1.0' -and $kept -eq '0.1.0') -or ($v -eq '0.2.0' -and $kept -eq '0.2.0')
-                $runs = Wait-For { Get-Running $root $v } 25
                 $next = Resolve-FakeRunner $root
-                Note $c ($consistent -and $sameSetup -and $runs -and (Get-Leftovers $root).Count -eq 0) "after '$($c.Step)': $v on disk and running, journal $($j.step), setup $kept ($r)"
-                Note $c ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"
-                Remove-FakeBox $root }
+                Note $c ($consistent -and $sameSetup -and $c.Held -and (Get-Leftovers $root).Count -eq 0) "after '$($c.Step)': $v on disk and running, journal $($j.step), setup $kept ($r)"
+                Note $c ($next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v) "  and the task's next runner is $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))" }
         ) @{ Step = $step }
     })
 
@@ -40,14 +41,13 @@ $finish = @(
         $c.Cut = (Get-Journal $c.Root).step
         $c.Pick = Resolve-FakeRunner $c.Root
         $c.Job = Start-FakeJob $c.Root $reconcile -Lib $c.Pick.Lib },
+    { param($c) Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 25 },
     { param($c)
         $root = $c.Root; $r = $c.R
         $j = Get-Journal $root
         $v = Get-ExeVersion $root
         $kept = Get-DirVersion (Join-Path $root 'PD\HTPC\setup')
-        $runs = Wait-For { Get-Running $root '0.1.0' } 25
-        Note $c ($c.Cut -eq 'rollingback' -and $c.Pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $runs -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($c.Release)) cut after '$($c.Step)' ($($c.Cut)): finished, 0.1.0 on disk and running, setup $kept ($r; $($j.message))"
-        Remove-FakeBox $root })
+        Note $c ($c.Cut -eq 'rollingback' -and $c.Pick.Whole -and $j.step -eq 'rolledback' -and $v -eq '0.1.0' -and $kept -eq '0.1.0' -and $c.Held -and (Get-Leftovers $root).Count -eq 0) "a rollback ($($c.Release)) cut after '$($c.Step)' ($($c.Cut)): finished, 0.1.0 on disk and running, setup $kept ($r; $($j.message))" })
 foreach ($step in 'rollingback', 'restored-launcher', 'restored-setup:lib', 'restored-setup:jobs', 'restored-setup:catalog.json') {
     # The crashing release (0.3.0): the update rolls back by itself, cut after $step.
     $cases += New-Case "fault-rb-crash-$($step -replace '[:.]', '_')" (@(
