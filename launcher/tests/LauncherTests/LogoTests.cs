@@ -9,26 +9,17 @@ namespace Htpc.Launcher;
 // Sites are fakes (no network); one real program's icon is read through the Shell.
 static class LogoTests
 {
-    static Action<bool, string> Check = null!;
+    static readonly Action<bool, string> Check = T.Check;
 
-    public static async Task Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
-        Console.WriteLine("== Logos: a site's icons, in order");
-        ParsePage();
-        ParseManifest();
-        Console.WriteLine("== Logos: what counts as an image");
-        Images();
-        Console.WriteLine("== Logos: resolving a site's icon (fake sites)");
-        await Resolve();
-        Console.WriteLine("== Logos: the catalog's logoUrl");
-        CatalogLogoUrls();
-        Console.WriteLine("== Logos: the cache");
-        await Cache();
-        Console.WriteLine("== Logos: a program's own icon (the Shell, 256 px)");
-        ProgramIcon();
-        Console.WriteLine("== Logos: only addresses on the internet are fetched from");
-        await Addresses();
+        T.Group("Logos: a site's icons, in order", () => { ParsePage(); ParseManifest(); });
+        T.Group("Logos: what counts as an image", Images);
+        T.GroupAsync("Logos: resolving a site's icon (fake sites)", Resolve);
+        T.Group("Logos: the catalog's logoUrl", CatalogLogoUrls);
+        T.GroupAsync("Logos: the cache", Cache);
+        T.Group("Logos: a program's own icon (the Shell, 256 px)", ProgramIcon);
+        T.GroupAsync("Logos: only addresses on the internet are fetched from", Addresses);
     }
 
     // The box's own network and itself are never reached (a site's icon address or a redirect

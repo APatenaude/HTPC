@@ -14,7 +14,7 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 
 | Need | Use |
 |---|---|
-| Build + the 4 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
+| Build + the 3 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
 | Everything (TvLab, setup tests, phone page) | `launcher\dev\Test-All.ps1` |
 | The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
 | TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
@@ -28,10 +28,13 @@ Setup elevated: `Program Files\HTPC\Setup\logs\launcher.log`). Setup: `C:\Progra
 `system-before.json`, `watchdog-pause`, `watchdog-watch`, `autostart.log`). The user's settings:
 `%LOCALAPPDATA%\HTPC\settings.json` (`LauncherSettings` in `src/Standby.cs`).
 
-Test conventions: LauncherTests `Check(ok, what)` with `== Group` headers, sub-files are static
-classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs`; AlertsTests
-`T.Group(...)`/`T.Check` in `*Checks` classes; PhoneTests groups in `Main`; TileTests covers
-`TileStore.cs`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
+Test conventions: LauncherTests `T.Group("Area: what", () => { ... Check(ok, what) ... })`
+(`Harness.cs`: each group timed and in a try of its own, the log cleared; the output is the
+groups and the failures, `-v` every check and `T.Info` details, any other argument picks groups by
+name: `dotnet run -c Release -- -v Logos`); sub-files are static classes with `Run()` called near
+the end of `tests/LauncherTests/Program.cs` (`TileStoreTests.cs` covers `TileStore.cs`); a list
+of cases is one check that names the ones that failed. AlertsTests `T.Group(...)`/`T.Check` in
+`*Checks` classes; PhoneTests groups in `Main`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
 (text, menu, home, network, settings, tiles, maps, resources, logos, addtile, sounds, notes): each
 `selftestGroup(({ check, sent, lastSent, ... }) => { ... })` with `check('Prefix: what', ok, detail)`
 in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are registered with
@@ -100,7 +103,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `PushStartMenu`, `AddProgramTile`, `AddWebsiteTile`, `RenameTile`, `RemoveTile`, `StartLibraryJob`;
   `LibraryService.Enqueue`, `EnqueueBoxJob`, `Run`, `RunThroughTask`, `Follow`; `TileStore.TryWebsiteUrl`,
   `CleanName`, `NewId`; `StartMenuScanner.Scan`.
-- Tests: TileTests; LauncherTests `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
+- Tests: LauncherTests `TileStoreTests.cs`, `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
   (`ui/selftest/tiles.js`), "Add a tile, Rename, setup's apps..." (`addtile.js`); audit (`ui/audit/home.js`)
   'tile options', 'rename', 'change icon', 'add tile: library', 'add tile: on this box', 'add tile:
   website', 'add tile: website, a long address typed'.

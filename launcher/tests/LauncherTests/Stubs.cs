@@ -5,8 +5,8 @@ namespace Htpc.Launcher;
 static class Log
 {
     public static readonly List<string> Lines = new();
-    public static bool Echo;
-    static void Add(string s) { lock (Lines) Lines.Add(s); if (Echo) Console.WriteLine("  log: " + s); }
+    public static void Clear() { lock (Lines) Lines.Clear(); }
+    static void Add(string s) { lock (Lines) Lines.Add(s); }
     public static void Info(string message) => Add("INFO " + message);
     public static void Warn(string message) => Add("WARN " + message);
     public static void Error(string message, Exception? e = null) => Add("ERROR " + message + (e is null ? "" : ": " + e.Message));

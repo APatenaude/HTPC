@@ -35,7 +35,8 @@ $b = & $dotnet build "$l\src\Launcher\Launcher.csproj" -c Release -nologo -v qui
 $b -split "`n" | Where-Object { $_ -match 'error CS' } | Select-Object -First 5
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
-$projects = @(Get-ChildItem "$l\tests" -Directory | ForEach-Object { "tests\$($_.Name)" }) + 'dev\TvLab'
+# Folders with a project only: a removed project's bin\ and obj\ may stay behind in a checkout.
+$projects = @(Get-ChildItem "$l\tests" -Directory | Where-Object { Test-Path "$($_.FullName)\*.csproj" } | ForEach-Object { "tests\$($_.Name)" }) + 'dev\TvLab'
 foreach ($p in $projects) {
     $o = & $dotnet run -c Release --project "$l\$p" 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { $failed++ }

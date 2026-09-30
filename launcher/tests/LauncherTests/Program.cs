@@ -1,18 +1,16 @@
 using System.Text.Json;
 using Htpc.Launcher;
 
-// Checks for the button maps, PadMapper, the video-end detector, the sleep timer, the decode-check
-// parser and the alerts overlay (run: dotnet run in this folder). Log and Input are stand-ins (Stubs.cs).
+// The launcher's checks, one group per area (Harness.cs): dotnet run -c Release in this folder.
+// Prints each group with its time, and the failures only; -v adds the passes and the details, and
+// any other argument runs only the groups whose name has it ("dotnet run -- -v Logos"). Log and
+// Input are stand-ins (Stubs.cs); the areas with a file of their own are called near the end.
 
-var failures = 0;
-var passes = 0;
-void Check(bool ok, string what)
-{
-    if (ok) passes++; else { failures++; Console.WriteLine("FAIL: " + what); }
-}
+T.Start(args);
+void Check(bool ok, string what) => T.Check(ok, what);
 
 // ---------------------------------------------------------------- ButtonMapStore
-Console.WriteLine("== ButtonMapStore");
+T.Group("ButtonMapStore", () =>
 {
     var stored = JsonDocument.Parse("""
     {
@@ -85,7 +83,7 @@ Console.WriteLine("== ButtonMapStore");
     var again = new ButtonMapStore(json, _ => { });
     Check(JsonSerializer.Serialize(again.ToJson()) == JsonSerializer.Serialize(json), "round trip through settings.json");
     Check(again.For("twitch", "mouse")!.Buttons[PadControl.LB] is KeyAction { Repeat: true }, "PageUp repeats when held");
-    Console.WriteLine("  saved: " + JsonSerializer.Serialize(json));
+    T.Info("saved: " + JsonSerializer.Serialize(json));
 
     // Every key name parses and formats back to itself.
     foreach (var name in new[] { "A", "Z", "0", "9", "F1", "F12", "Enter", "Space", "Esc", "Tab", "Backspace", "Delete", "PageUp", "Left", "Menu",
@@ -101,7 +99,7 @@ Console.WriteLine("== ButtonMapStore");
     Check(ButtonMapStore.ParseAction("do:format") is null, "unknown command refused");
 
     // Presets are described (for the UI) and match the preset objects.
-    foreach (var (name, map) in presets) Console.WriteLine($"  preset {name}: {string.Join(" ", map.Select(kv => kv.Key + "=" + kv.Value))}");
+    foreach (var (name, map) in presets) T.Info($"preset {name}: {string.Join(" ", map.Select(kv => kv.Key + "=" + kv.Value))}");
     Check(presets["controller"].Count == 0, "controller preset: nothing to show");
     Check(presets["mouse"]["r3"] == "do:keyboard" && presets["keyboard"]["r3"] == "do:keyboard", "R3 keyboard in both presets");
     Check(presets["mouse"]["dpad"] == "arrows", "mouse dpad arrows");
@@ -130,10 +128,10 @@ Console.WriteLine("== ButtonMapStore");
     Check(JsonSerializer.Deserialize<LauncherSettings>("{\"idleMinutes\": 15}", opts)!.InterfaceSounds == "low", "interface sounds: an older settings file gets Low");
     Check(JsonSerializer.Deserialize<LauncherSettings>("{\"interfaceSounds\": \"off\"}", opts)!.InterfaceSounds == "off", "interface sounds: Off is kept");
     Check(JsonSerializer.Serialize(new LauncherSettings { InterfaceSounds = "medium" }, opts).Contains("\"interfaceSounds\":\"medium\""), "interface sounds: reach the page as prefs.interfaceSounds");
-}
+});
 
 // ---------------------------------------------------------------- PadMapper
-Console.WriteLine("== PadMapper");
+T.Group("PadMapper", () =>
 {
     var store = new ButtonMapStore(JsonDocument.Parse("""{ "t": { "a": "key:Ctrl+T", "b": "mouse:right", "lb": "key:PageUp", "r3": "do:keyboard", "x": "key:Enter" } }""").RootElement, _ => { });
     var map = store.For("t", "mouse")!;
@@ -191,9 +189,10 @@ Console.WriteLine("== PadMapper");
     mapper.Update(S(), now += 8, true);
     Thread.Sleep(50);
     Check(Input.Snapshot().Contains("move"), "left stick moves the pointer on the frame thread");
-}
+});
 
 // "Fires once": the controller raises one Pressed per press of R3 however long it is held.
+T.Group("Controller: R3 held", () =>
 {
     var controller = new ControllerService();
     var presses = 0;
@@ -207,10 +206,11 @@ Console.WriteLine("== PadMapper");
     Thread.Sleep(100);
     controller.Dispose();
     Check(presses == 1, $"R3 held 0.7 s raises one press (got {presses})");
-}
+});
 
 // A: A as it goes down (as ever), then AHold at 0.5 s and AUp when let go (hold A on a home tile
 // to move it). A tap: A, AUp, no AHold.
+T.Group("Controller: A tapped, and held", () =>
 {
     var controller = new ControllerService();
     var pads = new List<Pad>();
@@ -228,10 +228,10 @@ Console.WriteLine("== PadMapper");
     controller.Inject(P(0)); Thread.Sleep(60);
     controller.Dispose();
     lock (pads) Check(pads.SequenceEqual(new[] { Pad.A, Pad.AHold, Pad.AUp }), "... let go: AUp: " + string.Join(",", pads));
-}
+});
 
 // ---------------------------------------------------------------- Start + D-pad: the volume
-Console.WriteLine("== Start + D-pad (StartChord)");
+T.Group("Start + D-pad (StartChord)", () =>
 {
     const ushort St = StartChord.Start, Up = StartChord.Up, Dn = StartChord.Down, Lf = StartChord.Left, Rt = StartChord.Right, A = 0x1000;
     var c = new StartChord();
@@ -317,7 +317,7 @@ Console.WriteLine("== Start + D-pad (StartChord)");
     Check(AudioVolume.NextLevel(47, 5) == 50 && AudioVolume.NextLevel(47, -5) == 40, "volume buttons: steps of 5, to multiples of 5");
     Check(AudioVolume.NextLevel(45, 2) == 46 && AudioVolume.NextLevel(45, -2) == 42 && AudioVolume.NextLevel(46, 2) == 48, "Start + D-pad: steps of 2");
     Check(AudioVolume.NextLevel(99, 2) == 100 && AudioVolume.NextLevel(100, 2) == 100 && AudioVolume.NextLevel(1, -2) == 0, "stays within 0 to 100");
-}
+});
 
 // ---------------------------------------------------------------- Standby: waking with Home
 // The controller thread as standby runs it (Slow, WakeMode), from the moment Home goes down:
@@ -325,7 +325,7 @@ Console.WriteLine("== Start + D-pad (StartChord)");
 // Between presses it reads the real controller (none on a runner): the thread waits for the next
 // look for one, and a press made up with Inject must still get through at once. Not WakeMode: it
 // only adds the wake buzz, which reached the real controller on a box (and the mapper, unused here).
-Console.WriteLine("== Standby: waking with Home");
+T.Group("Standby: waking with Home", () =>
 {
     var controller = new ControllerService { Slow = true };
     var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -355,7 +355,7 @@ Console.WriteLine("== Standby: waking with Home");
     }
     controller.Dispose();
     double Median(List<double> v) => v.Count == 0 ? double.NaN : v.OrderBy(x => x).ElementAt(v.Count / 2);
-    Console.WriteLine($"  Home seen after {Median(seen):0} ms (max {(seen.Count > 0 ? seen.Max() : double.NaN):0}), held (the buzz) after {Median(held):0} ms (max {(held.Count > 0 ? held.Max() : double.NaN):0})");
+    T.Info($"Home seen after {Median(seen):0} ms (max {(seen.Count > 0 ? seen.Max() : double.NaN):0}), held (the buzz) after {Median(held):0} ms (max {(held.Count > 0 ? held.Max() : double.NaN):0})");
     Check(seen.Count == 6 && seen.Max() < 100, $"standby: Home going down is seen within 100 ms, even between looks for a controller ({string.Join(", ", seen.Select(x => x.ToString("0")))})");
     Check(held.Count == 6 && held.Min() >= 490 && held.Max() < 700, $"standby: the 0.5 s hold is reached 0.5 s after the press, not much later ({string.Join(", ", held.Select(x => x.ToString("0")))})");
 
@@ -364,14 +364,14 @@ Console.WriteLine("== Standby: waking with Home");
     Check(ControllerService.NoControllerWait(false, 1000, 1300) == 50 && ControllerService.NoControllerWait(false, 1000, 900) == 50, "no controller, awake: 50 ms waits as before");
     Check(ControllerService.NoControllerWait(true, 1000, 1300) == 300 && ControllerService.NoControllerWait(true, 1000, 1150) == 150, "no controller, standby: until the next look");
     Check(ControllerService.NoControllerWait(true, 1000, 900) == 1 && ControllerService.NoControllerWait(true, 1000, 99_000) == 300, "... a look already due at once, never more than 300 ms");
-}
+});
 
 // ---------------------------------------------------------------- Standby: the radios it turns off
 // StandbyRadioSwitch with a made-up radio: the Wi-Fi on a cable goes off in standby and comes
 // back at wake (Bluetooth has its own rule: below); the flag in settings brings the radio back after a
 // launcher that ended in standby; a refusal is tried again; a radio in use, or one the user
 // turned off, is left alone.
-Console.WriteLine("== Standby: the radios it turns off");
+T.Group("Standby: the radios it turns off", () =>
 {
     var on = true;
     var refuse = false;
@@ -450,7 +450,7 @@ Console.WriteLine("== Standby: the radios it turns off");
 
     var json = JsonSerializer.Serialize(new LauncherSettings { BluetoothOffByLauncher = true }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
     Check(json.Contains("\"bluetoothOffInStandby\":true") && json.Contains("\"wifiOffInStandby\":false"), "settings keep both radios' flags");
-}
+});
 
 // ---------------------------------------------------------------- The Bluetooth radio: off while nothing is paired
 // BluetoothRadio with a made-up radio and clock (the owner, 30 Sept 2026): off while nothing is
@@ -458,7 +458,7 @@ Console.WriteLine("== Standby: the radios it turns off");
 // closes and while a pairing runs; anything paired, or a look at the paired devices that fails,
 // keeps it on; the user's own switch wins; a launcher that ended with it off looks again at its
 // next start (1.0.9's standby flag included). Each change logged with why.
-Console.WriteLine("== The Bluetooth radio: off while nothing is paired");
+T.Group("The Bluetooth radio: off while nothing is paired", () =>
 {
     // The decision alone.
     const string Pairing = "for pairing";
@@ -659,14 +659,14 @@ Console.WriteLine("== The Bluetooth radio: off while nothing is paired");
         rule.PageShown(true).Wait();
         Check(switched.Count == 0 && looks == 0, $"radio {r}: nothing switched, nothing looked at");
     }
-}
+});
 
 // ---------------------------------------------------------------- Standby: apps in efficiency mode
 // A real process (ping, a few seconds) as an app: standby's efficiency mode (idle priority,
 // EcoQoS, its timer requests ignored), read back from Windows; the wake's call hands the timer
 // back (each call replaces the state); a launcher starting after one that ended in standby puts
 // the app back to normal; EcoQoS alone (the updater's jobs) is not mistaken for standby.
-Console.WriteLine("== Standby: apps in efficiency mode");
+T.Group("Standby: apps in efficiency mode", () =>
 {
     System.Diagnostics.Process Child() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
         Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 8 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
@@ -696,10 +696,10 @@ Console.WriteLine("== Standby: apps in efficiency mode");
         Check(!Native.LeftInStandby(app.Handle) && app.PriorityClass == System.Diagnostics.ProcessPriorityClass.BelowNormal, "EcoQoS alone (an update job): left as it is");
     }
     finally { try { app.Kill(); } catch (Exception) { } }
-}
+});
 
 // ---------------------------------------------------------------- VideoEndDetector
-Console.WriteLine("== VideoEndDetector");
+T.Group("VideoEndDetector", () =>
 {
     var t0 = new DateTime(2026, 9, 26, 22, 0, 0);
     MediaInfo M(string title, MediaStatus st, double? pos, double? dur, DateTime at, string src = "MSEdge") =>
@@ -797,11 +797,11 @@ Console.WriteLine("== VideoEndDetector");
     var ad = new[] { g.IsLive(M("V", P, 5, 15, t0)), g.IsLive(M("V", P, 0, 600, t0.AddSeconds(10))), g.IsLive(M("V", P, 1, 600, t0.AddSeconds(11))),
         g.IsLive(M("V", P, 2, 601, t0.AddSeconds(12))), g.IsLive(M("V", P, 3, 601, t0.AddSeconds(13))) };
     Check(ad.All(l => !l), "an ad then the video (15 s, then 600 s, a length settling by a second): not live");
-}
+});
 
 // ---------------------------------------------------------------- Media calls, a frozen player
 // Standby's pause, the idle check and the phone must go on without a player that never answers.
-Console.WriteLine("== Media calls: a player that never answers");
+T.Group("Media calls: a player that never answers", () =>
 {
     var never = new TaskCompletionSource<bool>().Task.AsAsyncOperation();
     var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -811,10 +811,10 @@ Console.WriteLine("== Media calls: a player that never answers");
     Check(error?.Contains("a frozen player") == true, $"no answer: a TimeoutException that names the call ({error})");
     Check(clock.Elapsed < MediaWatcher.CallTimeout + TimeSpan.FromSeconds(2), $"given up after the timeout, not later ({clock.ElapsedMilliseconds} ms)");
     Check(MediaWatcher.Timed(Task.FromResult(true).AsAsyncOperation(), "a player").GetAwaiter().GetResult(), "an answer comes through");
-}
+});
 
 // ---------------------------------------------------------------- SleepTimer
-Console.WriteLine("== SleepTimer");
+T.Group("SleepTimer", () =>
 {
     // The wall clock and the tick count (ms since boot) move together, until the clock is moved.
     var now = new DateTime(2026, 9, 26, 22, 0, 0);
@@ -924,20 +924,20 @@ Console.WriteLine("== SleepTimer");
     Check(timer.Active && object.Equals(((dynamic)timer.Describe()!).endsAt, "video") && ((dynamic)timer.Describe()!).minutesLeft == 120,
         "video mode, clock 3 hours on: still following it, 2 hours left");
     timer.Cancel();
-}
+});
 
 // ---------------------------------------------------------------- DecodeCheck.Parse
-Console.WriteLine("== DecodeCheck");
+T.Group("DecodeCheck", () =>
 {
     var fixture = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "hwdecode-fixture.json"));
     var parsed = DecodeCheck.Parse("WARNING: something\r\n" + fixture);
     Check(parsed is { } p && p.GetProperty("codecs").GetArrayLength() == 7 && p.GetProperty("pass").GetBoolean(), "fixture parses: 7 codecs, pass");
     Check(DecodeCheck.Parse("no json here") is null, "no JSON: null");
     Check(DecodeCheck.Parse("{\"x\":1}") is null, "JSON without codecs: null");
-}
+});
 
 // ---------------------------------------------------------------- AlertsForm.Render
-Console.WriteLine("== Alerts overlay");
+T.Group("Alerts overlay", () =>
 {
     var iconsFile = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ui", "icons.js"));
     var js = File.ReadAllText(iconsFile);
@@ -970,7 +970,7 @@ Console.WriteLine("== Alerts overlay");
             g.DrawImage(b, at.X - screen.X, at.Y - screen.Y);
         }
         canvas.Save(Path.Combine(outDir, $"alerts-{name}.png"), System.Drawing.Imaging.ImageFormat.Png);
-        Console.WriteLine($"  {name}: window {at}");
+        T.Info($"{name}: window {at}");
     }
     var hd = new Rectangle(0, 0, 1920, 1080);
     Shot("cards-1080", new OverlayView(cards), hd, Rectangle.Empty);
@@ -991,28 +991,28 @@ Console.WriteLine("== Alerts overlay");
             g.DrawImage(b, at.X - screen.X, at.Y - screen.Y);
         }
         canvas.Save(Path.Combine(outDir, $"volume-{name}.png"), System.Drawing.Imaging.ImageFormat.Png);
-        Console.WriteLine($"  volume-{name}: window {at}");
+        T.Info($"volume-{name}: window {at}");
     }
     var cardsLeft = 1920 - 96 - 680;
     VolumeShot("45", new SoundLevel(45, false), null, hd, Rectangle.Empty, at => Check(at.Left < 96 && at.Top < 48 && at.Right < cardsLeft && at.Bottom < 250, "volume: top left, clear of the cards"));
     VolumeShot("muted", new SoundLevel(45, true), null, hd, Rectangle.Empty, _ => { });
     VolumeShot("output-4k", new SoundLevel(30, false), "Speakers (USB Audio and HID)", new Rectangle(0, 0, 3840, 2160), Rectangle.Empty, at => Check(at.Right < cardsLeft * 2 && at.Height > 2 * (88 + 80), "volume with the output's name, 4K: taller, still clear of the cards"));
     VolumeShot("keyboard-top", new SoundLevel(80, false), null, hd, new Rectangle(0, 0, 1920, 560), at => Check(at.Top >= 560 - 40, "keyboard at the top: the volume below it"));
-}
+});
 
 // ---------------------------------------------------------------- Brightness kept across a start
-Console.WriteLine("== Brightness at start");
+T.Group("Brightness at start", () =>
 {
     Check(Dimmer.StartLevel(100) == 100 && Dimmer.StartLevel(55) == 55, "the level set last comes back");
     Check(Dimmer.StartLevel(Dimmer.FloorAtStart - 5) == Dimmer.FloorAtStart && Dimmer.StartLevel(0) == Dimmer.FloorAtStart && Dimmer.StartLevel(-20) == Dimmer.FloorAtStart,
         "never darker than the floor at start");
     Check(Dimmer.StartLevel(250) == 100, "never past 100");
     Check(new LauncherSettings().Brightness == 100 && new LauncherSettings().Volume is null, "defaults: full brightness, no volume kept yet");
-}
+});
 
 // ---------------------------------------------------------------- settings.json and its backup
 // In a folder of its own (never the box's settings.json).
-Console.WriteLine("== Settings: an unreadable settings.json");
+T.Group("Settings: an unreadable settings.json", () =>
 {
     // The launcher's own path, whatever the test's rights (an elevated CI runner too): only TV Box Setup saves elsewhere (Rights.SetupElevated).
     var dir = Path.Combine(Path.GetTempPath(), "htpc-settings-test");
@@ -1036,10 +1036,10 @@ Console.WriteLine("== Settings: an unreadable settings.json");
     File.Delete(file + ".bak");
     Check(LauncherSettings.Load(file).IdleMinutes == new LauncherSettings().IdleMinutes, "neither file: the defaults");
     Directory.Delete(dir, recursive: true);
-}
+});
 
 // ---------------------------------------------------------------- Core Audio (reads only)
-Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
+T.Group("Core Audio (reads only: nothing is switched or set)", () =>
 {
     // The box on 27 Sept: "Specified cast is not valid" reading the volume and listing outputs.
     // Windows' device enumerator is one object per process; a [ComImport] wrapper of it made
@@ -1070,7 +1070,7 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     GC.KeepAlive(held);
     List<string> casts;
     lock (Log.Lines) casts = Log.Lines.Skip(before).Where(l => l.Contains("cast", StringComparison.OrdinalIgnoreCase)).ToList();
-    Console.WriteLine($"  {outputs.Count} outputs, volume {volume?.ToString() ?? "none"}, level {level?.ToString() ?? "none"}");
+    T.Info($"{outputs.Count} outputs, volume {volume?.ToString() ?? "none"}, level {level?.ToString() ?? "none"}");
     Check(casts.Count == 0, "no cast failures with another wrapper of the enumerator alive: " + string.Join(" | ", casts));
     var hasAudio = outputs.Count > 0;
     Check(!hasAudio || (volume is not null && again == volume && level?.Volume == volume && endpoints.Count == outputs.Count), "with a sound output, every read works on either thread, and on the audio thread");
@@ -1115,10 +1115,10 @@ Console.WriteLine("== Core Audio (reads only: nothing is switched or set)");
     lock (Log.Lines) watchBefore = Log.Lines.Count(l => l.Contains("Watching the volume") || l.Contains("Watching the sound outputs"));
     Check(changes == 0 && watchBefore == 0, $"volume watch: starts, renews and stops quietly ({changes} changes)");
     Check(!hasAudio || CoreAudio.DefaultId() == outputs.First(o => o.IsDefault).Id, "the default output's id");
-}
+});
 
 // ---------------------------------------------------------------- Over an app: what is left alone
-Console.WriteLine("== Home menu over an app: the app's window and the pointer");
+T.Group("Home menu over an app: the app's window and the pointer", () =>
 {
     var screen = new Rectangle(0, 0, 3840, 2160);
     Native.Rect R(int l, int t, int r, int b) => new() { Left = l, Top = t, Right = r, Bottom = b };
@@ -1135,10 +1135,10 @@ Console.WriteLine("== Home menu over an app: the app's window and the pointer");
     Check(CursorHider.ComeBackTo(null, screen, parked) == new Point(1920, 1080), "position unknown: the middle");
     Check(CursorHider.ComeBackTo(parked, screen, parked) == new Point(1920, 1080), "it was at the parking spot: the middle");
     Check(CursorHider.ComeBackTo(new Point(5000, 10), screen, parked) == new Point(1920, 1080), "off the screen now: the middle");
-}
+});
 
 // ---------------------------------------------------------------- Every catalog app opens filling the screen
-Console.WriteLine("== Catalog: every app opens filling the screen");
+T.Group("Catalog: every app opens filling the screen", () =>
 {
     var root = new DirectoryInfo(AppContext.BaseDirectory);
     while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
@@ -1181,11 +1181,11 @@ Console.WriteLine("== Catalog: every app opens filling the screen");
         "website tiles: never kiosk, InPrivate or guest (their sign-ins would be lost)");
     Check(site[0] == @"--user-data-dir=C:\Users\u\AppData\Local\HTPC\edge\twitch" && site[1] == "--app=https://www.twitch.tv/" && site.Count(a => a.Contains("twitch.tv")) == 1,
         "website tiles: their own profile folder, the address as one argument of its own");
-}
+});
 
 // ---------------------------------------------------------------- A fill app's own title strip (launch.cropTop)
 // Feishin draws its own - [] x bar (30 CSS px) even full screen: filled, it sits just above the screen.
-Console.WriteLine("== Fill: an app's own title strip above the screen (launch.cropTop)");
+T.Group("Fill: an app's own title strip above the screen (launch.cropTop)", () =>
 {
     var tv4k = new Rectangle(0, 0, 3840, 2160);
     var hd = new Rectangle(0, 0, 1920, 1080);
@@ -1212,12 +1212,12 @@ Console.WriteLine("== Fill: an app's own title strip above the screen (launch.cr
     Check(AppManager.CropTopOf(L("""{ "fill": true, "cropTop": "30" }""")) == 0 && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": 500 }""")) == 0
         && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": -5 }""")) == 0 && AppManager.CropTopOf(L("""{ "fill": true, "cropTop": 12.5 }""")) == 0,
         "cropTop: a whole number of pixels up to 100, else nothing");
-}
+});
 
 // ---------------------------------------------------------------- Keys for an app's own menus (menuKeys)
 // Moonlight's menus (Qt) reach their toolbar only with Shift+Tab; Select, unused there, sends it.
 // Its stream is an SDL window: nothing, ever.
-Console.WriteLine("== Keys for an app's own menus (menuKeys)");
+T.Group("Keys for an app's own menus (menuKeys)", () =>
 {
     var root = new DirectoryInfo(AppContext.BaseDirectory);
     while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
@@ -1252,13 +1252,13 @@ Console.WriteLine("== Keys for an app's own menus (menuKeys)");
     var odd = MenuKeys.Parse(L("""{ "select": "key:Shift+Tab", "start": "mouse:left", "home": "key:Esc", "y": "key:NoSuchKey", "b": 5, "whileClass": "Qt*QWindow*" }"""));
     Check(odd is { Keys.Count: 1 } && odd.Keys.ContainsKey(Pad.Select), "only keys, only real buttons, never Home");
     Check(MenuKeys.Parse(L("""{ "start": "do:menu", "whileClass": "Qt*QWindow*" }""")) is null, "no key left: no menu keys");
-}
+});
 
 // ---------------------------------------------------------------- No installer finished on screen
 // install.interactive (an installer the user finished on screen, with install.folder and
 // install.keep for its uninstall) went with RetroBat, its only user: neither setup nor the
 // launcher knows them now, so no catalog entry may use them.
-Console.WriteLine("== Catalog: no installer finished on screen (install.interactive, folder, keep: gone)");
+T.Group("Catalog: no installer finished on screen (install.interactive, folder, keep: gone)", () =>
 {
     var root = new DirectoryInfo(AppContext.BaseDirectory);
     while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
@@ -1279,37 +1279,24 @@ Console.WriteLine("== Catalog: no installer finished on screen (install.interact
     Check(maps.SetControl(ButtonMapStore.Other, "a", "key:Space", "mouse") && saved.Count == 1
         && saved[0].TryGetProperty(ButtonMapStore.Other, out _) && !saved[0].TryGetProperty("_installer", out _),
         "... and the next save keeps Other windows' map, without it");
-}
+});
 
-// ---------------------------------------------------------------- Logos (LogoTests.cs)
-LogoTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
-
-// ---------------------------------------------------------------- Apps that start by themselves (AutostartTests.cs)
-AutostartTests.Run((ok, what) => Check(ok, what));
-
-// ---------------------------------------------------------------- Setup asks for administrator rights as it opens (ElevationTests.cs)
-ElevationTests.Run((ok, what) => Check(ok, what));
-
-// ---------------------------------------------------------------- The update checks' rules (UpdateRulesTests.cs)
-UpdateRulesTests.Run((ok, what) => Check(ok, what));
-
-// ---------------------------------------------------------------- Desktop mode's tray icon (DesktopTrayTests.cs)
-DesktopTrayTests.Run((ok, what) => Check(ok, what));
-
-// ---------------------------------------------------------------- Apps left running with no window (WindowlessQuitTests.cs)
-WindowlessQuitTests.Run((ok, what) => Check(ok, what));
-
-// ---------------------------------------------------------------- Add a tile, the keyboard: the owner's 29 Sept list (AddTileTests.cs)
-AddTileTests.Run((ok, what) => Check(ok, what)).GetAwaiter().GetResult();
-
-// ---------------------------------------------------------------- The Home menu's resource view (ResourceTests.cs)
-ResourceTests.Run((ok, what) => Check(ok, what));
+// ---------------------------------------------------------------- The areas with a file of their own
+LogoTests.Run();            // Logos
+AutostartTests.Run();       // Apps that start by themselves
+ElevationTests.Run();       // Setup asks for administrator rights as it opens
+UpdateRulesTests.Run();     // The update checks' rules
+DesktopTrayTests.Run();     // Desktop mode's tray icon
+WindowlessQuitTests.Run();  // Apps left running with no window
+AddTileTests.Run();         // Add a tile, the keyboard: the owner's 29 Sept list
+ResourceTests.Run();        // The Home menu's resource view
+TileStoreTests.Run();       // Added tiles: website addresses, names, glyphs, colours, ids
 
 // ---------------------------------------------------------------- The Home menu's backdrop
 // ScreenCapture's own part: sizes, scaling (the GPU halves a 4K screen; this is what 2560 wide
 // and the GDI fallback get) and the JPEG. The screen itself is not captured here.
-Console.WriteLine("== Home menu backdrop: scaling and the JPEG");
-unsafe
+T.Group("Home menu backdrop: scaling and the JPEG", () =>
+{ unsafe
 {
     Check(ScreenCapture.TargetSize(new Size(3840, 2160)) == new Size(1920, 1080), "4K: 1920x1080");
     Check(ScreenCapture.TargetSize(new Size(2560, 1440)) == new Size(1920, 1080), "1440p: 1920x1080");
@@ -1354,7 +1341,7 @@ unsafe
     var file = Path.Combine(Path.GetTempPath(), "htpc-backdrop-test.jpg");
     var clock = System.Diagnostics.Stopwatch.StartNew();
     fixed (byte* p = frame) ScreenCapture.SaveScaled(p, W, H, Stride, ScreenCapture.TargetSize(new Size(W, H)), file);
-    Console.WriteLine($"  4K frame scaled on the CPU and saved as a JPEG in {clock.ElapsedMilliseconds} ms ({new FileInfo(file).Length / 1024} KB)");
+    T.Info($"4K frame scaled on the CPU and saved as a JPEG in {clock.ElapsedMilliseconds} ms ({new FileInfo(file).Length / 1024} KB)");
     using (var jpeg = new Bitmap(file))
     {
         Check(jpeg.Width == 1920 && jpeg.Height == 1080, $"JPEG 1920x1080 (got {jpeg.Width}x{jpeg.Height})");
@@ -1364,26 +1351,26 @@ unsafe
         Check(Near(jpeg.GetPixel(1919, 540), 200, 200, 200), $"last column: no padding in it (got {jpeg.GetPixel(1919, 540)})");
     }
     File.Delete(file);
-}
+} });
 
 // ---------------------------------------------------------------- The text-field watcher, quiet
 // The launcher waits for it to be quiet before it takes the focus (MainForm.Reveal: 2 s per switch
 // while UI Automation listened). Not started here: it would listen to this desktop for real.
-Console.WriteLine("== Text-field watcher: quiet");
-using (var watcher = new TextFieldWatcher())
+T.Group("Text-field watcher: quiet", () =>
 {
+    using var watcher = new TextFieldWatcher();
     Check(watcher.Quiet, "new: quiet");
     Check(watcher.WhenDone().IsCompleted, "quiet: nothing to wait for");
     watcher.Enabled = false;
     Check(watcher.Quiet && watcher.WhenDone().IsCompleted, "turned off while off: still quiet, nothing queued");
-}
+});
 
 // ---------------------------------------------------------------- The text-field watcher: what is a text field
 // What UI Automation said of each kind of control in Edge 154 (read on the box, 30 Sept 2026: a
 // local page of every kind, Edge on a desktop of its own, never on the TV). The keyboard pops up
 // by itself on real text inputs, never on a switch, a check box, a button, a slider or a list
 // (Twitch, 29 Sept 2026: it came up on "Show Overlay Extensions", a switch in its player).
-Console.WriteLine("== Text-field watcher: what is a text field");
+T.Group("Text-field watcher: what is a text field", () =>
 {
     const int Button = 50000, CheckBox = 50002, ComboBox = 50003, Edit = 50004, Hyperlink = 50005, RadioButton = 50013,
         Slider = 50015, Spinner = 50016, Group = 50026, Document = 50030;
@@ -1442,12 +1429,12 @@ Console.WriteLine("== Text-field watcher: what is a text field");
     asked.Clear();
     TextFieldWatcher.IsTextField(Element(Button, toggle: true));
     Check(asked.SequenceEqual(new[] { TextFieldWatcher.ControlType }), $"a button: its control type asked, nothing more ({asked.Count} asked)");
-}
+});
 
 // ---------------------------------------------------------------- The WebViews' recovery
 // A page that keeps failing neither reloads in a tight loop nor stays dead; a GPU lost twice
 // means a new browser (software drawing otherwise), whatever the GPU.
-Console.WriteLine("== WebView recovery");
+T.Group("WebView recovery", () =>
 {
     const long Min = 60_000;
     var r = new WebViewRecovery();
@@ -1471,11 +1458,11 @@ Console.WriteLine("== WebView recovery");
 
     Check(new WebViewRecovery().OnFailure("BrowserProcessExited", 0).Step == WebViewRecovery.Step.Restart, "browser ended: restart");
     Check(new WebViewRecovery().OnFailure("UtilityProcessExited", 0).Step == WebViewRecovery.Step.Nothing, "a utility process: nothing");
-}
+});
 
 // ---------------------------------------------------------------- The launcher's own pages
 // Messages are taken, and pages shown, only from https://launcher.htpc/ (WebViewGuard).
-Console.WriteLine("== The launcher's origin");
+T.Group("The launcher's origin", () =>
 {
     Check(LauncherOrigin.Is("https://launcher.htpc/index.html") && LauncherOrigin.Is("https://LAUNCHER.htpc/keyboard.html#x"), "its pages");
     Check(!LauncherOrigin.Is("http://launcher.htpc/index.html"), "not over http");
@@ -1485,11 +1472,11 @@ Console.WriteLine("== The launcher's origin");
     Check(!LauncherOrigin.Is("https://capture.htpc/screen-1.jpg") && !LauncherOrigin.Is("file:///C:/ui/index.html") && !LauncherOrigin.Is(null) && !LauncherOrigin.Is("about:blank"), "not the capture host, a file, nothing, about:blank");
     Check(LauncherOrigin.Describe("https://evil.example/path?token=secret") == "https://evil.example", "the log gets the host only");
     Check(LauncherOrigin.Describe("file:///C:/Users/x/secret.txt") == "a file", "a file is not named in the log");
-}
+});
 
 // ---------------------------------------------------------------- The soak line
 // One line an hour: the launcher's weight and its WebView2 processes', for leaks over weeks.
-Console.WriteLine("== Soak line");
+T.Group("Soak line", () =>
 {
     const long MB = 1024 * 1024;
     var line = SoakLog.Line(new ProcessStats(150 * MB, 1200, 60, 80),
@@ -1500,10 +1487,9 @@ Console.WriteLine("== Soak line");
     Check(line.EndsWith("; up 2 d 2 h (the box 9 d 0 h)"), "uptimes: " + line);
     Check(ProcessStats.Of(Environment.ProcessId) is { PrivateBytes: > 0, Handles: > 0, Gdi: >= 0, User: >= 0 }, "this process's own numbers read");
     Check(SoakLog.Line(null, [], TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(7)) == "Soak: launcher ?; up 5 min (the box 7 min)", "nothing known: still one line");
-}
+});
 
-Console.WriteLine($"{passes} passed, {failures} failed");
-return failures == 0 ? 0 : 1;
+return T.Summary();
 
 /// <summary>Windows' device enumerator through a [ComImport] class of its own, as the launcher's files each had one.</summary>
 [System.Runtime.InteropServices.ComImport, System.Runtime.InteropServices.Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]

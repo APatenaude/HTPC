@@ -14,23 +14,16 @@ namespace Htpc.Launcher;
 // registers a task or shows a window.
 static class ElevationTests
 {
-    static Action<bool, string> Check = null!;
+    static readonly Action<bool, string> Check = T.Check;
 
-    public static void Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
-        Console.WriteLine("== Setup elevation: setup mode, and what a start does");
-        Decisions();
-        Console.WriteLine("== Rights: setup or not, and the token (split, no split, standard)");
-        RightsTable();
-        Console.WriteLine("== Setup elevation: setup runs as the user signed in here, or not at all");
-        SessionUserCheck();
-        Console.WriteLine("== Setup elevation: arguments and the command line");
-        Arguments();
-        Console.WriteLine("== Setup elevation: who takes over after setup");
-        AfterSetup();
-        Console.WriteLine("== Setup elevation: the mutex, setup.ps1, the task, the profiles, the screen");
-        Seams();
+        T.Group("Setup elevation: setup mode, and what a start does", Decisions);
+        T.Group("Rights: setup or not, and the token (split, no split, standard)", RightsTable);
+        T.Group("Setup elevation: setup runs as the user signed in here, or not at all", SessionUserCheck);
+        T.Group("Setup elevation: arguments and the command line", Arguments);
+        T.Group("Setup elevation: who takes over after setup", AfterSetup);
+        T.Group("Setup elevation: the mutex, setup.ps1, the task, the profiles, the screen", Seams);
     }
 
     static void Decisions()
@@ -121,9 +114,9 @@ static class ElevationTests
         // This session, as Windows records it (a CI runner's service session may have nobody).
         using var id = WindowsIdentity.GetCurrent();
         var (name, sid) = SetupElevation.SessionUser();
-        if (name is null) Console.WriteLine("    info: nobody signed in to this session (a service): the live check is skipped");
+        if (name is null) T.Info("nobody signed in to this session (a service): the live check is skipped");
         else if (SetupElevation.CompareSessionUser(id.User!.Value, id.Name, sid, name) != Same)
-            Console.WriteLine($"    info: this session's user {name} is not this test's {id.Name} (a runner): the live check is skipped");
+            T.Info($"this session's user {name} is not this test's {id.Name} (a runner): the live check is skipped");
         else Check(sid == id.User!.Value, $"this session's user ({name}) found by SID, this test's own ({sid})");
 
         // The refusal: full screen, one button, built but never shown.
@@ -293,7 +286,7 @@ static class ElevationTests
             Check(Has("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>") && Has("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"), "task: runs on battery too");
             Check(Has(@"<Command>C:\Program Files\HTPC\Launcher\HtpcWatchdog.exe</Command>") && Has("<Arguments>--shell</Arguments>")
                 && Has(@"<WorkingDirectory>C:\Program Files\HTPC\Launcher</WorkingDirectory>"), "task: the watchdog, --shell, in its folder");
-            if (!Has("LeastPrivilege")) Console.WriteLine(xml);
+            if (!Has("LeastPrivilege")) T.Info(xml);
         }
         catch (Exception e) { Check(false, $"Task Scheduler (a definition only): {e.GetType().Name}: {e.Message}"); }
 

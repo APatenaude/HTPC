@@ -28,10 +28,12 @@ static class WindowlessQuitTests
         return w;
     }
 
-    public static void Run(Action<bool, string> check)
-    {
-        Console.WriteLine("== Apps left running with no window (launch.quitWhenWindowless)");
+    public static void Run() => T.Group("Apps left running with no window (launch.quitWhenWindowless)", Checks);
 
+    static readonly Action<bool, string> check = T.Check;
+
+    static void Checks()
+    {
         // Its window hidden after two minutes (Stremio to a notification area the TV lacks).
         {
             var steps = Run(Opened(), 125, 400, None);

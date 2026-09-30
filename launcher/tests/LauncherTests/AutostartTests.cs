@@ -9,21 +9,15 @@ namespace Htpc.Launcher;
 // checks the SYSTEM side (HKLM, the user's hive, Startup folders, tasks, services).
 static class AutostartTests
 {
-    static Action<bool, string> Check = null!;
+    static readonly Action<bool, string> Check = T.Check;
 
-    public static void Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
-        Console.WriteLine("== Autostart: HKCU Run values (a fake registry)");
-        RunValues();
-        Console.WriteLine("== Autostart: this user's Startup folder (a temp folder, shortcuts faked)");
-        StartupFolder();
-        Console.WriteLine("== Autostart: whose a value is, what is never touched");
-        Owners();
-        Console.WriteLine("== Autostart: the apps' prefs files");
-        Prefs();
-        Console.WriteLine("== Autostart: the catalog");
-        Catalog();
+        T.Group("Autostart: HKCU Run values (a fake registry)", RunValues);
+        T.Group("Autostart: this user's Startup folder (a temp folder, shortcuts faked)", StartupFolder);
+        T.Group("Autostart: whose a value is, what is never touched", Owners);
+        T.Group("Autostart: the apps' prefs files", Prefs);
+        T.Group("Autostart: the catalog", Catalog);
     }
 
     /// <summary>Run keys in memory: what the guard read and removed, never the real registry.</summary>

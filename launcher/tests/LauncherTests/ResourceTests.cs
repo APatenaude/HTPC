@@ -16,9 +16,17 @@ static class ResourceTests
     static ProcUse P(uint pid, uint parent, string name, long cpu = 0, long mb = 10, uint session = User, long created = 100) =>
         new(pid, parent, created, name, session, cpu, mb * 1024 * 1024);
 
-    public static void Run(Action<bool, string> check)
+    public static void Run()
     {
-        Console.WriteLine("== Resource view: programs, the top three, what may be stopped");
+        T.Group("Resource view: programs, the top three, what may be stopped", Rules);
+        T.Group("Resource view: sampling this machine", Live);
+        T.Group("Resource view: ending only the process that was sampled", EndOnlyTheSame);
+    }
+
+    static readonly Action<bool, string> check = T.Check;
+
+    static void Rules()
+    {
         var procs = new List<ProcUse>
         {
             P(0, 0, "", cpu: 30 * Tick, session: Services),                          // Idle: never a program
@@ -111,16 +119,12 @@ static class ResourceTests
             && Off("ImageNameLength") == 56 && Off("ImageNameBuffer") == 64 && Off("UniqueProcessId") == 80
             && Off("InheritedFromUniqueProcessId") == 88 && Off("SessionId") == 100,
             "SYSTEM_PROCESS_INFORMATION: every field read where Windows puts it");
-
-        Live(check);
-        EndOnlyTheSame(check);
     }
 
     // The sampler on this machine: two reports, their numbers sane, the launcher's own row (this
     // test is "the launcher" here) never stoppable, a held row that is gone, and the cost.
-    static void Live(Action<bool, string> check)
+    static void Live()
     {
-        Console.WriteLine("== Resource view: sampling this machine");
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
         var watch = new ResourceWatch(new AppManager(Path.Combine(root!.FullName, "setup", "catalog.json")));
@@ -163,7 +167,7 @@ static class ResourceTests
         var first = times[0];
         var after = times.Skip(1).DefaultIfEmpty(first).ToList();
         var (report, cpu, list) = (after.Average(t => t.Report), after.Average(t => t.Cpu), after.Average(t => t.List));
-        Console.WriteLine($"  a sample and its report: {first.Report:0.0} ms the first time (the JSON's first use); then {cpu:0.0} ms of CPU, " +
+        T.Info($"a sample and its report: {first.Report:0.0} ms the first time (the JSON's first use); then {cpu:0.0} ms of CPU, " +
             $"{report:0.0} ms by the clock (each: {string.Join(", ", after.Select(t => $"{t.Report:0.0}"))}), the process list {list:0.0} ms of it " +
             $"({Process.GetProcesses().Length} processes)");
         // (Without the processor's clock in the registry, the time by the clock, more loosely.)
@@ -172,7 +176,7 @@ static class ResourceTests
 
     // Ending a program checks each process is still the one the sample saw: a new one with the
     // same id is left alone. Access denied (the System process) is said, not thrown.
-    static void EndOnlyTheSame(Action<bool, string> check)
+    static void EndOnlyTheSame()
     {
         using var child = Process.Start(new ProcessStartInfo("ping.exe", "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
         var created = child.StartTime.ToFileTimeUtc();

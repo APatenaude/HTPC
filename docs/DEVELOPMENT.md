@@ -92,9 +92,9 @@ that did the work; none of them belongs in the (public) repo:
 
 | Task | Command |
 |---|---|
-| After a change: build + the 4 test projects, one line each | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests`, `-Ui` adds the condensed UI self-test) |
+| After a change: build + the 3 test projects, one line each | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests`, `-Ui` adds the condensed UI self-test) |
 | Build | `dotnet build launcher\src\Launcher\Launcher.csproj -c Release` |
-| Run one test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (also TileTests, PhoneTests, AlertsTests, `launcher\dev\TvLab`) |
+| Run one test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (also PhoneTests, AlertsTests, `launcher\dev\TvLab`); LauncherTests prints its groups and failures, `-- -v` every check, `-- Logos` only the groups named so |
 | The UI self-test and audit walker | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest` |
 | The UI in a plain browser | open `launcher\ui\index.html` (demo data; `#selftest`, `#audit`, `#settings` routes) |
 | The phone app's checks | open `launcher\dev\phone-test.html` in Edge (or it runs headless in Test-All) |

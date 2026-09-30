@@ -11,21 +11,16 @@ using Htpc.Launcher;
 /// </summary>
 static class AddTileTests
 {
-    static Action<bool, string> Check = (_, _) => { };
+    static readonly Action<bool, string> Check = T.Check;
 
-    public static async Task Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "setup", "catalog.json"))) root = root.Parent;
-        Console.WriteLine("== Add tile: a program's icon in On this box");
-        await ProgramIcons();
-        Console.WriteLine("== Add tile: a program tile is maximized, not filled");
-        ProgramFills(root!.FullName);
-        Console.WriteLine("== Catalog: categories");
-        Categories(root.FullName);
-        Console.WriteLine("== On-screen keyboard: its window as high as its page");
-        KeyboardBand(root.FullName);
+        T.GroupAsync("Add tile: a program's icon in On this box", ProgramIcons);
+        T.Group("Add tile: a program tile is maximized, not filled", () => ProgramFills(root!.FullName));
+        T.Group("Catalog: categories", () => Categories(root!.FullName));
+        T.Group("On-screen keyboard: its window as high as its page", () => KeyboardBand(root!.FullName));
     }
 
     static byte[] Png(Color color)

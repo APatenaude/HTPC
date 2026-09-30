@@ -1,13 +1,14 @@
 using Htpc.Launcher;
 
-// Checks of the launcher's logic (launcher\dev\Checks\Checks.csproj). Each area is a method
-// below; the exit code is the number of failed checks.
+// Checks of the alerts, app exits, internet rules, Wi-Fi profiles and Bluetooth pairing and sound
+// (dotnet run -c Release in this folder; -v prints every check). Each area is a class below; the
+// exit code is the number of failed checks.
 
-AppExitChecks.Run();
-AlertChecks.Run();
-InternetChecks.Run();
-WifiChecks.Run();
-BluetoothChecks.Run();
+T.Area("App exits", AppExitChecks.Run);
+T.Area("Alerts", AlertChecks.Run);
+T.Area("Internet", InternetChecks.Run);
+T.Area("Wi-Fi", WifiChecks.Run);
+T.Area("Bluetooth", BluetoothChecks.Run);
 return T.Summary();
 
 static class WifiChecks

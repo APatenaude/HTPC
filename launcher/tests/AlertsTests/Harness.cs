@@ -11,18 +11,28 @@ static class Log
     public static void Error(string message, Exception? e = null) => Lines.Enqueue("ERROR " + message + (e is null ? "" : ": " + e.Message));
 }
 
-/// <summary>Pass/fail bookkeeping: each check prints one line; the exit code is the number failed.</summary>
+/// <summary>
+/// Pass/fail bookkeeping: a "== group" line per group and a line per failed check (-v: every
+/// check); each area runs in a try of its own (a throw is one FAIL, the next area still runs).
+/// The exit code is the number failed.
+/// </summary>
 static class T
 {
     static int passed, failed;
-    static string group = "";
+    static readonly bool Verbose = Environment.GetCommandLineArgs().Contains("-v");
 
-    public static void Group(string name) { group = name; Console.WriteLine($"-- {name}"); }
+    public static void Group(string name) => Console.WriteLine($"== {name}");
+
+    public static void Area(string name, Action run)
+    {
+        try { run(); }
+        catch (Exception e) { Check($"{name}: {e.GetType().Name}: {e.Message}", false); }
+    }
 
     public static void Check(string name, bool ok, string? detail = null)
     {
         if (ok) passed++; else failed++;
-        Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {name}{(ok || detail is null ? "" : $"  [{detail}]")}");
+        if (!ok || Verbose) Console.WriteLine($"  {(ok ? "ok  " : "FAIL")} {name}{(ok || detail is null ? "" : $"  [{detail}]")}");
     }
 
     public static void Equal<TV>(string name, TV expected, TV actual) =>

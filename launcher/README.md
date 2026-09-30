@@ -821,7 +821,7 @@ redirect chain and every file with the box's own code.
 A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, build, checks), then
 [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md).
 
-    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Quick.ps1            # build + the 4 test projects, one line each (-Ui: the UI too)
+    powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Quick.ps1            # build + the 3 test projects, one line each (-Ui: the UI too)
     powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1              # everything: build, tests, UI audit, phone page
     powershell -ExecutionPolicy Bypass -File launcher\dev\Merge-Branch.ps1 -Ref <branch> -Message "Merge ..." -Test
     powershell -ExecutionPolicy Bypass -File launcher\dev\Save-Screenshots.ps1 -Shots @(@{ Url = '...'; Out = '...' })
@@ -855,7 +855,8 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   account than the signed-in one.
 - Also desktop mode's tray icon on a fake taskbar and registry: when it shows, each notification,
   TaskbarCreated, Back to TV reaching the launcher's window.
-- `launcher\tests\TileTests` (website addresses and tile edits), `launcher\tests\PhoneTests` (the phone
+- Also in LauncherTests: added tiles' website addresses and fields (`TileStoreTests.cs`).
+- `launcher\tests\PhoneTests` (the phone
   remote, its server on 127.0.0.1), `launcher\tests\AlertsTests` (alerts, app exits, internet rules,
   Wi-Fi profiles and passwords).
 - The page's own checks: `launcher\dev\Test-Ui.ps1 -SelfTest`; screenshots:

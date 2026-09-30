@@ -10,7 +10,7 @@ namespace Htpc.Launcher;
 // stands for the launcher's. Then keeping it on the taskbar (TrayPromotion) on a fake registry.
 static class DesktopTrayTests
 {
-    static Action<bool, string> Check = null!;
+    static readonly Action<bool, string> Check = T.Check;
 
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
@@ -46,16 +46,11 @@ static class DesktopTrayTests
 
     static IntPtr Notification(int what, uint id = DesktopTray.IconId) => (IntPtr)(what | (int)(id << 16));
 
-    public static void Run(Action<bool, string> check)
+    public static void Run()
     {
-        Check = check;
-        Console.WriteLine("== Desktop mode's tray icon: when, and what each press does");
-        WhenWanted();
-        Choices();
-        Console.WriteLine("== Desktop mode's tray icon: the taskbar, and Back to TV to the launcher's window");
-        OnTheTaskbar();
-        Console.WriteLine("== Desktop mode's tray icon: kept on the taskbar (a fake registry)");
-        Promotion();
+        T.Group("Desktop mode's tray icon: when, and what each press does", () => { WhenWanted(); Choices(); });
+        T.Group("Desktop mode's tray icon: the taskbar, and Back to TV to the launcher's window", OnTheTaskbar);
+        T.Group("Desktop mode's tray icon: kept on the taskbar (a fake registry)", Promotion);
     }
 
     static void WhenWanted()
