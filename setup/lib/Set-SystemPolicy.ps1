@@ -315,7 +315,7 @@ $vbs = $false
 foreach ($v in @("$dg\Scenarios\HypervisorEnforcedCodeIntegrity", 'Enabled'), @($dg, 'EnableVirtualizationBasedSecurity'), @($lsa, 'LsaCfgFlags')) {
     if (Set-KeptValue $v[0] $v[1] 0) { $vbs = $true }
 }
-if ($held) { Write-Attention "memory integrity or Credential Guard may stay on: kept by $($held -join ' and ') (left alone)" }
+if ($held) { Write-Attention "memory integrity or Credential Guard may stay on: kept by $($held -join ' and ') (nothing more is tried)" }
 if ($vbs) { Add-RestartReason 'memory integrity and Credential Guard off' }
 else {
     # 1 Credential Guard, 2 memory integrity (Win32_DeviceGuard); none where VBS cannot run (a VM without nesting).
