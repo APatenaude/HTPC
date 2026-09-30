@@ -85,7 +85,7 @@ that did the work; none of them belongs in the (public) repo:
 | `launcher/tests/*`, `launcher/dev/TvLab` | Console test projects: `dotnet run -c Release`, exit 0 = pass |
 | `launcher/dev` | Dev and release scripts (below) |
 | `setup` | `setup.ps1` and its steps in `lib/`, the SYSTEM job verbs in `jobs/`, `catalog.json` (the apps), `autounattend/` (USB install), `test/` (setup tests, the VM tools) |
-| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator) |
+| `.github/workflows/tests.yml` | Every test, on every push (two jobs side by side, as an administrator: the .NET test projects and TvLab; setup's four PowerShell tests) |
 | `.github/workflows/release.yml` | Builds and publishes a release from a `v*` tag whose commit passed Tests |
 
 ## 3. The everyday loop

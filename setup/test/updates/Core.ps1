@@ -2,13 +2,12 @@
 # Dot-sourced by Test-Updates.ps1 (its script scope: Check, Section, $lib, $work...).
 
 Write-Host 'Core'
-# The start of every update job, as the real jobs call it (the fake jobs below skip it): a bare
-# 0x80000001 there stopped every update from 1.0.0 to 1.0.4 before it began.
-$enter = (& { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ". '$lib\UpdateCore.ps1'; try { Enter-UpdateJob; 'entered' } catch { `$_.Exception.Message }" 2>&1 | Out-String }).Trim()
-Check ($enter -eq 'entered') "an update job starts: keep-awake and low priority ($enter)"
-# The slow parts start first, side by side, and are checked below in their turn: the job
-# runner's and the bootstrap's own dry runs (a PowerShell each; a bad token is refused with
-# an error on stderr, and an exit code), and the real watchdog's compile (further down).
+# The slow parts start first, side by side, and are checked below in their turn (a PowerShell
+# each): the start of every update job, as the real jobs call it (the fake jobs below skip it: a
+# bare 0x80000001 there stopped every update from 1.0.0 to 1.0.4 before it began); the job
+# runner's and the bootstrap's own dry runs (a bad token is refused with an error on stderr, and
+# an exit code); and the real watchdog's compile (further down).
+$enterRun = Start-Child $psExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ". '$lib\UpdateCore.ps1'; try { Enter-UpdateJob; 'entered' } catch { `$_.Exception.Message }")
 $dryRuns = @(
     foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update') {
         @{ Accepted = $true; What = "job token accepted: $t"; Child = Start-PowerShell "$lib\Invoke-AppJob.ps1" @('-Job', $t, '-DryRun') }
@@ -56,6 +55,9 @@ static class Checks {
 '@)
 $wdExe = Join-Path $bin 'watchdog-checks.exe'
 $wdBuild = Start-Child $csc @('/nologo', '/target:exe', '/warnaserror+', '/main:Htpc.Watchdog.Checks', "/out:$wdExe", (Join-Path $repo 'launcher\src\Watchdog\Watchdog.cs'), $wdChecks)
+
+$enter = (Receive-Child $enterRun).Output.Trim()
+Check ($enter -eq 'entered') "an update job starts: keep-awake and low priority ($enter)"
 
 Check ((ConvertTo-SemVer '0.10.0') -gt (ConvertTo-SemVer '0.9.9')) '0.10.0 is newer than 0.9.9'
 Check ((ConvertTo-SemVer 'v1.2.3') -eq (ConvertTo-SemVer '1.2.3')) 'v1.2.3 is 1.2.3'

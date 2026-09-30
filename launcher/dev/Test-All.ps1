@@ -50,7 +50,7 @@ if (-not $SkipSetupTests) {
         $o = & powershell -NoProfile -ExecutionPolicy Bypass -File $s.FullName 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { $failed++ }
         "$($s.BaseName) => exit $LASTEXITCODE :: " + (($o -split "`n" | Where-Object { $_ -match 'passed|failed' } | Select-Object -Last 1) -join '').Trim()
-        $o -split "`n" | Where-Object { $_ -match '^\s*FAIL|Exception' } | Select-Object -First 6
+        $o -split "`n" | Where-Object { $_ -match '^\s*(FAIL|WARNING)|Exception' } | Select-Object -First 6
     }
 }
 

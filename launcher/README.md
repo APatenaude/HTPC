@@ -765,9 +765,10 @@ go, when the quiet check is due, an hour's wait after a failed one.
   section in `setup\test\updates\<Section>.ps1`) runs the update jobs against fakes under
   `%TEMP%\htpc-updtest`. Nothing on the machine changes.
 - The fakes: a fake GitHub on 127.0.0.1 (`Serve-FakeRelease.ps1`: bad redirects, lying lengths, 429,
-  404, wrong hashes), fake launchers (healthy, crashing, hanging) and a fake watchdog, the job ended
-  hard after every journal step, planted junctions / foreign owners / writable folders, and a faked
-  Windows Update child.
+  404, wrong hashes), fake launchers (healthy, crashing, hanging) and a fake watchdog (releases ship
+  theirs, as real ones do; a box can lack one), the job ended hard after every journal step (one
+  line per cut, naming what failed), planted junctions / foreign owners / writable folders, and a
+  faked Windows Update child.
 - Run it as SYSTEM too (a one-off scheduled task, in the test VM). The cases run side by side, each on
   a fake box of its own (`-Parallel 1`: one at a time).
 
