@@ -7,8 +7,10 @@
 //   clips them (a list's first and last rows: Wi-Fi, Bluetooth, button maps; the TV pane's bottom
 //   button; the Home menu's column scrolled to a program) and on screen, under no hint bar (the
 //   Home menu's quick buttons), covered by nothing (the Website form's fields and its preview).
-// - Each press: never wrapping round (the ends of the button maps list, the resource rows, the
-//   Home menu's quick buttons), 50 ms at most; everything reached; B leaves.
+// - Each press: never wrapping round (the ends of the button maps list, down from the last
+//   resource row, right from the Home menu's last quick button), 50 ms at most; everything
+//   reached; B leaves. Only a move against the press is seen: one sideways (a left from a
+//   full-width row going up to a button) is the self-test's to check.
 // - The page: no text spilling or cut off, the stage whole in the window (fit()), one hint bar
 //   (Tile options' over the home screen's), and the host's periodic pushes replayed without
 //   moving the focus or playing an entrance again.
@@ -287,6 +289,16 @@ async function auditWalk(page, report) {
     if (checked.size % AUDIT.tickEvery === 1) auditTick(page, report);
   };
   look(start);
+  // No directions walked (a state of a page walked whole elsewhere, a screen that takes every
+  // button): still every element, focused in turn, no press.
+  if (!page.dirs.length) {
+    for (const e of auditItems(page)) {
+      if (!e.dataset.id || checked.has(e.dataset.id)) continue;
+      AUDIT_IO.setFocus(e);
+      await null;
+      look(e);
+    }
+  }
   while (queue.length) {
     const id = queue.shift();
     for (const dir of page.dirs) {
