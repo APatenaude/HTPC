@@ -137,7 +137,8 @@ What the app sets up to start or run by itself, beyond what runs from its `launc
 
 ## Checks
 
-LauncherTests: the "Catalog: ..." groups in `Program.cs` (every app fills the screen, cropTop,
-menuKeys, no installer left on screen) and `AddTileTests.Categories` (categories, ASCII);
+LauncherTests: the "Catalog: ..." groups in `Program.cs` (every app fills the screen; launch
+options: fill, cropTop, menuKeys, ownController, clearBeforeStart; the apps dropped stay out),
+`WindowlessQuitTests.cs` (quitWhenWindowless) and `AddTileTests.Categories` (categories, ASCII);
 `AutostartTests.cs` and `setup\test\Test-Autostart.ps1 -Only Catalog` (autostart entries); PhoneTests
 (phoneKeys).
