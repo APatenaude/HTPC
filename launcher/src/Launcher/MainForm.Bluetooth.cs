@@ -35,12 +35,14 @@ sealed partial class MainForm
 
     /// <summary>
     /// OnLoad, once standby exists: the radio looked at now (a launcher that ended with it off,
-    /// something paired meanwhile: on again), and at each standby and wake. Not in setup.
+    /// something paired meanwhile: on again) and again a minute later (just after a boot Windows
+    /// may not list the radio yet), then at each standby and wake. Not in setup.
     /// </summary>
     void StartBluetoothRadio()
     {
         standby.Changed += active => LookAtBluetooth(active ? "standby" : "wake");
         LookAtBluetooth("the launcher started");
+        _ = Task.Delay(TimeSpan.FromMinutes(1)).ContinueWith(_ => LookAtBluetooth("a minute after the launcher started"), TaskScheduler.Default);
     }
 
     void LookAtBluetooth(string when) { if (!setupMode) _ = btRadio.Look(when); }

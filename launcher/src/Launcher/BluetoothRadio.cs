@@ -21,9 +21,10 @@ sealed record BluetoothRadioParts(
 ///   - Settings › Bluetooth is open (to look for devices and pair one), and for a minute after it
 ///     closes, or while a pairing runs (a controller still pairing is not cut off);
 ///   - the paired devices could not be read (never off on a failed look).
-/// Otherwise it goes off. Looked at when the launcher starts, when Settings › Bluetooth opens, a
-/// minute after it closes, when a pairing ends, at standby and at wake; not in between (the radio
-/// turned on in Windows' own settings, in desktop mode, is not fought over).
+/// Otherwise it goes off. Looked at when the launcher starts and a minute later
+/// (MainForm.Bluetooth.cs), when Settings › Bluetooth opens, a minute after it closes, when a
+/// pairing ends, at standby and at wake; not in between (the radio turned on in Windows' own
+/// settings, in desktop mode, is not fought over).
 ///
 /// The user's own choice wins. The rule turns off only a radio that is on, and turns on only one
 /// it turned off itself (the flag). Turned off with Settings › Bluetooth's switch (or in Windows),
