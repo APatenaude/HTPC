@@ -457,6 +457,7 @@ sealed class AppManager
             }
             wanted.Remove(match);
             Log.Info($"{match.Id} was already running (pid {p.Id}): taken over");
+            NormalIfLeftInStandby(match.Id, p);
             RunningChanged?.Invoke(match.Id, true);
             if (wanted.Count == 0) break;
         }
@@ -651,24 +652,46 @@ sealed class AppManager
 
     /// <summary>
     /// Standby: running apps go into Windows' Efficiency mode (idle priority and EcoQoS, the
-    /// economy clock), as Task Manager does; false puts them back to normal.
+    /// economy clock), as Task Manager does, and their requests for a faster system timer are
+    /// ignored (Native.SetEcoQos); false puts them back to normal.
     /// </summary>
     public void SetEfficiencyMode(bool on)
     {
         List<Process> list;
         lock (running) list = running.Values.Where(p => !p.HasExited).ToList();
-        foreach (var root in list)
-            foreach (var pid in Native.ProcessTree((uint)root.Id))
-            {
-                try
-                {
-                    using var p = Process.GetProcessById((int)pid);
-                    p.PriorityClass = on ? ProcessPriorityClass.Idle : ProcessPriorityClass.Normal;
-                    Native.SetEcoQos(p.Handle, on);
-                }
-                catch (Exception) { } // exited meanwhile, or not ours to change
-            }
+        foreach (var root in list) SetEfficiencyMode(root, on);
         Log.Info($"Apps {(on ? "in" : "out of")} efficiency mode ({list.Count} running)");
+    }
+
+    internal static void SetEfficiencyMode(Process root, bool on)
+    {
+        foreach (var pid in Native.ProcessTree((uint)root.Id))
+        {
+            try
+            {
+                using var p = Process.GetProcessById((int)pid);
+                p.PriorityClass = on ? ProcessPriorityClass.Idle : ProcessPriorityClass.Normal;
+                Native.SetEcoQos(p.Handle, on, ignoreTimer: on);
+            }
+            catch (Exception) { } // exited meanwhile, or not ours to change
+        }
+    }
+
+    /// <summary>
+    /// An app taken over at start that a launcher ending in standby left in Efficiency mode (it
+    /// crashed, or was ended): back to normal, or it would run at idle priority with its timer
+    /// requests ignored until the next standby. A launcher going back to standby (a handoff)
+    /// puts it there again.
+    /// </summary>
+    internal static void NormalIfLeftInStandby(string id, Process root)
+    {
+        try
+        {
+            if (!Native.LeftInStandby(root.Handle)) return;
+            SetEfficiencyMode(root, false);
+            Log.Info($"{id} was left in efficiency mode by a launcher that ended in standby: back to normal");
+        }
+        catch (Exception) { } // ended meanwhile, or not ours to read
     }
 
     public void Close(string id)

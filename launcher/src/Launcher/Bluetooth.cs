@@ -127,6 +127,22 @@ sealed class BluetoothService : IDisposable
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// No device is paired, from a fresh look (standby may then turn the radio off: no controller
+    /// or keyboard can be on Bluetooth). False when Windows does not answer in 10 s or fails: a
+    /// paired controller must never lose the radio on a failed look.
+    /// </summary>
+    public static async Task<bool> NothingPaired()
+    {
+        try
+        {
+            var aqs = Protocols + " AND System.Devices.Aep.IsPaired:=System.StructuredQueryType.Boolean#True";
+            var found = await DeviceInformation.FindAllAsync(aqs, Props, DeviceInformationKind.AssociationEndpoint).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            return found.Count == 0;
+        }
+        catch (Exception e) { Log.Warn($"Bluetooth: the paired devices not read ({e.GetType().Name}): the radio stays on in standby"); return false; }
+    }
+
     /// <summary>Looks for devices in pairing mode (while the user pairs one): on, or off.</summary>
     public void Discover(bool on)
     {

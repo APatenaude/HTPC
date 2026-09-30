@@ -235,13 +235,40 @@ static class Native
 
     [DllImport("kernel32.dll")]
     static extern bool SetProcessInformation(IntPtr process, int infoClass, ref PowerThrottlingState info, int size);
+    [DllImport("kernel32.dll")]
+    static extern bool GetProcessInformation(IntPtr process, int infoClass, ref PowerThrottlingState info, int size);
 
-    /// <summary>Execution-speed throttling on or off for a process (ProcessPowerThrottling).</summary>
-    public static void SetEcoQos(IntPtr process, bool on)
+    const uint ExecutionSpeed = 0x1, IgnoreTimerResolution = 0x4;
+
+    /// <summary>
+    /// Execution-speed throttling on or off for a process (ProcessPowerThrottling). ignoreTimer
+    /// (standby, with on): Windows also ignores the process's requests for a faster system timer
+    /// (timeBeginPeriod: players, SDL games, Chromium's windowless processes). One such request
+    /// keeps the whole box's timer at 1 ms, 1000 wake-ups a second, and Windows' own rule for it
+    /// leaves out processes without a window. Each call replaces the process's whole state: off
+    /// hands the timer back to Windows' rules (checked on the box, 29 Sept 2026: a program
+    /// holding 1 ms, the system timer 1 ms, 15.6 ms, then 1 ms again).
+    /// </summary>
+    public static void SetEcoQos(IntPtr process, bool on, bool ignoreTimer = false)
     {
-        const uint ExecutionSpeed = 0x1;
-        var state = new PowerThrottlingState { Version = 1, ControlMask = ExecutionSpeed, StateMask = on ? ExecutionSpeed : 0 };
-        SetProcessInformation(process, 4 /* ProcessPowerThrottling */, ref state, Marshal.SizeOf<PowerThrottlingState>());
+        var mask = on && ignoreTimer ? ExecutionSpeed | IgnoreTimerResolution : ExecutionSpeed;
+        var state = new PowerThrottlingState { Version = 1, ControlMask = mask, StateMask = on ? mask : 0 };
+        if (SetProcessInformation(process, 4 /* ProcessPowerThrottling */, ref state, Marshal.SizeOf<PowerThrottlingState>()) || mask == ExecutionSpeed) return;
+        // Windows before 11 knows no timer bit: the execution speed alone.
+        state = new PowerThrottlingState { Version = 1, ControlMask = ExecutionSpeed, StateMask = ExecutionSpeed };
+        SetProcessInformation(process, 4, ref state, Marshal.SizeOf<PowerThrottlingState>());
+    }
+
+    /// <summary>
+    /// The process is as standby leaves apps (SetEcoQos on, with the timer bit): put there by a
+    /// launcher that ended in standby, if this one did not.
+    /// </summary>
+    public static bool LeftInStandby(IntPtr process)
+    {
+        var state = new PowerThrottlingState { Version = 1 };
+        const uint Standby = ExecutionSpeed | IgnoreTimerResolution;
+        return GetProcessInformation(process, 4, ref state, Marshal.SizeOf<PowerThrottlingState>())
+            && (state.ControlMask & Standby) == Standby && (state.StateMask & Standby) == Standby;
     }
 
     // --- Process tree (Toolhelp) -----------------------------------------------------------

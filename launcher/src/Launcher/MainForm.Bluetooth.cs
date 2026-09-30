@@ -26,6 +26,25 @@ sealed partial class MainForm
         _ = RefreshBluetooth();
     }
 
+    /// <summary>
+    /// OnLoad, once standby exists: its Bluetooth switch (the radio off in standby while nothing
+    /// is paired, Standby.cs). OnLoad then turns it back on if the launcher before this one ended
+    /// in standby.
+    /// </summary>
+    void InitStandbyBluetooth()
+    {
+        standby.Bluetooth = new StandbyRadio("Bluetooth", BluetoothService.GetRadioState, SwitchForStandby,
+            BluetoothService.NothingPaired, "nothing paired");
+    }
+
+    // Switched by standby: Settings › Bluetooth, if it shows after the wake, says so at once.
+    async Task<bool> SwitchForStandby(bool on)
+    {
+        var done = await BluetoothService.SetRadio(on);
+        OnUiQueued(() => { if (btWanted) PostBluetooth(); });
+        return done;
+    }
+
     void BluetoothTick()
     {
         if (setupMode || standby is null || standby.Active) return;

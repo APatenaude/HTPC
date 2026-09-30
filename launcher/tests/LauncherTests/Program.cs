@@ -319,6 +319,175 @@ Console.WriteLine("== Start + D-pad (StartChord)");
     Check(AudioVolume.NextLevel(99, 2) == 100 && AudioVolume.NextLevel(100, 2) == 100 && AudioVolume.NextLevel(1, -2) == 0, "stays within 0 to 100");
 }
 
+// ---------------------------------------------------------------- Standby: waking with Home
+// The controller thread as standby runs it (Slow, WakeMode), from the moment Home goes down:
+// when the thread sees it, and when the 0.5 s hold is reached (the buzz and the wake come then).
+// Between presses it reads the real controller (none on a runner): the thread waits for the next
+// look for one, and a press made up with Inject must still get through at once.
+Console.WriteLine("== Standby: waking with Home");
+{
+    var controller = new ControllerService { Slow = true, WakeMode = true };
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    long downAt = -1, heldAt = -1;
+    controller.Pressed += (pad, repeat) =>
+    {
+        if (pad == Pad.HomeDown) Interlocked.Exchange(ref downAt, clock.ElapsedTicks);
+        if (pad == Pad.HomeHold) Interlocked.Exchange(ref heldAt, clock.ElapsedTicks);
+    };
+    PadState P(ushort b) => new(b, 0, 0, 0, 0, 0, 0);
+    double Ms(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+    controller.Start();
+    var seen = new List<double>();
+    var held = new List<double>();
+    for (var i = 0; i < 6; i++)
+    {
+        controller.Inject(null);   // the real controller again: the thread waits between looks
+        Thread.Sleep(650 + 37 * i); // presses fall at different points of that wait
+        Interlocked.Exchange(ref downAt, -1);
+        Interlocked.Exchange(ref heldAt, -1);
+        var pressed = clock.ElapsedTicks;
+        controller.Inject(P(0x0400));
+        for (var waited = 0; Interlocked.Read(ref heldAt) < 0 && waited < 2000; waited += 5) Thread.Sleep(5);
+        if (Interlocked.Read(ref downAt) >= 0) seen.Add(Ms(downAt - pressed));
+        if (Interlocked.Read(ref heldAt) >= 0) held.Add(Ms(heldAt - pressed));
+        controller.Inject(P(0)); Thread.Sleep(80);
+    }
+    controller.Dispose();
+    double Median(List<double> v) => v.Count == 0 ? double.NaN : v.OrderBy(x => x).ElementAt(v.Count / 2);
+    Console.WriteLine($"  Home seen after {Median(seen):0} ms (max {(seen.Count > 0 ? seen.Max() : double.NaN):0}), held (the buzz) after {Median(held):0} ms (max {(held.Count > 0 ? held.Max() : double.NaN):0})");
+    Check(seen.Count == 6 && seen.Max() < 100, $"standby: Home going down is seen within 100 ms, even between looks for a controller ({string.Join(", ", seen.Select(x => x.ToString("0")))})");
+    Check(held.Count == 6 && held.Min() >= 490 && held.Max() < 700, $"standby: the 0.5 s hold is reached 0.5 s after the press, not much later ({string.Join(", ", held.Select(x => x.ToString("0")))})");
+
+    // With no controller connected: awake, a look every 50 ms as ever; in standby, the thread
+    // waits for the next look for a controller (every 300 ms), however long is left.
+    Check(ControllerService.NoControllerWait(false, 1000, 1300) == 50 && ControllerService.NoControllerWait(false, 1000, 900) == 50, "no controller, awake: 50 ms waits as before");
+    Check(ControllerService.NoControllerWait(true, 1000, 1300) == 300 && ControllerService.NoControllerWait(true, 1000, 1150) == 150, "no controller, standby: until the next look");
+    Check(ControllerService.NoControllerWait(true, 1000, 900) == 1 && ControllerService.NoControllerWait(true, 1000, 99_000) == 300, "... a look already due at once, never more than 300 ms");
+}
+
+// ---------------------------------------------------------------- Standby: the radios it turns off
+// StandbyRadioSwitch with a made-up radio: the Wi-Fi on a cable and Bluetooth with nothing paired
+// go off in standby and come back at wake; the flag in settings brings the radio back after a
+// launcher that ended in standby; a refusal is tried again; a radio in use, or one the user
+// turned off, is left alone.
+Console.WriteLine("== Standby: the radios it turns off");
+{
+    var on = true;
+    var refuse = false;
+    var notNeeded = true;
+    var asked = new List<bool>();
+    var flag = false;
+    var saves = 0;
+    var radio = new StandbyRadio("Test", () => Task.FromResult(on ? "on" : "off"),
+        want => { asked.Add(want); if (refuse) return Task.FromResult(false); on = want; return Task.FromResult(true); },
+        () => Task.FromResult(notNeeded), "for the test");
+    StandbyRadioSwitch NewSwitch() => new(radio, () => flag, off => flag = off, () => saves++);
+    void Reset() { on = true; refuse = false; notNeeded = true; asked.Clear(); flag = false; saves = 0; }
+
+    var s = NewSwitch();
+    s.Off(() => true).Wait();
+    Check(!on && flag && saves == 1 && asked.SequenceEqual(new[] { false }), "standby: the radio goes off, and settings say so");
+    Check(Log.Lines.Contains("INFO Standby: Test radio off (for the test)"), "... logged with why");
+    s.Back("wake").Wait();
+    Check(on && !flag && saves == 2, "wake: back on, the flag cleared");
+    s.Back("wake").Wait();
+    Check(asked.Count == 2, "a second wake asks nothing more");
+
+    // The launcher ended in standby (a crash, the watchdog starts another): the next one's start.
+    Reset();
+    NewSwitch().Off(() => true).Wait();
+    NewSwitch().Back("the launcher started").Wait();
+    Check(on && !flag, "a launcher that ended in standby: the next one turns the radio back on at start");
+
+    // Windows refuses to turn it back on: the flag stays, and the next wake or start tries again.
+    Reset();
+    s = NewSwitch();
+    s.Off(() => true).Wait();
+    refuse = true;
+    s.Back("wake").Wait();
+    Check(!on && flag && Log.Lines.Contains("WARN Test radio back on (wake): Windows refused; tried again at the next wake or start"), "back on refused: still off, flag kept, logged");
+    refuse = false;
+    NewSwitch().Back("the launcher started").Wait();
+    Check(on && !flag, "... the next start turns it on");
+
+    // Refused going off: nothing is kept (nothing to bring back).
+    Reset();
+    refuse = true;
+    NewSwitch().Off(() => true).Wait();
+    Check(on && !flag && saves == 0, "off refused: left as it was, no flag");
+
+    // In use (the Wi-Fi joined, something paired), or turned off by the user: left alone, then as well.
+    Reset();
+    notNeeded = false;
+    s = NewSwitch();
+    s.Off(() => true).Wait();
+    Check(on && !flag && asked.Count == 0, "needed through standby: not touched");
+    Reset();
+    on = false;
+    s = NewSwitch();
+    s.Off(() => true).Wait();
+    s.Back("wake").Wait();
+    Check(!on && !flag && asked.Count == 0, "off already (the user's switch): not touched, and not turned on at wake");
+
+    // Woken while it was being turned off: straight back on.
+    Reset();
+    var looks = 0;
+    NewSwitch().Off(() => looks++ == 0).Wait();
+    Check(on && !flag && asked.SequenceEqual(new[] { false, true }), "woken while it went off: back on at once");
+    Check(Log.Lines.Contains("INFO Test radio back on (woken meanwhile)"), "... logged");
+
+    // Woken before it was looked at: nothing asked.
+    Reset();
+    NewSwitch().Off(() => false).Wait();
+    Check(on && asked.Count == 0, "woken before: nothing asked");
+
+    // The look at what needs it fails (Windows does not answer): left alone, logged.
+    Reset();
+    var failing = radio with { NotNeeded = () => Task.FromException<bool>(new TimeoutException("no answer")) };
+    new StandbyRadioSwitch(failing, () => flag, off => flag = off, () => saves++).Off(() => true).Wait();
+    Check(on && !flag && Log.Lines.Contains("WARN Standby: Test radio: no answer"), "a failing look: left on, logged");
+
+    var json = JsonSerializer.Serialize(new LauncherSettings { BluetoothOffInStandby = true }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    Check(json.Contains("\"bluetoothOffInStandby\":true") && json.Contains("\"wifiOffInStandby\":false"), "settings keep both radios' flags");
+}
+
+// ---------------------------------------------------------------- Standby: apps in efficiency mode
+// A real process (ping, a few seconds) as an app: standby's efficiency mode (idle priority,
+// EcoQoS, its timer requests ignored), read back from Windows; the wake's call hands the timer
+// back (each call replaces the state); a launcher starting after one that ended in standby puts
+// the app back to normal; EcoQoS alone (the updater's jobs) is not mistaken for standby.
+Console.WriteLine("== Standby: apps in efficiency mode");
+{
+    System.Diagnostics.Process Child() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+        Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 8 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
+    using var app = Child();
+    try
+    {
+        Check(!Native.LeftInStandby(app.Handle), "a new process: not in standby's state");
+        AppManager.SetEfficiencyMode(app, true);
+        app.Refresh();
+        Check(Native.LeftInStandby(app.Handle) && app.PriorityClass == System.Diagnostics.ProcessPriorityClass.Idle, "standby: idle priority, EcoQoS and timer requests ignored");
+        AppManager.SetEfficiencyMode(app, false);
+        app.Refresh();
+        Check(!Native.LeftInStandby(app.Handle) && app.PriorityClass == System.Diagnostics.ProcessPriorityClass.Normal, "wake: normal priority, the timer bit gone with the new state");
+
+        // Left in standby's state by a launcher that ended (as if it crashed): taken over, back to normal.
+        AppManager.SetEfficiencyMode(app, true);
+        AppManager.NormalIfLeftInStandby("ping", app);
+        app.Refresh();
+        Check(!Native.LeftInStandby(app.Handle) && app.PriorityClass == System.Diagnostics.ProcessPriorityClass.Normal, "taken over after a launcher ended in standby: back to normal");
+        Check(Log.Lines.Any(l => l.Contains("ping was left in efficiency mode")), "... logged");
+
+        // EcoQoS without the timer bit (UpdateService's jobs, below normal): not standby's, left alone.
+        app.PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal;
+        Native.SetEcoQos(app.Handle, true);
+        AppManager.NormalIfLeftInStandby("ping", app);
+        app.Refresh();
+        Check(!Native.LeftInStandby(app.Handle) && app.PriorityClass == System.Diagnostics.ProcessPriorityClass.BelowNormal, "EcoQoS alone (an update job): left as it is");
+    }
+    finally { try { app.Kill(); } catch (Exception) { } }
+}
+
 // ---------------------------------------------------------------- VideoEndDetector
 Console.WriteLine("== VideoEndDetector");
 {

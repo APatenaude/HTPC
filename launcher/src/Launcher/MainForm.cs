@@ -149,6 +149,8 @@ sealed partial class MainForm : Form
             standby = new Standby(controller, settings, media);
             standby.Changed += OnStandbyChanged;
             InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
+            InitStandbyBluetooth(); // MainForm.Bluetooth.cs: the Bluetooth radio off in standby, nothing paired
+            _ = standby.RadiosBack("the launcher started"); // if the launcher before this one ended in standby
             standby.GoingDown += () =>
             {
                 Post(new { type = "show", view = "home" });
@@ -163,6 +165,10 @@ sealed partial class MainForm : Form
             Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}, Modern Standby {Standby.ModernStandby()}");
             controller.Start();
             clock.Start();
+            // Nothing the 200 ms watch looks after is needed in standby (the pointer, the button
+            // map, where alerts go): its first tick in standby puts all that in its standby state,
+            // then it stops until the wake (OnStandbyChanged). Added last: it runs after the others.
+            mouseWatch.Tick += (_, _) => { if (mouseWatchPaused) mouseWatch.Stop(); };
             mouseWatch.Start();
         }
         catch (Exception ex)
@@ -1157,6 +1163,7 @@ sealed partial class MainForm : Form
     }
 
     string? appBeforeStandby;
+    bool mouseWatchPaused;   // from standby's announcement to its wake: the 200 ms watch stops (OnLoad)
 
     // Standby: the launcher goes in front as a black screen (the display is off anyway). Apps
     // behind it get no controller input (Chromium and SDL apps read the pad only when in front)
@@ -1165,6 +1172,8 @@ sealed partial class MainForm : Form
     void OnStandbyChanged(bool active)
     {
         Log.Info(active ? "In standby" : "Awake");
+        mouseWatchPaused = active;
+        if (!active) mouseWatch.Start();
         overlay.Suppress(active);
         volumeOsd.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.

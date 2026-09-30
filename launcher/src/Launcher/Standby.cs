@@ -71,6 +71,9 @@ sealed class LauncherSettings
     /// <summary>Standby turned the Wi-Fi radio off (on a cable): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
     public bool WifiOffInStandby { get; set; }
 
+    /// <summary>Standby turned the Bluetooth radio off (nothing paired): on again at wake, or at the next start if the launcher ended meanwhile.</summary>
+    public bool BluetoothOffInStandby { get; set; }
+
     /// <summary>
     /// The time of the elevated setup's copy (SetupCopyPath) this user's file last took in; null
     /// before any. A newer copy is taken in at the launcher's next start.
@@ -238,11 +241,53 @@ sealed class LauncherSettings
 }
 
 /// <summary>
-/// What standby needs of the Wi-Fi (WifiService, set by MainForm.Wifi.cs): the radio's state
-/// ("on", "off", "disabled", "none"), switching it, and whether the box is on its cable with the
-/// Wi-Fi joined to nothing.
+/// What standby needs of a radio it may turn off (the Wi-Fi: MainForm.Wifi.cs; Bluetooth:
+/// MainForm.Bluetooth.cs): its state ("on", "off", "disabled", "none"), switching it, and whether
+/// nothing needs it through standby (the Wi-Fi: the box is on its cable with the Wi-Fi joined to
+/// nothing; Bluetooth: nothing is paired). Name and Why: for the log.
 /// </summary>
-sealed record StandbyRadio(Func<Task<string>> State, Func<bool, Task<bool>> Switch, Func<bool> CableOnly);
+sealed record StandbyRadio(string Name, Func<Task<string>> State, Func<bool, Task<bool>> Switch, Func<Task<bool>> NotNeeded, string Why);
+
+/// <summary>
+/// One radio standby turns off and waking turns back on (StandbyRadio). Its flag in settings
+/// (WifiOffInStandby, BluetoothOffInStandby) is set once the radio is off and cleared only once
+/// it is on again: a launcher that ended in standby turns it back on at its next start, and one
+/// Windows refused is tried again at the next wake or start, never left off for good. Only a
+/// radio that is on: one the user turned off stays off. Checked in launcher\tests\LauncherTests.
+/// </summary>
+sealed class StandbyRadioSwitch(StandbyRadio radio, Func<bool> turnedOff, Action<bool> setTurnedOff, Action save)
+{
+    /// <summary>Standby: the radio off if nothing needs it. inStandby: false once woken (the radio then comes straight back).</summary>
+    public async Task Off(Func<bool> inStandby)
+    {
+        try
+        {
+            if (turnedOff() || await radio.State() != "on" || !await radio.NotNeeded() || !inStandby()) return;
+            if (!await radio.Switch(false)) return;
+            setTurnedOff(true);
+            save();
+            Log.Info($"Standby: {radio.Name} radio off ({radio.Why})");
+            if (!inStandby()) await Back("woken meanwhile");
+        }
+        catch (Exception e) { Log.Warn($"Standby: {radio.Name} radio: {e.Message}"); }
+    }
+
+    /// <summary>The radio back on, if standby turned it off (at wake, or a start after a launcher that ended in standby).</summary>
+    public async Task Back(string why)
+    {
+        try
+        {
+            if (!turnedOff()) return;
+            // The flag goes only once the radio is on: refused, it is tried again at the next wake
+            // or start, not left off for good.
+            if (!await radio.Switch(true)) { Log.Warn($"{radio.Name} radio back on ({why}): Windows refused; tried again at the next wake or start"); return; }
+            setTurnedOff(false);
+            save();
+            Log.Info($"{radio.Name} radio back on ({why})");
+        }
+        catch (Exception e) { Log.Warn($"{radio.Name} radio back on: {e.Message}"); }
+    }
+}
 
 /// <summary>
 /// Sleep, in the mode chosen in Settings. Screen off (standby) is the default (decision of
@@ -259,8 +304,11 @@ sealed record StandbyRadio(Func<Task<string>> State, Func<bool, Task<bool>> Swit
 /// rest of the chip stays out of its deep idle states, likely kept up by the devices around it,
 /// the controller's dongle among them (its USB polling is what lets Home wake the box at once;
 /// S3 cannot: every interface of the dongle reports "deepest wake: S0", no USB remote wakeup).
-/// What standby can switch off without touching that wake is done here: the Wi-Fi radio on a
-/// cable (below). The rest needs a wall meter (launcher\dev\Measure-StandbyPower.ps1).
+/// What standby can switch off without touching that wake is done here and in MainForm: the
+/// Wi-Fi radio on a cable, the Bluetooth radio with nothing paired (below), the apps' faster
+/// timers (AppManager.SetEfficiencyMode), and the launcher's own polling it does not need for
+/// waking (ControllerService.NoControllerWait, MainForm's 200 ms watch). The rest needs a wall
+/// meter (launcher\dev\Measure-StandbyPower.ps1).
 /// </summary>
 sealed class Standby
 {
@@ -354,6 +402,7 @@ sealed class Standby
         var mine = ++turn;
         Log.Info($"Standby ({reason})");
         Active = true;
+        timerLogAt = Environment.TickCount64 + 60_000;
         controller.Slow = true;
         controller.WakeMode = true;
         // A frozen player may never answer (each call has 2 s: MediaWatcher): 5 s in all, then
@@ -377,47 +426,43 @@ sealed class Standby
         // No XInput power-off here: the 8BitDo ignores it (it switches itself off after 15 idle
         // minutes) and it was a suspect in missed wake presses.
         standbySince = Environment.TickCount64;
-        await WifiOff();
+        foreach (var radio in Radios()) await radio.Off(() => Active);
     }
 
-    /// <summary>The Wi-Fi radio, for standby (MainForm.Wifi.cs sets it); null: left alone.</summary>
-    public StandbyRadio? Wifi { get; set; }
+    StandbyRadioSwitch? wifi, bluetooth;
 
     /// <summary>
-    /// Standby on a cable: the Wi-Fi radio goes off, back on at wake. Joined to no network it
-    /// still scans for one every minute or so, and nothing needs it in standby. Only when the cable
-    /// is up and carries the internet and the Wi-Fi is joined to nothing (a phone may reach the box
-    /// through a joined Wi-Fi, and Wake-on-LAN too). Kept in settings, so a launcher that ended in
-    /// standby turns it back on at its next start (WifiBack).
+    /// The Wi-Fi radio, for standby (MainForm.Wifi.cs sets it); unset: left alone. On a cable it
+    /// goes off, back on at wake: joined to no network it still scans for one every minute or so,
+    /// and nothing needs it in standby. Only when the cable is up and carries the internet and the
+    /// Wi-Fi is joined to nothing (a phone may reach the box through a joined Wi-Fi, and
+    /// Wake-on-LAN too).
     /// </summary>
-    async Task WifiOff()
+    public StandbyRadio Wifi
     {
-        try
-        {
-            if (Wifi is not { } wifi || settings.WifiOffInStandby || !await Task.Run(wifi.CableOnly) || await wifi.State() != "on" || !Active) return;
-            if (!await wifi.Switch(false)) return;
-            settings.WifiOffInStandby = true;
-            settings.Save();
-            Log.Info("Standby: Wi-Fi radio off (on the cable, the Wi-Fi joined to nothing)");
-            if (!Active) await WifiBack("woken meanwhile");
-        }
-        catch (Exception e) { Log.Warn($"Standby: Wi-Fi radio: {e.Message}"); }
+        set => wifi = new(value, () => settings.WifiOffInStandby, off => settings.WifiOffInStandby = off, settings.Save);
     }
 
-    /// <summary>The Wi-Fi radio back on, if standby turned it off (at wake, or a start after a launcher that ended in standby).</summary>
-    public async Task WifiBack(string why)
+    /// <summary>
+    /// The Bluetooth radio, for standby (MainForm.Bluetooth.cs sets it); unset: left alone. With
+    /// nothing paired it goes off, back on at wake: no controller, keyboard or headphones of the
+    /// box can be on it, and Windows' Bluetooth services stay busy while it is on (on the box,
+    /// 29 Sept 2026, with nothing paired: bthserv, BthAvctpSvc and DeviceAssociationService woke
+    /// the processor about 1,500 times a second and used 160 million cycles a second, steadily
+    /// since the box started). A paired device, or a look at the paired devices that fails,
+    /// leaves it on (a Bluetooth controller must still wake the box).
+    /// </summary>
+    public StandbyRadio Bluetooth
     {
-        try
-        {
-            if (!settings.WifiOffInStandby || Wifi is not { } wifi) return;
-            // The flag goes only once the radio is on: refused, it is tried again at the next wake
-            // or start, not left off for good.
-            if (!await wifi.Switch(true)) { Log.Warn($"Wi-Fi radio back on ({why}): Windows refused; tried again at the next wake or start"); return; }
-            settings.WifiOffInStandby = false;
-            settings.Save();
-            Log.Info($"Wi-Fi radio back on ({why})");
-        }
-        catch (Exception e) { Log.Warn($"Wi-Fi radio back on: {e.Message}"); }
+        set => bluetooth = new(value, () => settings.BluetoothOffInStandby, off => settings.BluetoothOffInStandby = off, settings.Save);
+    }
+
+    IEnumerable<StandbyRadioSwitch> Radios() => new[] { wifi, bluetooth }.OfType<StandbyRadioSwitch>();
+
+    /// <summary>The radios standby turned off back on (at wake, or a start after a launcher that ended in standby).</summary>
+    public async Task RadiosBack(string why)
+    {
+        foreach (var radio in Radios()) await radio.Back(why);
     }
 
     /// <summary>What this PC supports, read from Windows (GetPwrCapabilities).</summary>
@@ -464,7 +509,7 @@ sealed class Standby
             Changed?.Invoke(false);
         }
         Log.Info($"Awake in {clock.ElapsedMilliseconds} ms (screen on after {screenMs} ms)");
-        _ = WifiBack("wake"); // after the screen: nothing of the wake waits for it
+        _ = RadiosBack("wake"); // after the screen: nothing of the wake waits for it
     }
 
     /// <summary>
@@ -491,6 +536,7 @@ sealed class Standby
         if (Active)
         {
             WarnIdle(false);
+            LogTimerOnce();
             if (settings.SleepAfterStandbyHours > 0 && Capabilities().Sleep && HoldOffRealSleep?.Invoke() != true &&
                 Environment.TickCount64 - standbySince >= (long)TimeSpan.FromHours(settings.SleepAfterStandbyHours).TotalMilliseconds)
             {
@@ -525,6 +571,20 @@ sealed class Standby
         if (on == idleWarned) return;
         idleWarned = on;
         IdleWarning?.Invoke(on);
+    }
+
+    [DllImport("ntdll.dll")] static extern int NtQueryTimerResolution(out uint coarsest, out uint finest, out uint current);
+    long timerLogAt = long.MaxValue;   // tick count: a minute into standby; MaxValue: logged
+
+    // A minute into standby, once: the system timer. Windows' own is 15.6 ms; faster means a
+    // program asked for it (apps' requests are ignored in standby: AppManager.SetEfficiencyMode),
+    // and every processor then wakes that often: a lead for what the box draws in standby.
+    void LogTimerOnce()
+    {
+        if (Environment.TickCount64 < timerLogAt) return;
+        timerLogAt = long.MaxValue;
+        if (NtQueryTimerResolution(out var coarsest, out _, out var current) != 0) return;
+        Log.Info($"Standby: the system timer at {current / 10_000.0:0.0##} ms{(current < coarsest ? " (a program asks for a faster one than Windows' own)" : "")}");
     }
 
     static Guid? ActivePlan()
