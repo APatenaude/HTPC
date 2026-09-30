@@ -1,7 +1,7 @@
 'use strict';
 // Self-test: the Home menu's resource view, the menu over an app. Run by selftest.js, in its order.
-// Its rows' ends (the focus stays; nothing wraps round): the audit.
-selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focusId }) => {
+// Down from its last row wrapping round to the top: the audit; left and right staying on a row: here.
+selftestGroup(async ({ check, checkRows, asksFirst, pin, until, sent, lastSent, focusId }) => {
   // ---- The Home menu's resource view (resources.js) ------------------------------------------------
   // Sampled only while the menu shows; patched in place, its rows kept under the focus. The D-pad
   // goes in and out along the column (in its old card the focus was stuck on the TV).
@@ -17,6 +17,11 @@ selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focus
   const partNames = () => shownParts().map((p) => p.dataset.part).join(',');
   const linedParts = () => shownParts().filter((p) => parseFloat(getComputedStyle(p).borderTopWidth) > 0).map((p) => p.dataset.part).join(',');
   const menuHintKeys = () => [...$('menu-panel').querySelectorAll('footer.hints .key')].map((k) => k.textContent).join(',');
+  // What the X hint says it does: a program ended, an app closed (not the same words; which words: not here).
+  const menuHintX = () => {
+    const h = [...$('menu-panel').querySelectorAll('footer.hints .hint')].find((e) => e.querySelector('.key').textContent === 'X');
+    return h ? h.lastElementChild.textContent : '';
+  };
   const resData = (top, extra) => ({ type: 'res.data', cpu: 42.4, memUsed: 5120, memTotal: 8192, disk: 12.5e6, down: 45.2e6, up: 1.2e6, top, held: [], ...extra });
   const RJ = { key: 'app:jellyfin', name: 'Jellyfin', app: 'jellyfin', cpu: 30.2, mem: 900, stop: true };
   const RX = { key: 'exe:long.exe', name: `Program ${'with a very long name '.repeat(3)}.exe`, app: null, cpu: 7.25, mem: 2048, stop: true };
@@ -31,7 +36,7 @@ selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focus
   sent.length = 0;
   let blankData;
   checkRows('Resources: sampled only while the menu is on screen; blank, the numbers go', [
-    ['the home screen', false], ['the menu', true, () => { press('home'); onHost(resData([RX])); }],
+    ['the home screen', false, () => reset('home')], ['the menu', true, () => { press('home'); onHost(resData([RX])); }],
     ['the launcher blank (an app in front, standby)', false, () => { onHost({ type: 'blank' }); blankData = res.data; }],
     ['the menu back', true, () => onHost({ type: 'show', view: 'menu', current: null })], ['the menu left', false, () => reset('home')],
   ].map(([what, on, step]) => { if (step) step(); return [what, sampling() === on, `sampling: ${sampling()}`]; })
@@ -60,9 +65,16 @@ selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focus
   const tiny = [...$('menu-res').querySelectorAll('*')].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())
     && parseFloat(getComputedStyle(e).fontSize) < 18);
   check('Resources: no text under 18 px', !tiny.length, tiny.map((e) => `${e.className || e.tagName} ${getComputedStyle(e).fontSize}`).join(', '));
+  const resRowHeights = [...$('menu-res').querySelectorAll('.rs-row')].map((r) => r.offsetHeight);
+  pin('the resource view at most 230 px tall (its line included), its rows 38 px', $('menu-res').offsetHeight <= 230 && resRowHeights.every((h) => h === 38),
+    `${$('menu-res').offsetHeight} px, rows ${resRowHeights.join(' ')}`);
   const inHome = presses(['down', 'down', 'down']);
   check('Resources, over the home screen: down from the volume, the brightness, a quick button, then the one program it can stop',
     new RegExp(`^brightness,q-\\w+,res:${RX.key.replace('.', '\\.')}$`).test(inHome), inHome);
+  // Its rows are the column's whole width: nothing beside them (a left went up to a quick button,
+  // d69fec9: the walker flags only a move against the press).
+  const stuckHome = presses(['down', 'left', 'right']);
+  check('Resources: ... on the last it can stop, down, left and right leave the focus there', stuckHome === [1, 2, 3].map(() => `res:${RX.key}`).join(','), stuckHome);
   const outHome = presses(['up', 'up']);
   check('Resources: ... up: out of it to a quick button, then the brightness; the rows follow the host again',
     /^q-\w+,brightness$/.test(outHome) && lastSent('res.watch').hold.length === 0, `${outHome}; ${JSON.stringify(lastSent('res.watch'))}`);
@@ -107,6 +119,7 @@ selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focus
   press('down');
   const onLong = focusedEl();
   check('Resources: on a program\'s row, the hints: X and B, nothing on A', menuHintKeys() === 'X,B', menuHintKeys());
+  const programX = menuHintX();
   onHost(resData([RW, { ...RX, cpu: 55 }, RJ]));
   check('Resources: a new ranking under the focus: the rows stay where they are, their numbers change',
     focusedEl() === onLong && rNode(RJ.key) === $('menu-res').querySelectorAll('.rs-row')[0] && onLong.textContent.includes(resPercent(55)), $('menu-res').textContent.slice(-120));
@@ -122,8 +135,14 @@ selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focus
   check('Resources: the focus off the rows: the ended one goes, the rows follow the host again',
     /^q-/.test(focusId()) && !rNode(RX.key) && lastSent('res.watch').hold.length === 0, outApp);
   press('down');
-  check('Resources: on an app\'s row, the hints: X (it closes the app) and B', focusId() === `res:${RJ.key}` && menuHintKeys() === 'X,B', `${focusId()}: ${menuHintKeys()}`);
+  check('Resources: on an app\'s row, the hints: X and B, X saying something else than on a program (it closes the app)',
+    focusId() === `res:${RJ.key}` && menuHintKeys() === 'X,B' && !!menuHintX() && menuHintX() !== programX, `${focusId()}: ${menuHintKeys()}; X: ${menuHintX()} / ${programX}`);
   asksFirst('Resources: X on an app\'s row', () => rNode(RJ.key), 'x', 'res.stop', { key: RJ.key });
+  // Yes: the app closing, both its rows say so (a tag) until the host no longer lists it.
+  const appRow = $('menu-panel').querySelector('[data-close="jellyfin"]');
+  check('Resources: ... Yes: the app is closing, its resource row and its menu row say so',
+    closing.has('jellyfin') && !!rNode(RJ.key).querySelector('.tag') && !!appRow && !!appRow.querySelector('.tag'),
+    `closing ${closing.has('jellyfin')}; resource row tag ${!!rNode(RJ.key).querySelector('.tag')}; menu row ${appRow ? appRow.innerHTML.slice(0, 80) : 'none'}`);
   doneClosing('jellyfin');
   reset('home');
   noticeUpdate({ toasts: [], rows: [], pills: [] });

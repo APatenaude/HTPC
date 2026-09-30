@@ -1,14 +1,16 @@
 'use strict';
 // Self-test: Add a tile, Rename. Run by selftest.js, in its order.
 // Fields are real inputs typed with the launcher's keyboard (none drawn in the page), clear of its
-// band. (A tile filling the screen: LauncherTests.) The form's parts clear of each other: the audit.
-selftestGroup(async ({ check, until, imagesIn, sent, lastSent, tileEl, PNG1 }) => {
+// band. (A tile filling the screen: LauncherTests.)
+selftestGroup(async ({ check, pin, until, imagesIn, sent, lastSent, tileEl, PNG1 }) => {
   // ---- Add a tile: on this box, a website ------------------------------------------------------
   selftestFresh();
   state.libraryAvailable = true;
   const BAND = 440 / 1080;   // the keyboard's share of the screen's height (KeyboardForm.HeightOf1080, keyboard.css)
   const at = (id) => $('addtile').querySelector(`[data-id="${CSS.escape(id)}"]`);
   const kbTop = () => innerHeight * (1 - BAND);
+  const scale = () => $('stage').getBoundingClientRect().height / 1080;
+  const overlap = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
 
   // On this box: two of three icons made so far; the third comes with the list sent again.
   EXT.actions.addtile();
@@ -46,6 +48,15 @@ selftestGroup(async ({ check, until, imagesIn, sent, lastSent, tileEl, PNG1 }) =
   check('Website: the keyboard up at the bottom: the address is above it, nothing lifted', !document.querySelector('[data-kb-lift]')
     && at('wf-add').getBoundingClientRect().bottom <= kbTop(), `${at('wf-add').getBoundingClientRect().bottom} > ${kbTop()}`);
   textKeyboardAt(null);
+  // Every part clear of the others (the walker sees only what covers a field or a button, not a
+  // field painted over the preview or the header, nor the preview over the hints).
+  const parts = ['.at-header', '.lib-field[data-id="wf-url"]', '.lib-field[data-id="wf-name"]', '.lib-buttons', '.ws-preview', 'footer.hints']
+    .map((s) => [s, $('addtile').querySelector(s).getBoundingClientRect()]);
+  const clash = parts.flatMap(([s, r], i) => parts.slice(i + 1).filter(([, q]) => overlap(r, q)).map(([u]) => `${s} / ${u}`));
+  check('Website: nothing in the form overlaps anything else', !clash.length, clash.join(', '));
+  // No line on how to bring the keyboard up (the hints say Type, d69fec9): no button chip in the form.
+  const form = $('addtile').querySelector('.ws-form');
+  pin('the Website form: no line on how to bring the keyboard up', !form.querySelector('.key') && !/R3/.test(form.textContent), form.textContent.slice(0, 120));
   sent.length = 0;
   textKey('enter');                                 // Enter on the keyboard
   check('Website: Enter adds it (the address typed, trimmed)', lastSent('library.addWebsite') && lastSent('library.addWebsite').url === 'example.org/tv', JSON.stringify(lastSent('library.addWebsite')));
@@ -95,6 +106,10 @@ selftestGroup(async ({ check, until, imagesIn, sent, lastSent, tileEl, PNG1 }) =
   const groupOf = (id) => at(id).closest('.lc-group').dataset.cat;
   check('Library: each card under its category, apps before websites', groupOf('app-app0') === 'movies' && groupOf('site-website4') === 'movies' && groupOf('app-app17') === ''
     && at('app-app0').compareDocumentPosition(at('site-website4')) === Node.DOCUMENT_POSITION_FOLLOWING);
+  // No room kept for a description (9c3bc25 took them out; the size, 7c9465f), in the stage's pixels.
+  const lc = at('app-app1').getBoundingClientRect(), top = at('app-app1').querySelector('.lc-top').getBoundingClientRect(), st = at('app-app1').querySelector('.lc-status').getBoundingClientRect();
+  pin('a library app card at most 132 px tall, its status at most 24 px under its name', lc.height / scale() <= 132 && (st.top - top.bottom) / scale() <= 24,
+    `${Math.round(lc.height / scale())} px, ${Math.round((st.top - top.bottom) / scale())} px gap`);
   setFocus(at('app-app0'));
   const jumps = [];
   for (const b of ['rt', 'rt', 'rt', 'rt', 'rt', 'rt', 'rt', 'lt', 'lt']) { press(b); jumps.push(groupOf(focusedEl().dataset.id)); }

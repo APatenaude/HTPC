@@ -82,6 +82,10 @@ function selftestFresh(running = []) {
   // Many cases, one check: rows of [what, ok, detail]; its detail names each that failed.
   const checkRows = (name, rows) => check(name, rows.every(([, ok]) => ok),
     rows.filter(([, ok]) => !ok).map(([what, , detail]) => (detail !== undefined && detail !== '' ? `${what}: ${detail}` : what)).join('; '));
+  // The owner's own sizes (a tile, the resource view, a library card, the keyboard's keys...), measured
+  // where each group has its page set up, checked together at the end: one check, 'layout pins'.
+  const pins = [];
+  const pin = (what, ok, detail) => pins.push([what, !!ok, detail]);
 
   // A question before something that cannot be undone: the button on target() asks it, on Cancel,
   // sending nothing of msgType; B, and Cancel, close it with the focus back on target; asked again,
@@ -123,7 +127,7 @@ function selftestFresh(running = []) {
   // Every image in el loaded (or failed: its error handler has run by then).
   const imagesIn = (el) => [...el.querySelectorAll('img')].every((i) => i.complete);
 
-  const shared = { check, checkRows, asksFirst, until, imagesIn, tick, key, sent, lastSent, pressed, soundsRendered, sNode, focusId, tileEl, PNG1, heard };
+  const shared = { check, checkRows, pin, asksFirst, until, imagesIn, tick, key, sent, lastSent, pressed, soundsRendered, sNode, focusId, tileEl, PNG1, heard };
 
   async function run() {
     // A group without an await runs straight into the next, as when this was one function. One that
@@ -137,6 +141,9 @@ function selftestFresh(running = []) {
         selftestFresh();
       }
     }
+    // 6: home, resources, addtile (2), pages (2 sizes, their keys); fewer if a group stopped early.
+    checkRows('layout pins: the owner\'s sizes (tiles, the resource view, library cards, the Website form, the keyboard\'s keys)',
+      pins.length === 6 ? pins : [...pins, [`${pins.length} of 6 measured`, false]]);
 
     // ---- The UI audit: every page walked with the D-pad (audit.js) ---------------------------------
     press = realPress;   // eslint-disable-line no-global-assign

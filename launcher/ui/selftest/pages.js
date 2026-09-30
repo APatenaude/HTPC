@@ -1,7 +1,7 @@
 'use strict';
 // Self-test: fit() on every page (its fixed stage scaled to any screen), and the launcher's other
 // pages in a frame: setup's app list, the on-screen keyboard. Run by selftest.js, in its order.
-selftestGroup(async ({ check, checkRows }) => {
+selftestGroup(async ({ check, checkRows, pin }) => {
   const overlap = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
 
   // A frame holding one of the launcher's other pages (the same origin: its scripts can be
@@ -17,13 +17,14 @@ selftestGroup(async ({ check, checkRows }) => {
     f.contentWindow.console.log = () => {};
     return f;
   }
-  // The frame at another size, once its page has had the resize (its fit() runs on it).
-  const resize = (f, w, h) => new Promise((done) => {
-    if (f.contentWindow.innerWidth === w && f.contentWindow.innerHeight === h) { done(); return; }
-    f.contentWindow.addEventListener('resize', done, { once: true });
+  // The frame at another size, once its page has had the resize (its fit() runs on it): true, or
+  // false if none came within 2 s (the check that follows fails on it).
+  const resize = (f, w, h) => Promise.race([new Promise((done) => {
+    if (f.contentWindow.innerWidth === w && f.contentWindow.innerHeight === h) { done(true); return; }
+    f.contentWindow.addEventListener('resize', () => done(true), { once: true });
     f.style.width = `${w}px`;
     f.style.height = `${h}px`;
-  });
+  }), new Promise((done) => setTimeout(() => done(false), 2000))]);
 
   // ---- fit(): each page's stage whole on any screen ---------------------------------------------
   // Every page draws a fixed stage (1920x1080; the keyboard a 1920x440 band) that fit() scales to
@@ -66,11 +67,12 @@ selftestGroup(async ({ check, checkRows }) => {
     [...g.querySelectorAll('.su-app')].every((a) => suState.apps.find((x) => `app:${x.id}` === a.dataset.id).category === CATS[i].id)));
   // Not the audit's: a heading over an app, or the list under the buttons, covers no focus there.
   for (const [w, h] of [[1536, 864], [1920, 1080]]) {
-    await resize(su, w, h);
+    const resized = await resize(su, w, h);
     const list = sd.querySelector('.su-apps').getBoundingClientRect(), buttons = sd.querySelector('.su-buttons').getBoundingClientRect();
     const items = [...sd.querySelectorAll('.su-cat, .su-app')].map((e) => e.getBoundingClientRect());
     const clashes = items.filter((r, i) => items.slice(i + 1).some((q) => overlap(r, q))).length;
-    check(`Setup at ${w}x${h}: headings and apps clear of each other, the list above the buttons`, !clashes && list.bottom <= buttons.top, `${clashes} overlaps, ${list.bottom} / ${buttons.top}`);
+    check(`Setup at ${w}x${h}: headings and apps clear of each other, the list above the buttons`, resized && !clashes && list.bottom <= buttons.top,
+      `${resized ? '' : 'no resize in 2 s; '}${clashes} overlaps, ${list.bottom} / ${buttons.top}`);
   }
   sw.setFocus(sd.querySelector('.su-group:last-child .su-app'));
   sw.setFocus(sd.querySelector('.su-group:nth-child(3) .su-app'));
@@ -113,7 +115,7 @@ selftestGroup(async ({ check, checkRows }) => {
   check('Keyboard: LT is still Shift', kw.eval('shift') === 'once' && firstKey() === 'Q', firstKey());
   kw.onHost({ type: 'open', field: 'Password', password: true });
   for (const [w, h] of [[1920, 440], [1536, 352]]) {   // the band's window: the screen's width, 440/1080 of its height
-    await resize(kf, w, h);
+    const resized = await resize(kf, w, h);
     const hints = kd.getElementById('kb-hints'), band = kd.getElementById('kb').getBoundingClientRect(), s = w / 1920;
     // Each hint's buttons, as the bar shows them: LT and RT each their own, LB RB one; a password's Select too.
     const chips = [...hints.children].map((c) => [...c.querySelectorAll('.key')].map((k) => k.textContent).join(' '));
@@ -123,8 +125,12 @@ selftestGroup(async ({ check, checkRows }) => {
       `${hints.scrollWidth} > ${hints.clientWidth}, ${lastRight} / ${band.right - 96 * s}: ${chips.join(' | ')}`);
     const bar = hints.getBoundingClientRect();
     const out = [...kd.querySelectorAll('.kb-key')].filter((k) => { const r = k.getBoundingClientRect(); return r.top < band.top - 0.5 || r.bottom > bar.top + 0.5; });
-    check(`Keyboard at ${w} wide: the band fills its window, every key in it above the hints`, Math.abs(band.height - h) < 1 && !out.length,
-      `${band.height} px in ${h}; outside: ${out.map((k) => k.textContent).join(' ')}`);
+    check(`Keyboard at ${w} wide: the band fills its window, every key in it above the hints`, resized && Math.abs(band.height - h) < 1 && !out.length,
+      `${resized ? '' : 'no resize in 2 s; '}${band.height} px in ${h}; outside: ${out.map((k) => k.textContent).join(' ')}`);
+    // The owner's size: keys 46 px at least, the lowest row 4 px above the hints (stage pixels).
+    const keyH = kRow(1)[0].getBoundingClientRect().height, lowest = kRow(rows - 1)[0].getBoundingClientRect();
+    pin(`the keyboard's keys at ${w} wide: 46 px high at least, the lowest row 4 px above the hints`, keyH >= 46 * s && lowest.bottom + 4 * s <= bar.top,
+      `keys ${Math.round(keyH / s)} px, last row ${Math.round(lowest.bottom)} / hints ${Math.round(bar.top)}`);
   }
   kf.remove();
 });

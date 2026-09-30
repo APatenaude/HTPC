@@ -400,7 +400,8 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
    `({ check, sent, lastSent, ... })` (the list in `ui/selftest.js`: `checkRows` for many cases in one
    check, `asksFirst` for a question before something that cannot be undone, `until` to wait for an
    event). Not what the walker checks on every page (a ring cut, a list's ends, one hint bar:
-   `ui/audit.js`'s header), nor exact wording or pixel sizes. A new area: a file with
+   `ui/audit.js`'s header), nor exact wording; a size the owner decided (a tile, a key) is a
+   `pin(...)`, all checked together as 'layout pins'. A new area: a file with
    `selftestGroup(...)` starting from `selftestFresh()`, its name in `SELFTEST_FILES`.
 2. `ui/audit/home.js` or `settings.js` (index.html), `setup.js`, `keyboard.js`: `auditPage('name', { view,
    open() { auditFresh(); ...stress data...; go(view); }, scope, dirs, back, hints, tick })`. Every
