@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Checks installing and uninstalling catalog apps from the TV (SPEC W5) in the Hyper-V test VM.
+    Checks installing and uninstalling catalog apps from the TV (SPEC W5) in the test VM (the Incus VM,
 
 .DESCRIPTION
     Run inside the VM, elevated, after a clean install where setup has run (winget provisioned for
@@ -11,8 +11,8 @@
 
     Order (the lead's plan, spike first):
       1. Spike: winget works as SYSTEM on LTSC (winget --info, then install VLC as SYSTEM).
-      2. Machine installs through the task: Plex, VLC, Jellyfin, Moonlight, VacuumTube (zip).
-      3. Per-user installs the launcher runs itself (non-elevated): Stremio, Feishin, Kodi, Spotify.
+      2. Machine installs through the task: Plex, VLC, Jellyfin, Moonlight, Kodi, RetroArch,
+      3. Per-user installs the launcher runs itself (non-elevated): Stremio, Feishin, Spotify, Playnite.
       4. Uninstalls of each kind.
       5. Abuse: bad tokens refused; HKCU COR_PROFILER has no effect under SYSTEM; a planted
          ProgramData\HTPC\setup folder and catalog edits are blocked for a standard user.
@@ -73,7 +73,7 @@ Write-Host "`n== Token validation (-DryRun)"
 $good = 'install:vlc', 'uninstall:kodi', 'upgrade:plex', 'firewall:stremio'
 $bad = 'install:VLC', 'install:twitch', 'install:edge', 'evil:vlc', 'install:vlc; calc', 'install:../x', 'install:'
 # The runner's own refusals come on stderr: under Stop, PowerShell 5.1 would turn the first one
-# into this script's error (as Test-Updates' Test-Token, these run under Continue).
+# into this script's error, so these run under Continue.
 foreach ($t in $good) {
     $r = & { $ErrorActionPreference = 'Continue'; & powershell -NoProfile -ExecutionPolicy Bypass -File $jobRunner -Job $t -DryRun -Catalog $catalog 2>&1 | Out-String }
     Want ($r -match 'OK:') "accepts $t"
@@ -101,7 +101,7 @@ if (Section 'Spike') {
 # ---- 2. Machine installs ----
 if (Section 'Machine') {
     Write-Host "`n== Machine installs (through the task, as SYSTEM)"
-    foreach ($id in 'plex', 'jellyfin', 'moonlight', 'youtube') {
+    foreach ($id in 'plex', 'jellyfin', 'moonlight', 'kodi', 'retroarch', 'youtube') {
         Want (Invoke-Job "install:$id") "install $id"
         Want (App-Installed (Get-CatalogApp $id)) "$id present"
     }
@@ -112,12 +112,12 @@ if (Section 'Machine') {
 if (Section 'User') {
     Write-Host "`n== Per-user installs (winget --scope user, no elevation)"
     Write-Host "  NOTE: run these from a standard (medium-IL) shell as the TV user, as the launcher does:"
-    foreach ($id in 'stremio', 'feishin', 'kodi', 'spotify') {
+    foreach ($id in 'stremio', 'feishin', 'spotify', 'playnite') {
         Write-Host "    powershell -NoProfile -File `"$jobRunner`" -Job install:$id"
     }
     Write-Host "  For Stremio, first add its firewall rule as SYSTEM so no prompt appears:"
     Write-Host "    (Schedule.Service).GetFolder('\HTPC').GetTask('Jobs').Run('firewall:stremio')"
-    Write-Host "  Watch: Kodi must not raise a UAC/consent prompt; Stremio must not raise a firewall prompt."
+    Write-Host "  Watch: Stremio must not raise a firewall prompt."
 }
 
 # ---- 4. Uninstalls ----
@@ -125,19 +125,32 @@ if (Section 'Uninstall') {
     Write-Host "`n== Uninstalls"
     Want (Invoke-Job 'uninstall:vlc') "uninstall VLC (winget)"
     Want (-not (App-Installed (Get-CatalogApp 'vlc'))) "VLC gone"
+    # Its data is the TV user's (the signed-in account), not this admin console's.
+    $tvData = $null
+    try {
+        $sid = (New-Object Security.Principal.NTAccount((Get-CimInstance Win32_ComputerSystem).UserName)).Translate([Security.Principal.SecurityIdentifier]).Value
+        $tvProfile = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid").ProfileImagePath
+        $tvData = Join-Path $tvProfile 'AppData\Roaming\VacuumTube'
+    } catch { Write-Host "    nobody signed in: VacuumTube's data not checked ($($_.Exception.Message))" -ForegroundColor Yellow }
+    $hadData = $tvData -and (Test-Path -LiteralPath $tvData)
     Want (Invoke-Job 'uninstall:youtube') "uninstall VacuumTube (zip)"
     Want (-not (Test-Path (Join-Path $env:ProgramFiles 'VacuumTube'))) "VacuumTube folder removed"
-    Want (Test-Path (Join-Path $env:APPDATA 'VacuumTube')) "VacuumTube data kept (if it was created)"
+    if ($hadData) { Want (Test-Path -LiteralPath $tvData) "VacuumTube data kept ($tvData)" }
+    elseif ($tvData) { Write-Host "    VacuumTube never ran for the TV user: no data to keep ($tvData)" }
 }
 
 # ---- 5. Abuse ----
 if (Section 'Abuse') {
     Write-Host "`n== Abuse attempts"
     # COR_PROFILER in HKCU must not affect the SYSTEM task (services do not read HKCU env).
-    New-ItemProperty 'HKCU:\Environment' -Name COR_ENABLE_PROFILING -Value '1' -PropertyType String -Force | Out-Null
-    New-ItemProperty 'HKCU:\Environment' -Name COR_PROFILER -Value '{00000000-0000-0000-0000-000000000001}' -PropertyType String -Force | Out-Null
-    Want (Invoke-Job 'upgrade:plex') "task still runs cleanly with HKCU COR_PROFILER set"
-    Remove-ItemProperty 'HKCU:\Environment' -Name COR_ENABLE_PROFILING, COR_PROFILER -ErrorAction SilentlyContinue
+    # (This console's HKCU, put back whatever happens.)
+    try {
+        New-ItemProperty 'HKCU:\Environment' -Name COR_ENABLE_PROFILING -Value '1' -PropertyType String -Force | Out-Null
+        New-ItemProperty 'HKCU:\Environment' -Name COR_PROFILER -Value '{00000000-0000-0000-0000-000000000001}' -PropertyType String -Force | Out-Null
+        Want (Invoke-Job 'upgrade:plex') "task still runs cleanly with HKCU COR_PROFILER set"
+    } finally {
+        Remove-ItemProperty 'HKCU:\Environment' -Name COR_ENABLE_PROFILING, COR_PROFILER -ErrorAction SilentlyContinue
+    }
     Write-Host "  Run as a STANDARD user (medium IL) and confirm each is DENIED:"
     Write-Host "    New-Item -ItemType Directory 'C:\ProgramData\HTPC\evil'         # denied (Users read-only)"
     Write-Host "    Set-Content '$catalog' 'x'                                       # denied (Program Files)"
