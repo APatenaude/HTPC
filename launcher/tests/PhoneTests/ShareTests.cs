@@ -190,7 +190,9 @@ static partial class Program
         Check(fromUs.Box == server.BoxId && fromUs.Box is { Length: 24 } && fromUs.Allow == origin && fromElsewhere.Allow is null,
             "/api/hello: the box's id, readable across our own origins only");
 
-        // At most 12 connections from one address; a 13th is closed at once.
+        // At most 12 connections from one address; one more is closed at once. Which one is not fixed:
+        // the server takes them in the order its thread pool gets to them, and on a busy machine the
+        // 13th to connect was once let in and the 12th closed. So each is asked, and 12 must answer.
         var held = new List<Socket>();
         try
         {
@@ -201,6 +203,7 @@ static partial class Program
                 await s.ConnectAsync(IPAddress.Loopback, port);
                 held.Add(s);
             }
+            // "200", "closed", or "no answer" (nothing in 10 s: a timeout is not taken for a close).
             async Task<string> Ask(Socket s)
             {
                 var request = Encoding.ASCII.GetBytes($"GET /api/hello HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
@@ -208,14 +211,18 @@ static partial class Program
                 {
                     await s.SendAsync(request);
                     var buffer = new byte[256];
-                    using var cts = new CancellationTokenSource(3000);
+                    using var cts = new CancellationTokenSource(10_000);
                     var n = await s.ReceiveAsync(buffer, SocketFlags.None, cts.Token);
-                    return Encoding.ASCII.GetString(buffer, 0, n);
+                    return n == 0 ? "closed" : Encoding.ASCII.GetString(buffer, 0, n).Split('\r')[0] is var status && status.StartsWith("HTTP/1.1 200") ? "200" : status;
                 }
-                catch (Exception e) when (e is SocketException or OperationCanceledException) { return ""; }
+                catch (SocketException) { return "closed"; }
+                catch (OperationCanceledException) { return "no answer"; }
             }
-            Check((await Ask(held[PhoneServer.MaxConnectionsPerAddress - 1])).StartsWith("HTTP/1.1 200") && (await Ask(held[^1])) == "",
-                $"{PhoneServer.MaxConnectionsPerAddress} connections from one address are served, one more is closed");
+            var answers = new List<string>();
+            foreach (var s in held) answers.Add(await Ask(s));
+            T.Info("closed: connection " + string.Join(", ", answers.Select((a, i) => (a, i)).Where(x => x.a == "closed").Select(x => x.i + 1)) + " of 13");
+            Check(answers.Count(a => a == "200") == PhoneServer.MaxConnectionsPerAddress && answers.Count(a => a == "closed") == 1,
+                $"{PhoneServer.MaxConnectionsPerAddress} connections from one address are served, one more is closed ({string.Join(", ", answers.GroupBy(a => a).Select(g => $"{g.Count()} {g.Key}"))})");
         }
         finally { foreach (var s in held) s.Dispose(); }
     }
