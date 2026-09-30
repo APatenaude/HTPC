@@ -18,6 +18,7 @@ Check.Verbose = Htpc.Launcher.Log.Verbose = args.Contains("-v");
 HttpClient.DefaultProxy = new System.Net.WebProxy();
 var command = args.FirstOrDefault(a => !a.StartsWith('-')) ?? "all";
 
+LabRun.Start();
 try
 {
     // The first HTTP request of a cold process (JIT, handler set-up) can take seconds on a busy box,

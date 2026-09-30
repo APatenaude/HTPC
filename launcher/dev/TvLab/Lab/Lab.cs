@@ -55,14 +55,16 @@ static class LabPaths
 }
 
 /// <summary>
-/// This run's own: one %TEMP%\tvlab-{pid} folder for every TV file (deleted at the end), and
-/// loopback addresses 127.b.c.n from the PID, so runs in parallel worktrees never share a fake's
-/// address and port.
+/// This run's own: one %TEMP%\tvlab-{pid} folder for every TV file (deleted at the end), held by
+/// a lock file open for the whole run, and loopback addresses 127.b.c.n from the PID, so runs in
+/// parallel worktrees never share a fake's address and port.
 /// </summary>
 static class LabRun
 {
+    const string LockName = "run.lock";
     static readonly int k = Environment.ProcessId / 4; // Windows PIDs are multiples of 4
     static int folders;
+    static FileStream? held;
     public static readonly string Root = Path.Combine(Path.GetTempPath(), $"tvlab-{Environment.ProcessId}");
 
     public static IPAddress Ip(int n) => new(new[] { (byte)127, (byte)(1 + k / 250 % 250), (byte)(k % 250), (byte)n });
@@ -70,19 +72,26 @@ static class LabRun
     /// <summary>A new folder name under this run's root (not created: the TV code creates what it writes).</summary>
     public static string Dir(string name) => Path.Combine(Root, $"{name}-{Interlocked.Increment(ref folders)}");
 
+    /// <summary>The root, with its lock file held open (no one else can open it) until CleanUp.</summary>
+    public static void Start()
+    {
+        Directory.CreateDirectory(Root);
+        held = new FileStream(Path.Combine(Root, LockName), FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+    }
+
     /// <summary>
-    /// The root gone (a background write may still be closing a file: tried three times), and the
-    /// folders of runs that ended without theirs. Another run's folder stays while it runs (an
-    /// older TvLab's names do not say whose: none of those while any other TvLab runs).
+    /// The root gone (a background write may still be closing a file: tried three times), and every
+    /// other tvlab-* folder no run holds: one whose lock file opens (its run ended without cleaning
+    /// up), or one without a lock file over a minute old (an older TvLab's; a younger one may be a
+    /// run between making its folder and its lock).
     /// </summary>
     public static void CleanUp()
     {
-        var others = new HashSet<int>();
-        foreach (var p in Process.GetProcessesByName("TvLab")) using (p) if (p.Id != Environment.ProcessId) others.Add(p.Id);
+        held?.Dispose();
+        held = null;
         foreach (var dir in Directory.GetDirectories(Path.GetTempPath(), "tvlab-*"))
         {
-            var owner = int.TryParse(Path.GetFileName(dir)[6..], out var pid) ? pid : 0;
-            if (dir != Root && (owner > 0 ? others.Contains(owner) : others.Count > 0)) continue;
+            if (dir != Root && !Abandoned(dir)) continue;
             for (var i = 0; i < 3 && Directory.Exists(dir); i++)
                 try { Directory.Delete(dir, true); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -90,6 +99,14 @@ static class LabRun
                     if (i < 2) Thread.Sleep(100); else Console.WriteLine($"  WARNING: left in %TEMP%: {dir} ({e.Message})");
                 }
         }
+    }
+
+    static bool Abandoned(string dir)
+    {
+        var lockFile = Path.Combine(dir, LockName);
+        if (!File.Exists(lockFile)) return DateTime.UtcNow - Directory.GetCreationTimeUtc(dir) > TimeSpan.FromMinutes(1);
+        try { using (new FileStream(lockFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) return true; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; } // held: that run is going
     }
 }
 
