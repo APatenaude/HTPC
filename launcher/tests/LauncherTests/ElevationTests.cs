@@ -185,7 +185,9 @@ static class ElevationTests
             ["Mixed"] = @"%HTPC_TEST_USER_VAR%\y",
         };
         Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", @"C:\Users\evil");
-        var env = SetupElevation.CleanEnvironment(machine);
+        Dictionary<string, string> env;
+        try { env = SetupElevation.CleanEnvironment(machine); }
+        finally { Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", null); }
         Check(env["Path"] == $@"{winDir}\system32;{winDir};C:\Tools\bin", $"PATH: the machine's, expanded with Windows' folder and the machine's own variables ({env["Path"]})");
         Check(env["ComSpec"] == $@"{winDir}\system32\cmd.exe" && env["Mixed"] == @"%HTPC_TEST_USER_VAR%\y", "... never with one of the user's (left as written)");
         Check(env["TEMP"] == SetupElevation.TrustedTemp && env["TMP"] == SetupElevation.TrustedTemp, $"TEMP and TMP admin-only ({env["TEMP"]})");
@@ -196,7 +198,6 @@ static class ElevationTests
         Check(env["USERNAME"] == Environment.UserName && env["USERPROFILE"] == Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             && env["LOCALAPPDATA"] == Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "the user's basics from their account (not the machine's SYSTEM)");
         Check(!env.ContainsKey("HTPC_TEST_USER_VAR"), "nothing else of the user's environment");
-        Environment.SetEnvironmentVariable("HTPC_TEST_USER_VAR", null);
         Check(SetupElevation.Trampoline(@"C:\x\TV Box Setup.exe", [], pf, "x&calc") is null, "a suffix that is not letters and digits: refused");
         var home = SetupElevation.HomeArgs(["--setup", "--dev", "--elevated", "--no-tv", "--home"]);
         Check(SetupElevation.Trampoline(odd, SetupElevation.ElevatedArgs(["--setup", SetupElevation.DesktopFlag]), pf, "a1b2c3") is { } withDesktop

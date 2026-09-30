@@ -181,11 +181,15 @@ static class ResourceTests
     static void EndOnlyTheSame()
     {
         using var child = Process.Start(new ProcessStartInfo("ping.exe", "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
-        var created = child.StartTime.ToFileTimeUtc();
-        var other = ResourceWatch.End([((uint)child.Id, created + 1)]);
-        check(other == (0, 0, 1) && !child.HasExited, $"another process with its id: left alone ({other})");
-        var same = ResourceWatch.End([((uint)child.Id, created)]);
-        check(same == (1, 0, 0) && child.WaitForExit(5000), $"the process the sample saw: ended ({same})");
+        try
+        {
+            var created = child.StartTime.ToFileTimeUtc();
+            var other = ResourceWatch.End([((uint)child.Id, created + 1)]);
+            check(other == (0, 0, 1) && !child.HasExited, $"another process with its id: left alone ({other})");
+            var same = ResourceWatch.End([((uint)child.Id, created)]);
+            check(same == (1, 0, 0) && child.WaitForExit(5000), $"the process the sample saw: ended ({same})");
+        }
+        finally { try { if (!child.HasExited) child.Kill(); } catch (Exception) { } }   // never left pinging for 30 s
         var system = ResourceWatch.End([(4u, 0L)]);
         check(system.Refused == 1 && system.Ended == 0, $"the System process: access denied, counted, nothing thrown ({system})");
     }

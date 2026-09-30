@@ -32,8 +32,23 @@ static class AddTileTests
         var program = new InstalledProgram("Paint", @"C:\x\Paint.lnk", @"C:\Windows\System32\mspaint.exe", null, null, true, null);
         Check(program.IconId == StartMenuScanner.IconId(@"C:\x\Paint.lnk"), "a program's IconId is its shortcut's");
 
-        var dir = Path.Combine(Path.GetTempPath(), "htpc-program-icons-" + Environment.ProcessId);
-        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        var dir = Fixtures.TempDir("program-icons");
+        try { await IconCache(dir); }
+        finally { Fixtures.Delete(dir); }
+
+        // A real shortcut through the Shell, as on the box (any in the Start menu).
+        var real = new[] { Environment.SpecialFolder.CommonPrograms, Environment.SpecialFolder.Programs }.Select(Environment.GetFolderPath)
+            .Where(Directory.Exists).SelectMany(d => Directory.EnumerateFiles(d, "*.lnk", SearchOption.AllDirectories)).FirstOrDefault();
+        if (real is not null)
+        {
+            var png = ExeIcon.Png(real, 48, out var why);
+            Check(png is not null, $"a Start menu shortcut's icon through the Shell: {Path.GetFileName(real)} ({why})");
+        }
+    }
+
+    // A program's icon made from its shortcut, once, kept with the apps' logos in dir.
+    static async Task IconCache(string dir)
+    {
         var made = new List<string>();
         (byte[]?, string) Shell(string path, int min) { made.Add(path); return (Png(Color.Teal), ""); }
         var icons = new AppLogos(dir, (_, _) => Task.FromResult<(byte[], Uri)?>(null), Shell);
@@ -63,16 +78,6 @@ static class AddTileTests
         Check(removed == 1 && !File.Exists(Path.Combine(dir, gone + ".png")) && !File.Exists(Path.Combine(dir, gone + ".from"))
             && File.Exists(Path.Combine(dir, id + ".png")) && File.Exists(Path.Combine(dir, "youtube.png")),
             "a program no longer in the Start menu: its icon goes; the listed ones' and the apps' logos stay");
-        try { Directory.Delete(dir, true); } catch (IOException) { }
-
-        // A real shortcut through the Shell, as on the box (any in the Start menu).
-        var real = new[] { Environment.SpecialFolder.CommonPrograms, Environment.SpecialFolder.Programs }.Select(Environment.GetFolderPath)
-            .Where(Directory.Exists).SelectMany(d => Directory.EnumerateFiles(d, "*.lnk", SearchOption.AllDirectories)).FirstOrDefault();
-        if (real is not null)
-        {
-            var png = ExeIcon.Png(real, 48, out var why);
-            Check(png is not null, $"a Start menu shortcut's icon through the Shell: {Path.GetFileName(real)} ({why})");
-        }
     }
 
     static void ProgramFills()

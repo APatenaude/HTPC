@@ -46,8 +46,7 @@ static class AutostartTests
     // catalog app's shortcut goes with its StartupApproved record, anything else stays.
     static void StartupFolder()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"htpc-startup-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = Fixtures.TempDir("startup");
         try
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -72,7 +71,7 @@ static class AutostartTests
             Check(guard.CheckStartupFolder("again", dir, Target) == 0, "  a second check: nothing to do");
             Check(guard.CheckStartupFolder("missing", Path.Combine(dir, "none"), Target) == 0, "  no Startup folder: nothing, no error");
         }
-        finally { try { Directory.Delete(dir, true); } catch (Exception) { } }
+        finally { Fixtures.Delete(dir); }
     }
 
     static void RunValues()
@@ -147,9 +146,7 @@ static class AutostartTests
     static void Prefs()
     {
         // Under the user's profile (%TEMP% is), as the guard insists.
-        var dir = Path.Combine(Path.GetTempPath(), "htpc-autostart-test");
-        if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-        Directory.CreateDirectory(dir);
+        var dir = Fixtures.TempDir("autostart");
         try
         {
             var off = new List<KeyValuePair<string, string>> { new("app.autostart-configured", "true"), new("app.autostart-mode", "\"off\"") };
@@ -184,7 +181,7 @@ static class AutostartTests
             Check(guard.ApplyPrefs(null, id => id == "spotify") == 0 && File.ReadAllText(file).Contains("\"normal\""), "Spotify running: its prefs left for after it ends");
             Check(guard.ApplyPrefs("spotify", _ => false) == 1 && File.ReadAllText(file).Contains("app.autostart-mode=\"off\""), "Spotify ended: autostart off again");
         }
-        finally { Directory.Delete(dir, recursive: true); }
+        finally { Fixtures.Delete(dir); }
     }
 
     static void Catalog()

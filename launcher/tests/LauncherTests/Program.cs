@@ -972,27 +972,29 @@ T.Group("Brightness at start", () =>
 T.Group("Settings: an unreadable settings.json", () =>
 {
     // The launcher's own path, whatever the test's rights (an elevated CI runner too): only TV Box Setup saves elsewhere (Rights.SetupElevated).
-    var dir = Path.Combine(Path.GetTempPath(), "htpc-settings-test");
-    if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-    var file = Path.Combine(dir, "settings.json");
-    var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    int Idle(string path) => JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), web)!.IdleMinutes;
-    new LauncherSettings { IdleMinutes = 45 }.Save(file);
-    new LauncherSettings { IdleMinutes = 50 }.Save(file);
-    Check(Idle(file) == 50 && Idle(file + ".bak") == 45 && !File.Exists(file + ".tmp"), "saved twice: the file, the one before as the backup, no temp file left");
-    File.WriteAllText(file, "{ \"idleMinutes\": 5");   // cut short
-    var loaded = LauncherSettings.Load(file);
-    Check(loaded.IdleMinutes == 45, "unreadable: the backup's settings");
-    Check(Idle(file) == 45 && File.ReadAllText(file + ".unreadable").StartsWith("{ \"idleMinutes\": 5"), "settings.json written again from the backup at once, the unreadable one kept aside");
-    loaded.IdleMinutes = 60;
-    loaded.Save(file);
-    Check(Idle(file) == 60 && Idle(file + ".bak") == 45, "the next save: the backup is a good copy, not the unreadable file");
-    File.WriteAllText(file, "");
-    Check(LauncherSettings.Load(file).IdleMinutes == 45, "unreadable again: the backup still has the settings");
-    File.Delete(file);
-    File.Delete(file + ".bak");
-    Check(LauncherSettings.Load(file).IdleMinutes == new LauncherSettings().IdleMinutes, "neither file: the defaults");
-    Directory.Delete(dir, recursive: true);
+    var dir = Fixtures.TempDir("settings");
+    try
+    {
+        var file = Path.Combine(dir, "settings.json");
+        var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        int Idle(string path) => JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(path), web)!.IdleMinutes;
+        new LauncherSettings { IdleMinutes = 45 }.Save(file);
+        new LauncherSettings { IdleMinutes = 50 }.Save(file);
+        Check(Idle(file) == 50 && Idle(file + ".bak") == 45 && !File.Exists(file + ".tmp"), "saved twice: the file, the one before as the backup, no temp file left");
+        File.WriteAllText(file, "{ \"idleMinutes\": 5");   // cut short
+        var loaded = LauncherSettings.Load(file);
+        Check(loaded.IdleMinutes == 45, "unreadable: the backup's settings");
+        Check(Idle(file) == 45 && File.ReadAllText(file + ".unreadable").StartsWith("{ \"idleMinutes\": 5"), "settings.json written again from the backup at once, the unreadable one kept aside");
+        loaded.IdleMinutes = 60;
+        loaded.Save(file);
+        Check(Idle(file) == 60 && Idle(file + ".bak") == 45, "the next save: the backup is a good copy, not the unreadable file");
+        File.WriteAllText(file, "");
+        Check(LauncherSettings.Load(file).IdleMinutes == 45, "unreadable again: the backup still has the settings");
+        File.Delete(file);
+        File.Delete(file + ".bak");
+        Check(LauncherSettings.Load(file).IdleMinutes == new LauncherSettings().IdleMinutes, "neither file: the defaults");
+    }
+    finally { Fixtures.Delete(dir); }
 });
 
 // ---------------------------------------------------------------- Core Audio (reads only)
@@ -1240,19 +1242,20 @@ T.Group("Home menu backdrop: scaling and the JPEG", () =>
             var v = x >= W ? Px(0, 0, 255) : x < W / 2 ? Px(120, 40, 20) : Px(200, 200, 200);
             BitConverter.TryWriteBytes(frame.AsSpan((y * Stride) + x * 4), v);
         }
-    var file = Path.Combine(Path.GetTempPath(), "htpc-backdrop-test.jpg");
-    var clock = System.Diagnostics.Stopwatch.StartNew();
-    fixed (byte* p = frame) ScreenCapture.SaveScaled(p, W, H, Stride, ScreenCapture.TargetSize(new Size(W, H)), file);
-    T.Info($"4K frame scaled on the CPU and saved as a JPEG in {clock.ElapsedMilliseconds} ms ({new FileInfo(file).Length / 1024} KB)");
-    using (var jpeg = new Bitmap(file))
+    var file = Path.Combine(Path.GetTempPath(), $"htpc-backdrop-{Guid.NewGuid():N}.jpg");
+    try
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        fixed (byte* p = frame) ScreenCapture.SaveScaled(p, W, H, Stride, ScreenCapture.TargetSize(new Size(W, H)), file);
+        T.Info($"4K frame scaled on the CPU and saved as a JPEG in {clock.ElapsedMilliseconds} ms ({new FileInfo(file).Length / 1024} KB)");
+        using var jpeg = new Bitmap(file);
         Check(jpeg.Width == 1920 && jpeg.Height == 1080, $"JPEG 1920x1080 (got {jpeg.Width}x{jpeg.Height})");
         bool Near(Color c, int r, int g, int b) => Math.Abs(c.R - r) <= 6 && Math.Abs(c.G - g) <= 6 && Math.Abs(c.B - b) <= 6;
         Check(Near(jpeg.GetPixel(400, 500), 20, 40, 120), $"left: the dark blue (got {jpeg.GetPixel(400, 500)})");
         Check(Near(jpeg.GetPixel(1500, 500), 200, 200, 200), $"right: the grey (got {jpeg.GetPixel(1500, 500)})");
         Check(Near(jpeg.GetPixel(1919, 540), 200, 200, 200), $"last column: no padding in it (got {jpeg.GetPixel(1919, 540)})");
     }
-    File.Delete(file);
+    finally { Fixtures.Delete(file); }
 } });
 
 // ---------------------------------------------------------------- The text-field watcher, quiet

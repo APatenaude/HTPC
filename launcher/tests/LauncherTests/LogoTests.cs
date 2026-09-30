@@ -290,8 +290,13 @@ static class LogoTests
 
     static async Task Cache()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "htpc-logo-test-" + Environment.ProcessId);
-        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        var dir = Fixtures.TempDir("logos");
+        try { await Cache(dir); }
+        finally { Fixtures.Delete(dir); }
+    }
+
+    static async Task Cache(string dir)
+    {
         var clock = new DateTime(2026, 9, 27, 12, 0, 0, DateTimeKind.Utc);
         var web = new FakeWeb();
         web.Files["https://flix.test/"] = Encoding.UTF8.GetBytes("<link rel=apple-touch-icon href=/t.png>");
@@ -406,7 +411,6 @@ static class LogoTests
         bg.Changed += () => done.TrySetResult();
         bg.Refresh(new[] { new LogoSource("flix", "https://flix.test/", null) });
         Check(await Task.WhenAny(done.Task, Task.Delay(5000)) == done.Task && bg.Url("flix") is not null, "Refresh: in the background, Changed when the logo is in");
-        try { Directory.Delete(dir, true); } catch (IOException) { }
     }
 
     static void ProgramIcon()

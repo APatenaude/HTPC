@@ -127,6 +127,25 @@ static class Fixtures
         return ms.ToArray();
     }
 
+    /// <summary>A new folder of the test's own in %TEMP% (a new name each run); Delete it in a finally.</summary>
+    public static string TempDir(string name)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"htpc-{name}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    /// <summary>A test's folder or file gone, whatever is left in it; a file still open elsewhere is left (and said).</summary>
+    public static void Delete(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+            else File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { T.Info($"left in %TEMP%: {path} ({e.Message})"); }
+    }
+
     /// <summary>A file standing for an installed program (or its shortcut), written and made 30 days ago.</summary>
     public static string OldFile(string path, string text = "not really a program")
     {
