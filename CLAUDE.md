@@ -11,7 +11,7 @@ remote, GitHub releases. Where to look:
 
 ## One-command tools
 
-- `launcher\dev\Test-Quick.ps1` after a change (build + 4 test projects, one line each; `-Only
+- `launcher\dev\Test-Quick.ps1` after a change (build + 3 test projects, one line each; `-Only
   LauncherTests`; `-Ui` adds the UI self-test and audit). `Test-All.ps1`: everything, before a merge.
 - `launcher\dev\Test-Ui.ps1 -Shots settings/wifi,menu-alerts -ShotSize 1536x864`: screenshots of UI
   routes (1536x864 is a 4K TV at 250%). Look at every screen a UI change touches, at the full-size
