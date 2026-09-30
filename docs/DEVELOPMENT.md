@@ -187,9 +187,10 @@ UI-only or launcher-only changes, which the headless UI self-test and the test p
    `launcher\src\Watchdog\`, elevated): the VM's Defender (cloud protection on) holds a new
    program's start for up to 8 s now and then, most around its own updates after a restore (its
    platform about 10 minutes after boot, event 2014 in its Operational log). A launcher start held
-   past a rollback survives it (likely under its renamed file, HtpcLauncher.bad): on 30 Sept
-   2026 about one Test-Updates run in ten failed a "runs again" check so. A failed wait prints the
-   box's state: a watchdog "start" line with "started" 8 s later is such a hold.
+   past a rollback used to survive it (about one Test-Updates run in ten failed on 30 Sept 2026):
+   the watchdog now ends a start a launcher update's pause or file change overtook, and the
+   rollback ends the launcher under its renamed names too. Faults reproduces it (a cut after
+   'placed-launcher' with the next start held 10 s). A failed wait prints the box's state.
 
 Hyper-V VM "htpc-test", made by `setup\test\New-TestVM.ps1` from a Windows 11 IoT Enterprise LTSC
 2024 ISO and an answer ISO (`setup\autounattend\New-InstallMedia.ps1`). `Start-TestVM.ps1` boots
