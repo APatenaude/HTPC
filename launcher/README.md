@@ -875,7 +875,10 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   screen, above the hints and not covered.
 - For the page: no text runs out of its card or row, or is cut off at the side of a pane (the long
   release notes that did), everything focusable is reached, nothing wraps round, B leaves, one hint bar
-  shows.
+  shows (one under another in the same place counts: bars have no background), the stage is whole in
+  the window.
+- The self-test does not check these again screen by screen: `ui/audit.js`'s header lists what each
+  rule stands for (each was shown by breaking the page and watching the walker fail).
 - Every press takes at most 50 ms (real time: the self-test runs without Edge's virtual time; Test-Ui
   prints the slowest).
 - As it walks it replays the host's periodic messages for the page (the clock, state pushes, the TV
@@ -890,8 +893,8 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
 - **Every new view must be in the walker**: an `auditPage()` in `ui/audit/<area>.js` for each view
   (`addView`), each Settings section and each setup step (what to set up, how to open it); one without
   fails the audit.
-- `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element; `-ShotSize
-  1536x864` takes it at the TV's size.
+- `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element (a comma in
+  its name as `%2C`: `-Shots` splits on commas); `-ShotSize 1536x864` takes it at the TV's size.
 
 ### The box's own drawing
 

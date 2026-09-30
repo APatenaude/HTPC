@@ -1,22 +1,21 @@
 'use strict';
 // Self-test: button maps, and what the Home menu over an app says its buttons do. Run by selftest.js, in its order.
+// The list's ends (it stops, its rows whole): the audit.
 selftestGroup(({ check, focusId }) => {
-  // ---- Button maps: the list, the editor's preset row and the picker ---------------------------
+  // ---- Button maps: the editor's preset row and the picker ------------------------------------------
+  selftestFresh();
   mapsDemo();
-  reset('home');
   go('maps');
   const mNode = (id) => $('maps').querySelector(`[data-id="${id}"]`);
-  press('up');
-  check('Button maps: up on the first app stays there', focusId() === 'm-youtube', focusId());
-  for (let i = 0; i < 12; i++) press('down');
-  const mlist = $('maps').querySelector('.mlist').getBoundingClientRect(), last = mNode('m-_other').getBoundingClientRect();
-  check('Button maps: down to the last app, it stays and shows whole', focusId() === 'm-_other' && last.bottom <= mlist.bottom, `${focusId()} ${last.bottom} > ${mlist.bottom}`);
+  const keys = (el) => [...el.querySelectorAll('.key')].map((k) => k.textContent);
   setFocus(mNode('m-twitch'));
   press('a');
   const bNode = (id) => $('buttons').querySelector(`[data-id="${id}"]`);
-  check('Editor: opens on a button, the preset row says how many differ', state.view === 'buttons' && focusId() === 'b-a' && /2 buttons changed/.test(bNode('b-preset').textContent));
+  const changed = Object.keys(mapApp('twitch').map.changes).length;
+  check('Editor: opens on a button, the preset row says how many differ', state.view === 'buttons' && focusId() === 'b-a' && bNode('b-preset').textContent.includes(String(changed)),
+    `${focusId()}: ${bNode('b-preset').textContent}`);
   press('up'); press('up'); press('up');
-  check('Editor: up goes to the preset row and stops there', focusId() === 'b-preset' && /Change preset/.test($('buttons').querySelector('.hints').textContent), focusId());
+  check('Editor: up goes to the preset row and stops there', focusId() === 'b-preset', focusId());
   press('left');
   check('Editor: left on the preset row changes nothing', mapApp('twitch').map.preset === 'mouse' && focusId() === 'b-preset');
   press('a');
@@ -27,12 +26,16 @@ selftestGroup(({ check, focusId }) => {
   check('Editor: cancelled, B closes the presets as they were', state.view === 'buttons' && focusId() === 'b-preset' && mapApp('twitch').map.preset === 'mouse', focusId());
   setFocus(bNode('b-start'));
   press('a');
-  check('Editor: A on a button opens its choice, with LB RB for the categories', !!$('buttons').querySelector('.bcats .key') && /LB\s*RB\s*Category/.test($('buttons').querySelector('.hints').textContent));
-  const cat = () => $('buttons').querySelector('.bcat.on').textContent;
+  const hintKeys = keys($('buttons').querySelector('.hints'));
+  check('Editor: A on a button opens its choice, with LB RB for the categories', !!$('buttons').querySelector('.bcats .key') && hintKeys.includes('LB') && hintKeys.includes('RB'), hintKeys.join(' '));
+  const cats = () => [...$('buttons').querySelectorAll('.bcat')];
+  const cat = () => cats().findIndex((c) => c.classList.contains('on'));
+  const first = cat();
   press('rb');
-  check('Editor: RB: the next category', cat() === 'Mouse', cat());
+  const next = cat();
   press('lb'); press('lb');
-  check('Editor: LB: the one before (round to the last)', cat() === 'Nothing', cat());
+  check('Editor: RB: the next category; LB: the one before, round to the last', next === first + 1 && cat() === (first + cats().length - 1) % cats().length,
+    `${first}, RB ${next}, LB LB ${cat()} of ${cats().length}`);
   press('b');
   check('Editor: B closes the choice, back on the button', !maps.picking && focusId() === 'b-start', focusId());
   reset('home');
@@ -41,8 +44,10 @@ selftestGroup(({ check, focusId }) => {
   state.tiles.find((t) => t.id === 'twitch').running = true;
   state.current = 'twitch';
   go('menu');
-  const card = $('menu-app').textContent;
-  check('Menu over an app: its buttons beside the panel, and how to go back', /Twitch/.test(card) && /Enter/.test(card) && /Back to Twitch/.test(card) && /This menu/.test(card), card.slice(0, 80));
+  const card = $('menu-app'), head = card.querySelector('.ma-head b');
+  const rowKeys = [...card.querySelectorAll('.ma-row .key')].map((k) => k.textContent);
+  check('Menu over an app: its buttons beside the panel, and how to go back', head && head.textContent === 'Twitch' && rowKeys.length > 3 && rowKeys.includes('Home')
+    && keys(card.querySelector('.ma-foot')).includes('B'), `${head && head.textContent}: ${rowKeys.join(' ')}`);
   back();
   state.current = null;
   go('menu');

@@ -1,9 +1,10 @@
 'use strict';
 // Self-test: the Home menu: its alert rows, where it opens, its quick buttons. Run by selftest.js, in its order.
-selftestGroup(({ check, sent, lastSent }) => {
+// Its column scrolled to the focus, its quick buttons' ends and above its hints: the audit.
+selftestGroup(({ check, checkRows, sent, lastSent }) => {
   // ---- The Home menu's alert rows -------------------------------------------------------------
+  selftestFresh(SELFTEST_TILES.map((t) => t.id));   // 6 open apps
   const tiles = state.tiles;
-  for (const t of tiles) t.running = true;          // 6 open apps
   state.current = 'jellyfin';
   noticeUpdate({
     toasts: [], pills: [],
@@ -44,22 +45,12 @@ selftestGroup(({ check, sent, lastSent }) => {
   for (const t of tiles) t.running = true;
   render();
 
-  // The crowded menu: 6 apps and an alert row fit down to the quick buttons without scrolling;
-  // with a second alert, the resource view under them comes into view with the focus.
+  // The crowded menu: 6 apps and an alert row fit down to the quick buttons without scrolling.
   const panel = $('menu-panel'), rowsBox = panel.querySelector('.panel-scroll');
   const quicks = [...panel.querySelectorAll('.quicks [data-nav]')];
-  const hintsBox = panel.querySelector('.hints').getBoundingClientRect();
   setFocus(panel.querySelector('[data-nav]'));   // the first: the column at its top
   check('menu: 6 apps + an alert row fit, down to the quick buttons', rowsBox.scrollTop === 0 && quicks[quicks.length - 1].getBoundingClientRect().bottom <= rowsBox.getBoundingClientRect().bottom,
     `${quicks[quicks.length - 1].getBoundingClientRect().bottom} > ${rowsBox.getBoundingClientRect().bottom}`);
-  check('menu: the quick buttons are above the button hints', quicks[quicks.length - 1].getBoundingClientRect().bottom <= hintsBox.top + 1);
-  noticeUpdate({ toasts: [], pills: [], rows: [...notices.rows,
-    { id: 'tv', title: 'Can’t reach the TV', body: 'Is it on the network? Settings › TV can find it again.', glyph: 'tv', tone: 'bad', action: 'TV settings' }] });
-  setFocus(panel.querySelector('[data-id="q-timer"]'));
-  press('down');
-  const lowRow = focusedEl(), lowBox = rowsBox.getBoundingClientRect();
-  check('menu: crowded (6 apps, 2 alerts), down from the quick buttons to a program: the column scrolls, the row shows whole', lowRow && lowRow.closest('#menu-res') && rowsBox.scrollTop > 0
-    && lowRow.getBoundingClientRect().bottom <= lowBox.bottom && lowRow.getBoundingClientRect().top >= lowBox.top, `${focusedEl() && focusedEl().dataset.id}, ${rowsBox.scrollTop}`);
 
   // Its quick buttons in the order of the home screen's top bar (Settings, then Power).
   const quickIds = quicks.map((e) => e.dataset.id);
@@ -67,23 +58,14 @@ selftestGroup(({ check, sent, lastSent }) => {
   check('menu: Settings then Power, in the order of the home screen\'s top bar',
     barIds.indexOf('settings') >= 0 && barIds.indexOf('settings') < barIds.indexOf('power') &&
     quickIds.join(',') === 'q-buttons,q-timer,q-settings,q-power', `menu ${quickIds.join(',')}; top bar ${barIds.join(',')}`);
-  setFocus(panel.querySelector('[data-id="q-timer"]'));
-  const walked = [];
-  for (let i = 0; i < 3; i++) { press('right'); walked.push(focusedEl() && focusedEl().dataset.id); }
-  press('left');
-  walked.push(focusedEl() && focusedEl().dataset.id);
-  check('menu: right from Timer: Settings, Power, and stays; left: Settings', walked.join(',') === 'q-settings,q-power,q-power,q-settings', walked.join(','));
-  press('a');
-  const toSettings = state.view;
-  press('b');
-  check('menu: A on Settings opens Settings, B comes back to it', toSettings === 'settings' && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === 'q-settings',
-    `${toSettings}, then ${state.view} on ${focusedEl() && focusedEl().dataset.id}`);
-  setFocus(panel.querySelector('[data-id="q-power"]'));
-  press('a');
-  const toPower = state.view;
-  press('b');
-  check('menu: A on Power opens Power, B comes back to it', toPower === 'power' && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === 'q-power',
-    `${toPower}, then ${state.view} on ${focusedEl() && focusedEl().dataset.id}`);
+  for (const [id, view, name] of [['q-settings', 'settings', 'Settings'], ['q-power', 'power', 'Power']]) {
+    setFocus(panel.querySelector(`[data-id="${id}"]`));
+    press('a');
+    const to = state.view;
+    press('b');
+    check(`menu: A on ${name} opens ${name}, B comes back to it`, to === view && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === id,
+      `${to}, then ${state.view} on ${focusedEl() && focusedEl().dataset.id}`);
+  }
 
   // ---- Home lands on an actionable card's row ----------------------------------------------------
   reset('home');
@@ -138,23 +120,18 @@ selftestGroup(({ check, sent, lastSent }) => {
       walk[0] === 'brightness' && walk[1] === 'q-power' && /^res:/.test(walk[2] || '') && walk[3] === 'q-power' && walk[4] === 'q-settings'
       && walk[5] === 'brightness' && walk[6] === 'q-power', walk.join(','));
     press('b');
-    running(['twitch', 'stremio']);
-    press('home');
-    check('Menu over the home screen with apps open: the first of them, whatever was used last', on() === 'app:twitch', on());
-    press('b');
-    onHost({ type: 'show', view: 'menu', current: 'twitch' });
-    check('Menu over an app: its Home screen row, whatever was used last', on() === 'home', on());
-    noticeUpdate({ toasts: [], pills: [], rows: [{ id: 'tv', title: 'Can’t reach the TV', glyph: 'tv', tone: 'bad', action: 'TV settings' }] });
-    onHost({ type: 'show', view: 'menu', current: 'twitch', focus: 'alert:tv' });
-    check('Menu over an app with an alert on screen: its row, as before', on() === 'alert:tv', on());
-    noticeUpdate({ toasts: [], rows: [], pills: [] });
-    onHost({ type: 'state', desktop: true });
-    onHost({ type: 'show', view: 'menu', current: 'desktop' });
-    check('Menu over the desktop: Back to TV, as before', on() === 'back-tv', on());
+    // Where it opens, whatever was used last.
+    const alertTv = { toasts: [], pills: [], rows: [{ id: 'tv', title: 'Can’t reach the TV', glyph: 'tv', tone: 'bad', action: 'TV settings' }] };
+    checkRows('Menu opens where it should, whatever was used last', [
+      ['over the home screen with apps open: the first of them', 'app:twitch', () => { running(['twitch', 'stremio']); press('home'); }],
+      ['over an app: its Home screen row', 'home', () => { press('b'); onHost({ type: 'show', view: 'menu', current: 'twitch' }); }],
+      ['over an app, an alert on screen: its row', 'alert:tv', () => { noticeUpdate(alertTv); onHost({ type: 'show', view: 'menu', current: 'twitch', focus: 'alert:tv' }); }],
+      ['over the desktop: Back to TV', 'back-tv', () => {
+        noticeUpdate({ toasts: [], rows: [], pills: [] });
+        onHost({ type: 'state', desktop: true });
+        onHost({ type: 'show', view: 'menu', current: 'desktop' });
+      }],
+    ].map(([what, want, open]) => { open(); return [what, on() === want, on()]; }));
     onHost({ type: 'state', desktop: false });
-    state.current = null; state.backdrop = null;
-    menuUsed.control = null; menuUsed.quick = null;
-    running(tiles.map((t) => t.id));
-    reset('home');
   }
 });

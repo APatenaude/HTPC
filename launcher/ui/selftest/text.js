@@ -1,23 +1,17 @@
 'use strict';
 // Self-test: the key guard in a text field, text from the on-screen keyboard. Run by selftest.js, in its order.
-selftestGroup(({ check, key, sent, lastSent, pressed }) => {
-  // ---- Key guard ---------------------------------------------------------------------------
-  reset('home');
+selftestGroup(({ check, checkRows, key, sent, lastSent, pressed }) => {
+  // ---- Key guard: typing keys stay in a text field, Enter and Escape still work the dialog ----------
+  selftestFresh();
   const field = document.createElement('input');
   field.type = 'password';
   field.setAttribute('aria-label', 'Password for [Network]');
   $('stage').appendChild(field);
   field.focus();
-  for (const k of ['x', 'h', 'p', 'Backspace', 'ArrowLeft', 'ArrowRight', ' ', 'PageUp']) {
-    pressed.length = 0;
-    const e = key(k);
-    check(`key guard: "${k}" stays in the field`, pressed.length === 0 && !e.defaultPrevented, pressed.join(','));
-  }
-  for (const [k, b] of [['Enter', 'a'], ['Escape', 'b']]) {
-    pressed.length = 0;
-    key(k);
-    check(`key guard: ${k} still works the dialog (${b})`, pressed[0] === b, pressed.join(','));
-  }
+  const typed = (k) => { pressed.length = 0; const e = key(k); return [`"${k}"`, pressed.length === 0 && !e.defaultPrevented, pressed.join(',') || 'handled']; };
+  const button = (k, b) => { pressed.length = 0; key(k); return [`${k} (${b})`, pressed[0] === b, pressed.join(',') || 'nothing']; };
+  checkRows('key guard: typing keys stay in the field; Enter and Escape still work the dialog',
+    [...['x', 'h', 'p', 'Backspace', 'ArrowLeft', 'ArrowRight', ' ', 'PageUp'].map(typed), button('Enter', 'a'), button('Escape', 'b')]);
 
   // ---- Text from the on-screen keyboard -----------------------------------------------------
   field.value = '';

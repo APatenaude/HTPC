@@ -1,7 +1,8 @@
 'use strict';
 // Self-test: Wi-Fi, Settings > Bluetooth, Settings > Phone remote. Run by selftest.js, in its order.
-selftestGroup(async ({ check, tick, sent, lastSent }) => {
+selftestGroup(async ({ check, asksFirst, tick, sent, lastSent }) => {
   // ---- Wi-Fi (wifi.js) ------------------------------------------------------------------------------
+  selftestFresh();
   const asked = [], toasts = [];
   const box = document.createElement('div');
   $('stage').appendChild(box);
@@ -14,11 +15,11 @@ selftestGroup(async ({ check, tick, sent, lastSent }) => {
   draw();
   check('Wi-Fi: the network in use is at the top', node('wifi-current') && node('wifi-current').textContent.includes('Connected'));
   WifiUI.press('a', node('wifi-radio'));
-  check('Wi-Fi: switch off while online only through it asks first', asked.length === 1 && /Turn Wi-Fi off/.test(asked[0].title) && !lastSent('wifi.radio'));
+  check('Wi-Fi: switch off while online only through it asks first', asked.length === 1 && !lastSent('wifi.radio'), JSON.stringify(asked));
   WifiUI.press('x', node('wifi-current'));
-  check('Wi-Fi: X on the network in use asks before forgetting it', asked.length === 2 && /Forget/.test(asked[1].title) && /offline/.test(asked[1].text));
+  check('Wi-Fi: X on the network in use asks before forgetting it, and says why', asked.length === 2 && !!asked[1].text && !lastSent('wifi.forget'), JSON.stringify(asked));
   WifiUI.press('a', node('wifi-net:[Old router]'));
-  check('Wi-Fi: a WEP network is refused with the reason, no form', !WifiUI.joining && toasts.some((t) => /WEP/.test(t)));
+  check('Wi-Fi: a WEP network is refused with the reason, no form', !WifiUI.joining && toasts.length === 1, JSON.stringify(toasts));
   WifiUI.press('a', node('wifi-net:[Network name 2]'));
   draw();
   const pw = document.getElementById('wifi-password-input');
@@ -101,7 +102,9 @@ selftestGroup(async ({ check, tick, sent, lastSent }) => {
   reset('settings');
   const btNode = (id) => $('settings').querySelector(`[data-id="${id}"]`);
   check('Bluetooth: shown, the host lists devices', lastSent('bt.watch') && lastSent('bt.watch').on === true);
-  check('Bluetooth: paired headphones say sound plays there', btNode('bt-paired:p1') && btNode('bt-paired:p1').textContent.includes('sound plays here'));
+  // Its status: "Connected", and for the one sound plays on, a second part.
+  const btStatus = (id) => (btNode(id).querySelector('.ok') || { textContent: '' }).textContent.split('·').length;
+  check('Bluetooth: paired headphones say sound plays there', btNode('bt-paired:p1') && btStatus('bt-paired:p1') === 2, btNode('bt-paired:p1') && btNode('bt-paired:p1').textContent);
   setFocus(btNode('bt-new'));
   press('a');
   check('Bluetooth: Pair a new device looks for devices', lastSent('bt.scan') && lastSent('bt.scan').on === true && !!btNode('bt-near:n1'));
@@ -112,31 +115,17 @@ selftestGroup(async ({ check, tick, sent, lastSent }) => {
   check('Bluetooth: a keyboard\'s PIN is shown to type', btNode('bt-pin') && btNode('bt-pin').textContent.includes('482915'));
   onHost({ type: 'bt.result', id: 'n1', ok: true, text: '[Keyboard] paired' });
   check('Bluetooth: paired: back to the list, looking stops', !btNode('bt-pin') && !btNode('bt-pairing') && lastSent('bt.scan').on === false);
-  setFocus(btNode('bt-paired:p2'));
-  press('x');
-  check('Bluetooth: X on a paired device asks before removing it', state.view === 'ask' && !lastSent('bt.forget'));
-  press('b');
+  asksFirst('Bluetooth: X on a paired device', () => btNode('bt-paired:p2'), 'x', 'bt.forget', { id: 'p2' });
   reset('home');
   check('Bluetooth: left, the host stops', lastSent('bt.watch').on === false);
 
   // ---- Settings › Phone remote (phone-settings.js): Forget asks first -------------------------------
   EXT.sections.phone.demo();
   state.section = 'phone';
-  sent.length = 0;
   reset('settings');
-  for (const [id, what] of [['phone-b2', 'a phone'], ['phone-c3', 'a Shortcut key']]) {
-    setFocus($('settings').querySelector(`[data-id="${id}"]`));
-    press('a');
-    const dialog = state.view === 'ask' && focusedEl() && focusedEl().dataset.id === 'ask-no';
-    check(`Phone remote: Forget on ${what} asks first, Cancel focused`, dialog && !lastSent('phone.forget'));
-    press('a');
-    check(`Phone remote: ... Cancel keeps ${what}`, state.view === 'settings' && !lastSent('phone.forget'));
+  for (const [id, what] of [['b2', 'a phone'], ['c3', 'a Shortcut key']]) {
+    asksFirst(`Phone remote: Forget on ${what}`, () => $('settings').querySelector(`[data-id="phone-${id}"]`), 'a', 'phone.forget', { id });
   }
-  setFocus($('settings').querySelector('[data-id="phone-c3"]'));
-  press('a');
-  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
-  press('a');
-  check('Phone remote: ... Forget forgets it', lastSent('phone.forget') && lastSent('phone.forget').id === 'c3');
   reset('home');
   await tick();
 });

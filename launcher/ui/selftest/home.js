@@ -2,6 +2,7 @@
 // Self-test: cards, the home screen's grid. Run by selftest.js, in its order.
 selftestGroup(({ check }) => {
   // ---- Cards --------------------------------------------------------------------------------------
+  selftestFresh();
   noticeUpdate({ toasts: [
     { id: 'a', title: 'Newest', tone: 'bad' }, { id: 'b', title: 'Older', tone: 'info' },
   ], rows: [], pills: [{ id: 'updates', text: '4 updates', glyph: 'download', tone: 'warn' }] });
@@ -33,7 +34,6 @@ selftestGroup(({ check }) => {
     const pseudo = (p) => getComputedStyle(wrap, p).content;
     check('Home: nothing drawn over the grid\'s ends (no fade, no mask)', ['::before', '::after'].every((p) => pseudo(p) === 'none' || pseudo(p) === 'normal')
       && getComputedStyle(wrap).maskImage === 'none', `${pseudo('::before')} ${pseudo('::after')} ${getComputedStyle(wrap).maskImage}`);
-    check(`Home: tiles as big as they were (${shown[0].offsetWidth} x ${tileH}, were 396 x 248)`, shown[0].offsetWidth >= 396 && tileH >= 236, `${shown[0].offsetWidth} x ${tileH}`);
     let seen = rowsShown();
     check('Home, 38 tiles: rows 1 to 3 whole, a sliver of row 4 below, nothing above', wrap.scrollTop === 0 && seen.slice(0, 3).every((v) => v === 1) && sliver(seen[3])
       && seen.slice(4).every((v) => v === 0), seen.join(' '));

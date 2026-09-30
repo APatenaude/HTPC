@@ -1,7 +1,8 @@
 'use strict';
 // Self-test: apps' logos. Run by selftest.js, in its order.
-selftestGroup(async ({ check, lastSent, tileEl, PNG1 }) => {
+selftestGroup(async ({ check, until, imagesIn, lastSent, tileEl, PNG1 }) => {
   // ---- Logos: the app's own where the host has one, the glyph otherwise --------------------------
+  selftestFresh();
   const plain = document.createElement('div');
   plain.innerHTML = appIcon({ glyph: 'play', color: '#FF0000' }, 40);
   check('Logos: no logo, the glyph in its colour', !!plain.querySelector('.appicon > svg') && !plain.querySelector('img') && /#FF0000/i.test(plain.innerHTML));
@@ -12,7 +13,7 @@ selftestGroup(async ({ check, lastSent, tileEl, PNG1 }) => {
     { id: 'chosen', name: 'Chosen', glyph: 'moon', color: '#F5D16B', logo: null, logoUrl: PNG1 },
   ];
   reset('home');
-  await new Promise((r) => setTimeout(r, 300));   // the images load (or fail)
+  await until(() => imagesIn($('tiles')));   // the images load (or fail)
   const tileIcon = (id) => tileEl(id).querySelector('.appicon');
   check('Logos: a tile shows its logo, not the glyph', tileIcon('netflix').classList.contains('has-logo') && getComputedStyle(tileIcon('netflix').querySelector('svg')).display === 'none');
   check('Logos: a logo that does not load gives way to the glyph', !tileIcon('broken').classList.contains('has-logo') && getComputedStyle(tileIcon('broken').querySelector('svg')).display !== 'none');

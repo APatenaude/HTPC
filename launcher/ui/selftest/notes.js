@@ -5,6 +5,7 @@ selftestGroup(async ({ check, sent, lastSent, heard }) => {
   // The question shows them all (to 20 000 characters) in a box Up and Down scroll, the focus left
   // on its buttons. Other screen sizes: the audit's pages.
   {
+    selftestFresh();
     const lines = UPD_DEMO_NOTES.split('\n').map((l) => l.replace(/^- /, ''));
     const row = () => $('settings').querySelector('[data-id="upd-launcher"]');
     const noteLines = (el) => [...el.querySelectorAll('.upd-note')];

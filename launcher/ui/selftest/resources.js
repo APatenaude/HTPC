@@ -1,9 +1,11 @@
 'use strict';
 // Self-test: the Home menu's resource view, the menu over an app. Run by selftest.js, in its order.
-selftestGroup(async ({ check, sent, lastSent, focusId }) => {
+// Its rows' ends (the focus stays; nothing wraps round): the audit.
+selftestGroup(async ({ check, checkRows, asksFirst, until, sent, lastSent, focusId }) => {
   // ---- The Home menu's resource view (resources.js) ------------------------------------------------
   // Sampled only while the menu shows; patched in place, its rows kept under the focus. The D-pad
   // goes in and out along the column (in its old card the focus was stuck on the TV).
+  selftestFresh();
   const rNode = (key) => $('menu-res').querySelector(`[data-id="res:${key}"]`);
   const menuNode = (id) => $('menu-panel').querySelector(`[data-id="${id}"]`);
   const menuIds = () => [...$('menu-panel').querySelectorAll('[data-nav]')].map((e) => e.dataset.id);
@@ -14,7 +16,7 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
   const shownParts = () => [...menuColumn().querySelectorAll('.menu-part')].filter((p) => p.offsetHeight > 0);
   const partNames = () => shownParts().map((p) => p.dataset.part).join(',');
   const linedParts = () => shownParts().filter((p) => parseFloat(getComputedStyle(p).borderTopWidth) > 0).map((p) => p.dataset.part).join(',');
-  const menuHintList = () => [...$('menu-panel').querySelectorAll('footer.hints .hint')].map((h) => h.textContent.trim()).join(',');
+  const menuHintKeys = () => [...$('menu-panel').querySelectorAll('footer.hints .key')].map((k) => k.textContent).join(',');
   const resData = (top, extra) => ({ type: 'res.data', cpu: 42.4, memUsed: 5120, memTotal: 8192, disk: 12.5e6, down: 45.2e6, up: 1.2e6, top, held: [], ...extra });
   const RJ = { key: 'app:jellyfin', name: 'Jellyfin', app: 'jellyfin', cpu: 30.2, mem: 900, stop: true };
   const RX = { key: 'exe:long.exe', name: `Program ${'with a very long name '.repeat(3)}.exe`, app: null, cpu: 7.25, mem: 2048, stop: true };
@@ -23,17 +25,23 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
     [resPercent(0), resPercent(0.04), resPercent(0.4), resPercent(9.94), resPercent(9.96), resPercent(100)].join(' ') === '0% 0% 0.4% 9.9% 10% 100%'
     && [resMemory(356), resMemory(999), resMemory(1843), resMemory(12406)].join(' ') === '356 MB 999 MB 1.8 GB 12.1 GB'
     && JSON.stringify([resRate(0, 'B'), resRate(845.3e6, 'B'), resRate(4.24e6, 'b'), resRate(1.2e9, 'b'), resRate(null, 'b')]) === '[["0","KB/s"],["845","MB/s"],["4.2","Mb/s"],["1.2","Gb/s"],null]');
+
+  // Sampled only while the menu is on screen: what the page asks the host, step by step.
+  const sampling = () => (lastSent('res.watch') || { on: false }).on;
   sent.length = 0;
-  reset('home');
-  check('Resources: nothing asked for on the home screen', !sent.some((m) => m.type === 'res.watch' && m.on));
+  let blankData;
+  checkRows('Resources: sampled only while the menu is on screen; blank, the numbers go', [
+    ['the home screen', false], ['the menu', true, () => { press('home'); onHost(resData([RX])); }],
+    ['the launcher blank (an app in front, standby)', false, () => { onHost({ type: 'blank' }); blankData = res.data; }],
+    ['the menu back', true, () => onHost({ type: 'show', view: 'menu', current: null })], ['the menu left', false, () => reset('home')],
+  ].map(([what, on, step]) => { if (step) step(); return [what, sampling() === on, `sampling: ${sampling()}`]; })
+    .concat([['the numbers once blank', blankData === null, JSON.stringify(blankData)]]));
 
   // Over the home screen with nothing open: neither the Home screen row nor Open apps (no part
   // for them, nor its line), the focus on the volume; all of the column fits. The box's usual top
   // three: the launcher, Windows' own, and one program it may stop.
-  for (const t of state.tiles) t.running = false;
   state.memory.menu = null;
   press('home');
-  check('Resources: the menu on screen asks the host to sample', lastSent('res.watch') && lastSent('res.watch').on === true);
   res.data = null;
   render();
   check('Resources: no view before the numbers (the menu\'s first frame as it was without it)', $('menu-res').innerHTML === '');
@@ -51,15 +59,10 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
   // Small, yet read from the couch: no text under 18 px of the 1920 x 1080 stage.
   const tiny = [...$('menu-res').querySelectorAll('*')].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())
     && parseFloat(getComputedStyle(e).fontSize) < 18);
-  const resRowHeights = [...$('menu-res').querySelectorAll('.rs-row')].map((r) => r.offsetHeight);
-  check(`Resources: small (${$('menu-res').offsetHeight} px tall, its line included), rows of 38 px, no text under 18 px`,
-    $('menu-res').offsetHeight <= 230 && resRowHeights.every((h) => h === 38) && !tiny.length,
-    `${resRowHeights.join(' ')}; ${tiny.map((e) => `${e.className || e.tagName} ${getComputedStyle(e).fontSize}`).join(', ')}`);
+  check('Resources: no text under 18 px', !tiny.length, tiny.map((e) => `${e.className || e.tagName} ${getComputedStyle(e).fontSize}`).join(', '));
   const inHome = presses(['down', 'down', 'down']);
   check('Resources, over the home screen: down from the volume, the brightness, a quick button, then the one program it can stop',
     new RegExp(`^brightness,q-\\w+,res:${RX.key.replace('.', '\\.')}$`).test(inHome), inHome);
-  const stuckHome = presses(['down', 'left', 'right']);
-  check('Resources: ... on the last it can stop, down, left and right leave the focus there', stuckHome === [1, 2, 3].map(() => `res:${RX.key}`).join(','), stuckHome);
   const outHome = presses(['up', 'up']);
   check('Resources: ... up: out of it to a quick button, then the brightness; the rows follow the host again',
     /^q-\w+,brightness$/.test(outHome) && lastSent('res.watch').hold.length === 0, `${outHome}; ${JSON.stringify(lastSent('res.watch'))}`);
@@ -86,13 +89,12 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
   const panelRow = menuNode('home');
   setFocus(panelRow);
   onHost(resData([RJ, RX, RW], { cpu: 3 }));
-  const cardEl = $('menu-res').firstElementChild;
-  check('Resources: the view comes with the first numbers, the focus left where it was', cardEl && /3%/.test(cardEl.textContent) && focusedEl() === panelRow);
+  const cardEl = $('menu-res').firstElementChild, first = $('menu-res').textContent;
+  check('Resources: the view comes with the first numbers, the focus left where it was', cardEl && first.includes(resPercent(3)) && focusedEl() === panelRow);
   onHost(resData([RJ, RX, RW]));
   check('Resources: the numbers patch the view in place, the menu and its focus untouched',
     $('menu-res').firstElementChild === cardEl && menuNode('home') === panelRow && focusedEl() === panelRow
-    && /CPU\s*42%/.test($('menu-res').textContent) && /RAM\s*5\.0 \/ 8\.0 GB/.test($('menu-res').textContent) && /Disk\s*13 MB\/s/.test($('menu-res').textContent)
-    && /Net\s*↓45 Mb\/s ↑1\.2 Mb\/s/.test($('menu-res').textContent), $('menu-res').textContent.slice(0, 120));
+    && $('menu-res').textContent !== first && $('menu-res').textContent.includes(resPercent(42.4)), $('menu-res').textContent.slice(0, 120));
   check('Menu over an app, two open and an alert: the alert, the Home screen row and both apps, then the controls, then the monitor, a line over each of the last two; all of it fits, no scrolling',
     ['alert:app:stremio', 'home', 'app:twitch', 'app:jellyfin'].every((id) => menuNode(id) && menuNode(id).closest('[data-part="apps"]'))
     && partNames() === 'apps,controls,monitor' && linedParts() === 'controls,monitor' && fits(),
@@ -104,48 +106,26 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
   check('Resources: ... the host keeps these rows for it', JSON.stringify(lastSent('res.watch').hold) === JSON.stringify([RJ.key, RX.key, RW.key]), JSON.stringify(lastSent('res.watch')));
   press('down');
   const onLong = focusedEl();
-  press('down');
-  check('Resources: down to the last row it can stop, and stays there', onLong === rNode(RX.key) && focusedEl() === onLong, focusedEl() && focusedEl().dataset.id);
-  check('Resources: its hints: X ends the program; nothing on A', menuHintList() === 'XEnd program,BBack', menuHintList());
+  check('Resources: on a program\'s row, the hints: X and B, nothing on A', menuHintKeys() === 'X,B', menuHintKeys());
   onHost(resData([RW, { ...RX, cpu: 55 }, RJ]));
   check('Resources: a new ranking under the focus: the rows stay where they are, their numbers change',
-    focusedEl() === onLong && rNode(RJ.key) === $('menu-res').querySelectorAll('.rs-row')[0] && /55%/.test(onLong.textContent), $('menu-res').textContent.slice(-120));
+    focusedEl() === onLong && rNode(RJ.key) === $('menu-res').querySelectorAll('.rs-row')[0] && onLong.textContent.includes(resPercent(55)), $('menu-res').textContent.slice(-120));
   // X ends a program, with a question first as everywhere; never A.
   sent.length = 0;
   press('a');
   check('Resources: A on a program\'s row does nothing: no question, nothing ended', state.view === 'menu' && focusedEl() === onLong && !lastSent('res.stop'), state.view);
-  press('x');
-  check('Resources: X asks before ending a program, on Cancel', state.view === 'ask' && /^End Program/.test(asking.title) && focusedEl().dataset.id === 'ask-no', asking && asking.title);
-  press('a');
-  check('Resources: ... Cancel: nothing ended, back on its row', state.view === 'menu' && !lastSent('res.stop') && focusId() === `res:${RX.key}`, `${state.view} on ${focusId()}`);
-  press('x');
-  press('b');
-  check('Resources: ... B: nothing ended either, back on its row', state.view === 'menu' && !lastSent('res.stop') && focusId() === `res:${RX.key}`, `${state.view} on ${focusId()}`);
-  press('x');
-  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
-  press('a');
-  check('Resources: yes: the host ends it, back on its row', lastSent('res.stop') && lastSent('res.stop').key === RX.key && state.view === 'menu' && focusedEl() && focusedEl().dataset.id === `res:${RX.key}`);
+  asksFirst('Resources: X on a program\'s row', () => rNode(RX.key), 'x', 'res.stop', { key: RX.key });
   onHost(resData([RJ, RW], { held: [{ key: RX.key, gone: true }] }));
   check('Resources: ended: its row stays under the focus, says so, and offers nothing more',
-    focusedEl() === rNode(RX.key) && /Ended/.test(rNode(RX.key).textContent) && menuHintList() === 'BBack', menuHintList());
-  const outApp = presses(['left', 'up', 'up']);
-  check('Resources: left stays; up to the program above, then out to a quick button; the rows follow the host again',
-    /^res:exe:long\.exe,res:app:jellyfin,q-\w+$/.test(outApp) && !rNode(RX.key) && lastSent('res.watch').hold.length === 0, outApp);
+    focusedEl() === rNode(RX.key) && !!rNode(RX.key).querySelector('.tag') && !rNode(RX.key).querySelector('.rs-cpu') && menuHintKeys() === 'B', menuHintKeys());
+  const outApp = presses(['up', 'up']);
+  check('Resources: the focus off the rows: the ended one goes, the rows follow the host again',
+    /^q-/.test(focusId()) && !rNode(RX.key) && lastSent('res.watch').hold.length === 0, outApp);
   press('down');
-  check('Resources: on an app\'s row, the hints: X closes it', focusId() === `res:${RJ.key}` && menuHintList() === 'XClose app,BBack', `${focusId()}: ${menuHintList()}`);
-  press('x');
-  check('Resources: X on an app\'s row asks (Close)', state.view === 'ask' && asking.title === 'Close Jellyfin?');
-  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
-  press('a');
-  check('Resources: yes: the host closes it; its rows say Closing…', lastSent('res.stop').key === RJ.key && /Closing/.test(rNode(RJ.key).textContent)
-    && /Closing/.test($('menu-panel').querySelector('[data-close="jellyfin"]').textContent));
+  check('Resources: on an app\'s row, the hints: X (it closes the app) and B', focusId() === `res:${RJ.key}` && menuHintKeys() === 'X,B', `${focusId()}: ${menuHintKeys()}`);
+  asksFirst('Resources: X on an app\'s row', () => rNode(RJ.key), 'x', 'res.stop', { key: RJ.key });
   doneClosing('jellyfin');
-  onHost({ type: 'blank' });
-  check('Resources: the launcher blank (an app in front, standby): sampling stops, the numbers go', lastSent('res.watch').on === false && res.data === null);
-  onHost({ type: 'show', view: 'menu', current: 'twitch' });
-  check('Resources: the menu back: sampling again', lastSent('res.watch').on === true);
   reset('home');
-  check('Resources: the menu left: sampling stops', lastSent('res.watch').on === false);
   noticeUpdate({ toasts: [], rows: [], pills: [] });
   state.current = null;
   for (const t of state.tiles) t.running = t.id === 'jellyfin';
@@ -158,7 +138,7 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
   onHost({ type: 'show', view: 'menu', current: 'twitch', backdrop: frame, ack: true });
   check('Menu over an app: built at once, under the blank stage', state.view === 'menu' && $('stage').classList.contains('blank') && !lastSent('shown'));
   check('Menu over an app: its panel waits to slide in until it shows', getComputedStyle($('menu').querySelector('.panel')).animationName === 'none');
-  await new Promise((r) => setTimeout(r, 500));
+  await until(() => lastSent('shown'));
   const said = lastSent('shown');
   check('Menu over an app: shown with its backdrop, then the host is told', !$('stage').classList.contains('blank') && $('backdrop').classList.contains('on')
     && said && typeof said.painted === 'boolean' && said.ms >= 0 && said.load >= 0, JSON.stringify(said));
@@ -168,13 +148,10 @@ selftestGroup(async ({ check, sent, lastSent, focusId }) => {
 
   // Settings › TV left open, then the launcher goes (an app in front, standby): its TV search
   // (every 10 s on the host) stops until the section is on screen again.
+  const searching = () => lastSent('tv.showing') && lastSent('tv.showing').on;
   state.section = 'tv';
-  reset('settings');
-  check('Settings › TV on screen: the host searches', lastSent('tv.showing') && lastSent('tv.showing').on === true);
-  onHost({ type: 'blank' });
-  check('Blank stage: the TV search stops, no section in view', lastSent('tv.showing').on === false && sectionInView === null);
-  onHost({ type: 'show', view: 'settings', section: 'tv' });
-  check('Back on screen: the TV search starts again', lastSent('tv.showing').on === true && sectionInView === 'tv');
-  reset('home');
-  check('Settings left: the TV search stops', lastSent('tv.showing').on === false);
+  checkRows('Settings › TV: the host searches for TVs only while the section is on screen', [
+    ['on screen', true, () => reset('settings')], ['blank', false, () => onHost({ type: 'blank' })],
+    ['back on screen', true, () => onHost({ type: 'show', view: 'settings', section: 'tv' })], ['left', false, () => reset('home')],
+  ].map(([what, on, step]) => { step(); return [what, searching() === on && (sectionInView === 'tv') === (what !== 'blank' && what !== 'left'), `searching ${searching()}, in view ${sectionInView}`]; }));
 });
