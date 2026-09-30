@@ -193,10 +193,11 @@ try {
             # as SYSTEM cost seconds each), called afresh each time as the task calls it: each
             # probe's output, or the message it threw (caught, so an error record's line wrapping
             # cannot split it), in its own file; "done" once all ran. The last one sets
-            # HTPC_JOB_RESOLVE first (the update bootstrap's call), after the others.
+            # HTPC_JOB_RESOLVE first (the update bootstrap's call), after the others. -Catalog is tried
+            # with a verb no job has: were the guard ever to let it through, nothing would run as SYSTEM.
             $probes = @(
                 @{ Args = '-Job reconcile -DryRun'; What = '-DryRun is refused' },
-                @{ Args = '-Job reconcile -Catalog C:\x.json'; What = '-Catalog is refused' },
+                @{ Args = '-Job nosuchverb -Catalog C:\x.json'; What = '-Catalog is refused' },
                 @{ Args = '-Resolve -DataRoot C:\Windows\Temp'; What = '-Resolve/-DataRoot is refused' },
                 @{ Args = '-Resolve -DataRoot C:\Windows\Temp'; What = 'with HTPC_JOB_RESOLVE, -Resolve is allowed (the update bootstrap): it names the runner'; Mark = $true })
             $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -207,7 +208,13 @@ try {
             }
             $done = Join-Path $work 'sysjob-done.txt'
             $all = Join-Path $work 'sysjob.ps1'
-            [IO.File]::WriteAllText($all, "$($calls -join "`r`n")`r`nSet-Content -LiteralPath '$done' -Value done -Encoding ascii`r`n")
+            # With a BOM: PowerShell 5.1 reads a file without one as ANSI (a profile path may not be ASCII).
+            [IO.File]::WriteAllText($all, "$($calls -join "`r`n")`r`nSet-Content -LiteralPath '$done' -Value done -Encoding ascii`r`n", (New-Object Text.UTF8Encoding $true))
+            # No result from an earlier run may stand for this one.
+            foreach ($old in @($probes | ForEach-Object { $_.Result }) + $done) {
+                Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $old) { throw "$old is left from an earlier run" }
+            }
             $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$all`""
             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
             $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::FromMinutes(2))
