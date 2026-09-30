@@ -22,9 +22,9 @@
       Prefs     Spotify's prefs: lines set, the others kept, line ends and BOM kept, twice = no
                 change, nothing written when the app is not installed, nothing outside the profile;
                 Plex HTPC's plex.ini: the line in its [debug] section, the section added if missing
-      Catalog   the real catalog: its autostart entries are well formed, the box's own entries
-                (Spotify's and Edge's Run values) are claimed by the right app, Windows' and ours
-                are not, and the updaters found are turned off (Plex HTPC, Feishin)
+      Catalog   the real catalog: its autostart entries are well formed (one check naming any that is
+                not), the box's own entries (Spotify's and Edge's Run values) are claimed by the
+                right app, a vendor's service by none (the updaters it turns off: LauncherTests)
     Prints PASS/FAIL lines and a count; exit code 1 if anything failed.
 
 .PARAMETER Only
@@ -346,14 +346,17 @@ try {
         Write-Host 'Catalog (setup\catalog.json)'
         $real = @((Get-Content (Join-Path $repo 'setup\catalog.json') -Raw | ConvertFrom-Json).apps)
         $known = 'run', 'startup', 'tasks', 'services', 'prefs'
-        foreach ($a in $real | Where-Object { $_.PSObject.Properties['autostart'] }) {
-            $extra = @($a.autostart.PSObject.Properties.Name | Where-Object { $known -notcontains $_ })
-            $badNames = @(foreach ($k in 'run', 'startup', 'tasks', 'services') { @($a.autostart.$k | Where-Object { $_ -and -not (ConvertTo-NamePattern $_) }) })
-            $badPrefs = @($a.autostart.prefs | Where-Object { $_ -and ($_.file -notmatch '^%(APPDATA|LOCALAPPDATA)%\\' -or
-                    ($_.PSObject.Properties['section'] -and $_.section -notmatch '^[A-Za-z0-9 ._-]{1,60}$') -or
-                    @($_.set.PSObject.Properties | Where-Object { $_.Name -notmatch '^[A-Za-z0-9._-]{1,100}$' -or "$($_.Value)" -match '[\r\n]' }).Count) })
-            Check ($extra.Count -eq 0 -and $badNames.Count -eq 0 -and $badPrefs.Count -eq 0) "$($a.id): autostart well formed"
-        }
+        $declaring = @($real | Where-Object { $_.PSObject.Properties['autostart'] })
+        $malformed = @(foreach ($a in $declaring) {
+                $extra = @($a.autostart.PSObject.Properties.Name | Where-Object { $known -notcontains $_ })
+                $badNames = @(foreach ($k in 'run', 'startup', 'tasks', 'services') { @($a.autostart.$k | Where-Object { $_ -and -not (ConvertTo-NamePattern $_) }) })
+                $badPrefs = @($a.autostart.prefs | Where-Object { $_ -and ($_.file -notmatch '^%(APPDATA|LOCALAPPDATA)%\\' -or
+                        ($_.PSObject.Properties['section'] -and $_.section -notmatch '^[A-Za-z0-9 ._-]{1,60}$') -or
+                        @($_.set.PSObject.Properties | Where-Object { $_.Name -notmatch '^[A-Za-z0-9._-]{1,100}$' -or "$($_.Value)" -match '[\r\n]' }).Count) })
+                $why = @($(if ($extra) { "unknown $($extra -join ', ')" }), $(if ($badNames) { "names $($badNames -join ', ')" }), $(if ($badPrefs) { "prefs $(@($badPrefs.file) -join ', ')" })) | Where-Object { $_ }
+                if ($why) { "$($a.id) ($($why -join '; '))" }
+            })
+        Check ($declaring.Count -and -not $malformed.Count) "every app's autostart well formed ($(if ($malformed) { 'not: ' + ($malformed -join ', ') } else { @($declaring.id) -join ', ' }))"
         $rules = @(Get-AutostartRules $real $fakeProfile)
         $withExe = @($real | Where-Object { $_.PSObject.Properties['launch'] -and $_.launch.PSObject.Properties['exe'] })
         $noFolder = @($withExe | Where-Object { -not ($rules | Where-Object Id -eq $_.id).Folder } | ForEach-Object id)
@@ -362,17 +365,13 @@ try {
         Check ($o.Verdict -eq 'app' -and $o.Rule.Id -eq 'spotify') "the box's HKCU Run Spotify: Spotify's"
         $o = Get-AutostartOwner 'run' 'MicrosoftEdgeAutoLaunch_8714F0D917266FE3AFB7F8BB98EEBC18' "`"$pf86\Microsoft\Edge\Application\msedge.exe`" --no-startup-window --win-session-start" $rules $fakeProfile
         Check ($o.Verdict -eq 'app' -and $o.Rule.Id -eq 'edge') "the box's HKCU Run MicrosoftEdgeAutoLaunch_...: the Browser's"
-        $o = Get-AutostartOwner 'run' 'HTPC launcher' "`"$pf\HTPC\Launcher\HtpcWatchdog.exe`"" $rules $fakeProfile
-        Check ($o.Verdict -eq 'keep') "the box's HKCU Run HTPC launcher: kept"
-        $o = Get-AutostartOwner 'task' '\MicrosoftEdgeUpdateTaskMachineCore{9F388D10-48C0-4592-A1CA-50B79C9A872E}' "$pf86\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe /c" $rules $fakeProfile
-        Check ($o.Verdict -eq 'keep') "the box's Edge update task: kept"
+        # (HTPC launcher's Run value and Edge's updater tasks: kept whatever the catalog says, in Match.)
         $o = Get-AutostartOwner 'service' 'IntelGraphicsSoftwareService' '"C:\Program Files\WindowsApps\AppUp.IntelArcSoftware_26.32.2604.0_x64__8j3eq9eme6ctt\VFS\ProgramFilesX64\Intel\Intel Graphics Software\IntelGraphicsSoftware.Service.exe"' $rules $fakeProfile
         Check ($o.Verdict -eq 'none') "the box's IntelGraphicsSoftwareService: no catalog app's (left alone)"
-        $plex = ($real | Where-Object id -eq 'plex').autostart.prefs | Where-Object { $_.file -like '*\Plex HTPC\plex.ini' }
-        Check ($plex -and $plex.section -eq 'debug' -and $plex.set.disableUpdater -eq 'true') "Plex HTPC's own updater off (plex.ini [debug] disableUpdater=true)"
+        # Plex HTPC's and Feishin's updaters off, Spotify's Run value and prefs mode: LauncherTests
+        # (AutostartTests.Catalog). Its prefs' autostart-configured, which that one does not check:
         $spotify = ($real | Where-Object id -eq 'spotify').autostart
-        Check (($spotify.run -contains 'Spotify') -and $spotify.prefs[0].set.'app.autostart-mode' -eq '"off"' -and $spotify.prefs[0].set.'app.autostart-configured' -eq 'true') "Spotify: its Run value, and its prefs' autostart off"
-        Check (($real | Where-Object id -eq 'feishin').launch.env.DISABLE_AUTO_UPDATES -eq '1') "Feishin started with DISABLE_AUTO_UPDATES (its updater downloads and installs on quit)"
+        Check ($spotify.prefs[0].set.'app.autostart-configured' -eq 'true') "Spotify's prefs set app.autostart-configured=true too"
     }
 } finally {
     if (-not $Keep) { Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue }
