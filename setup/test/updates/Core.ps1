@@ -50,6 +50,9 @@ static class Checks {
     Check(Program.FallBack(3, -1, false), "3 fast exits in a row: restart the box or the desktop");
     Check(!Program.FallBack(3, -1, true), "  never while a launcher update watches the launcher it put in place");
     Check(!Program.FallBack(2, -1, false) && !Program.FallBack(3, 0, false), "  not before 3, nor again while in the fallback");
+    Check(!Program.StartOvertaken("7|1|2", "7|1|2", false), "a launcher start, the same file at its path and no pause after it: kept");
+    Check(Program.StartOvertaken("7|1|2", "7|1|2", true), "  ended when a launcher update's pause came while it started");
+    Check(Program.StartOvertaken("7|1|2", "8|1|3", false) && Program.StartOvertaken("7|1|2", null, false), "  ended when the file at its path changed or went while it started (a rollback)");
     return failed;
   } } }
 '@)

@@ -33,7 +33,9 @@
 //       there when the watchdog starts is ignored.
 //   C:\ProgramData\HTPC\state\watchdog-pause  {"jobPid": N, "expiresUtc": "..."}, written by
 //       SYSTEM jobs (launcher updates; the folder is admin-only). Over when it expires or the job
-//       process is gone; ignored when written before the box started.
+//       process is gone; ignored when written before the box started. A start it overtook (Windows
+//       held the start while the job paused, or moved the launcher's files back) is ended at once,
+//       not counted.
 // Watch (the launcher is still started, as usual):
 //   C:\ProgramData\HTPC\state\watchdog-watch  the same format and rules, written by a launcher
 //       update from before it lifts its pause after the swap until the new launcher is judged
@@ -294,6 +296,7 @@ namespace Htpc.Watchdog
             var restarted = sawExit;
             var reason = restartReason ?? "ended";
             if (child != null) child.Dispose();
+            var stamp = FileStamp(LauncherExe);
             child = Native.Start(LauncherExe, restarted ? "--restarted --restart-reason=" + reason : "");
             if (child == null)
             {
@@ -302,6 +305,18 @@ namespace Htpc.Watchdog
                 return;
             }
             Log.Info("Launcher started (pid " + child.Id + (restarted ? ", --restarted: " + reason : "") + ")");
+            // Windows can hold a new program's start for seconds (the antivirus checks it first). A
+            // launcher update may have paused this watchdog meanwhile, or put other files in place (a
+            // rollback): this launcher is then not the one wanted (it can be the version put aside),
+            // so it is ended at once, not counted, and the loop starts the right one when it may.
+            if (StartOvertaken(stamp, FileStamp(LauncherExe), JobFileHolds(JobPauseFile)))
+            {
+                Log.Info("A launcher update paused the watchdog or changed the launcher while it started: ending it (pid " + child.Id + ")");
+                try { child.Kill(); child.WaitForExit(5000); }
+                catch (Exception e) { Log.Warn("Could not end it: " + e.Message); }
+                sawExit = true; restartReason = "planned";
+                return;
+            }
             // Until it holds the mutex (a first start after an update unpacks for a while), or
             // exits before it does.
             while (!HasExited(child) && !IsHeld())
@@ -361,6 +376,18 @@ namespace Htpc.Watchdog
             catch (Exception) { return false; }
         }
 
+        // Which file is at the launcher's path: its size and times, read without opening it (a
+        // handle could get in the way of an update renaming it); null when there is none.
+        static string FileStamp(string path)
+        {
+            try
+            {
+                var f = new FileInfo(path);
+                return f.Exists ? f.Length + "|" + f.CreationTimeUtc.Ticks + "|" + f.LastWriteTimeUtc.Ticks : null;
+            }
+            catch (Exception) { return null; }
+        }
+
         // --- The rules, apart from Windows (setup\test\Test-Updates.ps1 compiles this file with checks) --
 
         // A job's file (pause or watch), {"jobPid": N, "expiresUtc": "..."}: it holds while it was
@@ -389,6 +416,14 @@ namespace Htpc.Watchdog
         {
             if (code == PlannedExit || jobHolds || !lived.HasValue) return Exit.NotCounted;
             return lived.Value < FastExit || (endedHung && lived.Value < Settled) ? Exit.Fast : Exit.Settled;
+        }
+
+        // A launcher start that a launcher update overtook: its pause came while the start was
+        // under way, or the file at the launcher's path is not the one there when it began (a
+        // rollback or a swap moved files meanwhile).
+        internal static bool StartOvertaken(string stampBefore, string stampAfter, bool jobPaused)
+        {
+            return jobPaused || !string.Equals(stampBefore, stampAfter, StringComparison.Ordinal);
         }
 
         // The fallback (restart the box, else the desktop) after 3 fast exits in a row, never while
