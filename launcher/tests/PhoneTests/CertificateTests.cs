@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Htpc.Launcher;
 
@@ -36,8 +37,6 @@ sealed class MemoryKeyStore : IKeyStore
 static partial class Program
 {
     static readonly IPAddress Home = IPAddress.Parse("192.168.1.20");
-
-    static string TempFolder() => Path.Combine(Path.GetTempPath(), $"htpc-certs-test-{Guid.NewGuid():N}");
 
     // As a phone that installed only the root: the intermediate comes from the server.
     static X509ChainStatusFlags Chain(X509Certificate2 root, X509Certificate2? intermediate, X509Certificate2 leaf)
@@ -172,7 +171,7 @@ static partial class Program
 
         // Setup's step itself: a pair the user's files hold that this box would not make never
         // reaches the machine store (the check comes first, elevated or not).
-        var folder = TempFolder();
+        using var folder = new TempPath("certs-test");
         var keys = new MemoryKeyStore();
         var forgedPair = Intermediate(testRoot, subject, With("2.5.29.19", new X509BasicConstraintsExtension(true, true, 5, true)), keys.Create(PhoneCertificates.IntermediateKeyName));
         Directory.CreateDirectory(folder);
@@ -182,15 +181,54 @@ static partial class Program
         Check(step.LoadExisting() && !step.PlaceIntermediateInMachineStore() && !step.IntermediateInMachineStore
             && Log.Warnings.Any(w => w.Contains("not put in the machine's CA store") && w.Contains("path length 0")),
             "setup's step: an intermediate this box would not make is loaded, then refused before the machine store");
-        Directory.Delete(folder, true);
+    }
+
+    // A test's name for its CAs: "HTPC test <32 hex digits>", never the box's (RemoveTestCerts finds them by it).
+    static string NewTestName() => $"HTPC test {Guid.NewGuid():N}";
+    const string AnyTestName = "HTPC test [0-9a-f]{32}";
+
+    /// <summary>
+    /// The certificates in the CA stores (the user's; the machine's too with administrator rights)
+    /// whose CN is exactly "&lt;test name&gt; phone remote" (namePattern: a regex, AnyTestName or an
+    /// escaped name), whatever their O: only a test's own, never the box's or anyone else's. Removed.
+    /// </summary>
+    static int RemoveTestCerts(string namePattern)
+    {
+        var cn = new Regex($@"(^|[,+]\s*)CN={namePattern} phone remote\s*([,+]|$)");
+        var removed = 0;
+        foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+        {
+            try
+            {
+                using var store = new X509Store(StoreName.CertificateAuthority, location);
+                store.Open(OpenFlags.ReadWrite | OpenFlags.OpenExistingOnly);
+                foreach (var c in store.Certificates.Where(c => cn.IsMatch(c.Subject)))
+                {
+                    try { store.Remove(c); removed++; }
+                    catch (CryptographicException) { }   // the machine's, seen from the user's store
+                }
+            }
+            catch (CryptographicException) { }   // the machine's store, without administrator rights
+        }
+        return removed;
     }
 
     static void CertificateTests()
     {
-        var folder = TempFolder();
+        var testName = NewTestName();
+        try { CertificateChecks(testName); }
+        finally
+        {
+            RemoveTestCerts(Regex.Escape(testName));
+            Check(IntermediatesInStore(testName).Count == 0, "the test's certificates removed from the CA stores");
+        }
+    }
+
+    static void CertificateChecks(string testName)
+    {
+        using var folder = new TempPath("certs-test");
         var now = new DateTime(2026, 9, 27, 12, 0, 0);
         var store = new MemoryKeyStore();
-        var testName = $"HTPC test {Guid.NewGuid():N}";
         var certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home, IPAddress.Parse("8.8.8.8"), IPAddress.Parse("fe80::1") }), "first Ensure makes a server certificate");
         var root = certs.Authority!;
@@ -241,7 +279,7 @@ static partial class Program
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { Home }) && certs.Authority!.Thumbprint == root.Thumbprint && certs.Current!.Thumbprint == server.Thumbprint,
             "after a restart: the same root, intermediate and certificate, none made");
         // Setup, as the user (--phone-certificates-create): the pair only, made once.
-        var madeFolder = TempFolder();
+        using var madeFolder = new TempPath("certs-test");
         var madeKeys = new MemoryKeyStore();
         var maker = new PhoneCertificates(madeFolder, madeKeys, testName, () => now);
         Check(maker.MakeAuthorities() && madeKeys.Names.SequenceEqual(new[] { PhoneCertificates.IntermediateKeyName })
@@ -255,7 +293,7 @@ static partial class Program
         var setupView = new PhoneCertificates(folder, store, testName, () => now);
         Check(setupView.LoadExisting() && setupView.Intermediate!.Thumbprint == inter.Thumbprint && store.Names.OrderBy(n => n).SequenceEqual(keysBefore),
             "setup's step loads the launcher's pair as it is, and makes no key");
-        var emptyFolder = TempFolder();
+        using var emptyFolder = new TempPath("certs-test");
         Check(!new PhoneCertificates(emptyFolder, new MemoryKeyStore(), testName).LoadExisting() && !Directory.Exists(emptyFolder) || !Directory.EnumerateFiles(emptyFolder).Any(),
             "before the launcher's first start there is nothing to load, and nothing is made");
         MachineStoreChecks(root, inter, testName);        var moved = IPAddress.Parse("192.168.1.33");
@@ -283,11 +321,6 @@ static partial class Program
         Check(!leftovers.Any(l => inStore.Contains(l.Thumbprint)) && inStore.Contains(certs.Intermediate!.Thumbprint),
             "at every start this box's older intermediates leave the CA store (CN and O in either order); the current one stays");
         Check(others.All(o => inStore.Contains(o.Thumbprint)), "another O, or CN and O in one multi-valued name: left alone");
-        using (var user = new X509Store(StoreName.CertificateAuthority, StoreLocation.CurrentUser))
-        {
-            user.Open(OpenFlags.ReadWrite);
-            foreach (var o in others) user.Remove(o);
-        }
 
         // What the box had: leftovers in the machine's store (from test runs as administrator) show
         // in the user's store too, and the launcher, without administrator rights, cannot remove
@@ -314,33 +347,28 @@ static partial class Program
         // What the single CA of an earlier build left goes too, and only that.
         var legacy = new MemoryKeyStore();
         legacy.Create("HTPC phone remote CA");
-        var legacyFolder = TempFolder();
+        using var legacyFolder = new TempPath("certs-test");
         Directory.CreateDirectory(legacyFolder);
         File.WriteAllBytes(Path.Combine(legacyFolder, "ca.cer"), new byte[] { 1 });
         new PhoneCertificates(legacyFolder, legacy, testName, () => now).Ensure(PhoneCertificates.LocalNames(), new[] { Home });
         Check(legacy.Open("HTPC phone remote CA") is null && !File.Exists(Path.Combine(legacyFolder, "ca.cer")) && legacy.Open(PhoneCertificates.IntermediateKeyName) is not null,
             "the old single CA's key and ca.cer removed; the new intermediate kept");
-        Directory.Delete(legacyFolder, true);
-        PhoneCertificates.RemoveIntermediates(testName, null);
-        Check(IntermediatesInStore(testName).Count == 0, "the test's intermediates removed from the CA stores");
-        Directory.Delete(folder, true);
     }
 
     // ---- HTTPS: the real key store (as on the box), keys made for the test and deleted after ------------
 
     static async Task HttpsTests()
     {
-        var prefix = $"HTPC test {Guid.NewGuid():N} ";
-        var testName = prefix.Trim();
-        var store = new CngKeyStore(prefix);
-        var folder = TempFolder();
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
-        var root = FindUp(Path.Combine("launcher", "phone"))!;
+        var testName = NewTestName();
+        var store = new CngKeyStore(testName + " ");
+        using var folder = new TempPath("certs-test");
+        using var file = new TempPath("phones-test", ".json");
+        PhoneServer? server = null;
         try
         {
             var certs = new PhoneCertificates(folder, store, testName);
             var pairing = new PhonePairing(file) { RequireCode = false };
-            var server = new PhoneServer(new FakeHost(), root, pairing, IPAddress.Loopback, certificates: certs) { Addresses = () => new[] { Home } };
+            server = new PhoneServer(new FakeHost(), PhoneFolder, pairing, IPAddress.Loopback, certificates: certs) { Addresses = () => new[] { Home } };
             var httpPort = FreePort();
             var httpsPort = FreePort();
             Check(await server.StartAsync(new[] { httpPort }, httpsPort) == httpPort && server.SecurePort == httpsPort, "HTTP and HTTPS both start");
@@ -449,17 +477,15 @@ static partial class Program
             }
             Check(await Wss($"https://tv.local:{httpsPort}") == 101, "wss from the secure page: accepted");
             Check(await Wss($"http://tv.local:{httpsPort}") == 403 && await Wss("https://evil.com") == 403, "wss from another origin or scheme: 403");
-            await server.StopAsync();
         }
         finally
         {
+            if (server is not null) await server.StopAsync();
             store.Delete(PhoneCertificates.IntermediateKeyName);
             store.Delete(PhoneCertificates.ServerKeyName);
             Check(store.Open(PhoneCertificates.IntermediateKeyName) is null && store.Open(PhoneCertificates.ServerKeyName) is null, "test keys deleted from the key store");
-            PhoneCertificates.RemoveIntermediates(testName, null);
+            RemoveTestCerts(Regex.Escape(testName));
             Check(IntermediatesInStore(testName).Count == 0, "its intermediate removed from the CA stores");
-            if (Directory.Exists(folder)) Directory.Delete(folder, true);
-            File.Delete(file);
         }
     }
 }

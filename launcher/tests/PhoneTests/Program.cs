@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
-using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -11,30 +9,6 @@ namespace Htpc.Launcher;
 // The phone remote's checks, one group per area (Harness.cs): dotnet run -c Release in this folder.
 // Prints each group with its time, and the failures only; -v adds the passes, the details and the
 // log, and any other argument runs only the groups whose name has it ("dotnet run -- -v Pairing").
-
-/// <summary>The launcher as the server sees it: records what arrives.</summary>
-sealed class FakeHost : IPhoneHost
-{
-    public readonly ConcurrentQueue<string> Events = new();
-    public volatile string? Code;
-    public int Shown;
-    public bool Asleep;
-    public (byte[] Data, string ContentType)? Art;
-    public void OnCommand(PhoneClient phone, PhoneCommand command) => Events.Enqueue(command switch
-    {
-        KeyCommand k => $"key {k.Key}",
-        TypeCommand t => $"type back={t.Back} text={t.Text}",
-        _ => command.GetType().Name,
-    });
-    public void OnConnected(PhoneClient phone) => Events.Enqueue("connected");
-    public void OnDisconnected(PhoneClient phone) => Events.Enqueue("disconnected");
-    public bool ShowPairingCode(string code) { if (Asleep) return false; Code = code; Shown++; return true; }
-    public void HidePairingCode(bool paired) { Code = null; Events.Enqueue($"hide paired={paired}"); }
-    public void PhonesChanged() { }
-    public void ShortcutKeyMade(string phoneName) => Events.Enqueue("shortcut " + phoneName);
-    public (byte[] Data, string ContentType)? Artwork() => Art;
-    public void OpenShared(string url) => Events.Enqueue("shared " + url);
-}
 
 static partial class Program
 {
@@ -47,6 +21,9 @@ static partial class Program
         T.Start(args);
         // Tests name their CAs themselves: the box's own (its intermediates stay in Windows' CA stores) never grow.
         var boxOnes = IntermediatesInStore(PhoneCertificates.BoxName);
+        // What a run stopped half-way left (its cleanup never ran); not while another run goes (those are its own).
+        if (Process.GetProcessesByName(Process.GetCurrentProcess().ProcessName).Length == 1)
+            T.Info($"certificates earlier runs left in the CA stores, removed: {RemoveTestCerts(AnyTestName)}");
         T.Group("Protocol", ProtocolTests);
         T.Group("Links", LinkTests);
         T.Group("Routing", RoutingTests);
@@ -180,7 +157,7 @@ static partial class Program
 
     static void PairingTests()
     {
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
+        using var file = new TempPath("phones-test", ".json");
         var now = new DateTime(2026, 9, 26, 20, 0, 0);
         var p = new PhonePairing(file, () => now);
         Check(p.RequireCode, "code on by default");
@@ -234,7 +211,6 @@ static partial class Program
         var text = File.ReadAllText(file);
         Check(!text.Contains(ok.Token!) && !text.Contains(k1.Token!), "the file holds hashes, not tokens");
         Check(reloaded.Forget(reloaded.Find(ok.Token)!.Id).Count == 1 && reloaded.Find(ok.Token) is null, "forget");
-        File.Delete(file);
     }
 
     // ---- Host and Origin ----------------------------------------------------------------------------------
@@ -255,88 +231,10 @@ static partial class Program
 
     // ---- Server on 127.0.0.1 -----------------------------------------------------------------------------
 
-    static string? FindUp(string relative)
-    {
-        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
-        {
-            var path = Path.Combine(d.FullName, relative);
-            if (File.Exists(path) || Directory.Exists(path)) return path;
-        }
-        return null;
-    }
-
-    static int FreePort()
-    {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        var port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
-    }
-
-    static async Task<string> Raw(int port, string request)
-    {
-        using var tcp = new TcpClient();
-        await tcp.ConnectAsync(IPAddress.Loopback, port);
-        var s = tcp.GetStream();
-        await s.WriteAsync(Encoding.ASCII.GetBytes(request));
-        var buf = new byte[4096];
-        var n = await s.ReadAsync(buf);
-        return Encoding.ASCII.GetString(buf, 0, n);
-    }
-
-    static async Task<(ClientWebSocket? Socket, int Status)> Ws(int port, string? origin, string? cookie)
-    {
-        var ws = new ClientWebSocket();
-        if (origin is not null) ws.Options.SetRequestHeader("Origin", origin);
-        if (cookie is not null) ws.Options.SetRequestHeader("Cookie", cookie);
-        ws.Options.CollectHttpResponseDetails = true;
-        try
-        {
-            await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws"), CancellationToken.None);
-            return (ws, 101);
-        }
-        catch (WebSocketException) { return (null, (int)ws.HttpStatusCode); }
-    }
-
-    static async Task<JsonElement?> Receive(ClientWebSocket ws, int ms = 3000)
-    {
-        var buf = new byte[8192];
-        using var cts = new CancellationTokenSource(ms);
-        try
-        {
-            var r = await ws.ReceiveAsync(buf, cts.Token);
-            if (r.MessageType == WebSocketMessageType.Close) return null;
-            return JsonDocument.Parse(buf.AsMemory(0, r.Count)).RootElement.Clone();
-        }
-        catch (Exception) { return null; }
-    }
-
-    static Task SendText(ClientWebSocket ws, string text) => ws.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
-
-    static Task<bool> WaitFor(FakeHost host, string item, int ms = 2000) => Until(() => host.Events.Contains(item), ms);
-
-    /// <summary>Whether something comes true within ms (checked every 20 ms).</summary>
-    static async Task<bool> Until(Func<bool> ok, int ms = 2000)
-    {
-        for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < ms; await Task.Delay(20))
-            if (ok()) return true;
-        return ok();
-    }
-
     static async Task ServerTests()
     {
-        var root = FindUp(Path.Combine("launcher", "phone")) ?? FindUp("phone");
-        if (root is null) { Check(false, "launcher\\phone found"); return; }
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
-        var now = DateTime.Now;
-        var pairing = new PhonePairing(file, () => now);
-        var host = new FakeHost();
-        var server = new PhoneServer(host, root, pairing, IPAddress.Loopback);
-        var port = FreePort();
-        Check(await server.StartAsync(new[] { port }) == port, $"starts on 127.0.0.1:{port}");
-        var origin = $"http://127.0.0.1:{port}";
-        using var http = new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = new Uri(origin) };
+        await using var box = await TestServer.StartAsync();
+        var (host, pairing, server, port, origin, http) = (box.Host, box.Pairing, box.Server, box.Port, box.Origin, box.Http);
 
         // Static files: only the web app's own.
         var page = await http.GetAsync("/");
@@ -370,7 +268,7 @@ static partial class Program
         host.Asleep = true;
         Check((int)(await Post("/api/pair/start", "{}", origin)).StatusCode == 409, "pair/start while asleep 409");
         host.Asleep = false;
-        now += PhonePairing.Cooldown;
+        box.Now += PhonePairing.Cooldown;
         Check((await Post("/api/pair/start", "{}", origin)).StatusCode == HttpStatusCode.OK && host.Code is { Length: 4 } && host.Shown == 1, "pair/start shows a code on the TV");
         var code = host.Code!;
         var second = await Post("/api/pair/start", "{}", origin);
@@ -387,7 +285,7 @@ static partial class Program
         var startLocked = await Post("/api/pair/start", "{}", origin);
         Check((int)startLocked.StatusCode == 429 && (await Json(startLocked)).GetProperty("error").GetString() == "locked", "no new code while locked");
         Check((int)(await Post("/api/pair", "{\"code\":\"12a4\"}", origin)).StatusCode is 400 or 429, "malformed code refused");
-        now = now.AddSeconds(61);
+        box.Now = box.Now.AddSeconds(61);
         await Post("/api/pair/start", "{}", origin);
         code = host.Code!;
         Check((await Post("/api/pair", $"{{\"code\":\"{code}\"}}", null)).StatusCode == HttpStatusCode.Forbidden, "pair without Origin 403");
@@ -402,7 +300,7 @@ static partial class Program
         artRequest.Headers.Add("Cookie", cookie);
         Check((await http.SendAsync(artRequest)).StatusCode == HttpStatusCode.OK, "art with the cookie 200");
         // "Show a code" by mistake: the phone's Cancel takes it off the TV at once.
-        now += PhonePairing.Cooldown;
+        box.Now += PhonePairing.Cooldown;
         await Post("/api/pair/start", "{}", origin);
         var shownCode = host.Code;
         Check((await Post("/api/pair/cancel", "{}", null)).StatusCode == HttpStatusCode.Forbidden && host.Code == shownCode, "cancel without Origin: 403, the code stays");
@@ -472,9 +370,6 @@ static partial class Program
         await Until(() => server.ClientCount == 0);
         var (again, _) = await Ws(port, origin, cookie);
         Check(again is not null && (await Receive(again))?.GetProperty("paired").GetBoolean() == false, "its cookie no longer works");
-
-        await server.StopAsync();
-        File.Delete(file);
     }
 
     // A phone silent for a while is dropped; one sending its heartbeat stays. On a server of its own
@@ -482,41 +377,28 @@ static partial class Program
     // would pass for the wrong reason.
     static async Task SilenceTests()
     {
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
-        var host = new FakeHost();
-        var server = new PhoneServer(host, FindUp(Path.Combine("launcher", "phone"))!, new PhonePairing(file) { RequireCode = false }, IPAddress.Loopback)
-            { Silence = TimeSpan.FromMilliseconds(600) };
-        var port = FreePort();
-        await server.StartAsync(new[] { port });
+        await using var box = await TestServer.StartAsync(silence: TimeSpan.FromMilliseconds(600));
+        box.Pairing.RequireCode = false;
+        var (host, silence) = (box.Host, box.Server.Silence);
         using var stopPings = new CancellationTokenSource();
-        try
+        var (pinger, _) = await Ws(box.Port, box.Origin, null);
+        await Receive(pinger!);
+        var pings = Task.Run(async () =>
         {
-            var origin = $"http://127.0.0.1:{port}";
-            var (pinger, _) = await Ws(port, origin, null);
-            await Receive(pinger!);
-            var pings = Task.Run(async () =>
+            while (!stopPings.IsCancellationRequested)
             {
-                while (!stopPings.IsCancellationRequested)
-                {
-                    try { await Task.Delay(100, stopPings.Token); await SendText(pinger!, "{\"t\":\"ping\"}"); } catch (Exception) { return; }
-                }
-            });
-            var (quiet, _) = await Ws(port, origin, null);
-            await Receive(quiet!);
-            var sw = Stopwatch.StartNew();
-            var gone = await Receive(quiet!, (int)(server.Silence.TotalMilliseconds * 5));
-            var after = sw.Elapsed;
-            Check(gone is null && after > server.Silence * 2 / 3 && after < server.Silence * 5 && await WaitFor(host, "disconnected")
-                && pinger!.State == WebSocketState.Open && host.Events.Count(e => e == "disconnected") == 1,
-                $"a phone silent for {server.Silence.TotalSeconds} s is dropped (after {after.TotalSeconds:0.0} s, the launcher told); one pinging every 0.1 s stays");
-            stopPings.Cancel();
-            await pings;
-        }
-        finally
-        {
-            stopPings.Cancel();
-            await server.StopAsync();
-            File.Delete(file);
-        }
+                try { await Task.Delay(100, stopPings.Token); await SendText(pinger!, "{\"t\":\"ping\"}"); } catch (Exception) { return; }
+            }
+        });
+        var (quiet, _) = await Ws(box.Port, box.Origin, null);
+        await Receive(quiet!);
+        var sw = Stopwatch.StartNew();
+        var gone = await Receive(quiet!, (int)(silence.TotalMilliseconds * 5));
+        var after = sw.Elapsed;
+        Check(gone is null && after > silence * 2 / 3 && after < silence * 5 && await WaitFor(host, "disconnected")
+            && pinger!.State == WebSocketState.Open && host.Events.Count(e => e == "disconnected") == 1,
+            $"a phone silent for {silence.TotalSeconds} s is dropped (after {after.TotalSeconds:0.0} s, the launcher told); one pinging every 0.1 s stays");
+        stopPings.Cancel();
+        await pings;
     }
 }

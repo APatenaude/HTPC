@@ -18,19 +18,11 @@ static partial class Program
         Check(PhoneLinks.FindLink("no link here") is null && PhoneLinks.FindLink(null) is null && PhoneLinks.FindLink("file:///C:/x") is null, "no link: nothing");
         Check(P("{\"t\":\"open\",\"url\":\"https://a.b\",\"share\":true}") is OpenCommand { Shared: true } && P("{\"t\":\"open\",\"url\":\"https://a.b\"}") is OpenCommand { Shared: false }, "open: shared flag");
         Check(P("{\"t\":\"shortcutKey\"}") is ShortcutKeyCommand, "shortcutKey command");
-        var manifest = File.ReadAllText(Path.Combine(FindUp(Path.Combine("launcher", "phone"))!, "manifest.webmanifest"));
+        var manifest = File.ReadAllText(Path.Combine(PhoneFolder, "manifest.webmanifest"));
         Check(manifest.Contains("\"method\": \"POST\"") && manifest.Contains("application/x-www-form-urlencoded"), "manifest: the Share target posts");
 
-        var root = FindUp(Path.Combine("launcher", "phone"))!;
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
-        var now = DateTime.Now;
-        var pairing = new PhonePairing(file, () => now);
-        var host = new FakeHost();
-        var server = new PhoneServer(host, root, pairing, IPAddress.Loopback, clock: () => now);
-        var port = FreePort();
-        await server.StartAsync(new[] { port });
-        var origin = $"http://127.0.0.1:{port}";
-        using var http = new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = new Uri(origin) };
+        await using var box = await TestServer.StartAsync();
+        var (host, pairing, server, port, origin, http) = (box.Host, box.Pairing, box.Server, box.Port, box.Origin, box.Http);
         var key = pairing.NewKey();
         var paired = await http.SendAsync(new HttpRequestMessage(HttpMethod.Post, "/api/pair")
         {
@@ -93,7 +85,7 @@ static partial class Program
         var other = (await Share(HttpMethod.Post, "none", "https://vimeo.com/2")).Ticket;
         Check(await HelloShare($"{cookie}; {other}", link: "https://vimeo.com/2") == "https://vimeo.com/2", "each ticket is bound to its own link");
         var late = (await Share(HttpMethod.Post, "none")).Ticket;
-        now = now.AddSeconds(61);
+        box.Now = box.Now.AddSeconds(61);
         Check(await HelloShare($"{cookie}; {late}") is null, "the ticket lasts 60 s (after that the page asks)");
         for (var i = 0; i < 20; i++) await Share(HttpMethod.Post, "none", $"https://vimeo.com/{i}");
         Check(server.ShareTicketCount <= 16, $"at most 16 tickets waiting ({server.ShareTicketCount})");
@@ -118,7 +110,7 @@ static partial class Program
         var token = reply?.GetProperty("token").GetString();
         Check(token is { Length: >= 40 } && reply?.GetProperty("url").GetString() == $"http://tv.local:{port}/api/open", "a paired phone gets a Shortcut key and the URL");
         var owner = pairing.Find(cookie.Split('=', 2)[1])!;
-        Check(pairing.Phones.Any(p => p.Shortcut && p.Name == "Phone Shortcut" && p.Owner == owner.Id) && !File.ReadAllText(file).Contains(token!), "kept as a hash, listed as a Shortcut of the phone that made it");
+        Check(pairing.Phones.Any(p => p.Shortcut && p.Name == "Phone Shortcut" && p.Owner == owner.Id) && !File.ReadAllText(box.PairingFile).Contains(token!), "kept as a hash, listed as a Shortcut of the phone that made it");
         Check(await WaitFor(host, "shortcut Phone"), "the TV says a Shortcut key was made");
         Check(pairing.Find(token) is null && pairing.FindShortcut(cookie.Split('=', 2)[1]) is null, "a Shortcut key is no remote cookie, and the other way round");
         phone!.Abort();
@@ -152,18 +144,18 @@ static partial class Program
         Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/3\"}", "evil.com") == HttpStatusCode.MisdirectedRequest, "foreign Host: 421");
         Check((await http.GetAsync("/api/open")).StatusCode == HttpStatusCode.MethodNotAllowed, "GET: 405");
 
-        now = now.AddMinutes(2);
+        box.Now = box.Now.AddMinutes(2);
         for (var i = 0; i < 30; i++) await Open(other2, null, "{}");
         var codes = new List<HttpStatusCode>();
         for (var i = 0; i < 21; i++) codes.Add(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/4\"}"));
         Check(codes.Take(20).All(c => c == HttpStatusCode.OK) && codes[20] == HttpStatusCode.TooManyRequests, "20 links a minute per key (keyless requests elsewhere do not count), then 429");
         var second = pairing.NewShortcut(owner)!.Value.Token;
         Check(await Open(http, "Bearer " + second, "{\"url\":\"https://vimeo.com/5\"}") == HttpStatusCode.OK, "another key is not held up by the first one's limit");
-        now = now.AddMinutes(2);
+        box.Now = box.Now.AddMinutes(2);
         for (var i = 0; i < 10; i++) await Open(other2, "Bearer wrong", "{}");
         Check(await Open(other2, "Bearer " + token, "{\"url\":\"https://vimeo.com/6\"}") == HttpStatusCode.TooManyRequests, "10 wrong keys from one device: that device is shut out for a minute");
         Check(await Open(http, "Bearer " + token, "{\"url\":\"https://vimeo.com/7\"}") == HttpStatusCode.OK, "other devices are not");
-        now = now.AddMinutes(2);
+        box.Now = box.Now.AddMinutes(2);
         Check(await Open(other2, "Bearer " + token, "{\"url\":\"https://vimeo.com/8\"}") == HttpStatusCode.OK, "a minute later it is let in again");
         Check(PhoneServer.Device(IPAddress.Parse("2001:db8::1")) == PhoneServer.Device(IPAddress.Parse("2001:db8::ffff:1"))
             && PhoneServer.Device(IPAddress.Parse("2001:db8::1")) != PhoneServer.Device(IPAddress.Parse("2001:db8:0:1::1"))
@@ -228,8 +220,5 @@ static partial class Program
                 $"{PhoneServer.MaxConnectionsPerAddress} connections from one address are served, one more is closed");
         }
         finally { foreach (var s in held) s.Dispose(); }
-
-        await server.StopAsync();
-        File.Delete(file);
     }
 }
