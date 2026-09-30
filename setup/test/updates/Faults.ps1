@@ -8,10 +8,14 @@ Publish-FakeRelease '0.2.0' 'healthy'
 Publish-FakeRelease '0.3.0' 'crash'
 $steps = 'download', 'staged', 'ready', 'swapping', 'moved-launcher', 'placed-launcher', 'moved-watchdog', 'placed-watchdog', 'moved-setup:lib', 'placed-setup:lib',
     'moved-setup:jobs', 'placed-setup:jobs', 'moved-setup:catalog.json', 'placed-setup:catalog.json', 'moved-setup:', 'placed-setup:', 'swapped', 'verifying'
-# One check per cut, of every part (the line names the parts that failed).
-$cases = @(foreach ($step in $steps) {
-        New-Case "fault-$($step -replace '[:.]', '_')" @(
-            { param($c) $c.Job = Start-FakeJob $c.Root $update $c.Step },
+# One check per cut, of every part (the line names the parts that failed). Once more after
+# 'placed-launcher' with the watchdog's next start held 10 s, as the antivirus can hold one: it
+# comes up after the reconcile rolled back, and must not stay (the version put aside).
+$cases = @(foreach ($step in @($steps) + 'placed-launcher+held') {
+        New-Case "fault-$($step -replace '[:.+]', '_')" @(
+            { param($c)
+                if ($c.HoldStart) { [IO.File]::WriteAllText((Join-Path $c.Root 'hold-next-start'), '10') }
+                $c.Job = Start-FakeJob $c.Root $update $c.Step },
             { param($c)
                 # The power back: the task starts the box's bootstrap, which must find a whole runner
                 # (lib\ may be gone, or new beside the old jobs\), the one that began the update; the
@@ -35,8 +39,8 @@ $cases = @(foreach ($step in $steps) {
                 $c.Parts["$v running$(if (-not $c.Held) { ' -- not running: ' + (Get-BoxState $c.Root) })"] = $c.Held
                 $c.Parts["no .new left ($($left.Name -join ', '))"] = $left.Count -eq 0
                 $c.Parts["the task's next runner $v's (lib $($next.LibFrom), jobs $($next.JobsFrom))"] = $next.Whole -and $next.LibFrom -eq $v -and $next.JobsFrom -eq $v
-                Note-Parts $c "after '$($c.Step)': the runner that began it found; reconciled to $v on disk and running, journal $($j.step), setup $kept, watchdog $v, the next runner $v's ($($c.R))" $c.Parts }
-        ) @{ Step = $step }
+                Note-Parts $c "after '$($c.Step)'$(if ($c.HoldStart) { ', the next start held 10 s' }): the runner that began it found; reconciled to $v on disk and running, journal $($j.step), setup $kept, watchdog $v, the next runner $v's ($($c.R))" $c.Parts }
+        ) @{ Step = $step -replace '\+held$', ''; HoldStart = $step -like '*+held' }
     })
 
 # A rollback cut short (the new launcher crashes, then a power cut before or between the

@@ -103,25 +103,6 @@ $cases += New-Case 'swap-watchdog-new' @(
         $counted = Get-CountedExits $root
         Note $c ($counted.Count -eq 0 -and (Get-Leftovers $root).Count -eq 0) "  no exit counted by the watchdog, no .new left ($($counted -join '; '))" }) @{ WatchdogFile = 'HtpcWatchdog.prev.exe' }
 
-# A launcher start Windows holds for seconds (the antivirus checking a new program) while a
-# rollback happens: a broken runner rolls back at once, as the watchdog starts the new launcher,
-# held 6 s here. That start must not survive the rollback as the version put aside: the watchdog
-# ends it (its file changed meanwhile), not counted, and starts 0.1.0.
-$cases += New-Case 'swap-held-start' @(
-    { param($c)
-        [IO.File]::WriteAllText((Join-Path $c.Root 'hold-next-start'), '6')
-        $c.Job = Start-FakeJob $c.Root 'Invoke-LauncherUpdate -Version 0.5.0 -Source $src -Paths $paths' },
-    { param($c)
-        $c.RolledBack = (Get-Journal $c.Root).step -eq 'rolledback'
-        Wait-Case $c { param($c) Get-Running $c.Root '0.1.0' } 25 },
-    { param($c)
-        $root = $c.Root
-        $others = @(Get-BoxProcesses $root | Where-Object { $_.Name -notlike 'HtpcWatchdog*' -and $_.Path -ne (Join-Path $root 'PF\HTPC\Launcher\HtpcLauncher.exe') })
-        $log = @(Get-Content -LiteralPath (Join-Path $root 'watchdog-exits.log') -ErrorAction SilentlyContinue)
-        Note $c ($c.RolledBack -and $c.Held -and -not $others.Count) "a launcher start held past a rollback: it does not survive it, 0.1.0 runs ($(@($log | Where-Object { $_ -like 'ended at start*' }).Count) ended at start$(if ($others) { '; still running: ' + (@($others | ForEach-Object { "$($_.Name) $($_.Id)" }) -join ', ') })$(if (-not $c.Held) { ' -- not running: ' + (Get-BoxState $c.Root) }))"
-        $counted = Get-CountedExits $root
-        Note $c ($counted.Count -eq 0) "  no exit counted by the watchdog ($($counted -join '; '))" })
-
 # An app in front the whole time: the download goes ahead, the swap never does. It is given
 # up after 3 s here (3 hours on the box).
 $cases += New-Case 'swap-busy' @(

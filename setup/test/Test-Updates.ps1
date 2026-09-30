@@ -16,9 +16,9 @@
       Download  pinned redirects, lying lengths, rate limits, 404, a wrong SHA-256
       Swap      a whole update: healthy, crashing, hanging, broken runner, not newer, no space,
                 never back at Home; the fake watchdog counts none of its exits; the release's
-                watchdog swapped in and rolled back (and, new on a box, removed again); a
-                launcher start held past a rollback (as the antivirus can) not left running
-      Faults    the job ended hard after each journal step, then reconcile: never half of each
+                watchdog swapped in and rolled back (and, new on a box, removed again)
+      Faults    the job ended hard after each journal step, then reconcile: never half of each;
+                a launcher start held past the reconcile's rollback (as the antivirus can) ended
       Planting  junctions, user-owned files and ACL entries refused; the app jobs' work folders
                 (run it as SYSTEM in the VM too: -Only Planting)
       Wua       the Windows Update child faked: hangs, counts, "n of m", a stuck service
