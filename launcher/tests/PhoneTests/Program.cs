@@ -66,6 +66,7 @@ static partial class Program
         Console.WriteLine("Pairing"); PairingTests();
         Console.WriteLine("Host and Origin"); HostTests();
         Console.WriteLine("Server"); await ServerTests();
+        Console.WriteLine("Server: a silent phone"); await SilenceTests();
         Console.WriteLine("Certificates"); CertificateTests();
         Console.WriteLine("HTTPS (a key in the user's key store for the test, deleted after)"); await HttpsTests();
         Console.WriteLine("Share and the Shortcut"); await ShareTests();
@@ -325,11 +326,14 @@ static partial class Program
 
     static Task SendText(ClientWebSocket ws, string text) => ws.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
 
-    static async Task<bool> WaitFor(FakeHost host, string item, int ms = 2000)
+    static Task<bool> WaitFor(FakeHost host, string item, int ms = 2000) => Until(() => host.Events.Contains(item), ms);
+
+    /// <summary>Whether something comes true within ms (checked every 20 ms).</summary>
+    static async Task<bool> Until(Func<bool> ok, int ms = 2000)
     {
         for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < ms; await Task.Delay(20))
-            if (host.Events.Contains(item)) return true;
-        return false;
+            if (ok()) return true;
+        return ok();
     }
 
     static async Task ServerTests()
@@ -432,15 +436,6 @@ static partial class Program
         JsonElement? pong = null;
         for (var i = 0; i < 5 && pong?.GetProperty("t").GetString() != "pong"; i++) pong = await Receive(ws!);
         Check(pong?.GetProperty("t").GetString() == "pong", "the box answers the phone's ping (the phone notices a dead connection)");
-        // Its heartbeat, as the page sends it, for the rest of the tests (else the server drops it after 15 s).
-        using var stopPings = new CancellationTokenSource();
-        var pings = Task.Run(async () =>
-        {
-            while (!stopPings.IsCancellationRequested)
-            {
-                try { await Task.Delay(5000, stopPings.Token); await SendText(ws!, "{\"t\":\"ping\"}"); } catch (Exception) { return; }
-            }
-        });
         await SendText(ws!, "{\"t\":\"key\",\"k\":\"up\"}");
         await SendText(ws!, "{\"t\":\"key\",\"k\":\"LWin\"}");
         await SendText(ws!, "garbage{");
@@ -460,15 +455,7 @@ static partial class Program
         for (var i = 0; i < 7; i++) { var (s, _) = await Ws(port, origin, cookie); if (s is not null) { many.Add(s); await Receive(s); } }
         Check(server.ClientCount == 8 && (await Ws(port, origin, cookie)).Status == 503, "9th phone refused");
         foreach (var s in many) s.Abort();
-        for (var i = 0; i < 100 && server.ClientCount > 1; i++) await Task.Delay(50);
-
-        // A silent phone is dropped after 15 s; one sending its heartbeat stays.
-        var (quiet, _) = await Ws(port, origin, cookie);
-        Check(quiet is not null && await Receive(quiet) is not null, "another phone connects");
-        var sw = Stopwatch.StartNew();
-        var gone = quiet is null ? null : await Receive(quiet, 20000);
-        var droppedAfter = sw.ElapsedMilliseconds;
-        Check(gone is null && droppedAfter is > 14000 and < 19000 && ws!.State == WebSocketState.Open, $"silent phone dropped after {droppedAfter / 1000.0:0.0} s, the pinging one stays");
+        await Until(() => server.ClientCount == 1, 5000);
 
         // QR key; codes off, then on again; forget.
         var key = pairing.NewKey();
@@ -494,13 +481,54 @@ static partial class Program
             last = m.TryGetProperty("t", out var t) ? t.GetString() : null;
         }
         Check(last == "bye", "forgotten phone told bye");
-        await Task.Delay(300);
+        await Until(() => server.ClientCount == 0);
         var (again, _) = await Ws(port, origin, cookie);
         Check(again is not null && (await Receive(again))?.GetProperty("paired").GetBoolean() == false, "its cookie no longer works");
 
-        stopPings.Cancel();
-        await pings;
         await server.StopAsync();
         File.Delete(file);
+    }
+
+    // A phone silent for a while is dropped; one sending its heartbeat stays. On a server of its own
+    // with a short Silence: the main one keeps 15 s, or its 8-phone cap and "the paired one stays"
+    // would pass for the wrong reason.
+    static async Task SilenceTests()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
+        var host = new FakeHost();
+        var server = new PhoneServer(host, FindUp(Path.Combine("launcher", "phone"))!, new PhonePairing(file) { RequireCode = false }, IPAddress.Loopback)
+            { Silence = TimeSpan.FromMilliseconds(600) };
+        var port = FreePort();
+        await server.StartAsync(new[] { port });
+        using var stopPings = new CancellationTokenSource();
+        try
+        {
+            var origin = $"http://127.0.0.1:{port}";
+            var (pinger, _) = await Ws(port, origin, null);
+            await Receive(pinger!);
+            var pings = Task.Run(async () =>
+            {
+                while (!stopPings.IsCancellationRequested)
+                {
+                    try { await Task.Delay(100, stopPings.Token); await SendText(pinger!, "{\"t\":\"ping\"}"); } catch (Exception) { return; }
+                }
+            });
+            var (quiet, _) = await Ws(port, origin, null);
+            await Receive(quiet!);
+            var sw = Stopwatch.StartNew();
+            var gone = await Receive(quiet!, (int)(server.Silence.TotalMilliseconds * 5));
+            var after = sw.Elapsed;
+            Check(gone is null && after > server.Silence * 2 / 3 && after < server.Silence * 5 && await WaitFor(host, "disconnected")
+                && pinger!.State == WebSocketState.Open && host.Events.Count(e => e == "disconnected") == 1,
+                $"a phone silent for {server.Silence.TotalSeconds} s is dropped (after {after.TotalSeconds:0.0} s, the launcher told); one pinging every 0.1 s stays");
+            stopPings.Cancel();
+            await pings;
+        }
+        finally
+        {
+            stopPings.Cancel();
+            await server.StopAsync();
+            File.Delete(file);
+        }
     }
 }

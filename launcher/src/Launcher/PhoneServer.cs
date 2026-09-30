@@ -147,7 +147,6 @@ sealed class PhoneServer
     const string ShareCookie = "htpc_share";
     static readonly TimeSpan ShareTicketLife = TimeSpan.FromSeconds(60);
     const int OpenPerMinute = 20, WrongKeysPerMinute = 10;
-    static readonly TimeSpan Silence = TimeSpan.FromSeconds(15);
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     static readonly Regex Code = new(@"^[0-9]{4}\z");
 
@@ -211,6 +210,9 @@ sealed class PhoneServer
         this.bindTo = bindTo;
         Allowed = new HostAllowlist(extraNames);
     }
+
+    /// <summary>A phone silent this long is dropped (its page pings every 4 s). Tests: shorter, on a server of their own.</summary>
+    internal TimeSpan Silence { get; init; } = TimeSpan.FromSeconds(15);
 
     public int ClientCount { get { lock (clients) return clients.Count; } }
 
