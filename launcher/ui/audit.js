@@ -333,12 +333,17 @@ function auditMustCover() {
   return ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views), ...SECTIONS.map(([id]) => `section:${id}`)];
 }
 
-// Runs every page (or those named); check(name, ok, detail) records each result.
-async function runAudit(check, only) {
-  // The end state at once, no transitions; entrances last 0 s but keep their names (auditTick).
+// The end state at once, no transitions; entrances last 0 s but keep their names (auditTick).
+function auditStill() {
   const style = document.createElement('style');
   style.textContent = '*, *::before, *::after { transition: none !important; animation-duration: 0s !important; animation-delay: 0s !important; }';
   document.head.appendChild(style);
+  return style;
+}
+
+// Runs every page (or those named); check(name, ok, detail) records each result.
+async function runAudit(check, only) {
+  const style = auditStill();
   const log = console.log;
   console.log = (...args) => { if (args[0] === 'to host') AUDIT.sent.push(args[1]); else log(...args); };
   const covered = new Set(AUDIT.pages.flatMap((p) => p.covers));
@@ -387,6 +392,9 @@ async function auditRun() {
   if (one) {
     const page = AUDIT.pages.find((p) => p.name === decodeURIComponent(one[1]));
     if (!page) return;
+    // Its end state: a screenshot in Edge's virtual time caught setup's step entrance half way,
+    // three times in four (30 Sept 2026), Tile options' once in eight.
+    auditStill();
     AUDIT_IO.fresh();
     page.open();
     if (page.walk) { for (let i = 0; i < 7; i++) AUDIT_IO.press('down'); return; }
