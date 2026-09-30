@@ -202,7 +202,9 @@ if ($SelfTest) {
     if ($dom -match '(?s)<pre id="audit-results">(.*?)</pre>') {
         ''
         'UI audit in real time (index.html#audit):'
-        [Net.WebUtility]::HtmlDecode($Matches[1]) -split '\r?\n' | Where-Object { $_.Trim() -and $_ -notmatch '^PASS' }
+        $lines = [Net.WebUtility]::HtmlDecode($Matches[1]) -split '\r?\n'
+        $lines | Where-Object { $_.Trim() -and $_ -notmatch '^PASS' }
+        "  $(@($lines | Where-Object { $_ -match '^PASS' }).Count) passed"
         if ($dom -match '<title>AUDIT FAIL') { $failed = 1 }
     } else {
         Write-Warning 'No audit results in the page (a script error, or it did not finish by the load event?)'

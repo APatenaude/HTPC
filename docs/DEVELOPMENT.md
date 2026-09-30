@@ -91,6 +91,7 @@ that did the work; none of them belongs in the (public) repo:
 
 | Task | Command |
 |---|---|
+| After a change: build + the 4 test projects, one line each | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests`, `-Ui` adds the condensed UI self-test) |
 | Build | `dotnet build launcher\src\Launcher\Launcher.csproj -c Release` |
 | Run one test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (also TileTests, PhoneTests, AlertsTests, `launcher\dev\TvLab`) |
 | The UI self-test and audit walker | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest` |

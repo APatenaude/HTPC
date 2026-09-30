@@ -13,9 +13,9 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 
 | Need | Use |
 |---|---|
-| One test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (AlertsTests, TileTests, PhoneTests) |
+| Build + the 4 test projects, short output | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests,PhoneTests`, `-Ui`) |
 | Everything (TvLab, setup tests, phone page) | `launcher\dev\Test-All.ps1` |
-| The page's self-test and UI audit | `launcher\dev\Test-Ui.ps1 -SelfTest` |
+| The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
 | TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
 | Setup's scripts on fakes | `setup\test\Test-Updates.ps1` (admin; `-Only Core,Download,Swap,Faults,Planting,Wua`), `Test-Autostart.ps1` (`-Only Match,Guard,Prefs,Catalog`), `Test-Rights.ps1` (`-Only Walker,Acl,JobParams`), `Test-Drivers.ps1`; `Test-Library.ps1` in the VM only |
 | The release in the test VM | DEVELOPMENT.md section 6 |
@@ -330,7 +330,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
    static XxxOf(JsonElement)` validator that returns off/null for anything out of range.
 3. Setup side, if a script needs it: the reader in `AppCore.ps1` / `AppAutostart.ps1` / `Install-Apps.ps1`.
 4. Tests: the validator and the real catalog's values in a LauncherTests "Catalog: ..." group (or the
-   file of the feature); `Test-Autostart -Only Catalog` for autostart.*.
+   file of the feature); `Test-Autostart -Only Catalog` for autostart.*. Then `Test-Quick`.
 5. Where the behaviour is told: launcher/README.md or setup/README.md.
 
 ### Add a setting to a setup step
@@ -362,7 +362,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
    (choices in `CHOICES`).
 3. Audit: a 'settings: <label>' page comes from `SECTIONS` by itself; add its stress data and states
    (`auditSettings`, `sectionState(...)`). Selftest: a group of 'Settings › <label>:' checks.
-4. Demo: `index.html#settings/<id>`; check with `Test-Ui.ps1 -SelfTest`.
+4. Demo: `index.html#settings/<id>`; check with `Test-Quick -Only Ui`.
 
 ### Add a selftest check or an audit page
 1. selftest.js: in its `// ---- Title ----` group, drive the page (`reset(view)`, `press('down')`,
@@ -371,7 +371,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 2. audit.js, in the `AUDIT_PAGE === 'index'` block (or setup, keyboard): `auditPage('name', { view, open()
    { auditFresh(); ...stress data...; go(view); }, scope, dirs, back, hints, tick })`. Every `addView`, Settings
    section and setup step must be covered (`auditMustCover`) or the audit fails.
-3. Look at it: `Test-Ui.ps1 -Shots 'audit?page=name'`; run `Test-Ui.ps1 -SelfTest`.
+3. Look at it: `Test-Ui.ps1 -Shots 'audit?page=name'`; run `Test-Quick -Only Ui`.
 
 ### Add a LauncherTests file
 1. `tests/LauncherTests/<Area>Tests.cs`: `namespace Htpc.Launcher; static class <Area>Tests { public static
@@ -379,7 +379,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
    (async: `static async Task Run`, called with `.GetAwaiter().GetResult()`).
 2. The call in `tests/LauncherTests/Program.cs` with the others (`<Area>Tests.Run((ok, what) => Check(ok, what));`).
 3. Sources it needs in `LauncherTests.csproj`'s `<Compile Include="$(Src)File.cs" />`; `Stubs.cs` stands
-   in for Log and Input. Run it: `dotnet run -c Release --project launcher\tests\LauncherTests`.
+   in for Log and Input. Run `Test-Quick -Only LauncherTests`.
 
 ### Add a job verb
 1. `setup/jobs/<verb>.ps1` with `param([string]$Arg)`: refuse what it must not run as (`$script:IsSystem`),
