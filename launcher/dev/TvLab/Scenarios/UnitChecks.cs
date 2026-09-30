@@ -15,6 +15,7 @@ static class UnitChecks
         await Check.Group("EDID", Edids);
         await Check.Group("LAN adapters", Adapters);
         await Check.Group("Wake-on-LAN packets", WakePackets);
+        await Check.Group("LG: when the plain port", LgPlainPort);
         await Check.Group("Credentials file", Credentials);
         await Check.Group("Setup's TV files, taken in by the launcher", SetupTakeIn);
     }
@@ -179,6 +180,23 @@ static class UnitChecks
         Check.That(TvNet.MagicPacket("not a mac") is null, "magic packet: rejects a non-MAC");
         Check.Equal("aa:bb:cc:dd:ee:ff", TvNet.NormalizeMac("AA-BB-CC-DD-EE-FF"), "MAC normalized");
         Check.That(TvNet.NormalizeMac("00:00:00:00:00:00") is null, "MAC of zeros ignored");
+    }
+
+    /// <summary>
+    /// WebOsDriver.Plain for every case: with a key, only the scheme it was paired over (a key paired
+    /// over TLS never goes out in clear, refused or not); pairing, only after TLS was refused outright.
+    /// (BrandChecks cannot make a real refusal cheaply: Windows takes 2 s to refuse a loopback port.)
+    /// </summary>
+    static void LgPlainPort()
+    {
+        var cases = new (bool Pairing, string? Scheme, bool Refused, bool Plain)[]
+        {
+            (false, "wss", false, false), (false, "wss", true, false), (false, null, true, false), (false, "ws", false, true),
+            (true, null, false, false), (true, null, true, true), (true, "wss", false, false), (true, "wss", true, true),
+        };
+        var misses = cases.Where(c => WebOsDriver.Plain(c.Pairing, c.Scheme, c.Refused) != c.Plain)
+            .Select(c => $"{(c.Pairing ? "pairing" : $"key over {c.Scheme ?? "(none)"}")}{(c.Refused ? ", TLS refused" : "")}: {(c.Plain ? "plain" : "TLS")} expected");
+        Check.That(!misses.Any(), $"LG: a key only over its own scheme, the plain port only for a pairing TLS refused ({string.Join("; ", misses)})");
     }
 
     // --- Credentials ----------------------------------------------------------------------------------

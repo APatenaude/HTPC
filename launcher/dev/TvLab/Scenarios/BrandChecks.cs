@@ -375,7 +375,7 @@ static class BrandChecks
             await Pair(h, lg, Lg);
             Check.That(h.Tv.Credentials.Get(Lg.Key)?.Scheme == "wss", "LG: the key kept with the scheme it was paired over (wss)");
             await h.Tv.Poll();
-            lg.StopTls(); // its TLS port fails from now on; it still answers searches
+            lg.StopTls(); // its TLS port resets connections from now on (a refusal: UnitChecks' table); it still answers searches
             var tries = lg.Connections;
             h.Tv.Found.Clear();
             await h.Tv.Discover();
