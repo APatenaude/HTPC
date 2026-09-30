@@ -2,8 +2,9 @@
 
 For agents: where each feature lives, the names to Grep, the tests that cover it and the log lines
 that show it working. Grep a name, then Read about 40 lines around it; never read a whole big file
-(app.js, MainForm.cs, selftest.js, audit.js, SetupElevation.cs, AppManager.cs, LauncherUpdate.ps1,
-Test-Updates.ps1, LauncherTests\Program.cs). No line numbers here: they move.
+(MainForm.Phone.cs, SetupElevation.cs, AppManager.cs, LauncherUpdate.ps1, LauncherTests\Program.cs).
+The page's script, its self-test and audit, MainForm and Test-Updates.ps1 are split by area: read
+the one file of the area. No line numbers here: they move.
 
 Short paths: `src/` = `launcher/src/Launcher/`, `ui/` = `launcher/ui/`, `tests/` = `launcher/tests/`.
 The why of each feature: [launcher/README.md](../launcher/README.md), [setup/README.md](../setup/README.md),
@@ -18,7 +19,7 @@ The why of each feature: [launcher/README.md](../launcher/README.md), [setup/REA
 | A page as text (view, focus, hints, what shows, what overflows) | `launcher\dev\Describe-Page.ps1 -Route settings/wifi -Keys down,a` |
 | The page's self-test and UI audit | `launcher\dev\Test-Quick.ps1 -Only Ui` (condensed `Test-Ui.ps1 -SelfTest`) |
 | TV drivers against fake TVs | `dotnet run -c Release --project launcher\dev\TvLab` (`roku`, `checks`, `unit`, `phaseb`) |
-| Setup's scripts on fakes | `setup\test\Test-Updates.ps1` (admin; `-Only Core,Download,Swap,Faults,Planting,Wua`), `Test-Autostart.ps1` (`-Only Match,Guard,Prefs,Catalog`), `Test-Rights.ps1` (`-Only Walker,Acl,JobParams`), `Test-Drivers.ps1`; `Test-Library.ps1` in the VM only |
+| Setup's scripts on fakes | `setup\test\Test-Updates.ps1` (admin; `-Only Core,Download,Swap,Faults,Planting,Wua`: each in `setup\test\updates\<Section>.ps1`, the fakes in `updates\Fakes.ps1`, `FakeGitHub.ps1`, `Cases.ps1`), `Test-Autostart.ps1` (`-Only Match,Guard,Prefs,Catalog`), `Test-Rights.ps1` (`-Only Walker,Acl,JobParams`), `Test-Drivers.ps1`; `Test-Library.ps1` in the VM only |
 | The release in the test VM | `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build`, then `-UpdateFrom <previous>` (DEVELOPMENT.md section 6) |
 
 Logs: the launcher's and watchdog's `%LOCALAPPDATA%\HTPC\logs\launcher.log`, `watchdog.log` (TV Box
@@ -31,20 +32,27 @@ Setup elevated: `Program Files\HTPC\Setup\logs\launcher.log`). Setup: `C:\Progra
 Test conventions: LauncherTests `Check(ok, what)` with `== Group` headers, sub-files are static
 classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs`; AlertsTests
 `T.Group(...)`/`T.Check` in `*Checks` classes; PhoneTests groups in `Main`; TileTests covers
-`TileStore.cs`. `ui/selftest.js` is one async IIFE: `check('Prefix: what', ok, detail)` in
-`// ---- Title ----` groups; `ui/audit.js` registers views with `auditPage(name, spec)`.
+`TileStore.cs`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
+(text, menu, home, network, settings, tiles, maps, resources, logos, addtile, sounds, notes): each
+`selftestGroup(({ check, sent, lastSent, ... }) => { ... })` with `check('Prefix: what', ok, detail)`
+in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are registered with
+`auditPage(name, spec)` in `ui/audit/home.js`, `settings.js` (index.html), `setup.js`, `keyboard.js`
+(`AUDIT_FILES`).
 
 ## How the UI plugs in
 
-- Page (`ui/app.js`): `state`, `send(msg)`, `render`, `go(view)`, `reset(view)`, `back`, `press(button)`,
-  `setFocus(el)`, `focusedEl()`, `onHost(msg)` (init, tiles, blank, opened, state, input, show, toast; the
-  rest goes to `EXT.host` by type, then by prefix). Extension API (commented above `const EXT`):
-  `settingsSection`, `addView`, `onAction`, `hostMessage`, `ask`, `onHome`, `onTiles`, `sectionHooks`.
-  Script order: `ui/index.html`. Demo keys (`KEYS`): arrows, Enter/Space = A, Esc/Backspace = B, x, y,
-  h = Home, p = hold Home, o = Start, PageUp/PageDown = LB/RB.
-- Host (`src/MainForm.cs`): `HandleWebMessage` (ready, wake, home, shown, perf, setting, launch,
-  switchTo/resume, close, power, volume, brightness, timer; else `DispatchUiMessage`), `Post`,
-  `StateObject`/`PushState` (the "state" message), `TileList`.
+- Page: `ui/app.js` (the core: `state`, `send(msg)`, `render`, `patchHtml`, `hints`, `appIcon`, `go(view)`,
+  `reset(view)`, `back`, `toast`), then `ui/app/<area>.js`, plain scripts sharing their globals: `home.js`
+  (top bar, tiles), `menu.js`, `dialogs.js` (Power, timer, confirm, `ask`), `settings.js` (`SECTIONS`,
+  `CHOICES`, `settingsPress`), `focus.js` (`setFocus(el)`, `focusedEl()`, `nearest`, `move`), `input.js`
+  (`press(button)`, `activate`, `KEYS`), `host.js` (`onHost(msg)`: init, tiles, blank, opened, state, input,
+  show, toast; the rest goes to `EXT.host` by type, then by prefix; the demo data; the start). Extension
+  API (commented above `const EXT` in app.js): `settingsSection`, `addView`, `onAction`, `hostMessage`,
+  `ask`, `onHome`, `onTiles`, `sectionHooks`. Script order: `ui/index.html`. Demo keys (`KEYS`): arrows,
+  Enter/Space = A, Esc/Backspace = B, x, y, h = Home, p = hold Home, o = Start, PageUp/PageDown = LB/RB.
+- Host (`src/MainForm.cs`; each area in a `src/MainForm.<Area>.cs` part): `HandleWebMessage` (ready,
+  wake, home, shown, perf, setting, launch, switchTo/resume, close, power, volume, brightness, timer;
+  else `DispatchUiMessage`), `Post`, `StateObject`/`PushState` (the "state" message), `TileList`.
 - `src/MainForm.Messages.cs`: `[UiMessages("prefix.")]` methods in any `MainForm.*.cs` part
   (`RegisterUiHandlers`, the longest prefix wins) and `[UiReady]` methods run when the page is up.
 - Tests: LauncherTests "The launcher's origin", "WebView recovery" (`WebViewGuard.cs`, `WebViewRecovery.cs`).
@@ -53,30 +61,33 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 
 ## Home screen
 
-- Files: `ui/app.js`, `ui/notices.js` (pills), `ui/phone-card.js`, `src/MainForm.cs`, `src/AppManager.cs`.
+- Files: `ui/app/home.js`, `ui/app/input.js` (`activate`), `ui/notices.js` (pills), `ui/phone-card.js`,
+  `src/MainForm.Apps.cs`, `src/AppManager.cs`.
 - Names: `renderTiles`, `keepTileInView`, `slideTiles`, `updateHomeHints`, `renderStatus`, `activate`
   (launch, switch...); `MainForm.Open`, `BringUpWhenReady`, `SwitchTo`, `StepAside`, `Reveal`,
   `OnRunningChanged`; `AppManager.Launch`, `SetTiles`, `Tiles`.
-- Tests: selftest "Cards", "Home: three whole rows...", "Home: tiles in place, Tile options..."; audit
-  'home', 'home with the phone card', 'home with alert cards', 'home, moving a tile', 'home with apps
-  installing'; LauncherTests "Catalog: every app opens filling the screen", "Fill: ... (launch.cropTop)".
+- Tests: selftest "Cards", "Home: three whole rows..." (`ui/selftest/home.js`), "Home: tiles in place,
+  Tile options..." (`tiles.js`); audit (`ui/audit/home.js`) 'home', 'home with the phone card', 'home
+  with alert cards', 'home, moving a tile', 'home with apps installing'; LauncherTests "Catalog: every
+  app opens filling the screen", "Fill: ... (launch.cropTop)".
 - Log: `Started {id}: {exe} {args} (pid {n})`, `{id} window up after {ms} ms`, `Launcher hidden behind {id}`,
   `Launcher up in {ms} ms (...)`.
 
 ## Home menu and its resource view
 
-- Files: `ui/app.js`, `ui/buttons.js` (`menuAppCard`: what the app's buttons do), `ui/notices.js`
-  (alert rows), `ui/resources.js`, `src/MainForm.cs`, `src/ScreenCapture.cs`, `src/MainForm.Resources.cs`,
-  `src/ResourceWatch.cs`, `src/ResourceRules.cs`.
+- Files: `ui/app/menu.js`, `ui/app/focus.js` (`move`), `ui/buttons.js` (`menuAppCard`: what the app's
+  buttons do), `ui/notices.js` (alert rows), `ui/resources.js`, `src/MainForm.HomeMenu.cs`,
+  `src/ScreenCapture.cs`, `src/MainForm.Resources.cs`, `src/ResourceWatch.cs`, `src/ResourceRules.cs`.
 - Names: `renderMenu` (parts `data-part` apps / controls / monitor; quick buttons in `.quicks`),
   `menuUsed`, `menuOpening`, `menuHints`, `ackShown`; `MainForm.ShowOver`, `CaptureEarly`,
   `CaptureBackdrop`, `RevealPending`, `DescribePage`; `resViewHtml`, `resPatch`, `resourcesInView`,
   `hostMessage('res.data')`; `PrimeResources`, `OnResourcesMessage` (res.watch, res.stop), `StopProgram`;
   `ResourceWatch.Prime`/`Watch`/`Report`; `ResourceRules.MayEnd`, `Group`, `Top`.
-- Tests: selftest "The Home menu's alert rows", "Where the Home menu opens / quick buttons", "The Home
-  menu over an app says what its buttons do", "The Home menu's resource view"; audit 'home menu over an
-  app', '... over the home screen', '..., nothing open', 'home menu in desktop mode'; LauncherTests "Home
-  menu over an app", "Home menu backdrop: scaling and the JPEG", `ResourceTests.cs`.
+- Tests: selftest "The Home menu's alert rows", "Where the Home menu opens / quick buttons"
+  (`ui/selftest/menu.js`), "The Home menu over an app says what its buttons do" (`maps.js`), "The Home
+  menu's resource view" (`resources.js`); audit (`ui/audit/home.js`) 'home menu over an app', '... over
+  the home screen', '..., nothing open', 'home menu in desktop mode'; LauncherTests "Home menu over an
+  app", "Home menu backdrop: scaling and the JPEG", `ResourceTests.cs`.
 - Log: `Home over {app}: backdrop ready {ms} ms after Home`, `Home menu: page ready {ms} ms after Home`,
   `Screen capture ready`, `Resource view: {n} samples...`.
 
@@ -90,49 +101,51 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   `PushStartMenu`, `AddProgramTile`, `AddWebsiteTile`, `RenameTile`, `RemoveTile`, `StartLibraryJob`;
   `LibraryService.Enqueue`, `EnqueueBoxJob`, `Run`, `RunThroughTask`, `Follow`; `TileStore.TryWebsiteUrl`,
   `CleanName`, `NewId`; `StartMenuScanner.Scan`.
-- Tests: TileTests; LauncherTests `AddTileTests.cs`; selftest "Home: tiles in place, Tile options...",
-  "Add a tile, Rename, setup's apps..."; audit 'tile options', 'rename', 'change icon', 'add tile: library',
-  'add tile: on this box', 'add tile: website', 'add tile: website, a long address typed'.
+- Tests: TileTests; LauncherTests `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
+  (`ui/selftest/tiles.js`), "Add a tile, Rename, setup's apps..." (`addtile.js`); audit (`ui/audit/home.js`)
+  'tile options', 'rename', 'change icon', 'add tile: library', 'add tile: on this box', 'add tile:
+  website', 'add tile: website, a long address typed'.
 - Log: `Added program tile {name} ({target})`, `Added website tile {name} ({url})`, `Library: queued {token}`,
   `Library: started \HTPC\Jobs with {token}`, `Start menu read in {ms} ms ({n} programs)`.
 
 ## On-screen keyboard
 
-- Files: `src/KeyboardForm.cs`, `ui/keyboard.html`, `ui/keyboard.js`, `ui/keyboard.css`, `src/MainForm.cs`.
+- Files: `src/KeyboardForm.cs`, `ui/keyboard.html`, `ui/keyboard.js`, `ui/keyboard.css`, `src/MainForm.Keyboard.cs`.
 - Names: `KeyboardForm.Open`, `Dismiss`, `FitScreen`, `Band`, `HeightOf1080` (the band's height, also in
   keyboard.css and keyboard.js); keyboard.js `render`, `press`, `typeText`, `moveVertical`, `onButton`;
   `MainForm.OpenKeyboard`, `CloseKeyboard`, `OnKeyboardMessage`.
 - Tests: LauncherTests "On-screen keyboard: its window as high as its page" (`AddTileTests.cs`); selftest
-  'Keyboard:' checks; audit 'keyboard: letters', 'keyboard: symbols, shift locked', 'keyboard: a password'
-  (keyboard.html).
+  'Keyboard:' checks (`ui/selftest/addtile.js`); audit (`ui/audit/keyboard.js`) 'keyboard: letters',
+  'keyboard: symbols, shift locked', 'keyboard: a password' (keyboard.html).
 - Log: `Keyboard opened ({text field|R3}: ...)`, `Keyboard closed ({reason})`.
 
 ## Text-field detection
 
 - Files: `src/TextFieldWatcher.cs` (UI Automation, apps on the Mouse or Keyboard preset), `ui/textinput.js`
-  (the launcher's own fields), `src/MainForm.cs`, `src/MainForm.Alerts.cs` (the `text.` messages).
+  (the launcher's own fields), `src/MainForm.Keyboard.cs`, `src/MainForm.Alerts.cs` (the `text.` messages).
 - Names: `TextFieldWatcher.Start`, `Stop`, `OnFocus`, `IsTextField`; `MainForm.OnTextField`;
   `OnTextMessage` (text.keyboard, text.done), `OpenKeyboardForPage`, `TypeText`, `TypeKey`;
   textinput.js `isTextField`, `keyGuard`, `textInsert`, `textKey`, `openKeyboardFor`, `textKeyboardAt`
   (the page's `hostMessage('text.')` is in notices.js).
 - Tests: LauncherTests "Text-field watcher: quiet", "Text-field watcher: what is a text field"; selftest
-  "Key guard", "Text from the on-screen keyboard".
+  "Key guard", "Text from the on-screen keyboard" (`ui/selftest/text.js`).
 - Log: `Watching for text fields`, `Stopped watching for text fields (took {ms} ms)`.
 
 ## Controller and button maps
 
 - Files: `src/ControllerService.cs` (XInput, Home), `src/ButtonMap.cs`, `src/ButtonMapStore.cs`,
-  `src/PadMapper.cs`, `src/Input.cs` (SendInput), `src/MainForm.Maps.cs`, `src/MainForm.cs` (`OnPad`),
-  `src/MainForm.Settings.cs` (controller.*), `ui/buttons.js`, `ui/settings-more.js` (Controller section).
+  `src/PadMapper.cs`, `src/Input.cs` (SendInput), `src/MainForm.Maps.cs`, `src/MainForm.Controller.cs`
+  (`OnPad`, `UpdateMapper`), `src/MainForm.Timer.cs` (`OnChord`), `src/MainForm.Settings.cs`
+  (controller.*), `ui/buttons.js`, `ui/settings-more.js` (Controller section).
 - Names: `enum Pad`, `StartChord`, `ControllerService.Run`, `Buzz`; `ButtonMap.For(preset)`, `PadAction`,
   `KeyAction`; `ButtonMapStore.For`, `Build`, `ParseAction`, `SetPreset`, `SetControl`, `DescribeApp`;
   `PadMapper.Update`; `MainForm.UpdateMapper`, `OnPad`, `OnChord`; `RunMappedCommand`, `OnMapsMessage`
   (maps.*), `PostMaps`; `OnControllerMessage`; buttons.js views `maps`, `buttons`, `openEditor`,
   `choosePreset`, `startPicking`, `pickPress`. Catalog `preset`, `menuKeys` (`MenuKeys.Parse` in AppManager.cs).
 - Tests: LauncherTests "ButtonMapStore", "PadMapper", "Start + D-pad (StartChord)", "Keys for an app's own
-  menus (menuKeys)"; selftest "Button maps...", "Settings: opening, moving..." ('Controller:'); audit
-  'button maps', 'button map editor' (+ its choice, key combination, presets), 'settings: Controller',
-  'settings: Controller, button test'. Without a controller: `launcher\dev\Send-Pad.ps1` (a `--dev` launcher).
+  menus (menuKeys)"; selftest "Button maps..." (`ui/selftest/maps.js`), "Settings: opening, moving..."
+  ('Controller:', `settings.js`); audit (`ui/audit/settings.js`) 'button maps', 'button map editor' (+ its
+  choice, key combination, presets), 'settings: Controller', 'settings: Controller, button test'. Without a controller: `launcher\dev\Send-Pad.ps1` (a `--dev` launcher).
 - Log: `Controller connected in slot {n}`, `Home down` / `Home held` / `Home up after {ms} ms`,
   `Buttons: {name} preset`, `Button map {id}: {what}`.
 
@@ -147,8 +160,8 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   notices.js `noticeUpdate`, `renderNotices`, `noticeRowsHtml`, `noticePillsHtml`, `noticeAct`;
   `VolumeOsd.Show`, `Render`.
 - Tests: AlertsTests (App exits, Alerts: where and when / Home / standby / noise and threads, Internet);
-  LauncherTests "Alerts overlay" (renders to PNG); selftest "The Home menu's alert rows", "Cards"; audit
-  'home with alert cards'.
+  LauncherTests "Alerts overlay" (renders to PNG); selftest "The Home menu's alert rows"
+  (`ui/selftest/menu.js`), "Cards" (`home.js`); audit 'home with alert cards' (`ui/audit/home.js`).
 - Log: `Alert {id}`, `Alert {id}: "{action}"`, `Alert {id} dismissed`, `{id} ended: {kind} (exit code ...)`.
 
 ## TV control
@@ -162,8 +175,9 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   `PostTv`, `OnTvMessage` (tv.*). `--no-tv` sends nothing.
 - Tests: TvLab `Scenarios/RokuScenarios.cs` (golden traces), `TvChecks.cs` (binding, doubts, `--no-tv`,
   Wake-on-LAN), `PhaseBChecks.cs` (LG, Google), `SonySamsungChecks.cs`, `UnitChecks.cs` (EDID fixtures,
-  credentials); selftest 'TV'; audit 'tv: how the box controls it' (+ every brand), 'settings: TV',
-  'settings: TV, pairing keypad', 'setup: find the TV', 'setup: TV pairing keypad', 'setup: the TV input'.
+  credentials); selftest 'TV' (`ui/selftest/settings.js`); audit (`ui/audit/settings.js`) 'tv: how the
+  box controls it' (+ every brand), 'settings: TV', 'settings: TV, pairing keypad'; (`ui/audit/setup.js`)
+  'setup: find the TV', 'setup: TV pairing keypad', 'setup: the TV input'.
 - Log: `TV picked: {name} ({method}, {model}) on HDMI {n}`, `TV pairing with {name} ({method}): paired`,
   `TV {name}: on sent`, `TV {name} off`, `TV control paused: {reason}`.
 
@@ -171,6 +185,7 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 
 - Files: `src/Standby.cs` (`Standby`, `LauncherSettings`, `StandbyRadio`), `src/SleepTimer.cs`,
   `src/MediaWatcher.cs` (`MediaWatcher`, `VideoEndDetector`, `LiveGuess`), `src/MainForm.Timer.cs`,
+  `src/MainForm.Power.cs` (`Power`, `OnStandbyChanged`), `ui/app/dialogs.js` (Power, the timer),
   `src/DisplayState.cs`, `src/SystemControls.cs` (`AudioVolume`, `Dimmer`, `DisplayPower`),
   `setup/lib/Set-Power.ps1` (`Set-PowerValue`).
 - Names: `Standby.Enter`, `Wake`, `Sleep`, `RealSleep`, `Tick`, `RadiosBack`; `LauncherSettings.Load`,
@@ -178,8 +193,8 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   (timer.*); `MainForm.OnStandbyChanged`.
 - Tests: LauncherTests "Standby: waking with Home", "Standby: the radios it turns off", "Standby: apps in
   efficiency mode", "VideoEndDetector", "SleepTimer", "Settings: an unreadable settings.json"; AlertsTests
-  "Alerts: standby"; selftest 'Sleep timer:', 'Power:'; audit 'sleep timer', 'power', 'settings: Sleep &
-  power'. On a box: `launcher\dev\Measure-StandbyPower.ps1`.
+  "Alerts: standby"; selftest 'Sleep timer:', 'Power:' (`ui/selftest/settings.js`); audit 'sleep timer',
+  'power' (`ui/audit/home.js`), 'settings: Sleep & power' (`ui/audit/settings.js`). On a box: `launcher\dev\Measure-StandbyPower.ps1`.
 - Log: `Standby ({reason})`, `Wake ({reason})`, `Awake in {ms} ms (screen on after {ms} ms)`, `Sleep (S3)
   ({reason})`, `Standby: {radio} radio off ({why})`, `Sleep timer: {label}`.
 
@@ -197,8 +212,9 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   `JoinWifi`, `PostWifi`, `OnWifiMessage` (wifi.*). Read-only probe: `launcher\dev\Run-NetProbe.ps1`.
 - Tests: AlertsTests `BluetoothChecks` (pairing answers, kinds, sound follows headphones, volume),
   `WifiChecks`; LauncherTests "The Bluetooth radio: off while nothing is paired"; selftest 'Bluetooth:',
-  'Wi-Fi:'; audit 'settings: Bluetooth' (+ looking for devices, a PIN to type), 'settings: Wi-Fi' (+ a
-  password to type, a hidden network), 'setup: Wi-Fi'.
+  'Wi-Fi:' (`ui/selftest/network.js`); audit (`ui/audit/settings.js`) 'settings: Bluetooth' (+ looking for
+  devices, a PIN to type), 'settings: Wi-Fi' (+ a password to type, a hidden network); 'setup: Wi-Fi'
+  (`ui/audit/setup.js`).
 - Log: `Bluetooth radio {on|off} ({why}...)`, `Bluetooth: pairing asks {kind}: {decision}`,
   `Wi-Fi: joining a network ({security}, {mode}): {result}`, `Wi-Fi: join failed, reason {n}`.
 
@@ -214,10 +230,12 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   PS `Invoke-LauncherUpdate`, `Save-LauncherRelease`, `Complete-LauncherCheck`, `Wait-LauncherHealthy`,
   `Restore-PreviousLauncher`, `Invoke-LauncherReconcile`, `$MachineSteps`, `Update-MachineSettings`,
   `Save-ReleaseAsset`, `Write-UpdateProgress`, `Enter-UpdateJob`.
-- Tests: LauncherTests `UpdateRulesTests.cs`; `setup\test\Test-Updates.ps1` (Core: job grammar, watchdog
-  rules, machine steps; Download; Swap; Faults; Planting; Wua; fakes from `Serve-FakeRelease.ps1`);
-  selftest 'Notes:'; audit 'settings: Updates' and its states, 'ask: update the TV launcher', 'launcher
-  restarting'; after a release `launcher\dev\Test-ReleaseAssets.ps1`.
+- Tests: LauncherTests `UpdateRulesTests.cs`; `setup\test\Test-Updates.ps1`, its sections in
+  `setup\test\updates\` (`Core.ps1`: job grammar, watchdog rules, machine steps; `Download.ps1`;
+  `Swap.ps1`; `Faults.ps1`; `Planting.ps1`; `Wua.ps1`; fakes in `Fakes.ps1`, `FakeGitHub.ps1`, served by
+  `Serve-FakeRelease.ps1`); selftest 'Notes:' (`ui/selftest/notes.js`); audit (`ui/audit/settings.js`)
+  'settings: Updates' and its states, 'ask: update the TV launcher', 'launcher restarting'; after a
+  release `launcher\dev\Test-ReleaseAssets.ps1`.
 - Log: `Launcher {v} healthy (UI ready, controller thread running)`, `Updates: checking (daily|asked)`,
   `At Home for launcher {v}...`, `Leaving for launcher {v}`; watchdog.log `Not counted: a launcher update
   is checking this launcher`; the job: `The launcher is now version {v}`, `{step} settings (the machine's
@@ -228,15 +246,17 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 - Files: `setup/setup.ps1` (`$Steps`, an ordered name -> scriptblock table; `-Only`, `-Skip`, `-Uninstall`,
   `-Unattended`, `-NoPause`, `-LauncherExe`), `setup/lib/Common.ps1`, each step's `setup/lib/Set-*.ps1` /
   `Install-*.ps1`, `setup/lib/Uninstall-Htpc.ps1` (`$UninstallSteps`); the wizard `src/SetupRunner.cs`,
-  `src/SetupElevation.cs`, `src/MainForm.SetupGuard.cs`, `src/Rights.cs`, `ui/setup.js` (`STEP_NAMES`).
+  `src/SetupElevation.cs`, `src/MainForm.Setup.cs`, `src/MainForm.SetupGuard.cs`, `src/Rights.cs`,
+  `ui/setup.js` (`STEP_NAMES`).
 - Names: `Save-Progress` (setup-progress.json), `Write-Change` (`  + `), `Write-Same` (`  = `),
   `Write-Attention` (`  ! `), `Write-Skipped`, `Add-RestartReason`, `Set-RegValue`; results `OK`,
   `skipped: <why>`, `FAILED: <why>` in setup-last.json (exit 1 on a FAILED step); `SetupRunner.StartInfo`,
   `Poll`; `SetupElevation.Decide`, `Relaunch`, `Trampoline`, `CleanEnvironment`, `RunsAsSessionUser`;
   `MainForm.PostSetupInit`, `StartSetup`; `Rights` decided once in `Program.Main`.
 - Tests: LauncherTests `ElevationTests.cs`; `Test-Rights.ps1` (uninstall walker, ACL lock, job params);
-  `Test-Drivers.ps1`; `Test-Updates -Only Core` (machine steps, system-before.json); selftest 'Setup:';
-  audit 'setup: welcome' ... 'setup: done, many steps failed'; the VM: `setup\test\Test-ReleaseInVm.ps1`.
+  `Test-Drivers.ps1`; `Test-Updates -Only Core` (machine steps, system-before.json: `setup\test\updates\Core.ps1`);
+  selftest 'Setup:' (`ui/selftest/addtile.js`); audit (`ui/audit/setup.js`) 'setup: welcome' ... 'setup:
+  done, many steps failed'; the VM: `setup\test\Test-ReleaseInVm.ps1`.
 - Log: setup-*.log `== {step}` then `  + ...` lines and `== Summary`; launcher.log `Setup started:
   powershell ...`, `Setup ended (exit code {n})`.
 
@@ -250,7 +270,8 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   -Catalog`; `Get-JobApp`, `Get-AppRunScope`, `Assert-ScopeContext`, `Write-JobProgress`; C#
   `LibraryJob`, `LibraryService.Enqueue` (install/uninstall/upgrade), `EnqueueBoxJob`, `TokenShape`,
   `RunThroughTask`, `RunAsUser`, `Follow` (reads state\library-progress.json).
-- Tests: `Test-Updates -Only Core` (`$dryRuns`: accepted and refused tokens), `-Only Planting`;
+- Tests: `Test-Updates -Only Core` (`$dryRuns` in `setup\test\updates\Core.ps1`: accepted and refused
+  tokens), `-Only Planting`;
   `Test-Rights -Only JobParams`; `Test-Library.ps1` (VM).
 - Log: `Library: queued {token}`, `Library: started \HTPC\Jobs with {token}`, `Library: {id} made no
   progress for {n} min; giving up`; the runner `Job {token} failed: {why}`.
@@ -269,11 +290,12 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 ## Logos
 
 - Files: `src/AppLogos.cs`, `src/LogoSources.cs` (`SiteIcons`, `LogoImage`, `ExeIcon`), `src/MainForm.Logos.cs`,
-  `ui/app.js` (`appIcon`: `https://logos.htpc/<id>.png`, glyph fallback).
+  `ui/app.js` (`appIcon`: `https://logos.htpc/<id>.png`, glyph fallback), `ui/app/host.js` (`demoLogo`).
 - Names: `AppLogos.Refresh`, `RefreshNow`, `FromProgram`, `FromSite`, `Forget`, `IsOnInternet`;
   `SiteIcons.ParseManifest`, `LogoImage.ToPng`, `Normalize`; `StartLogos`, `RefreshLogos`. Catalog
   `logoUrl`, `logoExe`.
-- Tests: LauncherTests `LogoTests.cs`; selftest 'Logos:'; audit 'change icon', 'add tile: on this box'.
+- Tests: LauncherTests `LogoTests.cs`; selftest 'Logos:' (`ui/selftest/logos.js`); audit 'change icon',
+  'add tile: on this box' (`ui/audit/home.js`).
   Demo: `index.html#home?logos=1`.
 - Log: `Logo {id}: from {exe}`, `Logo {id}: {source} {host}{path}`, `Logo {id}: {host} not reached ...`.
 
@@ -290,22 +312,24 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
   `render`, `submitCode`, `handleShare`. Catalog `phoneKeys` (`PhoneAppKeys`).
 - Tests: PhoneTests (Protocol, Links, Routing, Pointer, Pairing, Host and Origin, Server, Certificates,
   HTTPS, Share); `launcher/dev/phone-test.html` (checks and a layout audit, headless in Test-All);
-  selftest 'Phone remote:'; audit 'home with the phone card', 'settings: Phone remote'; on a box
+  selftest 'Phone remote:' (`ui/selftest/network.js`); audit 'home with the phone card' (`ui/audit/home.js`),
+  'settings: Phone remote' (`ui/audit/settings.js`); on a box
   `launcher\dev\Test-Phone.ps1`.
 - Log: `Phone remote on port {n}`, `Phone remote: HTTPS on port {n}`, `Phone paired: {name} ({id})`,
   `Phone pairing: code shown on the TV`.
 
 ## Desktop mode, the shell and the watchdog
 
-- Files: `src/Shell.cs` (`DesktopMode`, `WatchdogPause`), `src/MainForm.Shell.cs`, `src/DesktopTray.cs`,
+- Files: `src/Shell.cs` (`DesktopMode`, `WatchdogPause`), `src/MainForm.Shell.cs`, `src/MainForm.Power.cs`, `src/DesktopTray.cs`,
   `launcher/src/Watchdog/Watchdog.cs` (.NET Framework, C# 5), `setup/lib/Set-Shell.ps1`.
 - Names: `DesktopMode.Enter`, `Leave`, `OpenForSetup`, `WatchdogIsShell`, `EnsureWatchdog`;
   `StartShellParts`, `EnterDesktop`, `BackToTv`, `UpdateTray`, `StartWebView`, `ExitForRestart`;
   `MainForm.Power` ("desktop", "tv"); `DesktopTray.ChoiceFor`, `OnMessage`, `TrayPromotion.Run`;
   watchdog `WatchLoop`, `StartLauncher`, `Judge`, `TryAutoRestart`, `EnterFallback` (exit 75 is planned).
 - Tests: LauncherTests `DesktopTrayTests.cs`, `ElevationTests.cs` ("who takes over after setup"); no
-  watchdog unit tests (Test-Updates Core checks its rules); selftest 'Menu over the desktop:'; audit
-  'home menu in desktop mode', 'power in desktop mode', 'settings: About & Desktop mode'.
+  watchdog unit tests (Test-Updates Core checks its rules); selftest 'Menu over the desktop:'
+  (`ui/selftest/menu.js`); audit 'home menu in desktop mode', 'power in desktop mode' (`ui/audit/home.js`),
+  'settings: About & Desktop mode' (`ui/audit/settings.js`).
 - Log: `Desktop mode ({how})`, `Desktop mode: Explorer started (pid {n})`, `Back to TV`, `Tray icon: added`;
   watchdog.log `Launcher started (pid {n})`, `Paused (...)`.
 
@@ -349,30 +373,37 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
    -Build -Probe <a script printing the setting>` (clean Windows, after setup, after the uninstall).
 
 ### Add a Home menu element
-1. `renderMenu` in `ui/app.js`: a `data-nav` element with a unique `data-id` and a `data-act` in the right
-   part (apps, controls with `.quicks`, monitor); its hints in `menuHints`; up/down landing in `move`.
+1. `renderMenu` in `ui/app/menu.js`: a `data-nav` element with a unique `data-id` and a `data-act` in the
+   right part (apps, controls with `.quicks`, monitor); its hints in `menuHints`; up/down landing in
+   `move` (`ui/app/focus.js`).
 2. Its action: `onAction('<act>', (el, arg) => ...)` (or an existing `data-act`); host work through
    `send({ type: 'x.y' })` and a `[UiMessages("x.")]` method in a `src/MainForm.*.cs` part.
-3. selftest.js: a check in "Where the Home menu opens / quick buttons..."; the audit's 'home menu ...'
-   pages walk it (make it reachable, never clipped). Look: `Describe-Page.ps1 -Route home -Keys h`.
+3. `ui/selftest/menu.js`: a check in "Where the Home menu opens / quick buttons..."; the audit's 'home
+   menu ...' pages (`ui/audit/home.js`) walk it (make it reachable, never clipped). Look:
+   `Describe-Page.ps1 -Route home -Keys h`.
 
 ### Add a Settings section
-1. `SECTIONS` in `ui/app.js` (id, icon, label); `settingsSection('<id>', { render, press, shown, left, demo })`
-   in a `ui/settings-<id>.js` (or an existing file), loaded in `ui/index.html` after app.js.
+1. `SECTIONS` in `ui/app/settings.js` (id, icon, label); `settingsSection('<id>', { render, press, shown,
+   left, demo })` in a `ui/settings-<id>.js` (or an existing file), loaded in `ui/index.html` after
+   app.js and app/*.js.
 2. Host: a `src/MainForm.<Area>.cs` partial with `[UiMessages("<id>.")]` and a `[UiReady]` post; a plain
    value can go through `send({ type: 'setting', key, value })` and `LauncherSettings.Set` in `src/Standby.cs`
    (choices in `CHOICES`).
 3. Audit: a 'settings: <label>' page comes from `SECTIONS` by itself; add its stress data and states
-   (`auditSettings`, `sectionState(...)`). Selftest: a group of 'Settings › <label>:' checks.
+   in `ui/audit/settings.js` (`sectionData`, `auditSettings`, `sectionState(...)`). Selftest: a group of
+   'Settings › <label>:' checks in `ui/selftest/settings.js` (or a new file in `SELFTEST_FILES`).
 4. Demo: `index.html#settings/<id>`; check with `Describe-Page.ps1 -Route settings/<id>` and `Test-Quick -Only Ui`.
 
 ### Add a selftest check or an audit page
-1. selftest.js: in its `// ---- Title ----` group, drive the page (`reset(view)`, `press('down')`,
-   `onHost({ type: ... })` for a host message, `lastSent(type)` for what the page sent), then
-   `check('Prefix: what', ok, detail)`.
-2. audit.js, in the `AUDIT_PAGE === 'index'` block (or setup, keyboard): `auditPage('name', { view, open()
-   { auditFresh(); ...stress data...; go(view); }, scope, dirs, back, hints, tick })`. Every `addView`, Settings
-   section and setup step must be covered (`auditMustCover`) or the audit fails.
+1. `ui/selftest/<area>.js`: in its `// ---- Title ----` group, drive the page (`reset(view)`,
+   `press('down')`, `onHost({ type: ... })` for a host message, `lastSent(type)` for what the page sent),
+   then `check('Prefix: what', ok, detail)`; a helper the group needs comes in its first line's
+   `({ check, sent, lastSent, ... })` (the list in `ui/selftest.js`). A new area: a file with
+   `selftestGroup(...)`, its name in `SELFTEST_FILES` at the place in the run it needs.
+2. `ui/audit/home.js` or `settings.js` (index.html), `setup.js`, `keyboard.js`: `auditPage('name', { view,
+   open() { auditFresh(); ...stress data...; go(view); }, scope, dirs, back, hints, tick })`. Every
+   `addView`, Settings section and setup step must be covered (`auditMustCover` in `ui/audit.js`) or the
+   audit fails.
 3. Look at it: `Describe-Page.ps1 -Route 'audit?page=name'`; run `Test-Quick -Only Ui`.
 
 ### Add a LauncherTests file
@@ -392,5 +423,5 @@ classes with `Run(check)` called near the end of `tests/LauncherTests/Program.cs
 3. C#: a box job through `UpdateService.QueueBox("<verb>", arg, label, ...)` (SYSTEM through the task, or
    `AsUser`), or an app verb in `LibraryService.Enqueue`'s list; a `case "updates.<x>"` in
    `MainForm.Updates.OnUpdatesMessage` and the send in `ui/updates.js`.
-4. Tests and docs: the token in `Test-Updates.ps1` Core `$dryRuns` (accepted, and a refused shape);
+4. Tests and docs: the token in `setup\test\updates\Core.ps1` `$dryRuns` (accepted, and a refused shape);
    setup/README.md's verb table.

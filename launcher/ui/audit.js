@@ -1,36 +1,19 @@
 'use strict';
-// The UI audit, a "focus walker": every page of the launcher is set up in a stress state (40
-// tiles, more than the owner's 38, 20 library apps, 15 Wi-Fi networks, 10 Bluetooth devices, 8
-// phones and 4 keys, long names...) and walked with the D-pad through press(), the path the
-// controller takes, from the first focus to every element it can reach. At each focus it checks
-// that the element, its focus
-// ring (its own width, read from its style) and its zoom:
-//   - are whole inside every box that clips them (a list that scrolls, a pane), and on screen;
-//   - are not under a hint bar, nor covered by anything (elementFromPoint at the corners and the
-//     centre);
-// and for the page: no text runs out of its card or row, nor is cut off at the side of a pane
-// (auditSpills: what the focus never lands on too); every focusable element is reached; no press
-// wraps round or jumps back (up at the first row, down at the last, stays; but on the on-screen
-// keyboard, whose rows and columns wrap round on purpose); B leaves it; exactly
-// one hint bar shows; every press (press() plus style and layout) takes 50 ms at most. As it
-// walks, it replays the host's periodic messages for the page (the clock and state pushes, the TV
-// search, Wi-Fi scans, install progress...): the focus must stay where it is, and nothing on
-// screen may be drawn afresh (an entrance animation playing again: a dialog popping in twice a
-// second).
+// The UI audit, a "focus walker": each page set up in a stress state (more tiles, apps, networks...
+// than a real box, long names) and walked with the D-pad through press(), from the first focus to
+// every element it reaches. At each focus: the element, its ring and zoom whole inside every box
+// that clips them and on screen, under no hint bar, covered by nothing; for the page: no text
+// spilling or cut off, everything reached, no press wrapping round, B leaves, one hint bar, every
+// press 50 ms at most, and the host's periodic pushes replayed without moving the focus or
+// playing an entrance again.
 //
-// Three pages: the launcher (index.html), first-run setup (setup.html) and the on-screen keyboard
-// (keyboard.html), each with its own pages below. Runs, all from launcher\dev\Test-Ui.ps1
-// -SelfTest, all in real time (press times checked each time): in the self-test
-// (index.html#selftest); on its own (index.html#audit: it runs before the page's load event ends,
-// so headless Edge's --dump-dom waits for it); and
-// setup.html#audit, keyboard.html#audit, index.html#audit again at other screen sizes (1920x1080,
-// 1536x864: a 4K TV at Windows' 250 %, 1280x720, 2560x1080: the stage scaled, letterboxed).
-// #audit?page=<name> sets one page up in its stress state with the focus on its last element
-// (or the page's last()), for a screenshot.
+// This file is the engine; the pages are in audit/<area>.js (AUDIT_FILES), loaded after it. Runs
+// in the self-test (index.html#selftest), and alone on index.html, setup.html, keyboard.html
+// #audit, before the page's load event ends (headless Edge's --dump-dom waits for it). #audit?page=
+// <name> sets one page up, the focus on its last element, for a screenshot.
 //
-// EVERY VIEW MUST BE IN THE WALKER: a new view (addView), Settings section or setup step is
-// checked by adding an auditPage() for it below (what to set up, how to open it). One missing
-// fails the audit.
+// EVERY VIEW MUST BE IN THE WALKER: a new view (addView), Settings section or setup step needs an
+// auditPage() (what to set up, how to open it). One missing fails the audit.
 
 const AUDIT = { pages: [], slowMs: 50, ring: 4, sent: [], tickEvery: 4 };   // sent: what the page sent the host
 
@@ -55,6 +38,8 @@ const AUDIT_IO = {
     fresh: () => {}, tick: () => {},
   },
 }[AUDIT_PAGE];
+// Its pages, walked in this order.
+const AUDIT_FILES = { index: ['home', 'settings'], setup: ['setup'], keyboard: ['keyboard'] }[AUDIT_PAGE];
 
 // name: what the report says. view: the view it opens (state.view; setup: its step). open():
 // stress data, then the page (the focus where a user lands). scope: a selector for the part
@@ -66,7 +51,7 @@ const AUDIT_IO = {
 // message for it, replayed as it is walked. last: the element to end on for a screenshot.
 function auditPage(name, spec) { AUDIT.pages.push({ dirs: ['up', 'down', 'left', 'right'], back: 1, hints: AUDIT_PAGE === 'setup' ? 0 : 1, covers: [spec.view], ...spec, name }); }
 
-// ---- Stress data ------------------------------------------------------------------------------
+// ---- Stress data used by more than one page's list --------------------------------------------
 
 const AUDIT_LONG = 'with a name long enough to run out of room on a TV screen';
 const AUDIT_GLYPHS = [['youtube', '#FF5B52'], ['chat', '#B08CFF'], ['film', '#7C8CFF'], ['library', '#3DC0F0'], ['moon', '#F5D16B'], ['globe', '#3CCB9A'], ['music', '#1ED760'], ['tv', '#5AB0FF']];
@@ -100,364 +85,10 @@ function auditTv() {
   t.found = t.found.concat(Array.from({ length: 6 }, (_, i) => ({ ...t.found[0], id: `roku:X${i}`, name: `Roku TV ${i + 2}`, picked: false, detected: false })));
 }
 
-// ---- The launcher's pages (index.html) --------------------------------------------------------
-
-function auditTiles(n) {
-  return Array.from({ length: n }, (_, i) => {
-    const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
-    return { id: `app${i}`, name: i % 5 === 3 ? `App ${i + 1} ${AUDIT_LONG}` : `App ${i + 1}`, glyph, color, running: i % 4 === 1 };
-  });
-}
-
-// A clean start for each page: the home screen, no app over it, no alerts, nothing moving.
-function auditFresh() {
-  state.moving = null; state.current = null; state.backdrop = null; state.confirm = null; state.timer = null;
-  state.phone = null; state.stack = []; state.memory = {}; state.desktop = false;
-  menuUsed.control = null; menuUsed.quick = null;
-  if (typeof more === 'object' && more.testing) { more.testing = false; more.pad = null; }
-  bt.scanning = false; bt.pin = null; bt.pairing = null;
-  if (WifiUI.joining) WifiUI.stop();
-  TvUi.code = '';
-  hideOpening();
-  notices.own = [];
-  noticeUpdate({ toasts: [], rows: [], pills: [] });
-  state.tiles = auditTiles(40);
-  reset('home');
-}
-
 // The catalog's categories (catalog.json), and one the catalog does not know (its cards: Other).
 const AUDIT_CATEGORIES = [['movies', 'Movies & shows'], ['canada', 'Canadian TV'], ['sports', 'Sports'], ['music', 'Music'],
   ['games', 'Games'], ['media', 'Your media & tools']].map(([id, name]) => ({ id, name }));
 const auditCategory = (i) => (i % 13 === 12 ? 'unknown' : AUDIT_CATEGORIES[i % AUDIT_CATEGORIES.length].id);
-// A 1x1 PNG: a program's or an app's own icon (the host's logos.htpc), which does load.
-const AUDIT_LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-
-// As big as the real library or bigger: 24 apps and 26 sites in six categories and Other, and a
-// box's 110 programs (On this box), long names in each.
-function auditLibrary() {
-  const apps = Array.from({ length: 24 }, (_, i) => {
-    const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
-    return { id: `lib${i}`, name: i === 7 ? `Library app ${AUDIT_LONG}` : `Library app ${i + 1}`, glyph, color, type: 'app', category: auditCategory(i),
-      state: ['home', 'uninstalling', 'install', 'install'][i % 4], canUninstall: true, logo: i % 3 === 0 ? AUDIT_LOGO : null };
-  });
-  apps[5].state = 'installing';
-  Object.assign(apps[12], { state: 'home', canUninstall: false, builtin: true });   // the Browser: Built in, A asks to remove it from Home
-  const sites = Array.from({ length: 26 }, (_, i) => ({ id: `site${i}`, name: i === 4 ? `Streaming site ${AUDIT_LONG}` : `Site ${i + 1}`, color: '#FF4B55',
-    type: 'website', category: auditCategory(i + 3), state: i % 3 === 1 ? 'home' : 'add' }));
-  // lib9 went through the queue and is still to install: it did not install.
-  onHost({ type: 'library.progress', current: { id: 'lib9', name: 'Library app 10', action: 'install', phase: 'download', percent: 30 }, pending: [] });
-  onHost(AUDIT_PROGRESS);
-  onHost({ type: 'library.catalog', apps, sites, categories: AUDIT_CATEGORIES, available: true });
-  onHost({ type: 'library.programs', list: auditPrograms() });
-}
-// Every other one with its own icon (the host makes them in the background: the rest come later).
-const auditPrograms = () => Array.from({ length: 110 }, (_, i) => ({ name: i === 3 ? `Program ${AUDIT_LONG}` : i === 40 ? `Uninstall ${AUDIT_LONG}` : `Program ${i + 1}`,
-  launchable: i % 6 !== 4, onHome: i % 7 === 2, note: i % 6 === 4 ? 'No program file' : null, logo: i % 2 ? AUDIT_LOGO : null }));
-// The install queue, pushed twice a second while it runs.
-const AUDIT_PROGRESS = { type: 'library.progress', current: { id: 'lib5', name: 'Library app 6', action: 'install', phase: 'download', percent: 62 }, pending: [{ id: 'lib2', action: 'install' }] };
-
-function auditMaps() {
-  maps.data = null;
-  mapsDemo();
-  for (let i = 0; i < 14; i++) maps.data.apps.push({ id: `mapapp${i}`, name: i === 2 ? `Map app ${AUDIT_LONG}` : `Map app ${i + 1}`, glyph: 'app', color: '#B3B5BC',
-    map: { preset: ['mouse', 'keyboard', 'controller'][i % 3], defaultPreset: 'mouse', changes: i % 2 ? { a: 'key:F', b: 'key:Esc' } : {} } });
-}
-const auditMapsTick = () => EXT.host['maps.data'](auditClone(maps.data));
-
-// The Home menu's resource view at its widest: every number as long as it gets, names that run
-// out of their row, a row of Windows' own. The host sends it every 2 s, in another order each time.
-function auditRes() {
-  AUDIT.resFlip = !AUDIT.resFlip;
-  const top = [
-    { key: 'app:app1', name: `App 2 ${AUDIT_LONG}`, app: 'app1', cpu: 100, mem: 31999, stop: true },
-    { key: 'exe:program.exe', name: `Program ${AUDIT_LONG}.exe`, app: null, cpu: 88.8, mem: 12406, stop: true },
-    { key: 'win:windows-update', name: `Windows Update ${AUDIT_LONG}`, app: null, cpu: 9.9, mem: 999, stop: false },
-  ];
-  onHost({ type: 'res.data', cpu: 100, memUsed: 65100, memTotal: 65400, disk: 9.99e9, down: 9.99e9, up: 999.4e6, top: AUDIT.resFlip ? top : top.reverse(), held: [] });
-}
-
-function auditSettings(section) {
-  state.section = section;
-  reset('settings');
-  const nav = $('settings').querySelector(`[data-section="${section}"]`);
-  const first = $('settings').querySelector('.spane [data-nav]');
-  setFocus(first || nav);
-}
-function auditSettingsFirst() {
-  const first = $('settings').querySelector('.spane [data-nav]');
-  if (first) setFocus(first);
-}
-
-const AUDIT_BT = { type: 'bt.state', adapter: true, radio: 'on', scanning: false,
-  nearby: Array.from({ length: 8 }, (_, i) => ({ id: `near${i}`, name: i === 2 ? `[Speaker ${AUDIT_LONG}]` : `[Nearby ${i + 1}]`, kind: ['speaker', 'keyboard', 'headphones', 'other'][i % 4] })),
-  paired: Array.from({ length: 10 }, (_, i) => ({ id: `bt${i}`, name: i === 3 ? `[Headphones ${AUDIT_LONG}]` : `[Device ${i + 1}]`,
-    kind: ['headphones', 'controller', 'keyboard', 'speaker', 'mouse'][i % 5], connected: i < 2, soundHere: i === 0 })) };
-function auditBtTick() {
-  const s = auditClone(AUDIT_BT);
-  s.paired.reverse(); s.nearby.reverse();
-  onHost(s);
-}
-
-function auditPhone() {
-  EXT.host['phone.settings']({ type: 'phone.settings', phone: {
-    listening: true, address: 'tv.local', ip: '192.168.1.20', requireCode: true, reach: 'ok', unpaired: 2, secure: true,
-    fingerprint: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8',
-    qr: 'http://192.168.1.20/?k=Qm9vc3RlZC1kZW1vLWtleQ', sendQr: 'http://192.168.1.20/send?k=U2VuZC1kZW1vLWtleS1vbmx5',
-    phones: [...Array.from({ length: 8 }, (_, i) => ({ id: `ph${i}`, name: i === 2 ? `Phone ${AUDIT_LONG}` : `Phone ${i + 1}`, connected: i === 0, lastSeen: Date.now() - i * 86400000 })),
-      ...Array.from({ length: 4 }, (_, i) => ({ id: `key${i}`, name: `Shortcut key ${i + 1}`, connected: false, lastSeen: Date.now() - i * 3600000, shortcut: true }))] } });
-}
-
-function auditUpdates(kind) {
-  updDemo(kind);
-  for (let i = 0; i < 12; i++) upd.s.apps.push({ id: `u${i}`, name: `Updated app ${i + 1}`, glyph: 'app', color: '#B3B5BC', installed: '1.0', available: '1.1', update: i % 2 === 0, job: null });
-}
-const auditUpdatesTick = () => onHost(auditClone(upd.s));
-
-if (AUDIT_PAGE === 'index') {
-  auditPage('home', { view: 'home', back: 0, open() {} });
-  auditPage('home with the phone card', { view: 'home', back: 0, open() {
-    state.phone = { url: 'https://tv.local/', paired: false, pairingOpen: false };
-    try { localStorage.removeItem('phoneCardHidden'); } catch (e) { /* no storage */ }
-    render();
-  } });
-  // Alert cards at the top right: they move off the focus (Settings and Power, the top right tiles).
-  auditPage('home with alert cards', { view: 'home', back: 0, open() {
-    noticeUpdate({ rows: [], pills: [{ id: 'updates', text: '4 updates', glyph: 'download', tone: 'warn' }], toasts: [
-      { id: 'a', title: `A card ${AUDIT_LONG}`, body: `And its second line, ${AUDIT_LONG}`, glyph: 'warn', tone: 'bad', key: 'Home', action: 'Reopen' },
-      { id: 'b', title: 'No internet', body: 'Check the network cable or the Wi-Fi.', glyph: 'wifi', tone: 'warn', key: 'Home', action: 'Wi-Fi settings' },
-      { id: 'c', title: 'Phone remote connected', glyph: 'phone', tone: 'info' }] });
-  } });
-  auditPage('home, moving a tile', { view: 'home', back: 1, open() {
-    setFocus($('tiles').querySelector('[data-id="tile:app0"]'));
-    press('start'); press('a');                     // Tile options > Move
-  }, walk: auditMoveWalk, left: () => !state.moving });
-  // Apps being installed (library.js): their tiles show the progress, pushed twice a second.
-  auditPage('home with apps installing', { view: 'home', back: 0, tick: () => onHost(AUDIT_PROGRESS), open() {
-    auditLibrary();
-    EXT.actions.libcard(null, 'lib2'); reset('home');
-    onHost(AUDIT_PROGRESS);
-  } });
-  auditPage('tile options', { view: 'tileopts', open() {
-    setFocus($('tiles').querySelector('[data-id="tile:app23"]'));
-    press('start');
-  } });
-  auditPage('rename', { view: 'rename', open() { setFocus($('tiles').querySelector('[data-id="tile:app3"]')); press('start'); EXT.actions['opt-rename'](); } });
-  auditPage('change icon', { view: 'changeicon', open() { setFocus($('tiles').querySelector('[data-id="tile:app3"]')); press('start'); EXT.actions['opt-icon'](); } });
-  // B over an app goes back to it: the host brings the app forward (resume), the page stays up.
-  // With its resource view (resources.js), its numbers pushed again as it is walked.
-  auditPage('home menu over an app', { view: 'menu', covers: ['menu'], tick: () => { auditMapsTick(); auditRes(); }, left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
-    for (const t of state.tiles.slice(0, 7)) t.running = true;
-    auditMaps();
-    onHost({ type: 'show', view: 'menu', current: 'app1' });
-    noticeUpdate({ toasts: [], pills: [], rows: [
-      { id: 'app:app2', title: `App 3 closed unexpectedly, ${AUDIT_LONG}`, body: 'It stopped working and closed.', glyph: 'warn', tone: 'bad', action: 'Reopen' },
-      { id: 'tv', title: 'Can’t reach the TV', body: 'Is it on the network? Settings › TV can find it again.', glyph: 'tv', tone: 'bad', action: 'TV settings' }] });
-    auditRes();
-  } });
-  auditPage('home menu over the home screen', { view: 'menu', tick: auditRes, open() { press('home'); auditRes(); } });
-  // Nothing open: no Home screen row, no Open apps; the sliders first.
-  auditPage('home menu over the home screen, nothing open', { view: 'menu', covers: [], tick: auditRes, open() {
-    for (const t of state.tiles) t.running = false;
-    press('home');
-    auditRes();
-  } });
-  // Over the Windows desktop (desktop mode): Back to TV first; B goes back to the desktop.
-  auditPage('home menu in desktop mode', { view: 'menu', tick: auditRes, left: () => AUDIT.sent.some((m) => m.type === 'resume'), open() {
-    onHost({ type: 'state', desktop: true });
-    onHost({ type: 'show', view: 'menu', current: 'desktop' });
-    auditRes();
-  } });
-  auditPage('confirm (close an app)', { view: 'confirm', open() { setFocus($('tiles').querySelector('[data-id="tile:app1"]')); press('x'); } });
-  auditPage('power', { view: 'power', open() { go('power'); } });
-  auditPage('power in desktop mode', { view: 'power', open() { onHost({ type: 'state', desktop: true }); go('power'); } });
-  auditPage('sleep timer', { view: 'timer', open() { go('timer'); } });
-  auditPage('ask (a dialog)', { view: 'ask', open() { go('settings'); ask({ title: `Forget ${AUDIT_LONG}?`, text: `A question ${AUDIT_LONG}.`, yes: 'Forget' }); } });
-  auditPage('add tile: library', { view: 'addtile', covers: ['addtile'], tick: () => onHost(AUDIT_PROGRESS), open() { auditLibrary(); EXT.actions.addtile(); auditLibrary(); render(); } });
-  // The programs' icons arrive as the host makes them: the list is sent again, more with theirs.
-  auditPage('add tile: on this box', { view: 'addtile', tick: () => onHost({ type: 'library.programs', list: auditPrograms().map((p, i) => ({ ...p, logo: i % 3 ? AUDIT_LOGO : null })) }),
-    open() { auditLibrary(); EXT.actions.addtile(); press('rb'); auditLibrary(); render(); } });
-  auditPage('add tile: website', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb'); } });
-  // A long address and name typed in (the fields scroll their text; the preview's name wraps inside it).
-  auditPage('add tile: website, a long address typed', { view: 'addtile', covers: [], open() {
-    auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb');
-    const url = $('addtile').querySelector('[data-field="url"]'), name = $('addtile').querySelector('[data-field="name"]');
-    url.focus(); textInsert(`https://www.${'a-very-long-address-'.repeat(8)}example.com/watch?list=${'x'.repeat(200)}`);
-    name.focus(); textInsert(`Site ${AUDIT_LONG}`);
-    name.blur();
-  } });
-  auditPage('settings: section list', { view: 'settings', covers: ['settings'], scope: '.snav', dirs: ['up', 'down'], open() { state.section = 'sleep'; reset('settings'); } });
-  const sectionData = { tv: auditTv, wifi: () => WifiUI.handle(AUDIT_WIFI), bluetooth: () => onHost(AUDIT_BT), phone: auditPhone,
-    sound: () => onHost({ type: 'sound.outputs', canSwitch: true, outputs: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, name: i === 1 ? `Output ${AUDIT_LONG}` : `Output ${i + 1}`, isDefault: i === 0 })) }),
-    updates: () => auditUpdates('ready'), display: () => EXT.sections.display.demo(), about: () => EXT.sections.about.demo(), controller: () => EXT.sections.controller.demo() };
-  const sectionTick = { tv: auditTvTick, wifi: auditWifiTick, bluetooth: auditBtTick, phone: auditPhone, updates: auditUpdatesTick,
-    sound: () => onHost({ type: 'sound.outputs', ...auditClone(more.audio) }) };
-  for (const [id, , label] of SECTIONS) {
-    auditPage(`settings: ${label}`, { view: 'settings', covers: [`section:${id}`], scope: '.spane', back: 2, tick: sectionTick[id], open() {
-      auditSettings(id);
-      if (sectionData[id]) { sectionData[id](); render(); }
-      auditSettingsFirst();
-    } });
-  }
-  // The states a section goes through, beyond its first look.
-  const sectionState = (name, id, set, extra) => auditPage(`settings: ${name}`, { view: 'settings', covers: [], scope: '.spane', back: 2, tick: sectionTick[id], ...extra, open() {
-    auditSettings(id);
-    if (sectionData[id]) sectionData[id]();
-    set();
-    render();
-    auditSettingsFirst();
-  } });
-  // In a Wi-Fi form, B first leaves the form (then the pane, then Settings).
-  sectionState('Wi-Fi, a password to type', 'wifi', () => WifiUI.demo('password'), { back: 3, tick: () => WifiUI.handle(auditClone(AUDIT_WIFI)) });
-  sectionState('Wi-Fi, a hidden network', 'wifi', () => WifiUI.demo('hidden'), { back: 3, tick: () => WifiUI.handle(auditClone(AUDIT_WIFI)) });
-  sectionState('Bluetooth, looking for devices', 'bluetooth', () => { bt.scanning = true; }, { back: 3 });
-  sectionState('Bluetooth, a PIN to type', 'bluetooth', () => { bt.pin = { name: `[Keyboard ${AUDIT_LONG}]`, pin: '482915' }; }, { back: 3 });
-  sectionState('TV, pairing keypad', 'tv', () => { state.tv = TvUi.demo('pair-code'); });
-  sectionState('Updates, apps updating', 'updates', () => auditUpdates('running'));
-  sectionState('Updates, Windows updates installing', 'updates', () => auditUpdates('wininstall'));
-  sectionState('Updates, an update failed', 'updates', () => auditUpdates('failed'));
-  // The launcher's row in each state, and the longest text each place can get (1.0.3's notes ran
-  // out of that row on a TV); a screenshot (#audit?page=) ends on that row.
-  const launcherRow = { last: () => $('settings').querySelector('[data-id="upd-launcher"]') };
-  sectionState('Updates, checking', 'updates', () => auditUpdates('checking'), launcherRow);
-  sectionState('Updates, up to date', 'updates', () => auditUpdates('uptodate'), launcherRow);
-  sectionState('Updates, the launcher downloading', 'updates', () => auditUpdates('downloading'), launcherRow);
-  sectionState('Updates, the launcher waiting for Home', 'updates', () => auditUpdates('waiting'), launcherRow);
-  sectionState('Updates, a release that needs setup', 'updates', () => auditUpdates('setup'), launcherRow);
-  sectionState('Updates, the longest notes', 'updates', () => auditUpdates('longnotes'), launcherRow);
-  sectionState('Updates, long errors', 'updates', () => auditUpdates('longerrors'), launcherRow);
-  // The question A asks on that row, its notes in a box that scrolls; the tallest: the longest
-  // notes under the longest title and text (a version that did not start here, asked again).
-  for (const [name, kind, skipped] of [['ask: update the TV launcher', 'ready'], ['ask: update the TV launcher, the longest notes', 'longnotes'],
-    ['ask: try the TV launcher again, the longest notes', 'longnotes', true]]) {
-    auditPage(name, { view: 'ask', covers: [], open() {
-      auditSettings('updates'); auditUpdates(kind); upd.s.launcher.skipped = !!skipped; render();
-      EXT.actions['upd-row'](null, 'launcher');
-    } });
-  }
-  // The button test takes every button (Home stops it): only its card is checked, as the pad's
-  // state streams in 30 times a second.
-  auditPage('settings: Controller, button test', { view: 'settings', covers: [], scope: '.scol-left', dirs: [], back: 0,
-    tick: () => onHost({ type: 'controller.pad', buttons: 0x1000, lx: 12000, ly: -8000, rx: 0, ry: 0 }), open() {
-      auditSettings('controller');
-      EXT.sections.controller.demo();
-      render();
-      setFocus($('settings').querySelector('[data-id="pad-test"]'));
-      press('a');
-    } });
-  auditPage('tv: how the box controls it', { view: 'tvmethod', tick: auditTvTick, open() { auditTv(); auditSettings('tv'); go('tvmethod'); } });
-  auditPage('tv: how the box controls it, every brand', { view: 'tvmethod', tick: auditTvTick, open() { state.tv = TvUi.demo('crowd'); auditSettings('tv'); go('tvmethod'); } });
-  auditPage('button maps', { view: 'maps', tick: auditMapsTick, open() { auditMaps(); go('settings'); go('maps'); } });
-  auditPage('button map editor', { view: 'buttons', covers: ['buttons'], tick: auditMapsTick, back: 2, open() { auditMaps(); go('maps'); EXT.actions['map-edit'](null, 'twitch'); } });
-  auditPage('button map editor: a button\'s choice', { view: 'buttons', scope: '.baside', dirs: ['up', 'down'], back: 3, open() {
-    auditMaps(); go('maps'); EXT.actions['map-edit'](null, 'twitch');
-    setFocus($('buttons').querySelector('[data-id="b-start"]')); press('a');
-  } });
-  auditPage('button map editor: key combination', { view: 'buttons', scope: '.baside', back: 4, open() {
-    auditMaps(); go('maps'); EXT.actions['map-edit'](null, 'twitch');
-    setFocus($('buttons').querySelector('[data-id="b-select"]')); press('a');
-    setFocus([...$('buttons').querySelectorAll('[data-value]')].find((e) => e.dataset.value === 'combo')); press('a');
-  } });
-  auditPage('button map editor: presets', { view: 'buttons', scope: '.baside', dirs: ['up', 'down'], back: 3, open() {
-    auditMaps(); go('maps'); EXT.actions['map-edit'](null, 'twitch');
-    setFocus($('buttons').querySelector('[data-id="b-preset"]')); press('a');
-  } });
-  auditPage('launcher restarting', { view: 'updrestart', back: 0, hints: 0, open() { upd.restarting = '0.2.0'; go('updrestart'); } });
-}
-
-// Move mode: every press moves the tile; it must stay in view (and focused) wherever it goes.
-// A slow press is slow only if it is slow again, as in auditWalk: the tile back where it was, the
-// same press twice more, the fastest counts.
-function auditMoveWalk(page, report) {
-  const seq = [...Array(7).fill('down'), ...Array(3).fill('right'), ...Array(7).fill('up'), ...Array(3).fill('left')];
-  const back = { down: 'up', up: 'down', left: 'right', right: 'left' };
-  let slowest = 0;
-  for (const b of seq) {
-    let ms = auditPress(b);
-    for (let again = 0; again < 2 && ms > AUDIT.slowMs && state.moving; again++) {
-      AUDIT_IO.press(back[b]);
-      ms = Math.min(ms, auditPress(b));
-    }
-    slowest = Math.max(slowest, ms);
-    const el = $('tiles').querySelector('.tile.moving');
-    if (!el || !el.classList.contains('focused')) { report(`${b}: the moving tile lost the focus`); continue; }
-    for (const p of auditProblems(el)) report(`${b} to ${el.dataset.id}: ${p}`);
-    if (ms > AUDIT.slowMs) report(`${b}: took ${ms.toFixed(0)} ms`);
-  }
-  return slowest;
-}
-
-// ---- First-run setup's pages (setup.html) ---------------------------------------------------------
-
-function auditSetupFresh() {
-  if (typeof WifiUI !== 'undefined' && WifiUI.joining) WifiUI.stop();
-  Object.assign(state, { tvHint: null, dialog: false, read: null, starting: false, progress: null, result: null, wired: true, controller: true, battery: 'full' });
-  state.pressed = new Set(BUTTONS.map(([b]) => b));
-  // As many as the real catalog gives setup (38) and more, in its categories and one it does not know.
-  state.apps = Array.from({ length: 44 }, (_, i) => {
-    const [glyph, color] = AUDIT_GLYPHS[i % AUDIT_GLYPHS.length];
-    return { id: `sapp${i}`, name: i === 5 ? `App ${AUDIT_LONG}` : `App ${i + 1}`, glyph, color, default: i < 8, category: auditCategory(i) };
-  });
-  state.categories = AUDIT_CATEGORIES;
-  state.picked = new Set(state.apps.filter((a) => a.default).map((a) => a.id));
-  state.tv = TvUi.demo('roku');
-  TvUi.code = '';
-  goStep('welcome');
-}
-
-const auditSetupWifi = () => { const s = auditClone(AUDIT_WIFI); s.wired = null; return s; };
-
-if (AUDIT_PAGE === 'setup') {
-  auditPage('setup: welcome', { view: 'welcome', back: 0, open() {} });
-  auditPage('setup: controller, every button pressed', { view: 'controller', tick: () => onHost({ type: 'state', controller: true, battery: 'full' }), open() { goStep('controller'); } });
-  auditPage('setup: controller, none pressed yet', { view: 'controller', covers: [], back: 0, open() { state.pressed = new Set(); goStep('controller'); } });
-  auditPage('setup: Wi-Fi', { view: 'wifi', tick: () => { const s = auditSetupWifi(); s.networks = [s.networks[0], ...s.networks.slice(1).reverse()]; WifiUI.handle(s); }, open() {
-    state.wired = false; goStep('wifi'); WifiUI.handle(auditSetupWifi());
-  } });
-  // B leaves the form first (the step stays).
-  auditPage('setup: Wi-Fi, a password to type', { view: 'wifi', covers: [], left: () => !WifiUI.joining, tick: () => WifiUI.handle(auditSetupWifi()), open() {
-    state.wired = false; goStep('wifi'); WifiUI.demo('password'); render();
-  } });
-  auditPage('setup: Wi-Fi, a hidden network', { view: 'wifi', covers: [], left: () => !WifiUI.joining, tick: () => WifiUI.handle(auditSetupWifi()), open() {
-    state.wired = false; goStep('wifi'); WifiUI.demo('hidden'); render();
-  } });
-  auditPage('setup: find the TV', { view: 'tv', tick: auditTvTick, open() { auditTv(); goStep('tv'); } });
-  auditPage('setup: how the box controls the TV (dialog)', { view: 'tv:dialog', tick: auditTvTick, left: () => !state.dialog, open() {
-    state.tv = TvUi.demo('crowd'); goStep('tv'); state.dialog = true; render();
-  } });
-  auditPage('setup: TV pairing keypad', { view: 'tv', covers: [], tick: auditTvTick, open() { state.tv = TvUi.demo('pair-code'); goStep('tv'); } });
-  auditPage('setup: the TV input', { view: 'input', tick: auditTvTick, open() {
-    goStep('input'); onHost({ type: 'tv.read', power: 'on', input: 3 });
-  } });
-  auditPage('setup: apps', { view: 'apps', open() { goStep('apps'); } });
-  auditPage('setup: installing', { view: 'install', back: 0, tick: () => onHost(auditSetupProgress()), open() { goStep('install'); onHost(auditSetupProgress()); } });
-  auditPage('setup: done', { view: 'done', back: 0, open() {
-    state.result = { ok: true, results: {}, restartNeeded: [] }; goStep('done');
-  } });
-  auditPage('setup: done, many steps failed', { view: 'done', covers: [], back: 0, open() {
-    state.result = { ok: false, restartNeeded: ['shell'], results: Object.fromEntries(Object.keys(STEP_NAMES).map((k, i) => [k, i % 5 === 0 ? 'OK' : `FAILED: it stopped, ${AUDIT_LONG}`])) };
-    goStep('done');
-  } });
-}
-
-function auditSetupProgress() {
-  const names = Object.keys(STEP_NAMES);
-  return { type: 'progress', steps: names, running: names[4], results: Object.fromEntries(names.slice(0, 4).map((k, i) => [k, i === 2 ? 'FAILED: no network' : 'OK'])) };
-}
-
-// ---- The on-screen keyboard's pages (keyboard.html) ------------------------------------------------
-
-// Its rows and columns wrap round (the owner, 29 Sept 2026): the walker lets them.
-if (AUDIT_PAGE === 'keyboard') {
-  auditPage('keyboard: letters', { view: 'keyboard', back: 0, wraps: true, open() { onHost({ type: 'open', field: `A field ${AUDIT_LONG}`, password: false }); } });
-  auditPage('keyboard: symbols, shift locked', { view: 'keyboard', covers: [], back: 0, wraps: true, open() {
-    onHost({ type: 'open', field: 'Search', password: false });
-    symbols = true; shift = 'lock'; render();   // eslint-disable-line no-global-assign
-  } });
-  auditPage('keyboard: a password', { view: 'keyboard', covers: [], back: 0, wraps: true, open() {
-    onHost({ type: 'open', field: 'Password', password: true });
-    typed = 'x'.repeat(48); render();   // eslint-disable-line no-global-assign
-  } });
-}
 
 // ---- Checks ---------------------------------------------------------------------------------
 
@@ -696,7 +327,7 @@ async function runAudit(check, only) {
   const log = console.log;
   console.log = (...args) => { if (args[0] === 'to host') AUDIT.sent.push(args[1]); else log(...args); };
   const covered = new Set(AUDIT.pages.flatMap((p) => p.covers));
-  for (const v of auditMustCover()) check(`audit: ${v} is in the walker`, covered.has(v), 'no auditPage() covers it (audit.js)');
+  for (const v of auditMustCover()) check(`audit: ${v} is in the walker`, covered.has(v), 'no auditPage() covers it (audit/<area>.js)');
   const times = [];
   for (const page of AUDIT.pages) {
     if (only && !only.includes(page.name)) continue;
@@ -731,7 +362,7 @@ async function runAudit(check, only) {
 }
 
 // #audit (real time) and #audit?page=<name> (a page to look at), on any of the three pages.
-(async () => {
+async function auditRun() {
   const route = window.auditRoute || '';
   if (!route.startsWith('audit')) return;
   const one = /[?&]page=([^&]+)/.exec(route);
@@ -756,4 +387,18 @@ async function runAudit(check, only) {
     '\n\nSlowest press per page (ms, real time):\n' + times.map(([n, ms]) => `  ${ms.toFixed(1).padStart(6)}  ${n}`).join('\n');
   document.body.appendChild(pre);
   document.title = failed.length ? `AUDIT FAIL ${failed.length}` : `AUDIT PASS ${results.length}`;
-})();
+}
+
+// The page lists in order (async off), then the run: still before the page's load event, which
+// waits for the scripts added before it.
+AUDIT.ready = new Promise((done) => {
+  let left = AUDIT_FILES.length;
+  for (const name of AUDIT_FILES) {
+    const s = document.createElement('script');
+    s.src = `audit/${name}.js`;
+    s.async = false;
+    s.onload = s.onerror = () => { if (--left === 0) done(); };
+    document.body.appendChild(s);
+  }
+});
+AUDIT.ready.then(auditRun);
