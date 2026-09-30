@@ -14,8 +14,10 @@
                 (UpdateCore.ps1). With admin: Register-AppInstaller.ps1 -LockOnly replaces a junction
                 planted where tv\ should be with a real folder, leaving the link's target untouched.
       JobParams Start-Job.ps1 refuses -DryRun/-Catalog/-Resolve/-DataRoot as SYSTEM (needs admin to
-                run it as SYSTEM through a task), and does not refuse them for a normal user. A job's
-                progress reporter works in the runner as Start-Job.ps1 calls it (with &).
+                run it as SYSTEM through a task, one for the four probes), lets the update
+                bootstrap's marked -Resolve through (it names the runner), and does not refuse them
+                for a normal user (the dry run passes). A job's progress reporter works in the
+                runner as Start-Job.ps1 calls it (with &).
 
     Runs elevated (CI) and not elevated; the admin-only parts are skipped with a clear message.
 
@@ -157,12 +159,19 @@ try {
 
     if (Section 'JobParams') {
         Write-Host 'JobParams (Start-Job.ps1 refuses all but -Job as SYSTEM)'
-        $startJob = Join-Path $lib 'Start-Job.ps1'
+        # The bootstrap as installed: one folder up from a runner (lib\, jobs\, catalog.json).
+        $boot = Join-Path $work 'bootstrap'
+        New-Item -ItemType Directory -Force $boot | Out-Null
+        foreach ($part in 'lib', 'jobs', 'catalog.json') { Copy-Item -LiteralPath (Join-Path $repo "setup\$part") $boot -Recurse }
+        Copy-Item -LiteralPath (Join-Path $lib 'Start-Job.ps1') $boot
+        $startJob = Join-Path $boot 'Start-Job.ps1'
         $refusal = 'no other parameter is accepted as SYSTEM'
 
-        # A normal user is not refused for -DryRun (the guard is only for SYSTEM).
+        # A normal user is not refused for -DryRun (the guard is only for SYSTEM): the dry run
+        # goes through to the runner and succeeds.
         $userOut = & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $startJob -Job reconcile -DryRun 2>&1 | Out-String }
-        Check ($userOut -notmatch [regex]::Escape($refusal)) 'a normal user is not refused for -DryRun'
+        $userCode = $LASTEXITCODE
+        Check ($userCode -eq 0 -and $userOut -notmatch [regex]::Escape($refusal)) "a normal user is not refused for -DryRun: the runner's dry run passes (exit $userCode$(if ($userCode) { ': ' + ($userOut -replace '\s+', ' ').Trim() }))"
 
         # Start-Job.ps1 calls the runner with & (not dot-sourced), so the runner's helpers are not
         # global: a reporter made with GetNewClosure() could not see Write-JobProgress (install:kodi
@@ -177,46 +186,41 @@ try {
         Check ([bool]($got -and $got.phase -eq 'download' -and $got.percent -eq 42 -and $got.jobId -eq 'install:test')) "a job's progress reporter reaches Write-JobProgress when the runner is called with &, as Start-Job.ps1 does ($($chainOut.Trim()))"
 
         if ($elevated) {
-            # Runs Start-Job.ps1 as SYSTEM through a one-shot task. Returns ONE string: its output, or
-            # the message it threw (caught, so an error record's line wrapping cannot split it), with
-            # the whitespace collapsed. -ResolveMark sets HTPC_JOB_RESOLVE first (the bootstrap's call).
-            function Invoke-StartJobAsSystem([string]$Arguments, [switch]$ResolveMark) {
-                $result = Join-Path $work ("sysjob-" + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.txt')
-                $mark = if ($ResolveMark) { "`$env:HTPC_JOB_RESOLVE = '1'; " } else { '' }
-                $inner = "$mark`$r = try { & '$startJob' $Arguments *>&1 | Out-String -Width 4096 } catch { 'THREW: ' + `$_.Exception.Message }; " +
-                    "Set-Content -LiteralPath '$result' -Value ([string]`$r) -Encoding ascii"
-                $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-                $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-                $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
-                $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-                $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::FromMinutes(2))
-                $tn = 'HTPC rights test'
-                try {
-                    Register-ScheduledTask -TaskName $tn -Action $action -Principal $principal -Settings $settings -Force | Out-Null
-                    Start-ScheduledTask -TaskName $tn | Out-Null
-                    $deadline = (Get-Date).AddSeconds(60)
-                    # Until it has run and ended: just after the start it can still be Ready with
-                    # "has not run yet" (267011).
-                    do {
-                        Start-Sleep -Milliseconds 400
-                        $state = (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue).State
-                        $last = (Get-ScheduledTaskInfo -TaskName $tn -ErrorAction SilentlyContinue).LastTaskResult
-                    } while (("$state" -eq 'Running' -or "$state" -eq 'Queued' -or $last -eq 267011) -and (Get-Date) -lt $deadline)
-                } finally { Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue }
-                $text = if (Test-Path -LiteralPath $result) { [IO.File]::ReadAllText($result) } else { '' }
-                [string]($text -replace '\s+', ' ')
+            # Start-Job.ps1 run four times as SYSTEM by one one-shot task (a task and a PowerShell
+            # as SYSTEM cost seconds each), called afresh each time as the task calls it: each
+            # probe's output, or the message it threw (caught, so an error record's line wrapping
+            # cannot split it), in its own file; "done" once all ran. The last one sets
+            # HTPC_JOB_RESOLVE first (the update bootstrap's call), after the others.
+            $probes = @(
+                @{ Args = '-Job reconcile -DryRun'; What = '-DryRun is refused' },
+                @{ Args = '-Job reconcile -Catalog C:\x.json'; What = '-Catalog is refused' },
+                @{ Args = '-Resolve -DataRoot C:\Windows\Temp'; What = '-Resolve/-DataRoot is refused' },
+                @{ Args = '-Resolve -DataRoot C:\Windows\Temp'; What = 'with HTPC_JOB_RESOLVE, -Resolve is allowed (the update bootstrap): it names the runner'; Mark = $true })
+            $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $calls = for ($i = 0; $i -lt $probes.Count; $i++) {
+                $p = $probes[$i]
+                $p.Result = Join-Path $work "sysjob-$i.txt"
+                "$(if ($p.Mark) { "`$env:HTPC_JOB_RESOLVE = '1'`r`n" })`$r = try { & '$startJob' $($p.Args) *>&1 | Out-String -Width 4096 } catch { 'THREW: ' + `$_.Exception.Message }`r`nSet-Content -LiteralPath '$($p.Result)' -Value ([string]`$r) -Encoding ascii"
             }
+            $done = Join-Path $work 'sysjob-done.txt'
+            $all = Join-Path $work 'sysjob.ps1'
+            [IO.File]::WriteAllText($all, "$($calls -join "`r`n")`r`nSet-Content -LiteralPath '$done' -Value done -Encoding ascii`r`n")
+            $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$all`""
+            $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::FromMinutes(2))
+            $tn = 'HTPC rights test'
+            try {
+                Register-ScheduledTask -TaskName $tn -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+                Start-ScheduledTask -TaskName $tn | Out-Null
+                $deadline = (Get-Date).AddSeconds(60)
+                while (-not (Test-Path -LiteralPath $done) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
+            } finally { Unregister-ScheduledTask -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue }
             $pattern = [regex]::Escape($refusal)
-            $sysDry = Invoke-StartJobAsSystem '-Job reconcile -DryRun'
-            Check ([bool]($sysDry -match $pattern)) "as SYSTEM, -DryRun is refused ($sysDry)"
-            $sysCat = Invoke-StartJobAsSystem '-Job reconcile -Catalog C:\x.json'
-            Check ([bool]($sysCat -match $pattern)) "as SYSTEM, -Catalog is refused ($sysCat)"
-            $sysRes = Invoke-StartJobAsSystem '-Resolve -DataRoot C:\Windows\Temp'
-            Check ([bool]($sysRes -match $pattern)) "as SYSTEM, -Resolve/-DataRoot is refused ($sysRes)"
-            # The update bootstrap's exemption: HTPC_JOB_RESOLVE lets -Resolve through (it then fails
-            # only because this Start-Job has no runner beside it, not with the SYSTEM refusal).
-            $sysExempt = Invoke-StartJobAsSystem '-Resolve -DataRoot C:\Windows\Temp' -ResolveMark
-            Check ([bool]($sysExempt -and $sysExempt -notmatch $pattern)) "as SYSTEM with HTPC_JOB_RESOLVE, -Resolve is allowed (the update bootstrap) ($sysExempt)"
+            foreach ($p in $probes) {
+                $text = if (Test-Path -LiteralPath $p.Result) { ([IO.File]::ReadAllText($p.Result) -replace '\s+', ' ').Trim() } else { '(no result)' }
+                $ok = if ($p.Mark) { $text -notmatch $pattern -and $text -match 'lib=.+\\bootstrap\\lib jobs=.+\\bootstrap\\jobs' } else { $text -match $pattern }
+                Check ([bool]$ok) "as SYSTEM, $($p.What) ($text)"
+            }
         } else {
             Skip 'Start-Job.ps1 refusal as SYSTEM (needs a SYSTEM scheduled task)'
         }
