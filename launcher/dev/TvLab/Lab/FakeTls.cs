@@ -28,7 +28,9 @@ static class LabTls
     /// Accepts TLS connections on ip:port and runs <paramref name="serve"/> for each (the client's
     /// certificate is required when <paramref name="clientCertificate"/>). While
     /// <paramref name="refuse"/> says so, connections are dropped at once (a TV that is off).
-    /// <paramref name="note"/> hears "connection" as each arrives and "closed" once it is over.
+    /// <paramref name="note"/> hears "connection" as each arrives and "closed" once it is over. (A
+    /// finished handshake says nothing: .NET's client checks the certificate after it, so a fake
+    /// knows the client took its certificate only when the client speaks.)
     /// </summary>
     public static TcpListener Listen(IPAddress ip, int port, Func<X509Certificate2> certificate, bool clientCertificate,
         Func<bool> refuse, Func<SslStream, X509Certificate2?, Task> serve, Action<string>? note = null)
@@ -72,10 +74,11 @@ static class LabTls
 
 /// <summary>
 /// A fake's certificate, made when first needed; every one it had is disposed with it (their key
-/// files go). RSA keys take 100 ms each to make: the Google TV fakes share the run's two (a TV's
-/// own, another TV's), disposed at the run's end.
+/// files go). RSA keys take 100 ms each to make: a Google TV fake shares its key with the fakes of
+/// the same label in other worlds (the same TV), never with another label (a stranger must not
+/// pass the pin with the TV's key); those are disposed at the run's end.
 /// </summary>
-sealed class LabCertificate(bool rsa = false) : IDisposable
+sealed class LabCertificate(string label, bool rsa = false) : IDisposable
 {
     static readonly Dictionary<string, X509Certificate2> shared = new();
     readonly List<X509Certificate2> made = new();
@@ -88,13 +91,13 @@ sealed class LabCertificate(bool rsa = false) : IDisposable
 
     public X509Certificate2 Get()
     {
-        lock (made) return current ??= Make("fake-tv");
+        lock (made) return current ??= Make(label);
     }
 
     /// <summary>Another key from now on (another TV answering at this address).</summary>
     public void Replace()
     {
-        lock (made) current = Make("another-tv");
+        lock (made) current = Make(label + "-another-key");
     }
 
     X509Certificate2 Make(string name)

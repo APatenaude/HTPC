@@ -16,7 +16,7 @@ namespace Htpc.TvLab;
 sealed class FakeAtv : IBrandFake
 {
     readonly Trace trace;
-    readonly LabCertificate cert = new(rsa: true); // the pairing secret hashes its RSA modulus
+    readonly LabCertificate cert;
     readonly System.Net.Sockets.TcpListener pairing, remote;
     readonly HashSet<string> pairedClients = new();
     SslStream? live;
@@ -30,17 +30,17 @@ sealed class FakeAtv : IBrandFake
     public bool Reachable { get; set; } = true;
     /// <summary>The code on its screen during pairing.</summary>
     public string? Code { get; private set; }
-    public int Connections, PairingRequests, CodesShown;
+    public int Connections, Accepted, PairingRequests, CodesShown;
     public readonly List<int> Keys = new();
 
     public int Opened => Connections;
-    public string Got { get { lock (Keys) return IBrandFake.Describe(("pairing request", PairingRequests), ("code shown", CodesShown), ("key", Keys.Count)); } }
+    public string Got { get { lock (Keys) return IBrandFake.Describe(("connection that took its certificate", Accepted), ("pairing request", PairingRequests), ("code shown", CodesShown), ("key", Keys.Count)); } }
     public IEnumerable<string> Macs => Array.Empty<string>(); // it takes no Wake-on-LAN
     public void Join(FakeNet net) => net.MdnsResponders.Add(Mdns);
 
     public FakeAtv(string label, IPAddress ip, Trace trace)
     {
-        Label = label; Ip = ip; this.trace = trace;
+        Label = label; Ip = ip; this.trace = trace; cert = new(label, rsa: true); // the pairing secret hashes its RSA modulus
         pairing = LabTls.Listen(ip, 6467, () => cert.Get(), true, () => !Reachable, ServePairing, Note);
         remote = LabTls.Listen(ip, 6466, () => cert.Get(), true, () => !Reachable, ServeRemote, Note);
     }
@@ -70,10 +70,11 @@ sealed class FakeAtv : IBrandFake
     {
         if (client is null) return;
         byte[] nonce = RandomNumberGenerator.GetBytes(2);
-        while (true)
+        for (var spoke = false; ; spoke = true)
         {
             var m = await ProtoMessage.ReadFramed(ssl, CancellationToken.None);
             if (m is null) return;
+            if (!spoke) Interlocked.Increment(ref Accepted); // it took this certificate
             if (m.Has(10)) { Interlocked.Increment(ref PairingRequests); trace.Add($"{Label} pairing request"); await ssl.WriteAsync(Outer(11, new ProtoWriter().String(1, "fake"))); }
             else if (m.Has(20)) await ssl.WriteAsync(Outer(20, new ProtoWriter().Message(1, new ProtoWriter().Varint(1, 3).Varint(2, 6)).Varint(3, 1)));
             else if (m.Has(30))
@@ -105,15 +106,18 @@ sealed class FakeAtv : IBrandFake
 
     async Task ServeRemote(SslStream ssl, X509Certificate2? client)
     {
+        // It speaks first; a box that took its certificate answers (a pinned box with another key
+        // never does), and only then is an unpaired one turned away.
+        await ssl.WriteAsync(new ProtoWriter().Message(1, new ProtoWriter().Varint(1, 622)).Framed());
+        var m = await ProtoMessage.ReadFramed(ssl, CancellationToken.None);
+        if (m is null) return;
+        Interlocked.Increment(ref Accepted);
         bool paired;
         lock (pairedClients) paired = client is not null && pairedClients.Contains(LabTls.Pin(client));
         if (!paired) { trace.Add($"{Label} remote refused (not paired)"); return; }
         live = ssl;
-        await ssl.WriteAsync(new ProtoWriter().Message(1, new ProtoWriter().Varint(1, 622)).Framed());
-        while (true)
+        for (; m is not null; m = await ProtoMessage.ReadFramed(ssl, CancellationToken.None))
         {
-            var m = await ProtoMessage.ReadFramed(ssl, CancellationToken.None);
-            if (m is null) return;
             if (m.Has(1)) await ssl.WriteAsync(new ProtoWriter().Message(2, new ProtoWriter().Varint(1, 622)).Framed());
             else if (m.Has(2)) await PushPower(ssl);
             else if (m.Message(10) is { } key)

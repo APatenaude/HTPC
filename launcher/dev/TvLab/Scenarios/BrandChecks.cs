@@ -94,24 +94,40 @@ static class BrandChecks
 
     /// <summary>
     /// Picks the TV (again: pairs it again) and goes through its pairing: yes on the TV (LG, Samsung)
-    /// or the code it shows typed (Sony, Google TV). True when paired, and the box's first contact
-    /// after it is over.
+    /// or the code it shows typed (Sony, Google TV). True when paired and the box's first contact
+    /// after it is over; anything else is a failure, counted.
     /// </summary>
-    static async Task<bool> Pair(NewHost h, IBrandFake tv, Brand b, bool again = false)
+    static async Task<bool> Pair(Scene s, Brand b, bool again = false)
     {
+        var (_, h, tv) = s;
         if (again) h.Tv.StartPairing(); else h.Tv.Choose(b.Key);
         bool Ended() => h.Tv.Pairing?.Stage is "done" or "failed";
         if (!await Check.Wait($"{tv.Label}'s pairing to ask for its code or end", () => Ended() || h.Tv.Pairing?.Stage == "code" && tv.Code is not null)) return false;
-        if (!Ended()) { h.Tv.PairCode(tv.Code!); await Check.Wait($"{tv.Label}'s pairing to end", Ended); }
-        return h.Tv.Pairing?.Stage == "done" && await FirstContact(h, b);
+        if (!Ended()) { h.Tv.PairCode(tv.Code!); if (!await Check.Wait($"{tv.Label}'s pairing to end", Ended)) return false; }
+        if (h.Tv.Pairing?.Stage != "done") { Check.That(false, $"{tv.Label} paired ({h.Tv.Pairing?.Message})"); return false; }
+        return await FirstContact(s, b);
     }
 
     /// <summary>
     /// Once paired, the box reads the TV on its own (its MACs; LG and Google TV: the connection its
-    /// keys go over). Anything that swaps the TV or sends a key waits for that first.
+    /// keys go over). Anything that swaps the TV or sends a key waits for that first. That read is
+    /// one try, and a TLS handshake with a client certificate has taken over 10 s on GitHub's
+    /// runner: from 2 s on, the launcher's 5 s poll runs, as it would on the box.
     /// </summary>
-    static Task<bool> FirstContact(NewHost h, Brand b) => Check.Wait($"the box's first contact with the {b.Name} after pairing", async () =>
-        h.Tv.Profile is { Macs.Count: > 0 } || b.Connected && await BoxSees(h, b) is { Power: not TvPower.Unknown });
+    static Task<bool> FirstContact(Scene s, Brand b)
+    {
+        var (w, h, _) = s;
+        var polled = DateTime.UtcNow;
+        async Task<bool> Contacted() => h.Tv.Profile is { Macs.Count: > 0 } || b.Connected && await BoxSees(h, b) is { Power: not TvPower.Unknown };
+        return Check.Wait($"the box's first contact with the {b.Name} after pairing", async () =>
+        {
+            if (await Contacted()) return true;
+            if (DateTime.UtcNow - polled < TimeSpan.FromSeconds(2)) return false;
+            await w.RunFor(5);
+            polled = DateTime.UtcNow;
+            return await Contacted();
+        }, 30);
+    }
 
     /// <summary>What the box's own driver believes of the TV now, without reaching it: a live connection's state, else what the last search said.</summary>
     static async Task<TvState?> BoxSees(NewHost h, Brand b) =>
@@ -157,7 +173,7 @@ static class BrandChecks
         {
             using var s = await Found(b);
             var (w, h, tv) = s;
-            if (!await Pair(h, tv, b)) continue;
+            if (!await Pair(s, b)) continue;
             await h.Tv.Poll();
             tv.Dispose();
             if (b.Connected) await Dropped(h, b);
@@ -171,7 +187,9 @@ static class BrandChecks
             if (b != GoogleTv) { h.Tv.StartPairing(); await Check.Wait("pairing with the stranger to fail", () => h.Tv.Pairing?.Stage == "failed"); }
             await Check.Wait("the box done with the stranger", () => !other.Busy);
             var got = other.Got + (WokeAny(w, other.Macs) ? " Wake-on-LAN" : "");
-            Check.That(got == "", $"{b.Name}: another TV at the remembered address gets no key, prompt, command or Wake-on-LAN (got {got})");
+            // The Google TV stranger answers as the TV picked: the box does connect, and only the pin stops it.
+            var tried = b != GoogleTv || other.Opened > 0;
+            Check.That(got == "" && tried, $"{b.Name}: another TV at the remembered address: no connection takes its certificate; no key, prompt, command or Wake-on-LAN (got {got}; {other.Opened} connections)");
         }
     }
 
@@ -231,9 +249,11 @@ static class BrandChecks
         await Off();
         lg.ReplaceKey();
         before = w.Trace.Lines.Count;
+        var (connections, accepted) = (lg.Connections, lg.Accepted);
         await h.Wake(); await w.RunFor(20);
-        Check.That(!w.Trace.Lines.Skip(before).Any(l => l.Contains("lg register")) && h.Tv.Credentials.Get(Lg.Key)?.Pin == pinned,
-            "LG: another TLS key at the TV's address: no register, the key not sent, the pin kept");
+        await Check.Wait("the box done with the LG", () => !lg.Busy);
+        Check.That(lg.Connections > connections && lg.Accepted == accepted && !w.Trace.Lines.Skip(before).Any(l => l.Contains("lg register")) && h.Tv.Credentials.Get(Lg.Key)?.Pin == pinned,
+            $"LG: another TLS key at the TV's address: tried ({lg.Connections - connections}), none took its certificate ({lg.Accepted - accepted}), no register, the pin kept");
     }
 
     static async Task AtvFlow()
@@ -251,7 +271,7 @@ static class BrandChecks
         Check.That(NotLogged(h.Tv.Credentials.Get(GoogleTv.Key)?.Value) && NotLogged(atv.Code), "Google TV: its key pinned; code and pin never logged");
         Check.That(h.Tv.Credentials.Get("androidtv:client")?.Pfx is { Length: > 0 }, "Google TV: the box's client certificate kept (TLS client auth worked through Schannel)");
 
-        await FirstContact(h, GoogleTv); // its keys go over the connection the box opens right after pairing
+        await FirstContact(s, GoogleTv); // its keys go over the connection the box opens right after pairing
         await h.Tv.Poll();
         await h.Sleep();
         // 30 s: each key opens a TLS connection with a client certificate (Schannel), which took
@@ -326,7 +346,7 @@ static class BrandChecks
             h.Tv.Choose(muted.Key);
             await Check.Eventually("Samsung: Deny on the TV, and how to undo it", () => h.Tv.Pairing is { Stage: "failed" } p && p.Message.Contains("Device List"));
             mute.AcceptPrompt = true;
-            await Pair(h, mute, muted, again: true);
+            await Pair(s, muted, again: true);
             await h.Tv.Poll();
             var ui = System.Text.Json.JsonSerializer.Serialize(TvUiState.Describe(h.Tv));
             await h.Sleep();
@@ -372,7 +392,7 @@ static class BrandChecks
             var (w, h, t) = s;
             var lg = (FakeLg)t;
             lg.ListenPlain(LgPlainPort);
-            await Pair(h, lg, Lg);
+            await Pair(s, Lg);
             Check.That(h.Tv.Credentials.Get(Lg.Key)?.Scheme == "wss", "LG: the key kept with the scheme it was paired over (wss)");
             await h.Tv.Poll();
             lg.StopTls(); // its TLS port resets connections from now on (a refusal: UnitChecks' table); it still answers searches
@@ -388,10 +408,10 @@ static class BrandChecks
         {
             using var s = await Found(GoogleTv, ui: false);
             var (w, h, atv) = s;
-            await Pair(h, atv, GoogleTv);
+            await Pair(s, GoogleTv);
             await h.Tv.Poll();
             var before = atv.Opened;
-            await Pair(h, atv, GoogleTv, again: true); // the old connection is dropped, not reused
+            await Pair(s, GoogleTv, again: true); // the old connection is dropped, not reused
             await h.Tv.Poll();
             Check.That(atv.Opened >= before + 2, $"Google TV: after pairing again, a new pinned connection ({atv.Opened - before} new)");
             h.Tv.Credentials.Forget(GoogleTv.Key); // a Forget between reads
@@ -445,16 +465,17 @@ static class BrandChecks
             using var s = await Found(Sony, ui: false);
             var (w, h, t) = s;
             var sony = (FakeSony)t;
-            await Pair(h, sony, Sony);
+            await Pair(s, Sony);
             await h.Tv.Poll();
             sony.RedirectTo = thief.Url;
             await w.RunFor(20); await h.Sleep(); await h.Wake();
-            var paired = await Pair(h, sony, Sony, again: true);
-            Check.That(!paired && thief.Requests == 0, "Sony: a 307 to another host gets no cookie, no command, no pairing");
+            h.Tv.StartPairing();
+            await Check.Wait("the pairing through the redirect to end", () => h.Tv.Pairing?.Stage is "done" or "failed");
+            Check.That(h.Tv.Pairing?.Stage == "failed" && thief.Requests == 0, "Sony: a 307 to another host gets no cookie, no command, no pairing");
             Check.That(h.Tv.Credentials.Get(Sony.Key)?.Value != "stolen", "Sony: another host's cookie never becomes the credential");
             // (The failed pairing above left the old cookie; pair again for the expiry check.)
             sony.RedirectTo = null;
-            await Pair(h, sony, Sony, again: true);
+            await Pair(s, Sony, again: true);
             sony.ExpireCookie();
             await h.Tv.Poll(); await h.Sleep();
             // Whichever read meets the expired cookie first tries the renewal (the pairing's own first read may).
@@ -464,7 +485,7 @@ static class BrandChecks
             using var s = await Found(Samsung, ui: false);
             var (w, h, t) = s;
             var sam = (FakeSamsung)t;
-            await Pair(h, sam, Samsung);
+            await Pair(s, Samsung);
             Check.That(h.Tv.Credentials.Get(Samsung.Key)?.Pin is { Length: > 0 }, "Samsung: its channel's TLS key pinned at pairing");
             await h.Tv.Poll();
             var keys = sam.Keys;
@@ -475,18 +496,19 @@ static class BrandChecks
             sam.RedirectTo = null;
             sam.ReplaceChannelKey(); // same REST id, another TLS key on the channel
             var mark = w.Trace.Lines.Count;
+            var (channels, accepted) = (sam.Channels, sam.Accepted);
             await w.RunFor(20);
             await h.Sleep(); await h.Wake();
             await Check.Wait("the box done with the Samsung", () => !sam.Busy);
-            Check.That(sam.Keys == keys && !w.Trace.Lines.Skip(mark).Any(l => l.Contains("sam remote channel")),
-                "Samsung: a channel with another TLS key gets no token and no key (pinned)");
+            Check.That(sam.Channels > channels && sam.Accepted == accepted && sam.Keys == keys && !w.Trace.Lines.Skip(mark).Any(l => l.Contains("sam remote channel")),
+                $"Samsung: a channel with another TLS key: tried ({sam.Channels - channels}), none took its certificate ({sam.Accepted - accepted}), no token, no key (pinned)");
         }
     }
 
     static async Task<(Scene S, FakeSony Sony)> PairedSony()
     {
         var s = await Found(Sony, ui: false);
-        await Pair(s.H, s.Tv, Sony);
+        await Pair(s, Sony);
         await s.H.Tv.Poll();
         return (s, (FakeSony)s.Tv);
     }

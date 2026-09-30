@@ -124,7 +124,7 @@ sealed class FakeSamsung : IBrandFake
     readonly Trace trace;
     readonly FakeHttp rest;
     readonly System.Net.Sockets.TcpListener ws;
-    readonly LabCertificate cert = new();
+    readonly LabCertificate cert;
     public string Label { get; }
     public IPAddress Ip { get; }
     public string Id { get; set; }
@@ -135,7 +135,7 @@ sealed class FakeSamsung : IBrandFake
     public bool AcceptPrompt { get; set; } = true;
     public string? Token { get; private set; }
     public string Mac { get; set; } = "02:00:00:00:4d:01";
-    public int Channels, Prompts, Keys;
+    public int Channels, Accepted, Prompts, Keys;
     public Uri? RedirectTo { set => rest.RedirectTo = value; }
     /// <summary>Its remote channel now has another TLS key (another TV behind the same REST answer).</summary>
     public void ReplaceChannelKey() => cert.Replace();
@@ -150,7 +150,7 @@ sealed class FakeSamsung : IBrandFake
 
     public FakeSamsung(string label, IPAddress ip, int restPort, int wsPort, string id, Trace trace)
     {
-        Label = label; Ip = ip; Id = id; this.trace = trace;
+        Label = label; Ip = ip; Id = id; this.trace = trace; cert = new(label);
         rest = new FakeHttp(_ => !Reachable ? new FakeResponse(503) : new FakeResponse(200, new JsonObject
         {
             ["type"] = "Samsung SmartTV",
@@ -174,7 +174,9 @@ sealed class FakeSamsung : IBrandFake
     async Task Serve(SslStream ssl, System.Security.Cryptography.X509Certificates.X509Certificate2? _)
     {
         var request = await FakeHttp.Read(ssl);
-        if (request is null || !request.Headers.TryGetValue("Sec-WebSocket-Key", out var key)) return;
+        if (request is null) return;
+        Interlocked.Increment(ref Accepted); // it spoke: it took this certificate
+        if (!request.Headers.TryGetValue("Sec-WebSocket-Key", out var key)) return;
         var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
         await ssl.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"));
         using var socket = WebSocket.CreateFromStream(ssl, new WebSocketCreationOptions { IsServer = true });

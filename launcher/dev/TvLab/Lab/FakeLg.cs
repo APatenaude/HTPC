@@ -18,7 +18,7 @@ namespace Htpc.TvLab;
 sealed class FakeLg : IBrandFake
 {
     readonly Trace trace;
-    readonly LabCertificate cert = new();
+    readonly LabCertificate cert;
     readonly System.Net.Sockets.TcpListener tls;
     readonly FakeHttp description;
     readonly List<(WebSocket Socket, string Id, string Kind)> subscriptions = new();
@@ -33,7 +33,7 @@ sealed class FakeLg : IBrandFake
     public string? Key { get; set; }
     public bool AcceptPrompt { get; set; } = true;
     public int Prompts, Registers, Commands;
-    public int Connections;
+    public int Connections, Accepted;
     public string WiredMac { get; set; } = "02:00:00:00:1a:01";
     public string WifiMac { get; set; } = "02:00:00:00:1a:02";
 
@@ -41,7 +41,7 @@ sealed class FakeLg : IBrandFake
     bool tlsDown;
     public int Opened => Connections;
     public bool Busy => open > 0;
-    public string Got => IBrandFake.Describe(("register", Registers), ("prompt", Prompts), ("command", Commands));
+    public string Got => IBrandFake.Describe(("connection that took its certificate", Accepted), ("register", Registers), ("prompt", Prompts), ("command", Commands));
     public string? Code => null;
     public IEnumerable<string> Macs => new[] { WiredMac, WifiMac };
     public void Join(FakeNet net) { net.Responders.Add(Ssdp); net.WakeTargets.Add(WakePacket); }
@@ -74,7 +74,7 @@ sealed class FakeLg : IBrandFake
 
     public FakeLg(string label, IPAddress ip, int port, string udn, Trace trace)
     {
-        Label = label; Ip = ip; Udn = udn; this.trace = trace;
+        Label = label; Ip = ip; Udn = udn; this.trace = trace; cert = new(label);
         description = new FakeHttp(_ => new FakeResponse(200,
             $"<?xml version=\"1.0\"?><root xmlns=\"urn:schemas-upnp-org:device-1-0\"><device><friendlyName>{Name}</friendlyName>" +
             $"<manufacturer>LG Electronics</manufacturer><modelName>{Model}</modelName><UDN>uuid:{Udn}</UDN></device></root>"), ip);
@@ -111,7 +111,9 @@ sealed class FakeLg : IBrandFake
     async Task Serve(SslStream ssl, X509Certificate2? _)
     {
         var request = await FakeHttp.Read(ssl);
-        if (request is null || !request.Headers.TryGetValue("Sec-WebSocket-Key", out var key)) return;
+        if (request is null) return;
+        Interlocked.Increment(ref Accepted); // it spoke: it took this certificate
+        if (!request.Headers.TryGetValue("Sec-WebSocket-Key", out var key)) return;
         var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
         await ssl.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"));
         using var socket = WebSocket.CreateFromStream(ssl, new WebSocketCreationOptions { IsServer = true });
