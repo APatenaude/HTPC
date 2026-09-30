@@ -21,6 +21,29 @@ static partial class Program
     static int Main(string[] args)
     {
         T.Start(args);
+        // One run at a time on a box: runs share Windows' CA stores, and while another process writes
+        // to one, its listing misses certificates (a leftover not removed, the current one not found).
+        using var turn = new Mutex(false, @"Local\HTPC PhoneTests");
+        var ours = TakeTurn(turn);
+        try { return Groups(); }
+        finally { if (ours) turn.ReleaseMutex(); }
+    }
+
+    static bool TakeTurn(Mutex turn)
+    {
+        try
+        {
+            if (turn.WaitOne(0)) return true;
+            Console.WriteLine("  (another PhoneTests is running: waiting for it, they share the CA stores)");
+            if (turn.WaitOne(TimeSpan.FromMinutes(2))) return true;
+        }
+        catch (AbandonedMutexException) { return true; }   // a run that ended without letting go
+        Console.WriteLine("  WARNING: another PhoneTests still runs after 2 minutes: running anyway (the certificate checks may fail)");
+        return false;
+    }
+
+    static int Groups()
+    {
         // Tests name their CAs themselves: the box's own (its intermediates stay in Windows' CA stores) never grow.
         var boxOnes = IntermediatesInStore(PhoneCertificates.BoxName);
         // What a run stopped half-way left (its cleanup never ran); not while another run goes (those are its own).

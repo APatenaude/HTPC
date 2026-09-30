@@ -35,7 +35,8 @@ name: `dotnet run -c Release -- -v Logos`); sub-files are static classes with `R
 the end of `tests/LauncherTests/Program.cs` (`TileStoreTests.cs` covers `TileStore.cs`); a list
 of cases is one check that names the ones that failed. AlertsTests `T.Group(...)`/`T.Check` in
 `*Checks` classes; PhoneTests the same harness (`T.Group` in `Main`, `CheckAll` for a table;
-`Fixtures.cs`: `TestServer`, a server of the test's own, and `TempPath`, gone after). `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
+`Fixtures.cs`: `TestServer`, a server of the test's own, and `TempPath`, gone after; runs take turns,
+as they share Windows' CA stores). `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
 (text, menu, home, network, settings, tiles, maps, resources, logos, addtile, sounds, notes): each
 `selftestGroup(({ check, sent, lastSent, ... }) => { ... })` with `check('Prefix: what', ok, detail)`
 in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are registered with

@@ -316,8 +316,10 @@ static partial class Program
         certs = new PhoneCertificates(folder, store, testName, () => now);
         Check(!certs.Ensure(PhoneCertificates.LocalNames(), new[] { moved }), "a restart with the same pair: nothing made");
         var inStore = IntermediatesInStore(testName);
-        Check(!leftovers.Any(l => inStore.Contains(l.Thumbprint)) && inStore.Contains(certs.Intermediate!.Thumbprint),
-            "at every start this box's older intermediates leave the CA store (CN and O in either order); the current one stays");
+        var left = leftovers.Count(l => inStore.Contains(l.Thumbprint));
+        var currentIn = inStore.Contains(certs.Intermediate!.Thumbprint);
+        Check(left == 0 && currentIn, "at every start this box's older intermediates leave the CA store (CN and O in either order); the current one stays"
+            + $" ({left} of 2 left; the current one {(currentIn ? "there" : "missing")})");
         Check(others.All(o => inStore.Contains(o.Thumbprint)), "another O, or CN and O in one multi-valued name: left alone");
 
         // What the box had: leftovers in the machine's store (from test runs as administrator) show
