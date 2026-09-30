@@ -1,16 +1,24 @@
 'use strict';
 // The UI audit, a "focus walker": each page set up in a stress state (more tiles, apps, networks...
 // than a real box, long names) and walked with the D-pad through press(), from the first focus to
-// every element it reaches. At each focus: the element, its ring and zoom whole inside every box
-// that clips them and on screen, under no hint bar, covered by nothing; for the page: no text
-// spilling or cut off, everything reached, no press wrapping round, B leaves, one hint bar, every
-// press 50 ms at most, and the host's periodic pushes replayed without moving the focus or
-// playing an entrance again.
+// every element it reaches. Its rules, and what the self-test no longer checks one by one because
+// a rule does (each shown on 30 Sept 2026 by breaking the page and watching the walker fail):
+// - At each focus (auditProblems): the element, its ring and zoom whole inside every box that
+//   clips them (a list's first and last rows: Wi-Fi, Bluetooth, button maps; the TV pane's bottom
+//   button; the Home menu's column scrolled to a program) and on screen, under no hint bar (the
+//   Home menu's quick buttons), covered by nothing (the Website form's fields and its preview).
+// - Each press: never wrapping round (the ends of the button maps list, down from the last
+//   resource row, right from the Home menu's last quick button), 50 ms at most; everything
+//   reached; B leaves. Only a move against the press is seen: one sideways (a left from a
+//   full-width row going up to a button) is the self-test's to check.
+// - The page: no text spilling or cut off, the stage whole in the window (fit()), one hint bar
+//   (Tile options' over the home screen's), and the host's periodic pushes replayed without
+//   moving the focus or playing an entrance again.
 //
 // This file is the engine; the pages are in audit/<area>.js (AUDIT_FILES), loaded after it. Runs
 // in the self-test (index.html#selftest), and alone on index.html, setup.html, keyboard.html
-// #audit, before the page's load event ends (headless Edge's --dump-dom waits for it). #audit?page=
-// <name> sets one page up, the focus on its last element, for a screenshot.
+// #audit (its results in #audit-results and the title, read by Test-Ui.ps1). #audit?page=<name>
+// sets one page up, the focus on its last element, for a screenshot.
 //
 // EVERY VIEW MUST BE IN THE WALKER: a new view (addView), Settings section or setup step needs an
 // auditPage() (what to set up, how to open it). One missing fails the audit.
@@ -108,7 +116,8 @@ function auditPress(button) {
 }
 
 // Hint bars on screen: shown, not see-through, not under an opaque view (an overlay's dimmed
-// backdrop still shows what is under it).
+// backdrop still shows what is under it, and a hint bar has no background: one under another in
+// the same place shows through it, Tile options' over the home screen's).
 function auditHintBars() {
   return [...document.querySelectorAll('.hints')].filter((h) => {
     const r = h.getBoundingClientRect();
@@ -116,8 +125,16 @@ function auditHintBars() {
     for (let p = h; p; p = p.parentElement) if (Number(getComputedStyle(p).opacity) < 0.05) return false;
     const k = h.querySelector('.key').getBoundingClientRect();
     const hit = document.elementFromPoint(k.left + k.width / 2, k.top + k.height / 2);
-    return !!hit && (h.contains(hit) || (hit.classList.contains('overlay') && !hit.contains(h)));
+    return !!hit && (h.contains(hit) || !!hit.closest('.hints') || (hit.classList.contains('overlay') && !hit.contains(h)));
   });
+}
+
+// The stage (the keyboard: its band) whole in the window: fit() scales and letterboxes it to any
+// screen; the walker's other rules measure inside the stage, so they cannot see it run off.
+function auditStageOnScreen() {
+  const s = AUDIT_IO.stage().getBoundingClientRect();
+  return s.left >= -0.5 && s.top >= -0.5 && s.right <= innerWidth + 0.5 && s.bottom <= innerHeight + 0.5 ? null
+    : `the stage runs off the screen: ${Math.round(s.width)}x${Math.round(s.height)} at ${Math.round(s.left)},${Math.round(s.top)} in ${innerWidth}x${innerHeight}`;
 }
 
 // How far the focus ring reaches out of el, in stage pixels: its sharp box-shadows (a spread and
@@ -272,6 +289,16 @@ async function auditWalk(page, report) {
     if (checked.size % AUDIT.tickEvery === 1) auditTick(page, report);
   };
   look(start);
+  // No directions walked (a state of a page walked whole elsewhere, a screen that takes every
+  // button): still every element, focused in turn, no press.
+  if (!page.dirs.length) {
+    for (const e of auditItems(page)) {
+      if (!e.dataset.id || checked.has(e.dataset.id)) continue;
+      AUDIT_IO.setFocus(e);
+      await null;
+      look(e);
+    }
+  }
   while (queue.length) {
     const id = queue.shift();
     for (const dir of page.dirs) {
@@ -318,16 +345,22 @@ function auditMustCover() {
   return ['home', 'menu', 'power', 'timer', 'confirm', 'settings', ...Object.keys(EXT.views), ...SECTIONS.map(([id]) => `section:${id}`)];
 }
 
-// Runs every page (or those named); check(name, ok, detail) records each result.
-async function runAudit(check, only) {
-  // The end state at once, no transitions; entrances last 0 s but keep their names (auditTick).
+// The end state at once, no transitions; entrances last 0 s but keep their names (auditTick).
+function auditStill() {
   const style = document.createElement('style');
   style.textContent = '*, *::before, *::after { transition: none !important; animation-duration: 0s !important; animation-delay: 0s !important; }';
   document.head.appendChild(style);
+  return style;
+}
+
+// Runs every page (or those named); check(name, ok, detail) records each result.
+async function runAudit(check, only) {
+  const style = auditStill();
   const log = console.log;
   console.log = (...args) => { if (args[0] === 'to host') AUDIT.sent.push(args[1]); else log(...args); };
   const covered = new Set(AUDIT.pages.flatMap((p) => p.covers));
-  for (const v of auditMustCover()) check(`audit: ${v} is in the walker`, covered.has(v), 'no auditPage() covers it (audit/<area>.js)');
+  const missing = auditMustCover().filter((v) => !covered.has(v));
+  check('audit: every view, Settings section and setup step is in the walker', !missing.length, `no auditPage() covers ${missing.join(', ')} (audit/<area>.js)`);
   const times = [];
   for (const page of AUDIT.pages) {
     if (only && !only.includes(page.name)) continue;
@@ -340,6 +373,8 @@ async function runAudit(check, only) {
       await null;
       if (AUDIT_IO.view() !== page.view) report(`it did not open (the view is ${AUDIT_IO.view()})`);
       else {
+        const offScreen = auditStageOnScreen();
+        if (offScreen) report(offScreen);
         for (const p of auditSpills()) report(p);
         const slowest = page.walk ? page.walk(page, report) : await auditWalk(page, report);
         times.push([page.name, slowest || 0]);
@@ -369,6 +404,9 @@ async function auditRun() {
   if (one) {
     const page = AUDIT.pages.find((p) => p.name === decodeURIComponent(one[1]));
     if (!page) return;
+    // Its end state: a screenshot in Edge's virtual time caught setup's step entrance half way,
+    // three times in four (30 Sept 2026), Tile options' once in eight.
+    auditStill();
     AUDIT_IO.fresh();
     page.open();
     if (page.walk) { for (let i = 0; i < 7; i++) AUDIT_IO.press('down'); return; }
@@ -383,10 +421,16 @@ async function auditRun() {
   const failed = results.filter((r) => !r.ok);
   const pre = document.createElement('pre');
   pre.id = 'audit-results';
-  pre.textContent = `${innerWidth}x${innerHeight}\n` + results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.ok ? '' : '  [' + r.detail + ']'}`).join('\n') +
-    '\n\nSlowest press per page (ms, real time):\n' + times.map(([n, ms]) => `  ${ms.toFixed(1).padStart(6)}  ${n}`).join('\n');
+  pre.textContent = auditReport(results, times);
   document.body.appendChild(pre);
   document.title = failed.length ? `AUDIT FAIL ${failed.length}` : `AUDIT PASS ${results.length}`;
+}
+
+// What Test-Ui.ps1 reads: a line per check (PASS, or FAIL and why), then the slowest press of
+// each page walked (runAudit's times), indented.
+function auditReport(results, times) {
+  return results.map((r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}${r.ok ? '' : '  [' + r.detail + ']'}`).join('\n') +
+    '\n\nSlowest press per page (ms, real time):\n' + times.map(([n, ms]) => `  ${ms.toFixed(1).padStart(6)}  ${n}`).join('\n');
 }
 
 // The page lists in order (async off), then the run: still before the page's load event, which

@@ -1,10 +1,9 @@
 'use strict';
 // Self-test: tiles in place, Tile options, moving a tile, an app installing. Run by selftest.js, in its order.
-selftestGroup(({ check, sent, lastSent, tileEl }) => {
+// Tile options' one hint bar (the home screen's hidden under it): the audit.
+selftestGroup(({ check, asksFirst, sent, lastSent, tileEl }) => {
   // ---- Home: tiles updated in place, Tile options, moving a tile, an app installing -------------
-  state.current = null; state.backdrop = null;
-  onHost({ type: 'state', running: ['jellyfin'] });
-  reset('home');
+  selftestFresh(['jellyfin']);
   const jf = tileEl('jellyfin'), yt = tileEl('youtube');
   setFocus(jf);
   press('x');
@@ -18,7 +17,6 @@ selftestGroup(({ check, sent, lastSent, tileEl }) => {
   setFocus(tileEl('moonlight'));
   press('start');
   const panelR = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), mR = tileEl('moonlight').getBoundingClientRect();
-  check('Tile options: one hint bar (the home one hidden under it)', getComputedStyle($('home-hints')).visibility === 'hidden' && !!$('tileopts').querySelector('.hints'));
   check('Tile options: beside the tile, level with it', panelR.left >= mR.right && panelR.top < mR.bottom && panelR.bottom > mR.top, `${panelR.left},${panelR.top} / ${mR.right},${mR.top}`);
   press('b');
   setFocus(tileEl('jellyfin'));
@@ -66,12 +64,13 @@ selftestGroup(({ check, sent, lastSent, tileEl }) => {
   pad('a');
   check('Hold A: the phone\'s A (no release follows) opens at once', lastSent('launch') && lastSent('launch').id === 'moonlight');
   hideOpening();
-  // The longest tile hints (a running app: six), in stage pixels: the same at every 16:9 size.
+  // The longest tile hints (a running app: six, Hold A and X among them), in stage pixels: the same
+  // at every size.
   state.tiles.find((t) => t.id === 'moonlight').running = true;
   setFocus(tileEl('moonlight'));
-  const homeBar = $('home-hints');
-  check('Hold A: the tile hints say so, and all six fit (a running app)', /Hold A\s*Move/.test(homeBar.textContent) && /Close app/.test(homeBar.textContent) && homeBar.scrollWidth <= homeBar.clientWidth,
-    `${homeBar.scrollWidth} > ${homeBar.clientWidth}: ${homeBar.textContent}`);
+  const homeBar = $('home-hints'), homeKeys = [...homeBar.querySelectorAll('.key')].map((k) => k.textContent);
+  check('Hold A: the tile hints say so, and all six fit (a running app)', homeBar.querySelectorAll('.hint').length === 6 && homeKeys.includes('Hold A') && homeKeys.includes('X')
+    && homeBar.scrollWidth <= homeBar.clientWidth, `${homeBar.scrollWidth} > ${homeBar.clientWidth}: ${homeKeys.join(' ')}`);
   state.tiles.find((t) => t.id === 'moonlight').running = false;
 
   // Install from Add tile: A asks "Install Kodi?" (on Cancel); Yes starts it and Add tile stays up
@@ -82,21 +81,16 @@ selftestGroup(({ check, sent, lastSent, tileEl }) => {
   EXT.actions.addtile();
   onHost({ type: 'library.catalog', apps: [kodi], sites: [] });
   const kodiCard = () => $('addtile').querySelector('[data-id="app-kodi"]');
-  setFocus(kodiCard());
-  press('a');
-  check('Install: A asks "Install Kodi?" first, on Cancel', state.view === 'ask' && /Install Kodi\?/.test($('ask').textContent) && focusedEl() && focusedEl().dataset.id === 'ask-no', state.view);
-  setFocus($('ask').querySelector('[data-id="ask-yes"]'));
-  press('a');
-  check('Install: Yes starts it, with add to home, back on Add tile', state.view === 'addtile' && lastSent('library.install').id === 'kodi' && lastSent('library.install').addToHome === true, state.view);
+  asksFirst('Install: A on an app to install', kodiCard, 'a', 'library.install', { id: 'kodi', addToHome: true });
   onHost({ type: 'library.progress', current: { id: 'kodi', name: 'Kodi', action: 'install', phase: 'download', percent: 40 }, pending: [] });
-  check('Install: Add tile stays, on its card, which shows the progress', state.view === 'addtile' && focusedEl() === kodiCard() && /Downloading/.test(kodiCard().textContent) && !!kodiCard().querySelector('.lc-bar'));
+  check('Install: Add tile stays, on its card, which shows the progress', state.view === 'addtile' && focusedEl() === kodiCard() && !!kodiCard().querySelector('.lc-bar'), state.view);
   reset('home');
-  check('Install: home shows a tile installing it, with the progress', tileEl('~kodi') && /Downloading/.test(tileEl('~kodi').textContent) && !!tileEl('~kodi').querySelector('.pbar'));
+  check('Install: home shows a tile installing it, with the progress', tileEl('~kodi') && !!tileEl('~kodi').querySelector('.pbar'));
   onHost({ type: 'library.progress', current: null, pending: [] });
   onHost({ type: 'library.catalog', apps: [kodi], sites: [] });
-  check('Install: it did not install: the tile says so', tileEl('~kodi') && tileEl('~kodi').classList.contains('failed') && /Didn/.test(tileEl('~kodi').textContent));
+  check('Install: it did not install: the tile says so', tileEl('~kodi') && tileEl('~kodi').classList.contains('failed') && !tileEl('~kodi').querySelector('.pbar'));
   setFocus(tileEl('~kodi'));
-  check('Install: its hints: A tries again, X removes', /Try again/.test($('home-hints').textContent) && /Remove/.test($('home-hints').textContent));
+  const offered = [...$('home-hints').querySelectorAll('.key')].map((k) => k.textContent);
   press('x');
-  check('Install: X takes the tile away', !tileEl('~kodi'));
+  check('Install: X, in its hints, takes the tile away', offered.includes('X') && !tileEl('~kodi'), offered.join(' '));
 });

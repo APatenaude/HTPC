@@ -51,7 +51,7 @@ in a new session from this repo. In that first session:
 4. Run `New-DevMachine.ps1` again (without `-Install`) until the Access report says "all set", then
    prove the VM: `setup\test\Start-IncusTestVM.ps1 -WaitSsh`, `setup\test\Invoke-IncusTestVM.ps1 hostname`,
    `setup\test\Stop-IncusTestVM.ps1`.
-5. Run the UI self-test once (`launcher\dev\Test-Ui.ps1 -SelfTest`, about 3 minutes) so you know the
+5. Run the UI self-test once (`launcher\dev\Test-Ui.ps1 -SelfTest`, about 20 s) so you know the
    harness works on this machine before changing anything.
 6. Check the release state: `gh release list -R APatenaude/HTPC -L 3`, `git log --oneline -5`, and
    whether section 8's "in progress" items are on the branch (`git log --grep`).
@@ -95,7 +95,8 @@ that did the work; none of them belongs in the (public) repo:
 | After a change: build + the 3 test projects, one line each | `launcher\dev\Test-Quick.ps1` (`-Only LauncherTests`, `-Ui` adds the condensed UI self-test) |
 | Build | `dotnet build launcher\src\Launcher\Launcher.csproj -c Release` |
 | Run one test project | `dotnet run -c Release --project launcher\tests\LauncherTests` (also PhoneTests, AlertsTests, `launcher\dev\TvLab`); LauncherTests prints its groups and failures, `-- -v` every check, `-- Logos` only the groups named so |
-| The UI self-test and audit walker | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest` |
+| The UI self-test and audit walker (at 1536x864; `-AllSizes`: every size) | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-Ui.ps1 -SelfTest` |
+
 | The UI in a plain browser | open `launcher\ui\index.html` (demo data; `#selftest`, `#audit`, `#settings` routes) |
 | The phone app's checks | open `launcher\dev\phone-test.html` in Edge (or it runs headless in Test-All) |
 | Everything, one pass | `powershell -ExecutionPolicy Bypass -File launcher\dev\Test-All.ps1` |
@@ -103,8 +104,8 @@ that did the work; none of them belongs in the (public) repo:
 | The setup exe | `launcher\dev\Publish-Setup.ps1` (writes `launcher\dist\TV Box Setup.exe`) |
 
 `Test-All.ps1` runs the build, every test project, the setup tests CI runs (Test-Autostart, -Drivers,
--Rights, -Updates; not `Test-Library.ps1`, which installs real apps, nor `Test-ReleaseInVm.ps1`), the UI self-test with the audit at 1080p, 1536x864 (a 4K TV
-at Windows' 250 % scaling), 720p, 1200p and ultrawide, and the phone page. `Test-Updates.ps1` needs administrator rights (it sets folder
+-Rights, -Updates; not `Test-Library.ps1`, which installs real apps, nor `Test-ReleaseInVm.ps1`), the UI self-test with the audit
+at 1536x864 (a 4K TV at Windows' 250 % scaling), then at 1080p, 720p, 1200p and ultrawide (`-AllSizes`), and the phone page. `Test-Updates.ps1` needs administrator rights (it sets folder
 owners): run it elevated, or in the VM.
 
 ### On a TV box itself

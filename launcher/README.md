@@ -839,8 +839,8 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   `HtpcLauncher.Standby`) that only a launcher started with `--dev` answers (`Start-Launcher.ps1 -Dev`,
   with `-NoTv` while nobody watches the TV); a release, and the setup exe, ignore them.
 - Also in `dev/`: `Build-Icon.ps1` (the launcher's icon from `art/`), `input-test.html` (a page showing
-  the keys and clicks it gets, for Test-Presets), `library-uitest.html` (the library screens' checks),
-  `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`, `Run-NetProbe.ps1`, `TvLab` (above).
+  the keys and clicks it gets, for Test-Presets), `New-PhoneIcons.ps1`, `Show-MediaSessions.ps1`,
+  `Run-NetProbe.ps1`, `TvLab` (above).
 - Screenshots (Save-Screenshots, Test-Ui `-Shots`, Save-Screen) also write a half-size `-small.png`
   (`-Scale`, `Save-ScaledImage.ps1`) for a quick look; judge details on the full-size one.
 
@@ -871,21 +871,26 @@ A new development machine: `launcher\dev\New-DevMachine.ps1 -Install` (tools, bu
   screen, above the hints and not covered.
 - For the page: no text runs out of its card or row, or is cut off at the side of a pane (the long
   release notes that did), everything focusable is reached, nothing wraps round, B leaves, one hint bar
-  shows.
-- Every press takes at most 50 ms (timed in a second, real-time run, `index.html#audit`).
+  shows (one under another in the same place counts: bars have no background), the stage is whole in
+  the window.
+- The self-test does not check these again screen by screen: `ui/audit.js`'s header lists what each
+  rule stands for (each was shown by breaking the page and watching the walker fail).
+- Every press takes at most 50 ms (real time: the self-test runs without Edge's virtual time; Test-Ui
+  prints the slowest).
 - As it walks it replays the host's periodic messages for the page (the clock, state pushes, the TV
   search, Wi-Fi scans in another order, install progress): the focus must stay put and nothing on
   screen may be drawn afresh (an entrance playing again).
 - First-run setup (`setup.html#audit`: every step, the TV dialog, the Wi-Fi forms) and the on-screen
-  keyboard (`keyboard.html#audit`) are walked too.
-- The launcher again at 1920x1080, 1536x864 (a 4K TV at Windows' 250 %: the page the owner's TV gets),
-  1280x720, 2560x1080 and 1920x1200 (the TV or monitor may be any size and shape: the stage scales and
-  letterboxes).
+  keyboard (`keyboard.html#audit`) are walked too, in the same Edge.
+- All at 1536x864 (a 4K TV at Windows' 250 %: the page the owner's TV gets; the keyboard's band
+  1536x352). Each page draws a fixed 1920x1080 stage that `fit()` scales and letterboxes (the TV or
+  monitor may be any size and shape): the self-test checks `fit()` at 720p, ultrawide and 16:10, and
+  `Test-Ui.ps1 -SelfTest -AllSizes` (Test-All) walks the pages at those sizes too.
 - **Every new view must be in the walker**: an `auditPage()` in `ui/audit/<area>.js` for each view
   (`addView`), each Settings section and each setup step (what to set up, how to open it); one without
   fails the audit.
-- `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element; `-ShotSize
-  1536x864` takes it at the TV's size.
+- `-Shots "audit?page=home"` shows a page in its stress state, focus on its last element (a comma in
+  its name as `%2C`: `-Shots` splits on commas); `-ShotSize 1536x864` takes it at the TV's size.
 
 ### The box's own drawing
 

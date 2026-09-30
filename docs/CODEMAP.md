@@ -35,11 +35,11 @@ name: `dotnet run -c Release -- -v Logos`); sub-files are static classes with `R
 the end of `tests/LauncherTests/Program.cs` (`TileStoreTests.cs` covers `TileStore.cs`); a list
 of cases is one check that names the ones that failed. AlertsTests `T.Group(...)`/`T.Check` in
 `*Checks` classes; PhoneTests groups in `Main`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
-(text, menu, home, network, settings, tiles, maps, resources, logos, addtile, sounds, notes): each
+(text, menu, home, network, settings, tiles, maps, resources, logos, addtile, pages, sounds, notes): each
 `selftestGroup(({ check, sent, lastSent, ... }) => { ... })` with `check('Prefix: what', ok, detail)`
-in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are registered with
-`auditPage(name, spec)` in `ui/audit/home.js`, `settings.js` (index.html), `setup.js`, `keyboard.js`
-(`AUDIT_FILES`).
+in `// ---- Title ----` groups, each from `selftestFresh()` (its own tiles). `ui/audit.js` is the
+walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.js`, `settings.js`
+(index.html), `setup.js`, `keyboard.js` (`AUDIT_FILES`).
 
 ## How the UI plugs in
 
@@ -96,7 +96,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 ## Library, Add a tile, tile options
 
 - Files: `ui/library.js` (one IIFE), `src/MainForm.Library.cs`, `src/LibraryService.cs`, `src/TileStore.cs`,
-  `src/StartMenuScanner.cs`; dev page `launcher/dev/library-uitest.html`.
+  `src/StartMenuScanner.cs`.
 - Names: views `tileopts`, `rename`, `changeicon`, `addtile`; `openAddTile`, `setTab`, `libraryTabHtml`,
   `onboxTabHtml`, `websiteTabHtml`, `saveWebsite`, `startMove`/`moveTile`/`dropTile`, `installApp`,
   `hostMessage('library.')`; `OnLibraryMessage` (library.*, tile.*), `PostLibraryReady`, `PushLibraryCatalog`,
@@ -104,7 +104,8 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `LibraryService.Enqueue`, `EnqueueBoxJob`, `Run`, `RunThroughTask`, `Follow`; `TileStore.TryWebsiteUrl`,
   `CleanName`, `NewId`; `StartMenuScanner.Scan`.
 - Tests: LauncherTests `TileStoreTests.cs`, `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
-  (`ui/selftest/tiles.js`), "Add a tile, Rename, setup's apps..." (`addtile.js`); audit (`ui/audit/home.js`)
+  (`ui/selftest/tiles.js`), "Add a tile, Rename..." (`addtile.js`); audit (`ui/audit/home.js`)
+
   'tile options', 'rename', 'change icon', 'add tile: library', 'add tile: on this box', 'add tile:
   website', 'add tile: website, a long address typed'.
 - Log: `Added program tile {name} ({target})`, `Added website tile {name} ({url})`, `Library: queued {token}`,
@@ -117,7 +118,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   keyboard.css and keyboard.js); keyboard.js `render`, `press`, `typeText`, `moveVertical`, `onButton`;
   `MainForm.OpenKeyboard`, `CloseKeyboard`, `OnKeyboardMessage`.
 - Tests: LauncherTests "On-screen keyboard: its window as high as its page" (`AddTileTests.cs`); selftest
-  'Keyboard:' checks (`ui/selftest/addtile.js`); audit (`ui/audit/keyboard.js`) 'keyboard: letters',
+  'Keyboard:' and 'fit():' checks (`ui/selftest/pages.js`); audit (`ui/audit/keyboard.js`) 'keyboard: letters',
   'keyboard: symbols, shift locked', 'keyboard: a password' (keyboard.html).
 - Log: `Keyboard opened ({text field|R3}: ...)`, `Keyboard closed ({reason})`.
 
@@ -258,7 +259,7 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
   `MainForm.PostSetupInit`, `StartSetup`; `Rights` decided once in `Program.Main`.
 - Tests: LauncherTests `ElevationTests.cs`; `Test-Rights.ps1` (uninstall walker, ACL lock, job params);
   `Test-Drivers.ps1`; `Test-Updates -Only Core` (machine steps, system-before.json: `setup\test\updates\Core.ps1`);
-  selftest 'Setup:' (`ui/selftest/addtile.js`); audit (`ui/audit/setup.js`) 'setup: welcome' ... 'setup:
+  selftest 'Setup:' (`ui/selftest/pages.js`); audit (`ui/audit/setup.js`) 'setup: welcome' ... 'setup:
   done, many steps failed'; the VM: `setup\test\Test-ReleaseInVm.ps1`.
 - Log: setup-*.log `== {step}` then `  + ...` lines and `== Summary`; launcher.log `Setup started:
   powershell ...`, `Setup ended (exit code {n})`.
@@ -403,8 +404,12 @@ in `// ---- Title ----` groups. `ui/audit.js` is the walker; the pages are regis
 1. `ui/selftest/<area>.js`: in its `// ---- Title ----` group, drive the page (`reset(view)`,
    `press('down')`, `onHost({ type: ... })` for a host message, `lastSent(type)` for what the page sent),
    then `check('Prefix: what', ok, detail)`; a helper the group needs comes in its first line's
-   `({ check, sent, lastSent, ... })` (the list in `ui/selftest.js`). A new area: a file with
-   `selftestGroup(...)`, its name in `SELFTEST_FILES` at the place in the run it needs.
+   `({ check, sent, lastSent, ... })` (the list in `ui/selftest.js`: `checkRows` for many cases in one
+   check, `asksFirst` for a question before something that cannot be undone, `until` to wait for an
+   event). Not what the walker checks on every page (a ring cut, a list's ends, one hint bar:
+   `ui/audit.js`'s header), nor exact wording; a size the owner decided (a tile, a key) is a
+   `pin(...)`, all checked together as 'layout pins'. A new area: a file with
+   `selftestGroup(...)` starting from `selftestFresh()`, its name in `SELFTEST_FILES`.
 2. `ui/audit/home.js` or `settings.js` (index.html), `setup.js`, `keyboard.js`: `auditPage('name', { view,
    open() { auditFresh(); ...stress data...; go(view); }, scope, dirs, back, hints, tick })`. Every
    `addView`, Settings section and setup step must be covered (`auditMustCover` in `ui/audit.js`) or the
