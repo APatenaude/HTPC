@@ -725,6 +725,17 @@ function Restore-PreviousLauncher($Paths, $Journal, [string]$Reason) {
         # Test hook: a power cut between two slots of a rollback.
         Invoke-UpdateFault "restored-$(Get-SlotKey $slot)"
     }
+    # A launcher the watchdog was starting as the pause came (it looked, then started it: a start
+    # the antivirus holds takes seconds) shows up after the pass above, still the version put
+    # aside: ended too, until none has shown for half a second (at most 5 s), before the pause goes.
+    $quiet = [DateTime]::UtcNow
+    $until = $quiet.AddSeconds(5)
+    while (([DateTime]::UtcNow - $quiet).TotalMilliseconds -lt 500 -and [DateTime]::UtcNow -lt $until) {
+        $late = @(Get-LauncherProcesses $Paths)
+        foreach ($p in $late) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+        if ($late.Count) { $quiet = [DateTime]::UtcNow }
+        Start-Sleep -Milliseconds 100
+    }
     Save-LauncherJournal $Paths $Journal 'rolledback' "$Reason; back on $($Journal.from)"
     Clear-WatchdogPause $Paths -Watch
     Clear-WatchdogPause $Paths
