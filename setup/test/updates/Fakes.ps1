@@ -121,12 +121,20 @@ static int Main() {
 # <root>\watchdog-exits.log: "planned" (exit code 75), "covered" (a job's pause or watch file names
 # a live process: not counted) or "counted" (a crash the real watchdog would count towards
 # restarting the box). Stops when <root>\stop-watchdog exists. Renamed while it runs (an update
-# that brings a watchdog), it goes on from there, as the real one does.
+# that brings a watchdog), it goes on from there, as the real one does. As the real one, it ends a
+# start that a job's pause or a change of the launcher's file overtook (not counted: "ended at
+# start" in the log). <root>\hold-next-start (seconds) holds its next start that long, as the
+# antivirus can, with the file it began with (a hard link, HtpcLauncher.held.exe, keeps it
+# whatever a rollback renames meanwhile).
 function Get-FakeWatchdog([string]$Version = '0.1.0', [switch]$Later) {
     Build-Fake "watchdog-$Version.exe" -Later:$Later -Source (@'
-using System; using System.IO; using System.Threading; using System.Diagnostics; using System.Text.RegularExpressions;
+using System; using System.IO; using System.Threading; using System.Diagnostics; using System.Text.RegularExpressions; using System.Runtime.InteropServices;
 [assembly: System.Reflection.AssemblyVersion("VERSION.0")] [assembly: System.Reflection.AssemblyFileVersion("VERSION.0")]
 class W {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool CreateHardLink(string link, string existing, IntPtr security);
+  static string Stamp(string path) {
+    try { var f = new FileInfo(path); return f.Exists ? f.Length + "|" + f.CreationTimeUtc.Ticks + "|" + f.LastWriteTimeUtc.Ticks : null; } catch (Exception) { return null; }
+  }
   static bool Holds(string path) {
     try { var m = Regex.Match(File.ReadAllText(path), "\"jobPid\":\\s*(\\d+)");
           if (m.Success) { using (Process.GetProcessById(int.Parse(m.Groups[1].Value))) return true; } } catch (Exception) { }
@@ -155,9 +163,24 @@ class W {
     // Started as the real one starts it (CreateProcess, not the shell's ShellExecute).
     // Logged before and after: a start the antivirus holds shows as a "start" line alone.
     if (!Holds(pause) && !running && DateTime.UtcNow >= nextStart && File.Exists(exe)) {
+      var stamp = Stamp(exe);
+      var from = exe;
+      var hold = Path.Combine(root, "hold-next-start");
       try { File.AppendAllText(log, "start " + DateTime.UtcNow.ToString("HH:mm:ss.f") + Environment.NewLine); } catch (Exception) { }
-      try { child = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = dir }); } catch (Exception) { }
+      if (File.Exists(hold)) {
+        int seconds; int.TryParse(File.ReadAllText(hold).Trim(), out seconds); File.Delete(hold);
+        from = Path.Combine(dir, "HtpcLauncher.held.exe");
+        if (!CreateHardLink(from, exe, IntPtr.Zero)) from = exe;
+        Thread.Sleep(seconds * 1000);
+      }
+      try { child = Process.Start(new ProcessStartInfo(from) { UseShellExecute = false, WorkingDirectory = dir }); } catch (Exception) { }
       try { File.AppendAllText(log, "started " + (child == null ? "none" : child.Id.ToString()) + " " + DateTime.UtcNow.ToString("HH:mm:ss.f") + Environment.NewLine); } catch (Exception) { }
+      if (child != null && (Holds(pause) || Stamp(exe) != stamp)) {
+        try { File.AppendAllText(log, "ended at start " + child.Id + Environment.NewLine); } catch (Exception) { }
+        try { child.Kill(); child.WaitForExit(5000); } catch (Exception) { }
+        child = null;
+        nextStart = DateTime.UtcNow;
+      }
     }
     // Waits on the launcher itself, so its exit is judged at once (as the real watchdog waits on
     // its mutex): a sleep could miss a rollback's short pause on a loaded box.
