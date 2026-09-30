@@ -147,7 +147,9 @@ sealed class ControllerService : IDisposable
 
     /// <summary>
     /// Poll every 25 ms instead of 8 ms (standby: fewer CPU wake-ups). Not slower: at 80 ms a
-    /// quick tap on Home fell between two polls and did not wake the box.
+    /// quick tap on Home fell between two polls and did not wake the box. With no controller
+    /// connected (a controller switches itself off after a while), the thread only wakes for the
+    /// next look for one (NoControllerWait).
     /// </summary>
     public bool Slow { get; set; }
 
@@ -217,12 +219,18 @@ sealed class ControllerService : IDisposable
 
     // Dev and test: a made-up controller state used instead of the real one (see Inject).
     volatile StrongBox<PadState>? injected;
+    // Set by Inject: a thread waiting for the next look for a controller goes on at once.
+    readonly AutoResetEvent injectedNow = new(false);
 
     /// <summary>
     /// Dev and test: acts as if the controller were in this state (buttons, triggers, sticks)
     /// until the next call; null goes back to the real controller.
     /// </summary>
-    public void Inject(PadState? state) => injected = state is { } s ? new StrongBox<PadState>(s) : null;
+    public void Inject(PadState? state)
+    {
+        injected = state is { } s ? new StrongBox<PadState>(s) : null;
+        injectedNow.Set();
+    }
 
     // Controller thread only.
     int slot = -1;
@@ -323,6 +331,16 @@ sealed class ControllerService : IDisposable
         }
     }
 
+    const int ScanEveryMs = 300;
+
+    /// <summary>
+    /// How long the thread waits while no controller is connected: 50 ms awake; in standby until
+    /// the next look for one, since nothing else is read meanwhile (about 3 wake-ups a second
+    /// instead of 16, the looks as often as ever: a controller switched on is found as quickly).
+    /// </summary>
+    internal static int NoControllerWait(bool slow, long now, long nextScan) =>
+        slow ? (int)Math.Clamp(nextScan - now, 1, ScanEveryMs) : 50;
+
     /// <summary>
     /// Finds the controller (a scan every 300 ms while there is none) and reads it. False when
     /// there is nothing to read this time round (the caller loops again).
@@ -332,9 +350,11 @@ sealed class ControllerService : IDisposable
         state = default;
         if (slot < 0 && now >= nextScan)
         {
+            // A look at an empty slot costs about a million processor cycles (XInput looks for
+            // devices again each time): the reason for looking only this often.
             for (uint i = 0; i < 4 && slot < 0; i++)
                 if (XInputGetStateEx(i, out _) == 0) slot = (int)i;
-            nextScan = now + 300;
+            nextScan = now + ScanEveryMs;
             if (slot >= 0)
             {
                 Log.Info($"Controller connected in slot {slot}");
@@ -351,7 +371,12 @@ sealed class ControllerService : IDisposable
                 }
             }
         }
-        if (slot < 0) { SetStatus(false, null); Thread.Sleep(50); return false; }
+        if (slot < 0)
+        {
+            SetStatus(false, null);
+            injectedNow.WaitOne(NoControllerWait(Slow, now, nextScan));
+            return false;
+        }
 
         if (XInputGetStateEx((uint)slot, out state) != 0)
         {
