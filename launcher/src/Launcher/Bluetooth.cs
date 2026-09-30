@@ -128,19 +128,19 @@ sealed class BluetoothService : IDisposable
     }
 
     /// <summary>
-    /// No device is paired, from a fresh look (standby may then turn the radio off: no controller
-    /// or keyboard can be on Bluetooth). False when Windows does not answer in 10 s or fails: a
-    /// paired controller must never lose the radio on a failed look.
+    /// Whether any device is paired, from a fresh look (with none, the radio goes off:
+    /// BluetoothRadio.cs). Null when Windows does not answer in 10 s or fails: a paired controller
+    /// must never lose the radio on a failed look.
     /// </summary>
-    public static async Task<bool> NothingPaired()
+    public static async Task<bool?> AnythingPaired()
     {
         try
         {
             var aqs = Protocols + " AND System.Devices.Aep.IsPaired:=System.StructuredQueryType.Boolean#True";
             var found = await DeviceInformation.FindAllAsync(aqs, Props, DeviceInformationKind.AssociationEndpoint).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
-            return found.Count == 0;
+            return found.Count > 0;
         }
-        catch (Exception e) { Log.Warn($"Bluetooth: the paired devices not read ({e.GetType().Name}): the radio stays on in standby"); return false; }
+        catch (Exception e) { Log.Warn($"Bluetooth: the paired devices not read ({e.GetType().Name}): the radio is left on"); return null; }
     }
 
     /// <summary>Looks for devices in pairing mode (while the user pairs one): on, or off.</summary>
@@ -272,16 +272,24 @@ sealed class BluetoothService : IDisposable
         catch (Exception) { return "none"; }
     }
 
+    /// <summary>
+    /// The radio on or off; true once done. Only a refusal is logged here: BluetoothRadio logs
+    /// each change with why it was made.
+    /// </summary>
     public static async Task<bool> SetRadio(bool on)
     {
         try
         {
             var access = Radio.RequestAccessAsync().AsTask();
-            if (await Task.WhenAny(access, Task.Delay(10_000)) != access || access.Result != RadioAccessStatus.Allowed) return false;
+            if (await Task.WhenAny(access, Task.Delay(10_000)) != access || access.Result != RadioAccessStatus.Allowed)
+            {
+                Log.Warn($"Bluetooth radio {(on ? "on" : "off")}: no access to the radio ({(access.IsCompleted ? access.Result.ToString() : "no answer in 10 s")})");
+                return false;
+            }
             var radio = (await Radio.GetRadiosAsync()).FirstOrDefault(r => r.Kind == RadioKind.Bluetooth);
             if (radio is null) return false;
             var result = await radio.SetStateAsync(on ? RadioState.On : RadioState.Off);
-            Log.Info($"Bluetooth radio {(on ? "on" : "off")}: {result}");
+            if (result != RadioAccessStatus.Allowed) Log.Warn($"Bluetooth radio {(on ? "on" : "off")}: Windows said {result}");
             return result == RadioAccessStatus.Allowed;
         }
         catch (Exception e) { Log.Warn($"Bluetooth radio: {e.Message}"); return false; }

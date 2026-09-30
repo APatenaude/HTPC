@@ -4,7 +4,8 @@
 // (launcher\dev\Test-Ui.ps1 -SelfTest: in real time, the page read through the DevTools protocol
 // once its title says it is done).
 // Covers what the host cannot see: the text-field key guard, text from the on-screen keyboard,
-// X and A on an alert's row in the Home menu, Home landing on an alert's row, the crowded menu,
+// X and A on an alert's row in the Home menu, Home landing on an alert's row, where the menu opens
+// and which quick button up and down land on (the ones used last), the crowded menu,
 // its quick buttons in the order of the home screen's top bar (Settings, then Power), the home
 // grid (38 tiles: three whole rows, a sliver of the next, a row at a time),
 // Power's Restart and Shut down asking first, moving around Settings and changing a value there only once A has picked its row, the
@@ -215,10 +216,69 @@
   back();
   reset('home');
   state.memory.menu = 'volume';
+  menuUsed.control = 'brightness';
   noticeUpdate({ toasts: [{ id: 'phone', title: 'Phone remote connected', glyph: 'phone', tone: 'info' }], rows: [], pills: [] });
   press('home');
-  check('Home with only a passing card: the remembered focus', focusedEl() && focusedEl().dataset.id === 'volume', focusedEl() && focusedEl().dataset.id);
+  check('Home with only a passing card: the menu opens as usual (over the home screen, the first open app)', focusedEl() && focusedEl().dataset.id === 'app:youtube', focusedEl() && focusedEl().dataset.id);
   back();
+
+  // ---- Where the Home menu opens, and where up and down land in its quick buttons -----------------
+  // The owner, 30 Sept 2026. Over the home screen with nothing open: Volume at first, then the
+  // control used last this session (a slider changed, a quick button pressed), across openings;
+  // with apps open, the first of them; over an app, its Home screen row (an alert's row if the
+  // host says). Down from the brightness and up from the monitor land on the quick button used
+  // last (the one nearest, as before, until one is); along the row, as ever. Real presses.
+  {
+    const on = () => focusedEl() && focusedEl().dataset.id;
+    const running = (ids) => { for (const t of tiles) t.running = ids.includes(t.id); };
+    noticeUpdate({ toasts: [], rows: [], pills: [] });
+    menuUsed.control = null; menuUsed.quick = null;
+    running([]);
+    reset('home');
+    press('home');
+    const first = on();
+    press('down'); press('right');                          // the brightness, changed
+    press('b'); press('home');
+    const afterBrightness = on();
+    const nearestBefore = nearest(focusedEl(), 'down', items(), true);   // where down went before
+    press('down');                                          // into the quick buttons, none used yet
+    const nearestQuick = on();
+    press('right'); press('right');                         // Power
+    press('a');
+    const toPower = state.view;
+    press('b');
+    const backOnPower = on();
+    press('b'); press('home');
+    const afterPower = on();
+    check('Menu over the home screen, nothing open: on Volume at first, then on the control used last (the brightness changed, then Power pressed)',
+      first === 'volume' && afterBrightness === 'brightness' && toPower === 'power' && backOnPower === 'q-power' && afterPower === 'q-power',
+      `${first}; ${afterBrightness}; ${toPower} ${backOnPower}; ${afterPower}`);
+    check('Menu: down from the brightness into the quick buttons, none used yet: the one nearest, as before',
+      nearestBefore && nearestBefore.classList.contains('quick') && nearestQuick === nearestBefore.dataset.id, `${nearestQuick} (nearest: ${nearestBefore && nearestBefore.dataset.id})`);
+    const walk = ['up', 'down', 'down', 'up', 'left', 'up', 'down'].map((b) => { press(b); return on(); });
+    check('Menu: into the quick buttons from the brightness or the monitor: the one used last (Power); along the row, as ever',
+      walk[0] === 'brightness' && walk[1] === 'q-power' && /^res:/.test(walk[2] || '') && walk[3] === 'q-power' && walk[4] === 'q-settings'
+      && walk[5] === 'brightness' && walk[6] === 'q-power', walk.join(','));
+    press('b');
+    running(['twitch', 'stremio']);
+    press('home');
+    check('Menu over the home screen with apps open: the first of them, whatever was used last', on() === 'app:twitch', on());
+    press('b');
+    onHost({ type: 'show', view: 'menu', current: 'twitch' });
+    check('Menu over an app: its Home screen row, whatever was used last', on() === 'home', on());
+    noticeUpdate({ toasts: [], pills: [], rows: [{ id: 'tv', title: 'Can’t reach the TV', glyph: 'tv', tone: 'bad', action: 'TV settings' }] });
+    onHost({ type: 'show', view: 'menu', current: 'twitch', focus: 'alert:tv' });
+    check('Menu over an app with an alert on screen: its row, as before', on() === 'alert:tv', on());
+    noticeUpdate({ toasts: [], rows: [], pills: [] });
+    onHost({ type: 'state', desktop: true });
+    onHost({ type: 'show', view: 'menu', current: 'desktop' });
+    check('Menu over the desktop: Back to TV, as before', on() === 'back-tv', on());
+    onHost({ type: 'state', desktop: false });
+    state.current = null; state.backdrop = null;
+    menuUsed.control = null; menuUsed.quick = null;
+    running(tiles.map((t) => t.id));
+    reset('home');
+  }
 
   // ---- Cards --------------------------------------------------------------------------------------
   noticeUpdate({ toasts: [

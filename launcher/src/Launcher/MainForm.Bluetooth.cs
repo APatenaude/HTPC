@@ -8,37 +8,47 @@ namespace Htpc.Launcher;
 ///   To the page:   bt.state {adapter, radio, paired, nearby, scanning} · bt.pin {id, name, pin}
 ///                  bt.result {id, ok, text}
 /// Looking for nearby devices runs only while the page asks, the launcher is in front and the
-/// box is awake. The sound check runs every 2 s, only with a paired Bluetooth audio device.
+/// box is awake. The sound check runs every 2 s, only with a paired Bluetooth audio device. The
+/// radio is off while nothing could use it, awake or in standby (BluetoothRadio.cs): the page
+/// turns it on while it shows, and the page's switch is the user's own.
 /// </summary>
 sealed partial class MainForm
 {
     readonly BluetoothService bt = new();
     readonly SoundSwitcher soundSwitcher = new();
+    BluetoothRadio btRadio = null!;   // the radio's rule: made in InitBluetooth
     HashSet<Guid> btAudio = new();   // container ids of the paired headphones and speakers
     bool btWanted, btScanWanted;
     int btTicks, btPosting, soundChecking;
 
-    /// <summary>InitAlerts (constructor): refreshes and the sound check on the clock.</summary>
+    /// <summary>InitAlerts (constructor): refreshes and the sound check on the clock, the radio's rule.</summary>
     void InitBluetooth()
     {
         bt.Changed += () => OnUiQueued(PostBluetooth);
         clock.Tick += (_, _) => BluetoothTick();
+        btRadio = new BluetoothRadio(new BluetoothRadioParts(BluetoothService.GetRadioState, SwitchRadio, BluetoothService.AnythingPaired,
+            () => standby is { Active: true }, () => Environment.TickCount64,
+            (delay, look) => _ = Task.Delay(delay).ContinueWith(_ => look(), TaskScheduler.Default),
+            () => settings.BluetoothOffByLauncher, off => settings.BluetoothOffByLauncher = off, settings.Save));
         _ = RefreshBluetooth();
     }
 
     /// <summary>
-    /// OnLoad, once standby exists: its Bluetooth switch (the radio off in standby while nothing
-    /// is paired, Standby.cs). OnLoad then turns it back on if the launcher before this one ended
-    /// in standby.
+    /// OnLoad, once standby exists: the radio looked at now (a launcher that ended with it off,
+    /// something paired meanwhile: on again) and again a minute later (just after a boot Windows
+    /// may not list the radio yet), then at each standby and wake. Not in setup.
     /// </summary>
-    void InitStandbyBluetooth()
+    void StartBluetoothRadio()
     {
-        standby.Bluetooth = new StandbyRadio("Bluetooth", BluetoothService.GetRadioState, SwitchForStandby,
-            BluetoothService.NothingPaired, "nothing paired");
+        standby.Changed += active => LookAtBluetooth(active ? "standby" : "wake");
+        LookAtBluetooth("the launcher started");
+        _ = Task.Delay(TimeSpan.FromMinutes(1)).ContinueWith(_ => LookAtBluetooth("a minute after the launcher started"), TaskScheduler.Default);
     }
 
-    // Switched by standby: Settings › Bluetooth, if it shows after the wake, says so at once.
-    async Task<bool> SwitchForStandby(bool on)
+    void LookAtBluetooth(string when) { if (!setupMode) _ = btRadio.Look(when); }
+
+    // Switched by the rule or the user: Settings › Bluetooth, if it shows, says so at once.
+    async Task<bool> SwitchRadio(bool on)
     {
         var done = await BluetoothService.SetRadio(on);
         OnUiQueued(() => { if (btWanted) PostBluetooth(); });
@@ -105,7 +115,8 @@ sealed partial class MainForm
                 btWanted = On();
                 if (!btWanted) btScanWanted = false;
                 BluetoothPlaceChanged();
-                _ = RefreshBluetooth();
+                // The radio on first, if the rule had it off: the page's first state then shows it on.
+                _ = btRadio.PageShown(btWanted).ContinueWith(_ => RefreshBluetooth(), TaskScheduler.Default);
                 break;
             case "bt.scan":
                 btScanWanted = On();
@@ -115,11 +126,16 @@ sealed partial class MainForm
                 var id = Str("id");
                 var name = bt.Nearby.FirstOrDefault(d => d.Id == id)?.Name ?? ""; // before Discover(false) clears the list
                 bt.Discover(false);   // looking while pairing slows pairing down
+                btRadio.PairingStarted();   // the radio stays on until it ends, the page left or not
                 _ = Task.Run(async () =>
                 {
-                    var (ok, text) = await bt.Pair(id, pin => OnUiQueued(() => Post(new { type = "bt.pin", id, name, pin })));
-                    await RefreshBluetooth();
-                    OnUiQueued(() => { Post(new { type = "bt.result", id, ok, text }); BluetoothPlaceChanged(); });
+                    try
+                    {
+                        var (ok, text) = await bt.Pair(id, pin => OnUiQueued(() => Post(new { type = "bt.pin", id, name, pin })));
+                        await RefreshBluetooth();
+                        OnUiQueued(() => { Post(new { type = "bt.result", id, ok, text }); BluetoothPlaceChanged(); });
+                    }
+                    finally { await btRadio.PairingEnded(); }
                 });
                 break;
             case "bt.forget":
@@ -133,7 +149,8 @@ sealed partial class MainForm
                 break;
             case "bt.radio":
                 var on = On();
-                _ = BluetoothService.SetRadio(on).ContinueWith(t => OnUiQueued(() =>
+                // The user's own choice: the rule leaves a radio they turned off alone (BluetoothRadio.cs).
+                _ = btRadio.UserSwitch(on).ContinueWith(t => OnUiQueued(() =>
                 {
                     if (!t.Result) Post(new { type = "bt.result", id = "", ok = false, text = "Windows did not switch Bluetooth" });
                     _ = RefreshBluetooth();

@@ -63,7 +63,10 @@ user) are folded into the items below; what was dropped is listed under "Not now
   ends it (any other program), never Windows' own or the launcher; A does nothing there. The
   menu's column is in three parts, a line between them: the open apps (and the way home), the
   controls (volume, brightness, Buttons, Timer, Settings, Power), then this monitor, small, so
-  that all of it fits over an app with two apps open and an alert. Any change of the volume,
+  that all of it fits over an app with two apps open and an alert. It opens over an app on Home
+  screen; over the home screen on the first open app, else on the control used last (Volume at
+  first); up and down into the quick buttons land on the one used last (the owner, 30 Sept
+  2026). Any change of the volume,
   from anywhere, shows a small indicator for 2 s (with the output's name when sound moves).
 - **N5 Hardware video decoding everywhere**, whatever the GPU's maker, with a check in
   Settings › Display that asks the graphics driver (H.264, HEVC, VP9, AV1) and plays no clips.
@@ -114,8 +117,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   the pinned repository, HTTPS and hashes; rolled back automatically). A quiet daily check,
   installs only when asked, restore points before Update all and Windows updates.
 - **N11 On-screen keyboard in any app** (browser logins, searches). A band at the bottom of
-  the screen. Pops up automatically when a text or password field gets focus (UI Automation),
-  and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
+  the screen. Pops up automatically when a text or password field gets focus (UI Automation;
+  an editable region of a page too), never on a switch, a check box, a button, a slider or a
+  list to pick from (Twitch, 29 Sept 2026), and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
   symbols, show password, and a row of what a controller lacks (Tab, refresh, zoom, full
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
   with their own keyboard (VacuumTube, Jellyfin, Moonlight, Plex HTPC); R3 not intercepted in
@@ -154,7 +158,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
   networks too; location allowed for the launcher, which Windows requires for the list).
   Bluetooth: headphones, speakers, controllers and keyboards (a keyboard pairs only with a PIN);
   sound follows headphones; setup installs the adapter's own driver from Windows Update and
-  keeps Windows' generic one when there is none. Sound: one volume level for the box whatever
+  keeps Windows' generic one when there is none. The radio is off while nothing is paired, awake
+  or in standby (the owner, 30 Sept 2026: Windows' Bluetooth services kept the processor busy
+  all day for no one); Settings › Bluetooth turns it on while it shows and a minute after (to
+  pair); anything paired keeps it on. The page's switch is the user's: turned off there, the
+  radio stays off. Sound: one volume level for the box whatever
   the output.
 - **W4 First-run setup.** Welcome, controller check, Wi-Fi (only without a cable), find the TV,
   the TV's input, pick apps, install, done. The phone remote is not a step.

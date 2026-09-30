@@ -148,8 +148,8 @@ sealed partial class MainForm : Form
             standby = new Standby(controller, settings, media);
             standby.Changed += OnStandbyChanged;
             InitStandbyWifi(); // MainForm.Wifi.cs: the Wi-Fi radio off in standby, on the cable
-            InitStandbyBluetooth(); // MainForm.Bluetooth.cs: the Bluetooth radio off in standby, nothing paired
             _ = standby.RadiosBack("the launcher started"); // if the launcher before this one ended in standby
+            StartBluetoothRadio(); // MainForm.Bluetooth.cs: the Bluetooth radio off while nothing is paired
             standby.GoingDown += () =>
             {
                 Post(new { type = "show", view = "home" });
@@ -678,7 +678,8 @@ sealed partial class MainForm : Form
         mapper.Map = null; // at once: the controller now drives the keyboard
         keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false);
         // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
-        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"";
+        // An app's field: what the app calls it too ("textbox", "combobox"), should one that is no text field slip through.
+        var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"{(field.Kind.Length > 0 ? $", {field.Kind}" : "")}";
         Log.Info($"Keyboard opened ({(auto ? "text field" : "R3")}{(field is null ? "" : $": {(field.IsPassword ? "password" : "text")}{label}")})");
     }
 
