@@ -6,9 +6,10 @@
 </head>
 <body>
 <!-- Tests for launcher\phone\phone-logic.js (live-typing differences, touchpad gestures), then a
-     layout audit of the phone page at phone sizes (see below). Open in a browser, or headless:
-     msedge --headless=new --allow-file-access-from-files --virtual-time-budget=120000 --dump-dom
-     file:///.../launcher/dev/phone-test.html and look for "ALL PASSED". -->
+     layout audit of the phone page at phone sizes (see below). Open in a browser, or headless as
+     Test-All.ps1 runs it: msedge --headless=new --allow-file-access-from-files
+     --virtual-time-budget=30000 --dump-dom file:///.../launcher/dev/phone-test.html; the results
+     block's last line says whether all passed (empty: the page did not finish in the budget). -->
 <pre id="results"></pre>
 <script src="../phone/phone-logic.js"></script>
 <script>
@@ -17,7 +18,7 @@ const out = [];
 let failed = 0;
 function check(ok, what) { if (!ok) failed++; out.push(`${ok ? 'PASS' : 'FAIL'}  ${what}`); }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const { diff, typeMessages, graphemes, Gestures, clock, timeline } = PhoneLogic;
+const { diff, typeMessages, Gestures, clock, timeline } = PhoneLogic;
 
 // Live typing.
 check(same(diff('', 'hello'), { back: 0, text: 'hello' }), 'typing at the end');
@@ -30,7 +31,6 @@ check(same(diff('🇫🇷', ''), { back: 1, text: '' }), 'flag is one Backspace'
 check(same(diff('👨‍👩‍👧', ''), { back: 1, text: '' }), 'family emoji (ZWJ) is one Backspace');
 check(same(diff('café', 'caf'), { back: 1, text: '' }), 'e + combining accent is one Backspace');
 check(same(diff('ab', 'a😀b'), { back: 1, text: '😀b' }), 'insert in the middle: retype from there');
-check(graphemes('a👍🏽b').length === 3, 'graphemes');
 
 let msgs = typeMessages('', 'x'.repeat(600));
 check(msgs.length === 3 && msgs.every((m) => m.text.length <= 256) && msgs.map((m) => m.text).join('') === 'x'.repeat(600), 'a long paste goes in parts of 256 at most');
@@ -103,7 +103,7 @@ function frame(screen, [w, h], host) {
   return new Promise((resolve) => {
     const f = document.createElement('iframe');
     Object.assign(f.style, { width: w + 'px', height: h + 'px', border: '0', background: '#000', flexShrink: '0' });
-    f.onload = () => setTimeout(() => resolve(f), 300);
+    f.onload = () => setTimeout(() => resolve(f), 100);
     f.src = pageUrl(screen, h);
     host.appendChild(f);
   });

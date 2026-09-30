@@ -34,7 +34,9 @@ groups and the failures, `-v` every check and `T.Info` details, any other argume
 name: `dotnet run -c Release -- -v Logos`); sub-files are static classes with `Run()` called near
 the end of `tests/LauncherTests/Program.cs` (`TileStoreTests.cs` covers `TileStore.cs`); a list
 of cases is one check that names the ones that failed. AlertsTests `T.Group(...)`/`T.Check` in
-`*Checks` classes; PhoneTests groups in `Main`. `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
+`*Checks` classes; PhoneTests the same harness (`T.Group` in `Main`, `CheckAll` for a table;
+`Fixtures.cs`: `TestServer`, a server of the test's own, and `TempPath`, gone after; runs take turns,
+as they share Windows' CA stores). `ui/selftest.js` runs `ui/selftest/<area>.js` in the order of `SELFTEST_FILES`
 (text, menu, home, network, settings, tiles, maps, resources, logos, addtile, pages, sounds, notes): each
 `selftestGroup(({ check, sent, lastSent, ... }) => { ... })` with `check('Prefix: what', ok, detail)`
 in `// ---- Title ----` groups, each from `selftestFresh()` (its own tiles). `ui/audit.js` is the
@@ -105,7 +107,6 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   `CleanName`, `NewId`; `StartMenuScanner.Scan`.
 - Tests: LauncherTests `TileStoreTests.cs`, `AddTileTests.cs`; selftest "Home: tiles in place, Tile options..."
   (`ui/selftest/tiles.js`), "Add a tile, Rename..." (`addtile.js`); audit (`ui/audit/home.js`)
-
   'tile options', 'rename', 'change icon', 'add tile: library', 'add tile: on this box', 'add tile:
   website', 'add tile: website, a long address typed'.
 - Log: `Added program tile {name} ({target})`, `Added website tile {name} ({url})`, `Library: queued {token}`,
@@ -314,8 +315,9 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   `StartPhone`, `OnPhoneCommand`, `HandlePhone`, `PhoneKeyPress`, `PhoneType`, `OpenPhoneLink`,
   `ShowPairCode`, `OnPhoneUiMessage` (phone.*), `PushPhoneState`; phone.js `connect`, `applyState`,
   `render`, `submitCode`, `handleShare`. Catalog `phoneKeys` (`PhoneAppKeys`).
-- Tests: PhoneTests (Protocol, Links, Routing, Pointer, Pairing, Host and Origin, Server, Certificates,
-  HTTPS, Share); `launcher/dev/phone-test.html` (checks and a layout audit, headless in Test-All);
+- Tests: PhoneTests (Protocol, Links, Routing, Pointer, Pairing, Host and Origin, Server, a silent phone
+  (`PhoneServer.Silence`, shortened on a server of its own), Certificates, HTTPS, Share);
+  `launcher/dev/phone-test.html` (checks and a layout audit, headless in Test-All);
   selftest 'Phone remote:' (`ui/selftest/network.js`); audit 'home with the phone card' (`ui/audit/home.js`),
   'settings: Phone remote' (`ui/audit/settings.js`); on a box
   `launcher\dev\Test-Phone.ps1`.

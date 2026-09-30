@@ -1,77 +1,79 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
-using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
 namespace Htpc.Launcher;
 
-/// <summary>The launcher's log, on the console instead (tests never write launcher.log).</summary>
-static class Log
-{
-    public static void Info(string m) => Console.WriteLine("    log INFO  " + m);
-    public static readonly ConcurrentQueue<string> Warnings = new();
-    public static void Warn(string m) { Warnings.Enqueue(m); Console.WriteLine("    log WARN  " + m); }
-    public static void Error(string m, Exception? e = null) => Console.WriteLine("    log ERROR " + m + (e is null ? "" : ": " + e.Message));
-}
-
-/// <summary>The launcher as the server sees it: records what arrives.</summary>
-sealed class FakeHost : IPhoneHost
-{
-    public readonly ConcurrentQueue<string> Events = new();
-    public volatile string? Code;
-    public int Shown;
-    public bool Asleep;
-    public (byte[] Data, string ContentType)? Art;
-    public void OnCommand(PhoneClient phone, PhoneCommand command) => Events.Enqueue(command switch
-    {
-        KeyCommand k => $"key {k.Key}",
-        TypeCommand t => $"type back={t.Back} text={t.Text}",
-        _ => command.GetType().Name,
-    });
-    public void OnConnected(PhoneClient phone) => Events.Enqueue("connected");
-    public void OnDisconnected(PhoneClient phone) => Events.Enqueue("disconnected");
-    public bool ShowPairingCode(string code) { if (Asleep) return false; Code = code; Shown++; return true; }
-    public void HidePairingCode(bool paired) { Code = null; Events.Enqueue($"hide paired={paired}"); }
-    public void PhonesChanged() { }
-    public void ShortcutKeyMade(string phoneName) => Events.Enqueue("shortcut " + phoneName);
-    public (byte[] Data, string ContentType)? Artwork() => Art;
-    public void OpenShared(string url) => Events.Enqueue("shared " + url);
-}
+// The phone remote's checks, one group per area (Harness.cs): dotnet run -c Release in this folder.
+// Prints each group with its time, and the failures only; -v adds the passes, the details and the
+// log, and any other argument runs only the groups whose name has it ("dotnet run -- -v Pairing").
 
 static partial class Program
 {
-    static int passed, failed;
-
-    static void Check(bool ok, string what)
-    {
-        if (ok) passed++; else failed++;
-        if (!ok) Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"  {(ok ? "PASS" : "FAIL")}  {what}");
-        Console.ResetColor();
-    }
+    static void Check(bool ok, string what) => T.Check(ok, what);
+    static void CheckAll<TCase>(IEnumerable<TCase> cases, Func<TCase, bool> ok, string what, Func<TCase, string>? name = null) => T.CheckAll(cases, ok, what, name);
+    static Task CheckAllAsync<TCase>(IEnumerable<TCase> cases, Func<TCase, Task<bool>> ok, string what, Func<TCase, string>? name = null) => T.CheckAllAsync(cases, ok, what, name);
 
     static PhoneCommand? P(string json) => PhoneProtocol.Parse(Encoding.UTF8.GetBytes(json));
 
-    static async Task<int> Main()
+    static int Main(string[] args)
+    {
+        T.Start(args);
+        // One run at a time on a box: runs share Windows' CA stores, and while another process writes
+        // to one, its listing misses certificates (a leftover not removed, the current one not found).
+        var turn = TakeTurn();
+        try { return Groups(); }
+        finally { turn?.ReleaseMutex(); turn?.Dispose(); }
+    }
+
+    /// <summary>The box's PhoneTests turn (a named mutex), waited for up to 2 minutes; null: running without it (said).</summary>
+    static Mutex? TakeTurn()
+    {
+        var waited = Stopwatch.StartNew();
+        var said = false;
+        while (true)
+        {
+            try
+            {
+                var turn = new Mutex(false, @"Local\HTPC PhoneTests");
+                try { if (turn.WaitOne(500)) return turn; }
+                catch (AbandonedMutexException) { return turn; }   // a run that ended without letting go
+                turn.Dispose();
+            }
+            catch (UnauthorizedAccessException) { }   // a run with administrator rights holds it
+            if (waited.Elapsed > TimeSpan.FromMinutes(2))
+            {
+                Console.WriteLine("  WARNING: another PhoneTests still runs after 2 minutes: running anyway (the certificate checks may fail)");
+                return null;
+            }
+            if (!said) Console.WriteLine("  (another PhoneTests is running: waiting for it, they share the CA stores)");
+            said = true;
+        }
+    }
+
+    static int Groups()
     {
         // Tests name their CAs themselves: the box's own (its intermediates stay in Windows' CA stores) never grow.
         var boxOnes = IntermediatesInStore(PhoneCertificates.BoxName);
-        Console.WriteLine("Protocol"); ProtocolTests();
-        Console.WriteLine("Links"); LinkTests();
-        Console.WriteLine("Routing"); RoutingTests();
-        Console.WriteLine("Pointer"); PointerTests();
-        Console.WriteLine("Pairing"); PairingTests();
-        Console.WriteLine("Host and Origin"); HostTests();
-        Console.WriteLine("Server"); await ServerTests();
-        Console.WriteLine("Certificates"); CertificateTests();
-        Console.WriteLine("HTTPS (a key in the user's key store for the test, deleted after)"); await HttpsTests();
-        Console.WriteLine("Share and the Shortcut"); await ShareTests();
-        Check(IntermediatesInStore(PhoneCertificates.BoxName).IsSubsetOf(boxOnes), "no intermediate under the box's own name added to the CA stores");
-        Console.WriteLine($"\n{passed} passed, {failed} failed");
-        return failed == 0 ? 0 : 1;
+        // What a run stopped half-way left (its cleanup never ran); not while another run goes (those are its own).
+        if (Process.GetProcessesByName(Process.GetCurrentProcess().ProcessName).Length == 1)
+            T.Info($"certificates earlier runs left in the CA stores, removed: {RemoveTestCerts(AnyTestName)}");
+        T.Group("Protocol", ProtocolTests);
+        T.Group("Links", LinkTests);
+        T.Group("Routing", RoutingTests);
+        T.Group("Pointer", PointerTests);
+        T.Group("Pairing", PairingTests);
+        T.Group("Host and Origin", HostTests);
+        T.GroupAsync("Server", ServerTests);
+        T.GroupAsync("Server: a silent phone", SilenceTests);
+        T.Group("Certificates", CertificateTests);
+        T.GroupAsync("HTTPS (a key in the user's key store for the test, deleted after)", HttpsTests);
+        T.GroupAsync("Share and the Shortcut", ShareTests);
+        T.Group("Afterwards: the CA stores", () =>
+            Check(IntermediatesInStore(PhoneCertificates.BoxName).IsSubsetOf(boxOnes), "no intermediate under the box's own name added to the CA stores"));
+        return T.Summary();
     }
 
     // ---- PhoneProtocol ----------------------------------------------------------------------------
@@ -80,9 +82,8 @@ static partial class Program
     {
         Check(P("{\"t\":\"key\",\"k\":\"up\"}") is KeyCommand { Key: PhoneKey.Up }, "key up");
         Check(P("{\"t\":\"key\",\"k\":\"shiftTab\"}") is KeyCommand { Key: PhoneKey.ShiftTab }, "key shiftTab");
-        foreach (var bad in new[] { "LWin", "win", "lwin", "alt", "F4", "0x5B", "" })
-            Check(P($"{{\"t\":\"key\",\"k\":\"{bad}\"}}") is null, $"key \"{bad}\" rejected");
-        Check(P("{\"t\":\"key\",\"k\":91}") is null, "key as a number rejected");
+        CheckAll(new[] { "\"LWin\"", "\"win\"", "\"lwin\"", "\"alt\"", "\"F4\"", "\"0x5B\"", "\"\"", "91" }, k => P($"{{\"t\":\"key\",\"k\":{k}}}") is null,
+            "keys that are not the remote's rejected (the Windows key, Alt, F4, a key code)");
         Check(P("{\"t\":\"type\",\"text\":\"" + new string('a', 256) + "\"}") is TypeCommand { Text.Length: 256 }, "type 256 characters");
         Check(P("{\"t\":\"type\",\"text\":\"" + new string('a', 257) + "\"}") is null, "type 257 characters rejected");
         Check(P("{\"t\":\"type\",\"back\":2,\"text\":\"a\\tb\\nc\\u0000\"}") is TypeCommand { Back: 2, Text: "abc" }, "control characters stripped");
@@ -104,10 +105,10 @@ static partial class Program
 
     static void LinkTests()
     {
-        foreach (var bad in new[] { "file:///C:/Windows/win.ini", "ms-settings:display", "https://a --renderer-cmd-prefix=x",
+        CheckAll(new[] { "file:///C:/Windows/win.ini", "ms-settings:display", "https://a --renderer-cmd-prefix=x",
             "javascript:alert(1)", "https://user:pw@example.com/", "https://a\t--x", "ftp://example.com", "\\\\server\\share",
-            "C:\\Windows\\notepad.exe", "--app=https://x", "about:blank", "", "   " })
-            Check(PhoneLinks.Route(bad) is null, $"link rejected: {bad.Replace("\t", "\\t")}");
+            "C:\\Windows\\notepad.exe", "--app=https://x", "about:blank", "", "   " }, bad => PhoneLinks.Route(bad) is null,
+            "links that are no web page, carry a password or smuggle a switch rejected", bad => $"\"{bad.Replace("\t", "\\t")}\"");
         var yt = PhoneLinks.Route("https://youtu.be/dQw4w9WgXcQ?t=5");
         Check(yt is { Kind: LinkKind.YouTubeVideo, VideoId: "dQw4w9WgXcQ" } && yt.DeepLink!.AbsoluteUri == "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtu.be: video id, deep link rebuilt from it");
         Check(PhoneLinks.Route("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x") is { VideoId: "dQw4w9WgXcQ" }, "watch?v=");
@@ -133,8 +134,8 @@ static partial class Program
         var l = Ctx(launcher: true, app: null);
         Check(PhoneRouter.Route(PhoneKey.Up, l) is ToLauncher { Button: "up" } && PhoneRouter.Route(PhoneKey.Ok, l) is ToLauncher { Button: "a" }, "launcher: D-pad and OK as controller buttons");
         Check(PhoneRouter.Route(PhoneKey.Back, l) is ToLauncher { Button: "b" } && PhoneRouter.Route(PhoneKey.Options, l) is ToLauncher { Button: "start" }, "launcher: Back = B, Options = Start");
-        foreach (var k in new[] { PhoneKey.Enter, PhoneKey.Backspace, PhoneKey.Tab, PhoneKey.ShiftTab })
-            Check(PhoneRouter.Route(k, l) is Ignore, $"launcher: {k} ignored (never SendInput over the launcher)");
+        CheckAll(new[] { PhoneKey.Enter, PhoneKey.Backspace, PhoneKey.Tab, PhoneKey.ShiftTab }, k => PhoneRouter.Route(k, l) is Ignore,
+            "launcher: Enter, Backspace, Tab, Shift+Tab ignored (never SendInput over the launcher)");
         var kb = Ctx(keyboard: true, map: ButtonMap.Mouse);
         Check(PhoneRouter.Route(PhoneKey.Left, kb) is ToKeyboard { Button: "left" } && PhoneRouter.Route(PhoneKey.Back, kb) is ToKeyboard { Button: "b" }, "on-screen keyboard: driven like the controller");
         var edge = Ctx(map: ButtonMap.Mouse);
@@ -191,7 +192,7 @@ static partial class Program
 
     static void PairingTests()
     {
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
+        using var file = new TempPath("phones-test", ".json");
         var now = new DateTime(2026, 9, 26, 20, 0, 0);
         var p = new PhonePairing(file, () => now);
         Check(p.RequireCode, "code on by default");
@@ -200,7 +201,8 @@ static partial class Program
         now = now.AddSeconds(30);
         var again = p.NewCode();
         Check(again.Code is null && again.Left == TimeSpan.FromSeconds(90) && p.ShownCode == code, "asking again while it shows: its time left, the same code");
-        for (var i = 1; i <= 4; i++) Check(p.TryCode(Wrong(code!), "iPhone") is { Outcome: PairOutcome.Wrong } r && r.TriesLeft == 5 - i, $"wrong code {i}: {5 - i} left");
+        CheckAll(Enumerable.Range(1, 4), i => p.TryCode(Wrong(code!), "iPhone") is { Outcome: PairOutcome.Wrong } r && r.TriesLeft == 5 - i,
+            "wrong codes 1 to 4: 4, 3, 2, 1 tries left", i => $"wrong code {i}");
         Check(p.TryCode(Wrong(code!), "iPhone").Outcome == PairOutcome.Locked && p.LockedFor == TimeSpan.FromMinutes(1), "5th wrong code: locked 1 minute");
         Check(p.TryCode(code!, "iPhone").Outcome == PairOutcome.Locked && p.NewCode().Code is null, "while locked: no code works, none is made");
         now = now.AddMinutes(1).AddSeconds(1);
@@ -245,7 +247,6 @@ static partial class Program
         var text = File.ReadAllText(file);
         Check(!text.Contains(ok.Token!) && !text.Contains(k1.Token!), "the file holds hashes, not tokens");
         Check(reloaded.Forget(reloaded.Find(ok.Token)!.Id).Count == 1 && reloaded.Find(ok.Token) is null, "forget");
-        File.Delete(file);
     }
 
     // ---- Host and Origin ----------------------------------------------------------------------------------
@@ -253,98 +254,23 @@ static partial class Program
     static void HostTests()
     {
         var a = new HostAllowlist { Port = 80 };
-        foreach (var h in new[] { "tv.local", "TV.LOCAL.", "tv.local:80", "tv", "localhost", "127.0.0.1", "[::1]", "[::1]:80", Environment.MachineName })
-            Check(a.IsAllowedHost(h), $"host allowed: {h}");
-        foreach (var h in new[] { "tv.local:8080", "evil.com", "tv.local.evil.com", "", null, "[::1", "127.0.0.2", "tv.local:abc" })
-            Check(!a.IsAllowedHost(h), $"host refused: {h ?? "(none)"}");
+        CheckAll(new[] { "tv.local", "TV.LOCAL.", "tv.local:80", "tv", "localhost", "127.0.0.1", "[::1]", "[::1]:80", Environment.MachineName }, h => a.IsAllowedHost(h),
+            "the box's own names allowed as Host");
+        CheckAll(new[] { "tv.local:8080", "evil.com", "tv.local.evil.com", "", null, "[::1", "127.0.0.2", "tv.local:abc" }, h => !a.IsAllowedHost(h),
+            "other hosts and ports refused (DNS rebinding)", h => h ?? "(none)");
         Check(a.IsAllowedOrigin("http://tv.local") && a.IsAllowedOrigin("http://TV.local"), "origin tv.local");
-        foreach (var o in new[] { "https://tv.local", "http://evil.com", "null", "", null, "http://tv.local:81", "http://tv.local/x", "file://" })
-            Check(!a.IsAllowedOrigin(o), $"origin refused: {o ?? "(none)"}");
+        CheckAll(new[] { "https://tv.local", "http://evil.com", "null", "", null, "http://tv.local:81", "http://tv.local/x", "file://" }, o => !a.IsAllowedOrigin(o),
+            "other origins refused", o => o ?? "(none)");
         a.Port = 8765;
         Check(a.IsAllowedHost("tv.local:8765") && !a.IsAllowedHost("tv.local:80") && a.IsAllowedOrigin("http://tv.local:8765") && !a.IsAllowedOrigin("http://tv.local"), "port 8765");
     }
 
     // ---- Server on 127.0.0.1 -----------------------------------------------------------------------------
 
-    static string? FindUp(string relative)
-    {
-        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)
-        {
-            var path = Path.Combine(d.FullName, relative);
-            if (File.Exists(path) || Directory.Exists(path)) return path;
-        }
-        return null;
-    }
-
-    static int FreePort()
-    {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        var port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
-    }
-
-    static async Task<string> Raw(int port, string request)
-    {
-        using var tcp = new TcpClient();
-        await tcp.ConnectAsync(IPAddress.Loopback, port);
-        var s = tcp.GetStream();
-        await s.WriteAsync(Encoding.ASCII.GetBytes(request));
-        var buf = new byte[4096];
-        var n = await s.ReadAsync(buf);
-        return Encoding.ASCII.GetString(buf, 0, n);
-    }
-
-    static async Task<(ClientWebSocket? Socket, int Status)> Ws(int port, string? origin, string? cookie)
-    {
-        var ws = new ClientWebSocket();
-        if (origin is not null) ws.Options.SetRequestHeader("Origin", origin);
-        if (cookie is not null) ws.Options.SetRequestHeader("Cookie", cookie);
-        ws.Options.CollectHttpResponseDetails = true;
-        try
-        {
-            await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws"), CancellationToken.None);
-            return (ws, 101);
-        }
-        catch (WebSocketException) { return (null, (int)ws.HttpStatusCode); }
-    }
-
-    static async Task<JsonElement?> Receive(ClientWebSocket ws, int ms = 3000)
-    {
-        var buf = new byte[8192];
-        using var cts = new CancellationTokenSource(ms);
-        try
-        {
-            var r = await ws.ReceiveAsync(buf, cts.Token);
-            if (r.MessageType == WebSocketMessageType.Close) return null;
-            return JsonDocument.Parse(buf.AsMemory(0, r.Count)).RootElement.Clone();
-        }
-        catch (Exception) { return null; }
-    }
-
-    static Task SendText(ClientWebSocket ws, string text) => ws.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
-
-    static async Task<bool> WaitFor(FakeHost host, string item, int ms = 2000)
-    {
-        for (var sw = Stopwatch.StartNew(); sw.ElapsedMilliseconds < ms; await Task.Delay(20))
-            if (host.Events.Contains(item)) return true;
-        return false;
-    }
-
     static async Task ServerTests()
     {
-        var root = FindUp(Path.Combine("launcher", "phone")) ?? FindUp("phone");
-        if (root is null) { Check(false, "launcher\\phone found"); return; }
-        var file = Path.Combine(Path.GetTempPath(), $"htpc-phones-test-{Guid.NewGuid():N}.json");
-        var now = DateTime.Now;
-        var pairing = new PhonePairing(file, () => now);
-        var host = new FakeHost();
-        var server = new PhoneServer(host, root, pairing, IPAddress.Loopback);
-        var port = FreePort();
-        Check(await server.StartAsync(new[] { port }) == port, $"starts on 127.0.0.1:{port}");
-        var origin = $"http://127.0.0.1:{port}";
-        using var http = new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = new Uri(origin) };
+        await using var box = await TestServer.StartAsync();
+        var (host, pairing, server, port, origin, http) = (box.Host, box.Pairing, box.Server, box.Port, box.Origin, box.Http);
 
         // Static files: only the web app's own.
         var page = await http.GetAsync("/");
@@ -353,14 +279,12 @@ static partial class Program
         Check((await http.GetAsync("/phone.js")).Content.Headers.ContentType?.MediaType == "text/javascript", "phone.js");
         Check((await http.GetAsync("/nope.txt")).StatusCode == HttpStatusCode.NotFound, "unknown file 404");
         Check((await http.PostAsync("/index.html", null)).StatusCode == HttpStatusCode.MethodNotAllowed, "POST a file 405");
-        foreach (var path in new[] { "/../README.md", "/%2e%2e/README.md", "/..%2fREADME.md", "/icons/../../README.md", "/%2e%2e/src/Launcher/Launcher.csproj",
-            "/.hidden", "/C:/Windows/win.ini", "/..\\README.md", "//index.html" })
-        {
-            var raw = await Raw(port, $"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-            Check(raw.StartsWith("HTTP/1.1 404") || raw.StartsWith("HTTP/1.1 400"), $"path refused: {path} ({raw.Split('\r')[0]})");
-        }
-        foreach (var h in new[] { "evil.com", "tv.local.evil.com", $"127.0.0.1:{port + 1}" })
-            Check((await Raw(port, $"GET / HTTP/1.1\r\nHost: {h}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 421"), $"foreign Host 421: {h}");
+        await CheckAllAsync(new[] { "/../README.md", "/%2e%2e/README.md", "/..%2fREADME.md", "/icons/../../README.md", "/%2e%2e/src/Launcher/Launcher.csproj",
+            "/.hidden", "/C:/Windows/win.ini", "/..\\README.md", "//index.html" },
+            async path => await Raw(port, $"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n") is var raw && (raw.StartsWith("HTTP/1.1 404") || raw.StartsWith("HTTP/1.1 400")),
+            "paths out of the web app's folder, hidden or doubled: 404 or 400 (path traversal)");
+        await CheckAllAsync(new[] { "evil.com", "tv.local.evil.com", $"127.0.0.1:{port + 1}" },
+            async h => (await Raw(port, $"GET / HTTP/1.1\r\nHost: {h}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 421"), "a foreign Host: 421");
         Check((await Raw(port, $"GET / HTTP/1.1\r\nHost: tv.local:{port}\r\nConnection: close\r\n\r\n")).StartsWith("HTTP/1.1 200"), "Host tv.local on our port allowed");
 
         // Pairing over HTTP.
@@ -378,24 +302,22 @@ static partial class Program
         host.Asleep = true;
         Check((int)(await Post("/api/pair/start", "{}", origin)).StatusCode == 409, "pair/start while asleep 409");
         host.Asleep = false;
-        now += PhonePairing.Cooldown;
+        box.Now += PhonePairing.Cooldown;
         Check((await Post("/api/pair/start", "{}", origin)).StatusCode == HttpStatusCode.OK && host.Code is { Length: 4 } && host.Shown == 1, "pair/start shows a code on the TV");
         var code = host.Code!;
         var second = await Post("/api/pair/start", "{}", origin);
         Check(second.StatusCode == HttpStatusCode.OK && (await Json(second)).GetProperty("seconds").GetInt32() > 0 && host.Shown == 1 && host.Code == code,
             "asked again: the same code, not shown again (no hijack, no menu pulled up)");
-        for (var i = 1; i <= 4; i++)
-        {
-            var r = await Post("/api/pair", $"{{\"code\":\"{Wrong(code)}\"}}", origin);
-            Check(r.StatusCode == HttpStatusCode.Forbidden && (await Json(r)).GetProperty("left").GetInt32() == 5 - i, $"wrong code {i}: 403, {5 - i} left");
-        }
+        await CheckAllAsync(Enumerable.Range(1, 4), async i => await Post("/api/pair", $"{{\"code\":\"{Wrong(code)}\"}}", origin) is var r
+            && r.StatusCode == HttpStatusCode.Forbidden && (await Json(r)).GetProperty("left").GetInt32() == 5 - i, "wrong codes 1 to 4: 403, 4, 3, 2, 1 left", i => $"wrong code {i}");
         var locked = await Post("/api/pair", $"{{\"code\":\"{Wrong(code)}\"}}", origin);
-        Check((int)locked.StatusCode == 429 && (await Json(locked)).GetProperty("retry").GetInt32() == 60 && host.Events.Contains("hide paired=False"), "5th wrong code: 429 for 60 s, code taken off the TV");
-        Check((int)(await Post("/api/pair", $"{{\"code\":\"{code}\"}}", origin)).StatusCode == 429, "right code refused while locked");
+        var rightWhileLocked = await Post("/api/pair", $"{{\"code\":\"{code}\"}}", origin);
         var startLocked = await Post("/api/pair/start", "{}", origin);
-        Check((int)startLocked.StatusCode == 429 && (await Json(startLocked)).GetProperty("error").GetString() == "locked", "no new code while locked");
+        Check((int)locked.StatusCode == 429 && (await Json(locked)).GetProperty("retry").GetInt32() == 60 && host.Events.Contains("hide paired=False")
+            && (int)rightWhileLocked.StatusCode == 429 && (int)startLocked.StatusCode == 429 && (await Json(startLocked)).GetProperty("error").GetString() == "locked",
+            $"5th wrong code: 429 for 60 s, the code off the TV; then the right code {(int)rightWhileLocked.StatusCode} and a new code {(int)startLocked.StatusCode} (429 both)");
         Check((int)(await Post("/api/pair", "{\"code\":\"12a4\"}", origin)).StatusCode is 400 or 429, "malformed code refused");
-        now = now.AddSeconds(61);
+        box.Now = box.Now.AddSeconds(61);
         await Post("/api/pair/start", "{}", origin);
         code = host.Code!;
         Check((await Post("/api/pair", $"{{\"code\":\"{code}\"}}", null)).StatusCode == HttpStatusCode.Forbidden, "pair without Origin 403");
@@ -410,7 +332,7 @@ static partial class Program
         artRequest.Headers.Add("Cookie", cookie);
         Check((await http.SendAsync(artRequest)).StatusCode == HttpStatusCode.OK, "art with the cookie 200");
         // "Show a code" by mistake: the phone's Cancel takes it off the TV at once.
-        now += PhonePairing.Cooldown;
+        box.Now += PhonePairing.Cooldown;
         await Post("/api/pair/start", "{}", origin);
         var shownCode = host.Code;
         Check((await Post("/api/pair/cancel", "{}", null)).StatusCode == HttpStatusCode.Forbidden && host.Code == shownCode, "cancel without Origin: 403, the code stays");
@@ -422,8 +344,8 @@ static partial class Program
         var (unpaired, _) = await Ws(port, origin, null);
         var hello = unpaired is null ? null : await Receive(unpaired);
         Check(hello?.GetProperty("paired").GetBoolean() == false && hello?.GetProperty("v").GetInt32() == PhoneProtocol.Version
-            && hello?.GetProperty("state").ValueKind == JsonValueKind.Null, "unpaired phone: hello without state");
-        Check(unpaired is not null && await Receive(unpaired) is null && (int?)unpaired.CloseStatus == 4001, "then closed (4001)");
+            && hello?.GetProperty("state").ValueKind == JsonValueKind.Null && await Receive(unpaired!) is null && (int?)unpaired!.CloseStatus == 4001,
+            "unpaired phone: hello without state, then closed (4001)");
         Check((await Ws(port, "http://evil.com", cookie)).Status == 403 && (await Ws(port, null, cookie)).Status == 403, "socket from another site or without Origin 403");
         var (ws, _) = await Ws(port, origin, cookie);
         hello = await Receive(ws!);
@@ -432,15 +354,6 @@ static partial class Program
         JsonElement? pong = null;
         for (var i = 0; i < 5 && pong?.GetProperty("t").GetString() != "pong"; i++) pong = await Receive(ws!);
         Check(pong?.GetProperty("t").GetString() == "pong", "the box answers the phone's ping (the phone notices a dead connection)");
-        // Its heartbeat, as the page sends it, for the rest of the tests (else the server drops it after 15 s).
-        using var stopPings = new CancellationTokenSource();
-        var pings = Task.Run(async () =>
-        {
-            while (!stopPings.IsCancellationRequested)
-            {
-                try { await Task.Delay(5000, stopPings.Token); await SendText(ws!, "{\"t\":\"ping\"}"); } catch (Exception) { return; }
-            }
-        });
         await SendText(ws!, "{\"t\":\"key\",\"k\":\"up\"}");
         await SendText(ws!, "{\"t\":\"key\",\"k\":\"LWin\"}");
         await SendText(ws!, "garbage{");
@@ -460,15 +373,7 @@ static partial class Program
         for (var i = 0; i < 7; i++) { var (s, _) = await Ws(port, origin, cookie); if (s is not null) { many.Add(s); await Receive(s); } }
         Check(server.ClientCount == 8 && (await Ws(port, origin, cookie)).Status == 503, "9th phone refused");
         foreach (var s in many) s.Abort();
-        for (var i = 0; i < 100 && server.ClientCount > 1; i++) await Task.Delay(50);
-
-        // A silent phone is dropped after 15 s; one sending its heartbeat stays.
-        var (quiet, _) = await Ws(port, origin, cookie);
-        Check(quiet is not null && await Receive(quiet) is not null, "another phone connects");
-        var sw = Stopwatch.StartNew();
-        var gone = quiet is null ? null : await Receive(quiet, 20000);
-        var droppedAfter = sw.ElapsedMilliseconds;
-        Check(gone is null && droppedAfter is > 14000 and < 19000 && ws!.State == WebSocketState.Open, $"silent phone dropped after {droppedAfter / 1000.0:0.0} s, the pinging one stays");
+        await Until(() => server.ClientCount == 1, 5000);
 
         // QR key; codes off, then on again; forget.
         var key = pairing.NewKey();
@@ -494,13 +399,39 @@ static partial class Program
             last = m.TryGetProperty("t", out var t) ? t.GetString() : null;
         }
         Check(last == "bye", "forgotten phone told bye");
-        await Task.Delay(300);
+        await Until(() => server.ClientCount == 0);
         var (again, _) = await Ws(port, origin, cookie);
         Check(again is not null && (await Receive(again))?.GetProperty("paired").GetBoolean() == false, "its cookie no longer works");
+    }
 
+    // A phone silent for a while is dropped; one sending its heartbeat stays. On a server of its own
+    // with a short Silence: the main one keeps 15 s, or its 8-phone cap and "the paired one stays"
+    // would pass for the wrong reason.
+    static async Task SilenceTests()
+    {
+        await using var box = await TestServer.StartAsync(silence: TimeSpan.FromSeconds(1));
+        box.Pairing.RequireCode = false;
+        var (host, silence) = (box.Host, box.Server.Silence);
+        using var stopPings = new CancellationTokenSource();
+        var (pinger, _) = await Ws(box.Port, box.Origin, null);
+        await Receive(pinger!);
+        var pings = Task.Run(async () =>
+        {
+            while (!stopPings.IsCancellationRequested)
+            {
+                try { await Task.Delay(100, stopPings.Token); await SendText(pinger!, "{\"t\":\"ping\"}"); } catch (Exception) { return; }
+            }
+        });
+        var (quiet, _) = await Ws(box.Port, box.Origin, null);
+        await Receive(quiet!);
+        var sw = Stopwatch.StartNew();
+        // Waiting twice the upper bound: a launcher that ignored Silence would fail by seconds, not by a timer's jitter.
+        var gone = await Receive(quiet!, (int)(silence.TotalMilliseconds * 10));
+        var after = sw.Elapsed;
+        Check(gone is null && after > silence * 2 / 3 && after < silence * 5 && await WaitFor(host, "disconnected")
+            && pinger!.State == WebSocketState.Open && host.Events.Count(e => e == "disconnected") == 1,
+            $"a phone silent for {silence.TotalSeconds} s is dropped (after {after.TotalSeconds:0.0} s, the launcher told); one pinging every 0.1 s stays");
         stopPings.Cancel();
         await pings;
-        await server.StopAsync();
-        File.Delete(file);
     }
 }
