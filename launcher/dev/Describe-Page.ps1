@@ -70,6 +70,20 @@ function Stop-OwnEdge {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+# A run killed from outside (a tool's time limit) never reaches its finally: its headless Edge stays
+# (41 processes on the box, 30 Sept 2026). Each run first ends the Edge of any earlier run whose
+# PowerShell is gone: the profile folder carries that run's process id. Never another Edge.
+function Stop-OrphanedEdge {
+    $alive = @{}
+    Get-Process powershell, pwsh -ErrorAction SilentlyContinue | ForEach-Object { $alive[$_.Id] = $true }
+    Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
+        Where-Object { $_.CommandLine -match 'htpc-describe-profile-(\d+)' -and -not $alive[[int]$Matches[1]] } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-ChildItem $env:TEMP -Directory -Filter 'htpc-describe-profile-*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '(\d+)$' -and -not $alive[[int]$Matches[1]] } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 # The page's keys (app.js KEYS): name -> key, code, Windows key code, whether it types a character.
 $keyTable = @{
     up = @('ArrowUp', 'ArrowUp', 38, $false); down = @('ArrowDown', 'ArrowDown', 40, $false)
@@ -173,9 +187,33 @@ new Promise((done) => {
 '@
 
 New-Item -ItemType Directory -Force $OutDir | Out-Null
+Stop-OrphanedEdge
 Stop-OwnEdge
 $p = Start-Process -FilePath $edge -PassThru -WindowStyle Hidden -ArgumentList @('--headless=new', '--do-not-de-elevate', '--disable-gpu',
     '--disable-extensions', "--window-size=$width,$height", '--hide-scrollbars', "`"--user-data-dir=$profileDir`"", '--remote-debugging-port=0', "`"$url`"")
+# Edge in a job that Windows closes with this process, however it ends (a caller that stops reading
+# early, Select-Object -First, kills this script before its finally): no Edge outlives it.
+Add-Type -ErrorAction SilentlyContinue -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class HtpcKillOnClose {
+    [StructLayout(LayoutKind.Sequential)] struct Basic { public long A, B; public uint LimitFlags; public UIntPtr C, D; public uint E; public UIntPtr F; public uint G, H; }
+    [StructLayout(LayoutKind.Sequential)] struct Io { public ulong A, B, C, D, E, F; }
+    [StructLayout(LayoutKind.Sequential)] struct Extended { public Basic Basic; public Io Io; public UIntPtr P, J, PP, PJ; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr a, string name);
+    [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(IntPtr job, int cls, ref Extended info, int size);
+    [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    static IntPtr job;
+    public static bool Add(IntPtr process) {
+        if (job == IntPtr.Zero) {
+            job = CreateJobObject(IntPtr.Zero, null);
+            var info = new Extended(); info.Basic.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if (!SetInformationJobObject(job, 9, ref info, Marshal.SizeOf(typeof(Extended)))) return false;
+        }
+        return AssignProcessToJobObject(job, process);
+    }
+}
+'@
+if (-not [HtpcKillOnClose]::Add($p.Handle)) { Write-Warning 'Edge not tied to this script: it may outlive a run ended from outside (the next run ends it)' }
 $socket = $null
 try {
     $clock = [Diagnostics.Stopwatch]::StartNew()
