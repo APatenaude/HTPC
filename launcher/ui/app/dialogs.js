@@ -11,11 +11,13 @@ const POWER = [
 ];
 // While the Windows desktop is up (desktop mode, state.desktop from the host), its card leads back.
 const BACK_TO_TV = { id: 'tv', glyph: 'tv', label: 'Back to TV', caption: 'Close the Windows desktop and taskbar' };
+// ... and one to the desktop as it is (Explorer stays up), for when Home took you to the dashboard.
+const BACK_TO_DESKTOP = { id: 'desktop', glyph: 'desktop', label: 'Desktop', caption: 'Back to the desktop, still open' };
 
 function renderPower() {
   POWER[0].caption = SLEEP_MODES[state.prefs.sleepMode].wake;
   // In place, as the other screens a host push or the clock redraws (patchHtml).
-  patchHtml($('power-cards'), POWER.map((p) => (p.id === 'desktop' && state.desktop ? BACK_TO_TV : p)).map((p) =>
+  patchHtml($('power-cards'), POWER.flatMap((p) => (p.id === 'desktop' && state.desktop ? [BACK_TO_DESKTOP, BACK_TO_TV] : [p])).map((p) =>
     `<div class="card" data-nav data-id="${p.id}" data-act="${p.id === 'timer' ? 'view' : 'power-action'}" data-arg="${p.id === 'timer' ? 'timer' : p.id}">` +
       `${icon(p.glyph, 72, 1.5)}<span class="label">${p.label}</span><span class="caption">${p.caption}</span></div>`).join(''));
   patchHtml($('power-note'), '');

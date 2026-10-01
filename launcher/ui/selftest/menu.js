@@ -132,6 +132,16 @@ selftestGroup(({ check, checkRows, sent, lastSent }) => {
         onHost({ type: 'show', view: 'menu', current: 'desktop' });
       }],
     ].map(([what, want, open]) => { open(); return [what, on() === want, on()]; }));
+    // Home took the box to the dashboard with the desktop still up: back to it is one press, no question, Explorer untouched.
+    onHost({ type: 'state', desktop: true });
+    reset('power');
+    check('Power with the desktop up: Desktop and Back to TV both offered', !!document.querySelector('#power-cards [data-id="desktop"]') && !!document.querySelector('#power-cards [data-id="tv"]'));
+    activate(document.querySelector('#power-cards [data-id="desktop"]'));
+    check('Power: Desktop with the desktop up goes straight there, no question', lastSent('power') && lastSent('power').action === 'desktop' && state.view === 'power', JSON.stringify(lastSent('power')) + ' ' + state.view);
+    onHost({ type: 'state', desktop: false });
+    reset('power');
+    activate(document.querySelector('#power-cards [data-id="desktop"]'));
+    check('Power: Desktop mode from the TV still asks first', state.view !== 'power' || !!state.dialog, state.view);
     onHost({ type: 'state', desktop: false });
   }
 });

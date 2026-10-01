@@ -16,6 +16,8 @@ function renderMenu() {
   const openApps = noticeRowsHtml() + // alerts with something to do (notices.js)
     // Over the Windows desktop (desktop mode) the way back comes first.
     (state.desktop ? `<div class="row big" data-nav data-id="back-tv" data-act="power-action" data-arg="tv">${icon('tv', 32, 2)}Back to TV</div>` : '') +
+    // Over an app or the dashboard with the desktop still up: back to it, Explorer left running.
+    (state.desktop && state.current !== 'desktop' ? `<div class="row big" data-nav data-id="to-desktop" data-act="power-action" data-arg="desktop">${icon('desktop', 32, 2)}Desktop</div>` : '') +
     (state.current ? `<div class="row big" data-nav data-id="home" data-act="home">${icon('home', 32, 2)}Home screen</div>` : '') +
     (running.length ? `<span class="section">Open apps</span><div class="apps">${apps}</div>` : '');
   // Many open apps (plus alert rows): two columns of shorter rows (notices.css).

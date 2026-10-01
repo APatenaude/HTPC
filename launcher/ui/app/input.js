@@ -35,7 +35,8 @@ function activate(el) {
     case 'view': go(arg); break;
     case 'power': go('power'); break;
     case 'power-action':
-      if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
+      if (arg === 'desktop' && state.desktop) send({ type: 'power', action: 'desktop' }); // back to it: Explorer is up, nothing to ask
+      else if (arg === 'desktop') ask({ title: 'Switch to the Windows desktop?', yes: 'Desktop mode', onYes: () => send({ type: 'power', action: 'desktop' }),
         text: 'The desktop, taskbar and Start menu open, for maintenance; open apps go down to the taskbar. To come back, press Home, then Back to TV (or the Back to TV icon on the desktop).' });
       // One wrong press of A must not switch the box off: the controller cannot turn it back on.
       else if (arg === 'shutdown') ask({ title: 'Shut down the box?', yes: 'Shut down', onYes: () => send({ type: 'power', action: 'shutdown' }),
