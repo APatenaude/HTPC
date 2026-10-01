@@ -79,6 +79,10 @@ foreach ($v in @("$policies\AdvertisingInfo", 'DisabledByGroupPolicy', 1), @("$p
     @('HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker', 'PreventDeviceEncryption', 1)) {
     [void](Set-KeptValue $v[0] $v[1] $v[2])
 }
+# Brightness in desktop mode dims through the displays' gamma ramp, so the Start menu is dimmed too
+# (launcher: Dimmer.GammaLevel). Windows turns down a ramp that dims more than about half unless
+# this says how far one may go (256: all of it); the launcher uses what Windows takes.
+if (Set-KeptValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ICM' 'GdiICMGammaRange' 256) { Add-RestartReason 'display gamma range' }
 if ($user) {
     Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsSpotlightFeatures' 1
     Set-RegValue 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent' 'DisableTailoredExperiencesWithDiagnosticData' 1

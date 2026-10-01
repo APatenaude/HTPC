@@ -115,6 +115,8 @@ self-contained file with these scripts inside (launcher/README.md, "Setup mode";
   - No advertising ID, activity history or Application Impact Telemetry (policies); no program from
     the firmware (`DisableWpbtExecution` 1); no automatic device encryption (`PreventDeviceEncryption`
     1, which the USB install's answer file sets already).
+  - `GdiICMGammaRange` 256 (HKLM ICM): Windows lets a gamma ramp dim the screen all the way, so the
+    launcher's brightness in desktop mode reaches the Start menu below 50% too (a restart for it).
   - The new Outlook, Dev Home and CrossDevice removed for every user and from the image (a clean LTSC
     install has none; Windows updates bring them). The uninstall does not bring them back.
   - What was there before goes in `state\system-before.json`, for the uninstall: services, tasks, and
