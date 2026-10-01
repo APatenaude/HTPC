@@ -201,6 +201,10 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   efficiency mode", "VideoEndDetector", "SleepTimer", "Settings: an unreadable settings.json"; AlertsTests
   "Alerts: standby"; selftest 'Sleep timer:', 'Power:' (`ui/selftest/settings.js`); audit 'sleep timer',
   'power' (`ui/audit/home.js`), 'settings: Sleep & power' (`ui/audit/settings.js`). On a box: `launcher\dev\Measure-StandbyPower.ps1`.
+- The running timer in the UI: the top bar's pill (`data-id="timer-pill"`) and the Home menu's first control
+  row (`sleep-timer`) are controls: A `extendTimer` (+15 min, `timer.extend`), X `cancelTimer`
+  (`ui/app/dialogs.js`; selftest 'Timer:' in `ui/selftest/menu.js`; audit 'home with a sleep timer',
+  'home menu with a sleep timer').
 - Log: `Standby ({reason})`, `Wake ({reason})`, `Awake in {ms} ms (screen on after {ms} ms)`, `Sleep (S3)
   ({reason})`, `Standby: {radio} radio off ({why})`, `Sleep timer: {label}`.
 

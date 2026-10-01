@@ -10,7 +10,8 @@ function renderStatus() {
   patchHtml($('status'),
     `<div class="clock"><span class="time">${timeText(now)}</span><span class="date">${esc(dateText(now))}</span></div>` +
     '<div class="pills">' +
-      (state.timer ? `<div class="pill timer">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
+      // Focusable: A adds 15 min, X ends the timer.
+      (state.timer ? `<div class="pill timer" data-nav data-id="timer-pill" data-act="timer-extend" data-x="timer-cancel">${icon('timer', 28, 2)}<span>${esc(timerText())}</span></div>` : '') +
       noticePillsHtml() + // alerts (notices.js)
       `<div class="pill"${low ? ' style="color: var(--warn)"' : ''}>${icon('controller', 32)}<b>${esc(batteryText())}</b></div>` +
       // Settings, then Power: the Home menu's quick buttons follow this order (renderMenu).
@@ -108,7 +109,8 @@ function updateHomeHints() {
   const t = f && state.tiles.find((x) => x.id === f.dataset.arg);
   // Not a tile: the Settings and Power buttons of the top bar, the phone card's "Not now".
   const other = f && !f.classList.contains('tile') ? ({ settings: 'Settings', power: 'Power', 'phone-card-hide': 'Not now' })[f.dataset.act] || 'Select' : null;
-  const list = other ? [['A', other], ['Home', 'Menu'], ['Hold Home', 'Power']]
+  const list = f && f.dataset.id === 'timer-pill' ? [['A', '+15 min'], ['X', 'Cancel timer'], ['Home', 'Menu'], ['Hold Home', 'Power']]
+    : other ? [['A', other], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : f && f.tileHints ? [...f.tileHints, ['Home', 'Menu'], ['Hold Home', 'Power']]
     : isAdd ? [['A', 'Add tile'], ['Home', 'Menu'], ['Hold Home', 'Power']]
     : [['A', 'Open'], ['Hold A', 'Move'], ...(t && t.running ? [['X', 'Close app']] : []), ['Start', 'Tile options'], ['Home', 'Menu'], ['Hold Home', 'Power']];

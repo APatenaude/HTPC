@@ -132,6 +132,21 @@ selftestGroup(({ check, checkRows, sent, lastSent }) => {
         onHost({ type: 'show', view: 'menu', current: 'desktop' });
       }],
     ].map(([what, want, open]) => { open(); return [what, on() === want, on()]; }));
+    // The sleep timer in the Home menu and on the dashboard: what is left, A adds 15 min, X ends it.
+    const menuRow = () => document.querySelector('#menu [data-id="sleep-timer"]');
+    onHost({ type: 'state', timer: { label: '30 min', endsAt: Date.now() + 29 * 60000 } });
+    onHost({ type: 'show', view: 'menu', current: null });
+    check('Timer: a running sleep timer has its row in the Home menu, with the time left', !!menuRow() && /Sleep in 29 min/.test(menuRow().textContent), menuRow() && menuRow().textContent);
+    setFocus(menuRow());
+    check('Timer: its hints say A +15 min, X Cancel timer', /\+15 min/.test($('menu').querySelector('.hints').textContent) && /Cancel timer/.test($('menu').querySelector('.hints').textContent));
+    press('a');
+    check('Timer: A on the row adds 15 min (and tells the host)', lastSent('timer.extend') && state.timer.endsAt - Date.now() > 43 * 60000 && state.timer.endsAt - Date.now() < 45 * 60000, JSON.stringify(state.timer));
+    press('x');
+    check('Timer: X on the row ends the timer, the row goes', state.timer === null && !menuRow() && lastSent('timer') && lastSent('timer').minutes === 0 && !!$('menu').querySelector('[data-nav].focused'), JSON.stringify(lastSent('timer')));
+    onHost({ type: 'state', timer: { label: '30 min', endsAt: Date.now() + 29 * 60000 } });
+    reset('home');
+    check('Timer: the top bar\'s pill is a control too', !!$('home').querySelector('.pill.timer[data-nav]'));
+    onHost({ type: 'state', timer: null });
     // Home took the box to the dashboard with the desktop still up: back to it is one press, no question, Explorer untouched.
     onHost({ type: 'state', desktop: true });
     reset('power');

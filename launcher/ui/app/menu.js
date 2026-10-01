@@ -31,6 +31,9 @@ function renderMenu() {
       `<span class="pad">${icon('controller', 28)}${esc(batteryText())}</span></div>` +
     `<div class="menu-part" data-part="apps">${openApps}</div>` +
     '<div class="menu-part" data-part="controls">' +
+      // A sleep timer running: what is left, A adds 15 min, X ends it.
+      (state.timer ? `<div class="row timer-row" data-nav data-id="sleep-timer" data-act="timer-extend" data-x="timer-cancel" data-alabel="+15 min" data-xlabel="Cancel timer">` +
+        `${icon('timer', 30)}<span class="grow">${esc(timerText())}</span><span class="tag">+15 min</span></div>` : '') +
       `<div class="row slider" data-nav data-id="volume" data-slider="volume">${icon('speaker', 30)}` +
         `<div class="track"><div class="fill" style="width:${state.volume}%"></div></div><span class="value">${state.volume}</span></div>` +
       `<div class="row slider" data-nav data-id="brightness" data-slider="brightness">${icon('sun', 30)}` +
@@ -78,8 +81,9 @@ function menuOpening() {
 // slider (A does nothing there). A program's row in the resource view: resources.js's own.
 function menuHints(el) {
   if (el && el.dataset.res && typeof resHints === 'function') return resHints(el);
-  const list = [el && el.dataset.slider ? ['←→', 'Change'] : ['A', 'Select']];
+  const list = [el && el.dataset.slider ? ['←→', 'Change'] : ['A', (el && el.dataset.alabel) || 'Select']];
   if (el && el.dataset.alert) list.push(['X', 'Dismiss']);
+  else if (el && el.dataset.xlabel) list.push(['X', el.dataset.xlabel]);
   else {
     const id = (el && el.dataset.close) || state.current;
     if (id && state.tiles.some((t) => t.id === id && t.running)) list.push(['X', 'Close app']);

@@ -59,6 +59,27 @@ function setTimer(o) {
   render();
 }
 
+// +15 min on the running timer (the Home menu's row, the top bar's pill: A), as the phone and the
+// last minute's card do it; X there ends it. Over a "when this video ends" timer it becomes a 15-minute countdown (SleepTimer.Extend).
+function extendTimer() {
+  if (!state.timer) return;
+  const left = state.timer.endsAt === 'video' ? 0 : Math.max(0, state.timer.endsAt - Date.now());
+  state.timer = { label: '+15 min', endsAt: Date.now() + left + 15 * 60000 };
+  send({ type: 'timer.extend' });
+  render();
+}
+
+function cancelTimer() {
+  const inMenu = state.view === 'menu';
+  setTimer({ minutes: 0 });
+  // Its row or pill is gone: the focus goes to the control next to where it was.
+  const next = document.querySelector(inMenu ? '#menu [data-id="volume"]' : '#home [data-id="power"]');
+  if (next) setFocus(next);
+}
+
+onAction('timer-extend', () => extendTimer());
+onAction('timer-cancel', () => cancelTimer());
+
 // Settings › Sleep timer, left/right: Off, 15 min ... 2 hours, This video ends, round again.
 function stepTimer(step) {
   const order = [TIMER.length - 1, ...TIMER.keys()].slice(0, TIMER.length);   // Off first

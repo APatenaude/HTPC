@@ -143,6 +143,8 @@ html:has(#stage.blank) { background: var(--bg) !important; }
 .tile.focused::before, .card.focused::before { opacity: 1; }
 .tile.focused, .card.focused { background: var(--tile-focus); border-color: var(--tile-focus); color: #FFFFFF; transform: scale(1.05); }
 .round.focused, .row.focused, .quick.focused { background: var(--tile-focus); color: #FFFFFF; }
+.pill.timer.focused { background: var(--tile-focus); color: #FFFFFF; box-shadow: 0 0 0 4px var(--accent); }
+.row.timer-row:not(.focused) { background: var(--accent-bg); color: var(--accent); font-weight: 700; }
 .opt.focused { transform: scale(1.04); }
 
 .hints { height: 96px; box-sizing: border-box; padding: 0 96px; display: flex; align-items: center; gap: 44px; color: var(--text-2); }

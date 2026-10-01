@@ -127,6 +127,14 @@ if (AUDIT_PAGE === 'index') {
     auditRes();
   } });
   auditPage('confirm (close an app)', { view: 'confirm', open() { setFocus($('tiles').querySelector('[data-id="tile:app1"]')); press('x'); } });
+  // A sleep timer running: its pill in the top bar and its row in the Home menu (A +15 min, X cancel).
+  auditPage('home with a sleep timer', { view: 'home', covers: [], back: 0, open() { auditFresh(); onHost({ type: 'state', timer: { label: '30 min', endsAt: Date.now() + 29 * 60000 } }); go('home'); } });
+  auditPage('home menu with a sleep timer', { view: 'menu', covers: [], tick: auditRes, open() {
+    auditFresh();
+    onHost({ type: 'state', timer: { label: '30 min', endsAt: Date.now() + 29 * 60000 } });
+    press('home');
+    auditRes();
+  } });
   auditPage('power', { view: 'power', open() { go('power'); } });
   auditPage('power in desktop mode', { view: 'power', open() { onHost({ type: 'state', desktop: true }); go('power'); } });
   auditPage('sleep timer', { view: 'timer', open() { go('timer'); } });
