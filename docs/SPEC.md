@@ -129,8 +129,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
   side (unlike every list on the TV). 440 of 1080 high (it was 560: half the screen). The
   launcher's own fields (Wi-Fi, a website's address, a tile's name) use it too; no page draws a
   keyboard of its own (the owner, 29 Sept 2026).
-- **N12 Global brightness.** One slider dims the whole screen in every app (a software dimming
-  layer), from the Home menu, the phone remote and Settings › Display; kept across restarts.
+- **N12 Global brightness.** One slider dims the whole screen in every app, the dashboard and the
+  desktop with its Start menu (the displays' gamma ramp, one way for all; the owner, 1 Oct 2026: no layer
+  over the screen any more), from the Home menu, the phone remote and Settings › Display; kept across
+  restarts. Windows takes a ramp no darker than about half unless setup's `GdiICMGammaRange` allows it; the
+  ramp is put back when the launcher closes, checked every second, and Settings › Display has a reset.
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
   controller map below. Mouse and Keyboard apps can have any button remapped on the TV (only
   there) to a key, key combination, mouse action, media key or launcher action; YouTube,

@@ -987,11 +987,9 @@ T.Group("Brightness at start", () =>
     Check(ramp.Length == 768 && ramp[0] == 0 && ramp[255] == 32767 && ramp[256] == 0 && ramp[511] == 32767 && ramp[767] == 32767, "the gamma ramp: three channels, linear, scaled");
     Check(Dimmer.GammaRamp(100).SequenceEqual(Enumerable.Range(0, 768).Select(i => (ushort)(i % 256 * 257))), "at 100 the ramp is the plain one");
     Check(Enumerable.Range(1, 255).All(i => ramp[i] >= ramp[i - 1]), "the ramp never goes down");
-    // Windows turns down a ramp too far from the plain one: the lowest level it takes, then the layer for the rest.
+    // Windows turns down a ramp too far from the plain one: the lowest level it takes.
     Check(Dimmer.GammaLevel(70, l => true) == 70 && Dimmer.GammaLevel(30, l => l >= 50) == 50 && Dimmer.GammaLevel(32, l => l >= 50) == 52, "the ramp takes the level asked for, or the first one Windows accepts above it");
-    Check(Dimmer.GammaLevel(30, l => false) == 100 && Dimmer.GammaLevel(99, l => true) == 99, "none accepted: 100 (the layer alone)");
-    Check(Dimmer.LayerLevel(70, 70) == 100 && Dimmer.LayerLevel(30, 50) == 60 && Dimmer.LayerLevel(30, 100) == 30 && Dimmer.LayerLevel(10, 50) == Dimmer.Darkest * 2,
-        "the layer is what the ramp left: 30 through a ramp at 50 is a layer at 60");
+    Check(Dimmer.GammaLevel(30, l => false) == 100 && Dimmer.GammaLevel(99, l => true) == 99, "none accepted: 100 (not dimmed)");
     Check(new LauncherSettings().Brightness == 100 && new LauncherSettings().Volume is null, "defaults: full brightness, no volume kept yet");
 });
 

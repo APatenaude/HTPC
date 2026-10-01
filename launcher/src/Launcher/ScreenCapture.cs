@@ -16,8 +16,8 @@ namespace Htpc.Launcher;
 /// (no duplication for this screen, a rotated screen, a lost device, a UAC prompt).
 ///
 /// Both see every window on screen, layered ones too: the launcher's own layers over apps
-/// (brightness, alerts, volume) are kept out of the picture with LeaveOut, or the backdrop would
-/// carry them (the brightness twice, under the brightness layer itself).
+/// (alerts, volume) are kept out of the picture with LeaveOut, or the backdrop would carry them.
+/// Brightness is the displays' gamma ramp, applied after the picture is composed: not in it.
 /// </summary>
 static unsafe class ScreenCapture
 {

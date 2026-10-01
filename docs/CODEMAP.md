@@ -216,6 +216,19 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
 - Log: `Standby ({reason})`, `Wake ({reason})`, `Awake in {ms} ms (screen on after {ms} ms)`, `Sleep (S3)
   ({reason})`, `Standby: {radio} radio off ({why})`, `Sleep timer: {label}`.
 
+## Brightness
+
+- Files: `src/SystemControls.cs` (`Dimmer`: the displays' gamma ramp, the one way for every screen: dashboard,
+  apps, desktop, Start menu), `src/MainForm.Settings.cs` (`RestoreBrightness`, `SetBrightness`,
+  `ResetBrightness`), `ui/settings-more.js` (Settings › Display: the slider and Reset), the Home menu's
+  slider, the phone; `setup/lib/Set-SystemPolicy.ps1` (`GdiICMGammaRange` 256 lets Windows take a dark ramp).
+- Names: `Dimmer.SetBrightness`, `GammaRamp`, `GammaLevel` (the darkest level Windows takes, `Applied`),
+  `StartLevel`, `FloorAtStart`, `Reapply` (standby, resume, display change), `Check` (every second from the
+  clock: a program or driver that changed the ramp), `ResetGamma`, `ForcePlain`; `display.resetBrightness`.
+- Tests: LauncherTests "Brightness at start"; selftest 'Display:' (`ui/selftest/settings.js`).
+- Log: `Brightness {n}`, `Brightness {n}: Windows takes no darker than {m}`, `Brightness: the display's gamma
+  was changed by something else`, `Brightness reset (Settings > Display)`.
+
 ## Bluetooth and Wi-Fi
 
 - Bluetooth files: `src/Bluetooth.cs` (`BluetoothService`, `BtPairing`), `src/BluetoothRadio.cs` (off while
@@ -358,10 +371,7 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   'settings: About & Desktop mode' (`ui/audit/settings.js`).
 - Back to the desktop from the dashboard or an app without ending Explorer: the Power menu's Desktop card and
   the Home menu's Desktop row (`state.desktop`; `power-action` 'desktop' sends at once when the desktop is up,
-  `EnterDesktop` finds Explorer running). Brightness in desktop mode: `Dimmer.UseGamma` (set by
-  `MainForm.RefreshDimming`) dims through the displays' gamma ramp as far as Windows accepts (`GammaLevel`)
-  and the layer does the rest (`LayerLevel`): the Start menu is above any topmost window; tests "Brightness
-  at start".
+  `EnterDesktop` finds Explorer running).
 - Log: `Desktop mode ({how})`, `Desktop mode: Explorer started (pid {n})`, `Back to TV`, `Tray icon: added`;
   watchdog.log `Launcher started (pid {n})`, `Paused (...)`.
 

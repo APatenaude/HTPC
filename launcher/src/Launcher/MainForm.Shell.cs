@@ -27,7 +27,7 @@ sealed partial class MainForm
         if (options.BackToTv) BackToTv();
         // Started again while the desktop was up (a crash, an update): still desktop mode, as the
         // Power menu's Back to TV says.
-        else if (desktop.Active) { desktopMode = true; UpdateTray(); RefreshDimming(); }
+        else if (desktop.Active) { desktopMode = true; UpdateTray(); }
         if (setupMode || !desktop.ShellSession) return;
         watchdogCheck.Tick += (_, _) => DesktopMode.EnsureWatchdog();
         watchdogCheck.Start();
@@ -66,7 +66,6 @@ sealed partial class MainForm
         Log.Info($"Desktop mode ({(desktop.ShellSession ? "the launcher is the shell" : "next to Explorer")})");
         desktop.Enter();
         desktopMode = true;
-        RefreshDimming();
         UpdateTray(); // added as soon as Explorer's taskbar takes it
         cursor.Show(); // the desktop is for the mouse (or the controller's Mouse preset)
         // Entered from inside an app: the app would still cover the desktop. Open apps go down
@@ -93,7 +92,6 @@ sealed partial class MainForm
     {
         Log.Info("Back to TV");
         desktopMode = false;
-        RefreshDimming();
         UpdateTray();
         alertCenter.Clear("desktop");
         Post(new { type = "show", view = "home" });

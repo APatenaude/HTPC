@@ -194,56 +194,34 @@ sealed class AudioVolume
 }
 
 /// <summary>
-/// Global brightness (SPEC N12): a black, click-through, topmost layer over every app. It can
-/// only darken; the TV's own brightness is set once to the brightest comfortable level.
-/// In desktop mode (UseGamma) the displays' gamma ramp does the dimming as far as Windows allows
-/// (about half by default), the layer the rest: the Start menu, search and the flyouts live in a
-/// window band above any topmost window, so only the ramp reaches them.
+/// Global brightness (SPEC N12): the displays' gamma ramp, the same for the dashboard, every app
+/// and the desktop with its Start menu, taskbar and flyouts (a layer over the screen could not
+/// dim those: they sit above any window). It can only darken; the TV's own brightness is set
+/// once to the brightest comfortable level. Windows turns down a ramp that dims more than about
+/// half unless the System step's GdiICMGammaRange allows it (setup\lib\Set-SystemPolicy.ps1):
+/// the launcher uses the darkest level Windows takes (Applied), never fails. The ramp belongs to
+/// the display, not to this program, so it is put back when the launcher closes or is asked to
+/// (Settings › Display), looked at every second for a program or driver that changed it, and set
+/// again after standby, a resume and a display change.
 /// </summary>
-sealed class Dimmer : Form
+sealed class Dimmer
 {
-    const int WS_EX_TRANSPARENT = 0x20, WS_EX_LAYERED = 0x80000, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000, WS_EX_TOPMOST = 0x8;
-
-    public Dimmer()
-    {
-        FormBorderStyle = FormBorderStyle.None;
-        BackColor = Color.Black;
-        ShowInTaskbar = false;
-        StartPosition = FormStartPosition.Manual;
-        // Topmost only through WS_EX_TOPMOST below: the TopMost property made Show() activate this
-        // layer, so the launcher lost the foreground and ignored the controller (brightness 95 -> 90
-        // "locked up" until Alt+Tab).
-        Opacity = 0;
-    }
-
-    protected override void WndProc(ref Message m)
-    {
-        const int WM_MOUSEACTIVATE = 0x21, MA_NOACTIVATE = 3;
-        if (m.Msg == WM_MOUSEACTIVATE) { m.Result = MA_NOACTIVATE; return; }
-        base.WndProc(ref m);
-    }
-
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
-            return cp;
-        }
-    }
-
-    protected override bool ShowWithoutActivation => true;
-
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateDC(string driver, string device, string? port, IntPtr devMode);
     [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
     [DllImport("gdi32.dll")] static extern bool SetDeviceGammaRamp(IntPtr hdc, [In] ushort[] ramp);
+    [DllImport("gdi32.dll")] static extern bool GetDeviceGammaRamp(IntPtr hdc, [Out] ushort[] ramp);
 
-    /// <summary>Dim through the displays' gamma ramp too (desktop mode). Set it, then SetBrightness again.</summary>
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public bool UseGamma { get; set; }
+    /// <summary>The darkest the slider goes (never fully black).</summary>
+    public const int Darkest = 10;
 
-    int gammaNow = 100;   // what the ramp is at: 100 = untouched by this program
+    /// <summary>
+    /// A start never comes up darker than this, whatever was set last: a picture too dark to read
+    /// looks like a broken box, and the controller's way back is in the Home menu on that picture.
+    /// </summary>
+    public const int FloorAtStart = 30;
+
+    /// <summary>The brightness a start applies: the one set last (kept in settings), clamped as SetBrightness does, at least FloorAtStart.</summary>
+    public static int StartLevel(int saved) => Math.Max(Math.Clamp(saved, Darkest, 100), FloorAtStart);
 
     /// <summary>The ramp for a level: red, green and blue, 256 entries each, linear, scaled to percent.</summary>
     public static ushort[] GammaRamp(int percent)
@@ -261,11 +239,14 @@ sealed class Dimmer : Form
         return 100;
     }
 
-    /// <summary>The layer's own level once the ramp is at gamma: what is left of percent.</summary>
-    public static int LayerLevel(int percent, int gamma) =>
-        gamma >= 100 ? percent : Math.Clamp((int)Math.Round(100.0 * percent / gamma), Darkest, 100);
+    int wanted = 100;    // what the slider says
+    int applied = 100;   // what the ramp is at: 100 = plain
+    long lastReset;      // tick count of the last time the ramp was found changed (logged once in a while)
 
-    bool TrySetRamp(int level)
+    /// <summary>The level the ramp is really at: the slider's, or the darkest Windows takes.</summary>
+    public int Applied => applied;
+
+    static bool TrySetRamp(int level)
     {
         var ramp = GammaRamp(level);
         var all = true;
@@ -276,86 +257,63 @@ sealed class Dimmer : Form
             try { all &= SetDeviceGammaRamp(dc, ramp); }
             finally { DeleteDC(dc); }
         }
-        if (all) gammaNow = level;
         return all;
-    }
-
-    /// <summary>The ramp back to the plain one (a start after a launcher that ended while dimmed this way, leaving desktop mode, closing).</summary>
-    public void ResetGamma()
-    {
-        if (gammaNow != 100 && !TrySetRamp(100)) Log.Warn("Brightness: could not put the display's gamma back");
-    }
-
-    /// <summary>The ramp again, as it was: a display that came back (standby, a signal change) may have dropped it.</summary>
-    public void Reapply()
-    {
-        if (gammaNow != 100) TrySetRamp(gammaNow);
-    }
-
-    /// <summary>A launcher that ended while dimming through the ramp left it there: plain again before the first frame.</summary>
-    public static void ClearStaleGamma()
-    {
-        using var stale = new Dimmer { gammaNow = 0 };
-        stale.ResetGamma();
-    }
-
-    /// <summary>The darkest the layer goes (never fully black).</summary>
-    public const int Darkest = 10;
-
-    /// <summary>
-    /// A start never comes up darker than this, whatever was set last: a picture too dark to read
-    /// looks like a broken box, and the controller's way back is in the Home menu on that picture.
-    /// </summary>
-    public const int FloorAtStart = 30;
-
-    /// <summary>The brightness a start applies: the one set last (kept in settings), clamped as SetBrightness does, at least FloorAtStart.</summary>
-    public static int StartLevel(int saved) => Math.Max(Math.Clamp(saved, Darkest, 100), FloorAtStart);
-
-    /// <summary>The primary screen changed (MainForm.Screen.cs): the layer covers the new one.</summary>
-    public void FitScreen()
-    {
-        Reapply();
-        if (Visible) Bounds = Screen.PrimaryScreen!.Bounds;
-    }
-
-    // WinForms moves it to the rectangle Windows suggests for the new DPI: the screen's instead.
-    protected override void OnDpiChanged(DpiChangedEventArgs e)
-    {
-        base.OnDpiChanged(e);
-        FitScreen();
-    }
-
-    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-
-    /// <summary>
-    /// Back on top of the topmost windows shown after it (the on-screen keyboard is one, and was
-    /// not dimmed: the brightness layer sat under it), without activating anything.
-    /// </summary>
-    public void Raise()
-    {
-        const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
-        if (Visible && IsHandleCreated) SetWindowPos(Handle, new IntPtr(-1) /* HWND_TOPMOST */, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
     /// <summary>100 = no dimming; 10 = darkest allowed (never fully black).</summary>
     public void SetBrightness(int percent)
     {
-        percent = Math.Clamp(percent, Darkest, 100);
-        var gamma = 100;
-        if (UseGamma && percent < 100) gamma = GammaLevel(percent, TrySetRamp);
-        if (gamma == 100) ResetGamma(); // none taken, or not in desktop mode: the plain ramp
-        var layer = LayerLevel(percent, gamma);
-        Bounds = Screen.PrimaryScreen!.Bounds;
-        Opacity = (100 - layer) / 100.0;
-        var front = Native.GetForegroundWindow();
-        if (layer < 100 && !Visible) Show();
-        if (layer == 100 && Visible) Hide();
-        // Should Windows still activate the layer, the window that was in front gets it back.
-        if (IsHandleCreated && Native.GetForegroundWindow() == Handle && front != IntPtr.Zero && front != Handle)
+        wanted = Math.Clamp(percent, Darkest, 100);
+        if (wanted == 100) { ResetGamma(); return; }
+        var level = GammaLevel(wanted, TrySetRamp);
+        if (level == 100)
         {
-            Native.SetForegroundWindow(front);
-            Log.Warn("Brightness layer took the foreground; given back");
+            Log.Warn($"Brightness {wanted}: Windows takes no dimmer ramp at all (HDR on, or a driver that refuses it); not dimmed");
+            if (applied != 100) { ForcePlain(); applied = 100; }
+            return;
         }
+        applied = level;
+        if (level != wanted) Log.Info($"Brightness {wanted}: Windows takes no darker than {level} (the System step's GdiICMGammaRange lifts that after a restart)");
+    }
+
+    /// <summary>Plain again: the slider's level is forgotten too.</summary>
+    public void ResetGamma()
+    {
+        wanted = 100;
+        ForcePlain();
+        applied = 100;
+    }
+
+    /// <summary>The plain ramp on every display, whether this program thinks it set one or not (Settings › Display's reset).</summary>
+    public static bool ForcePlain()
+    {
+        var ok = TrySetRamp(100);
+        if (!ok) Log.Warn("Brightness: could not put the display's gamma back");
+        return ok;
+    }
+
+    /// <summary>The ramp again as asked: a display that came back (standby, a signal change) may have dropped it.</summary>
+    public void Reapply()
+    {
+        if (wanted < 100) SetBrightness(wanted);
+    }
+
+    /// <summary>Every second: a program or a driver that changed the ramp (a game, a mode change) gets it put back.</summary>
+    public void Check()
+    {
+        if (applied == 100) return;
+        var dc = CreateDC("DISPLAY", Screen.PrimaryScreen!.DeviceName, null, IntPtr.Zero);
+        if (dc == IntPtr.Zero) return;
+        var now = new ushort[3 * 256];
+        bool read;
+        try { read = GetDeviceGammaRamp(dc, now); }
+        finally { DeleteDC(dc); }
+        if (!read) return;
+        var want = GammaRamp(applied);
+        if (now[255] == want[255] && now[511] == want[511] && now[767] == want[767]) return;
+        if (Environment.TickCount64 - lastReset > 60_000) Log.Info($"Brightness: the display's gamma was changed by something else; set to {applied} again");
+        lastReset = Environment.TickCount64;
+        SetBrightness(wanted);
     }
 }
 

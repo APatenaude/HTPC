@@ -86,6 +86,12 @@ selftestGroup(async ({ check, checkRows, asksFirst, tick, sent, lastSent, sNode,
   setFocus(sNode('set-pointerSpeed'));
   const lefts = ['left', 'left'].map((b) => { press(b); return focusId(); }).join(',');
   check('Controller: left from the right column goes beside it, then (nothing beside) to the list', lefts === 'pad-test,s-controller', lefts);
+  // Display: the reset puts brightness back to 100 and tells the host.
+  openSection('display');
+  state.brightness = 40;
+  setFocus(sNode('brightness-reset'));
+  press('a');
+  check('Display: Reset brightness sends the reset and the slider goes to 100', lastSent('display.resetBrightness') && state.brightness === 100, JSON.stringify(lastSent('display.resetBrightness')) + ' ' + state.brightness);
   // TV: buttons side by side are reached with left and right.
   openSection('tv');
   setFocus(sNode('tv-test'));

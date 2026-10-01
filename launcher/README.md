@@ -25,7 +25,7 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
 - `src/MainForm.Screen.cs`: the screen the launcher fills, followed through display changes. A box
   restarted at night with the TV off comes up on Windows' placeholder monitor; when the TV comes on
   (any resolution or scaling) or another screen becomes the primary one, the window and its layers
-  over apps (brightness, alerts, volume, the keyboard's band) are fitted again, half a second after
+  over apps (alerts, volume, the keyboard's band; the brightness ramp set again) are fitted again, half a second after
   Windows settles. Per-monitor DPI aware; the pages follow the scaling themselves.
 - `ui/sounds.js`: interface sounds (SPEC N2; Settings › Sound: Off, Low, Medium; Low by default),
   short and soft, made with the Web Audio API (no audio files). What a press did picks its sound (a
@@ -213,7 +213,7 @@ SPEC W1, W5. App library and tile editing:
 
 - The screen through Desktop Duplication, halved on the GPU to 1920 wide, a JPEG, off the UI thread
   (GDI as the fallback); started at Home's press, one thrown away at start (the first is slow).
-- The launcher's layers over apps (brightness, alerts, volume) are left out of it
+- The launcher's layers over apps (alerts, volume) are left out of it
   (WDA_EXCLUDEFROMCAPTURE).
 
 ### The resource view (`src/ResourceWatch.cs`, `ResourceRules.cs`, `MainForm.Resources.cs`, `ui/resources.*`)
@@ -251,7 +251,7 @@ SPEC W1, W5. App library and tile editing:
   timer, the phone.
 - `src/AlertsForm.cs`: the overlay over apps (design: Alerts), alert cards at the top right, painted
   with GDI+ into a layered window (per-pixel alpha, click-through, never takes the focus, left out
-  of the Home menu's screen capture), above the brightness layer, clear of the on-screen keyboard,
+  of the Home menu's screen capture), clear of the on-screen keyboard,
   hidden in standby. `Show(OverlayView)`, `Hide()`, `Hidden`. Icons come from `ui/icons.js`.
 - `src/VolumeOsd.cs`, `VolumeWatch` (AudioOutputs.cs): a small card at the top left over everything
   for 2 s after any change of the volume or mute, whoever made it (Windows'
@@ -274,7 +274,7 @@ SPEC W1, W5. App library and tile editing:
   standby. `dev/Show-MediaSessions.ps1` lists what apps report (read-only).
 - VideoEndDetector decides when "this video" has ended (autoplay moving on counts; a pause after
   5 min; an ad does not; 3 h cap).
-- `src/SystemControls.cs`: master volume (Core Audio), the brightness dimmer layer.
+- `src/SystemControls.cs`: master volume (Core Audio), brightness (`Dimmer`: the displays' gamma ramp).
 - `src/LauncherHandoff.cs`: what a launcher about to go away tells the next one
   (`%LOCALAPPDATA%\HTPC\handoff.json`, read once, ignored when old): after a launcher update or a
   night's restart for Windows updates, the new one goes straight back to standby and sends the TV

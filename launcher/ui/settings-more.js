@@ -3,7 +3,7 @@
 // added through app.js's settingsSection(). Loaded after app.js.
 //
 //   To the host:   {type:'controller.test', on} {type:'controller.rumble'} {type:'sound.outputs'}
-//                  {type:'sound.output', id} {type:'sound.test'} {type:'display.decodeCheck'}
+//                  {type:'sound.output', id} {type:'sound.test'} {type:'display.decodeCheck'} {type:'display.resetBrightness'}
 //                  {type:'system.info'} {type:'system.saveLogs'} {type:'system.restart'} {type:'system.setup'}
 //                  {type:'setting', key, value} (pointerSpeed, preciseSpeed, scrollSpeed 1-10; showKeyboardAutomatically)
 //   From the host: {type:'controller.pad', connected, buttons, lt, rt, lx, ly, rx, ry} (while testing)
@@ -268,7 +268,12 @@ settingsSection('display', {
     const others = r && r.adapter && r.adapter.otherAdapters && r.adapter.otherAdapters.length ? ` · the TV’s GPU (also: ${r.adapter.otherAdapters.join(', ')})` : '';
     const adapter = r && r.adapter && r.adapter.name ? `${r.adapter.name} · driver ${r.adapter.driverVersion}${others}` : '';
     return '<header><h1>Display</h1><p>Brightness for every app, and which video formats the graphics chip decodes.</p></header>' +
-      sliderRow('brightness', 'Brightness', 'Dims everything on screen, in every app. Can only go darker than the TV’s own setting.', true) +
+      sliderRow('brightness', 'Brightness', 'Dims everything on screen, in every app and on the desktop. Can only go darker than the TV’s own setting.', true) +
+      '<div class="srow">' +
+        '<div class="text"><span class="label">Reset brightness</span>' +
+          '<span class="caption">Puts the screen back to its plain, undimmed setting, should it ever stay dim.</span></div>' +
+        '<div class="sbutton" data-nav data-id="brightness-reset" data-act="brightness-reset">Reset</div>' +
+      '</div>' +
       '<div class="srow decode">' +
         '<div class="text"><span class="label">Hardware video decoding</span>' +
           `<span class="caption">${esc(d.running ? 'Checking… about 20 seconds' : decodeSummary(r))}</span>` +
@@ -289,6 +294,12 @@ settingsSection('display', {
   },
 });
 
+onAction('brightness-reset', () => {
+  state.brightness = 100;
+  send({ type: 'display.resetBrightness' });
+  toast('Brightness reset');
+  render();
+});
 onAction('decode-check', () => {
   if (more.decode && more.decode.running) return;
   more.decode = { running: true, result: more.decode && more.decode.result };

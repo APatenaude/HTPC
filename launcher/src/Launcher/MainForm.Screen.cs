@@ -57,7 +57,7 @@ sealed partial class MainForm
         phoneScreenHeight = screen.Height; // the phone's touchpad speed (MainForm.Phone.cs)
         ScreenCapture.ScreenChanged();     // the Home menu's backdrop: the new screen's output
         if (!options.Windowed && Bounds != screen) Bounds = screen;
-        dimmer.FitScreen();
+        dimmer.Reapply(); // a new display starts with the plain ramp
         keyboard.FitScreen();
         overlay.Relayout();
         volumeOsd.ScreenChanged();

@@ -99,6 +99,7 @@ sealed partial class MainForm : Form
         clock.Tick += (_, _) =>
         {
             CheckSleepTimer();
+            dimmer.Check();
             KeepFilled();
             // Every 5 s: the idle check (not during setup), and the TV's power state (its own remote).
             // Neither waits for the other (a frozen player held the TV's poll up), and one still
@@ -121,7 +122,6 @@ sealed partial class MainForm : Form
         revealTimer.Tick += (_, _) => RevealPending("400 ms");
         Directory.CreateDirectory(captureDir);
         // The layers over apps stay out of the Home menu's backdrop (ScreenCapture).
-        ScreenCapture.LeaveOut(dimmer);
         ScreenCapture.LeaveOut(overlay);
         ScreenCapture.LeaveOut(volumeOsd);
         RegisterUiHandlers(); // MainForm.Messages.cs: [UiMessages] and [UiReady] methods of every part
@@ -498,8 +498,7 @@ sealed partial class MainForm : Form
         tray?.Dispose(); // MainForm.Shell.cs: no icon left behind in the taskbar
         cursor.Restore();
         ElevatedInput.Close(); // the helper ends with its pipe, before an update swaps the launcher's files
-        dimmer.ResetGamma(); // a layer never shown leaves no close event to do it
-        dimmer.Close();
+        dimmer.ResetGamma(); // the ramp is the display's, not ours: plain again
         base.OnFormClosed(e);
     }
 }

@@ -94,19 +94,20 @@ sealed partial class MainForm
     /// </summary>
     void RestoreBrightness()
     {
-        if (settings.Brightness < 100) Dimmer.ClearStaleGamma();
         brightness = Dimmer.StartLevel(settings.Brightness);
         if (brightness == 100) return;
         dimmer.SetBrightness(brightness);
         Log.Info($"Brightness {brightness}{(brightness != settings.Brightness ? $" (set to {settings.Brightness} last; a start is never darker than {Dimmer.FloorAtStart})" : "")}");
     }
 
-    /// <summary>Desktop mode entered or left (or found up at start): the gamma ramp dims there, so the Start menu is dimmed too.</summary>
-    void RefreshDimming()
+    /// <summary>Settings › Display › Reset: the slider at 100 and the displays' ramp plain, whatever this program thinks it set.</summary>
+    void ResetBrightness()
     {
-        if (dimmer.UseGamma == desktopMode) return;
-        dimmer.UseGamma = desktopMode;
-        dimmer.SetBrightness(brightness);
+        brightness = 100;
+        dimmer.ResetGamma();
+        if (settings.Brightness != 100) { settings.Brightness = 100; SaveSoon(); }
+        Log.Info("Brightness reset (Settings › Display)");
+        PushState();
     }
 
     /// <summary>The Home menu's slider or the phone: at once on screen, kept for the next start.</summary>
@@ -129,6 +130,7 @@ sealed partial class MainForm
     [UiMessages("display.")]
     async void OnDisplayMessage(string type, JsonElement m)
     {
+        if (type == "display.resetBrightness") { ResetBrightness(); return; }
         if (type != "display.decodeCheck" || decodeCheck.Running) return;
         var run = decodeCheck.RunAsync();
         Post(new { type = "display.decode", running = true, result = DecodeCheck.Last() });
