@@ -113,8 +113,20 @@
 
 /* The Wi-Fi step: the network list (wifi.js's .wifi-scroll) scrolls inside the step, clear of Back / Next. */
 /* Its forms (a password, a hidden network) scroll in it too, never squeezed. */
-#su-wifi { display: flex; flex-direction: column; max-height: 560px; min-height: 0; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
+#su-wifi { display: flex; flex-direction: column; gap: 14px; max-height: 560px; min-height: 0; overflow: hidden auto; scrollbar-width: none; padding: 8px; margin: -8px; }
 #su-wifi > :not(.wifi-scroll) { flex-shrink: 0; }
+/* The rows come from wifi.js with Settings' spacing (its pane gives them the gap and margins): the same here. */
+#su-wifi .section { margin: 12px 0 0; }
+#su-wifi .section:first-child { margin-top: 0; }
+#su-wifi .wifi-note { margin: 6px 0 0; }
+#su-wifi .sbuttons { margin-top: 6px; gap: 20px; }
+#su-wifi .sbutton { height: 80px; padding: 0 44px; border-radius: 24px; font-size: 28px; }
+/* A form (a password, a hidden network): the intro goes, so the fields, the buttons and the note fit with no scrolling. */
+.su-col:has(.wifi-field) .su-head p { display: none; }
+.su-col:has(.wifi-field) #su-wifi { max-height: 700px; }
+#su-wifi .srow { min-height: 88px; padding: 14px 32px; }
+#su-wifi .wifi-field { min-height: 0; padding: 14px 32px 16px; }
+#su-wifi .wifi-field input { height: 56px; }
 .su-tvlist.more-down, #su-wifi.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent); }
 .su-tvlist.more-up, #su-wifi.more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); }
 .su-tvlist.more-up.more-down, #su-wifi.more-up.more-down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 calc(100% - 48px), transparent); }

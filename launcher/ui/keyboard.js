@@ -29,7 +29,7 @@ const SYMBOLS = ['1234567890', '!#$%^&*()-', "_=+[]{};:'", '",<>?/\\~'];
 let symbols = false;
 let shift = 'off';            // off | once (next letter) | lock
 let focus = { row: 1, col: 0 };
-let field = '', password = false, reveal = false, typed = '';
+let field = '', password = false, reveal = false, typed = '', cursor = 0;
 
 function rows() {
   const set = symbols ? SYMBOLS : LETTERS;
@@ -85,7 +85,8 @@ function render() {
   const on = rowsEl.querySelector(`.kb-key[data-r="${focus.row}"][data-c="${focus.col}"]`);
   if (on) on.classList.add('on');
   document.getElementById('kb-field').textContent = field || 'the app';
-  document.getElementById('kb-typed').textContent = password ? (reveal ? typed : '•'.repeat(typed.length)) : '';
+  const shown = password ? (reveal ? typed : '•'.repeat(typed.length)) : '';
+  document.getElementById('kb-typed').innerHTML = password ? `${esc(shown.slice(0, cursor))}<span class="kb-caret"></span>${esc(shown.slice(cursor))}` : '';
   // The triggers each their own (the owner, 29 Sept 2026: LT is Shift, RT the symbols); the
   // bumpers, which go together, one: the bar holds the password's Show too, at every screen width.
   const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['LT', 'Shift'], ['RT', 'Symbols'], [['LB', 'RB'], 'Cursor'], ['Start', 'Enter']];
@@ -105,11 +106,23 @@ function flash(r, c) {
 
 function typeText(text) {
   send({ type: 'type', text });
-  typed += text;
+  typed = typed.slice(0, cursor) + text + typed.slice(cursor);
+  cursor += text.length;
   if (shift === 'once') shift = 'off';
 }
 
-function backspace() { send({ type: 'key', key: 'backspace' }); typed = typed.slice(0, -1); }
+function backspace() {
+  send({ type: 'key', key: 'backspace' });
+  if (cursor === 0) return;
+  typed = typed.slice(0, cursor - 1) + typed.slice(cursor);
+  cursor--;
+}
+
+// The preview knows only what was typed here: the app's field may hold more, so the cursor stops at its ends.
+function moveCursor(dir) {
+  send({ type: 'key', key: dir });
+  cursor = Math.max(0, Math.min(typed.length, cursor + (dir === 'left' ? -1 : 1)));
+}
 
 function cycleShift() { shift = shift === 'off' ? 'once' : shift === 'once' ? 'lock' : 'off'; }
 
@@ -119,7 +132,7 @@ function press(k) {
     case 'shift': cycleShift(); break;
     case 'back': backspace(); break;
     case 'symbols': symbols = !symbols; break;
-    case 'left': case 'right': send({ type: 'key', key: k.id }); break;
+    case 'left': case 'right': moveCursor(k.id); break;
     case 'enter': send({ type: 'key', key: 'enter' }); break;
     case 'extra': send({ type: 'key', key: k.key }); break;
   }
@@ -156,8 +169,8 @@ function onButton(button) {
     case 'y': typeText(' '); break;
     case 'lt': cycleShift(); break;
     case 'rt': symbols = !symbols; break;   // the symbols page and back, as its key (#+= / abc)
-    case 'lb': send({ type: 'key', key: 'left' }); break;
-    case 'rb': send({ type: 'key', key: 'right' }); break;
+    case 'lb': moveCursor('left'); break;
+    case 'rb': moveCursor('right'); break;
     case 'start': send({ type: 'key', key: 'enter' }); break;
     case 'select': if (password) reveal = !reveal; break;
     case 'b': send({ type: 'close' }); return;
@@ -170,7 +183,7 @@ function onHost(m) {
   if (m.type === 'open') {
     field = m.field || '';
     password = !!m.password;
-    symbols = false; shift = 'off'; reveal = false; typed = '';
+    symbols = false; shift = 'off'; reveal = false; typed = ''; cursor = 0;
     focus = { row: 1, col: 0 };
     render();
   } else if (m.type === 'input') {

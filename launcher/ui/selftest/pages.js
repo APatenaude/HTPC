@@ -114,6 +114,18 @@ selftestGroup(async ({ check, checkRows, pin }) => {
   kw.onButton('lt');
   check('Keyboard: LT is still Shift', kw.eval('shift') === 'once' && firstKey() === 'Q', firstKey());
   kw.onHost({ type: 'open', field: 'Password', password: true });
+  // The typed preview follows the cursor: LB / RB move it, a letter goes in at it, X deletes before it.
+  const typedEl = kd.getElementById('kb-typed'), beforeCaret = () => typedEl.querySelector('.kb-caret').previousSibling.textContent;
+  kw.onButton('select');
+  for (const c of 'abc') kw.typeText(c);
+  kw.onButton('lb'); kw.onButton('lb'); kw.typeText('X'); kw.render();   // a key's A press renders after typing: onButton
+  check('Keyboard: LB moves the cursor in the preview, the next letter goes in at it', typedEl.textContent === 'aXbc' && beforeCaret() === 'aX', typedEl.textContent + ' / ' + beforeCaret());
+  kw.onButton('x');
+  check('Keyboard: X deletes before the cursor, not the last letter', typedEl.textContent === 'abc' && beforeCaret() === 'a', typedEl.textContent + ' / ' + beforeCaret());
+  for (let i = 0; i < 6; i++) kw.onButton('rb');
+  check('Keyboard: RB stops at the end of what was typed', beforeCaret() === 'abc', beforeCaret());
+  kw.onButton('select');
+  kw.onHost({ type: 'open', field: 'Password', password: true });
   for (const [w, h] of [[1920, 440], [1536, 352]]) {   // the band's window: the screen's width, 440/1080 of its height
     const resized = await resize(kf, w, h);
     const hints = kd.getElementById('kb-hints'), band = kd.getElementById('kb').getBoundingClientRect(), s = w / 1920;

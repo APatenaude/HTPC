@@ -212,6 +212,31 @@ static class SetupElevation
         : elevated ? (trustedPlace ? Step.Run : args.Contains(ElevatedFlag) ? Step.Unsafe : Step.Relocate)
         : args.Contains(ElevatedFlag) ? Step.NeedsAdmin : Step.Elevate;
 
+    /// <summary>Run as a screen of setup's own comes up (the splash goes: SetupSplash.Dismiss).</summary>
+    public static Action? ScreenIsUp { get; set; }
+
+    static bool uiPrepared;
+    static readonly object uiGate = new();
+
+    /// <summary>
+    /// What the process sets before its first window, once, whichever thread opens it (the splash has
+    /// a thread of its own: SetupSplash): where unhandled exceptions go (the mode cannot change once a
+    /// window exists), high-DPI mode and visual styles.
+    /// </summary>
+    public static void PrepareUi()
+    {
+        lock (uiGate)
+        {
+            if (uiPrepared) return;
+            uiPrepared = true;
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);
+            Application.ThreadException += (_, e) => Log.Error("UI thread", e.Exception);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Application.EnableVisualStyles();
+        }
+    }
+
     /// <summary>Same: setup runs as the user signed in here. Other: as someone else. Unknown: Windows did not say who is signed in.</summary>
     public enum SessionMatch { Same, Other, Unknown }
 
@@ -269,8 +294,7 @@ static class SetupElevation
             : $"Windows started setup as {me.Name} and did not say who is signed in here, so setup changed nothing.";
         CloseOwnDesktop();   // the signed-in user's Explorer, started for this setup by its first copy
         if (sid is not null) WatchdogPause.ClearFor(sid);
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
+        PrepareUi();
         using var screen = new AdminNeededForm(why, askAgain: null, "Setup must run as the TV account",
             "Sign in as the TV account and run TV Box Setup from there. That account must be an administrator.");
         Application.Run(screen);
@@ -642,9 +666,9 @@ static class SetupElevation
     /// it ends. The watchdog is paused for 15 minutes from each try: a launcher that closed for
     /// setup (About › Run setup again) is not started again over the prompt. Quitting closes the
     /// desktop it opened and lifts the pause. Nothing else is done meanwhile: a running launcher is
-    /// left alone.
+    /// left alone. True once an elevated copy was started (then the caller waits for its screen).
     /// </summary>
-    public static void GetRights(Step step, string[] args)
+    public static bool GetRights(Step step, string[] args)
     {
         Log.Info($"Setup started ({string.Join(' ', args)}) from {Environment.ProcessPath}, unpacked in {AppContext.BaseDirectory}: " + step switch
         {
@@ -662,20 +686,20 @@ static class SetupElevation
             Step.NeedsAdmin => "Windows started setup without them: User Account Control may be off, or this account is not an administrator.",
             _ => $"Setup did not start from its copy in {TrustedDir}, so it stopped before changing anything.",
         };
-        if (why is null) return;
+        if (why is null) return true;
 
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
+        PrepareUi();
         using var screen = new AdminNeededForm(why, () =>
         {
             WatchdogPause.Set(TimeSpan.FromMinutes(15));
             return Relaunch(args, prompt: !Environment.IsPrivilegedProcess);
         });
         Application.Run(screen);
-        if (screen.HandedOver) return;
+        if (screen.HandedOver) return true;
         CloseOwnDesktop();
         WatchdogPause.Clear();
         Log.Info("Setup: quit without administrator rights");
+        return false;
     }
 }
 
@@ -845,6 +869,7 @@ sealed class AdminNeededForm : Form
         base.OnShown(e);
         HoldFront();
         controller.Start();
+        SetupElevation.ScreenIsUp?.Invoke();
     }
 
     /// <summary>

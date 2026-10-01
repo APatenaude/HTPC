@@ -240,6 +240,7 @@ sealed partial class MainForm : Form
     {
         base.OnShown(e);
         Native.ForceForeground(Handle);
+        if (setupMode) StartSetupInstance(); // MainForm.SetupInstance.cs
     }
 
     /// <summary>
@@ -364,6 +365,7 @@ sealed partial class MainForm : Form
             case "ready" when setupMode:
                 uiReady = true;
                 PostSetupInit();
+                OnSetupPageReady(); // MainForm.SetupInstance.cs
                 break;
             case "install" when setupMode: StartSetup(m); break;
             case "finish" when setupMode: FinishSetup(); break;

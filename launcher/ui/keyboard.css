@@ -43,3 +43,6 @@ html, body { background: var(--panel); }   /* the band's colour, also beside it 
 /* The hints under the keys, clear of the last row's rings: a lower bar, a little closer together
    than the launcher's (nine of them with a password's Show: LT and RT each their own). */
 #kb .hints { margin-top: auto; height: 60px; flex-shrink: 0; gap: 32px; }
+
+/* The cursor in the typed preview: a thin bar between the characters, on top of the text's flow. */
+.kb-caret { display: inline-block; width: 2px; height: 1.1em; margin: 0 1px; vertical-align: text-bottom; background: var(--accent); }

@@ -117,9 +117,10 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
 - Files: `src/KeyboardForm.cs`, `ui/keyboard.html`, `ui/keyboard.js`, `ui/keyboard.css`, `src/MainForm.Keyboard.cs`.
 - Names: `KeyboardForm.Open`, `Dismiss`, `FitScreen`, `Band`, `HeightOf1080` (the band's height, also in
   keyboard.css and keyboard.js); keyboard.js `render`, `press`, `typeText`, `moveVertical`, `onButton`;
-  `MainForm.OpenKeyboard`, `CloseKeyboard`, `OnKeyboardMessage`.
+  `MainForm.OpenKeyboard`, `CloseKeyboard`, `OnKeyboardMessage`. The password preview keeps its own `typed`
+  and `cursor` (`moveCursor`: LB/RB and the cursor keys; letters go in at it, X deletes before it).
 - Tests: LauncherTests "On-screen keyboard: its window as high as its page" (`AddTileTests.cs`); selftest
-  'Keyboard:' and 'fit():' checks (`ui/selftest/pages.js`); audit (`ui/audit/keyboard.js`) 'keyboard: letters',
+  'Keyboard:' (the preview's cursor too) and 'fit():' checks (`ui/selftest/pages.js`); audit (`ui/audit/keyboard.js`) 'keyboard: letters',
   'keyboard: symbols, shift locked', 'keyboard: a password' (keyboard.html).
 - Log: `Keyboard opened ({text field|R3}: ...)`, `Keyboard closed ({reason})`.
 
@@ -258,12 +259,19 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   `skipped: <why>`, `FAILED: <why>` in setup-last.json (exit 1 on a FAILED step); `SetupRunner.StartInfo`,
   `Poll`; `SetupElevation.Decide`, `Relaunch`, `Trampoline`, `CleanEnvironment`, `RunsAsSessionUser`;
   `MainForm.PostSetupInit`, `StartSetup`; `Rights` decided once in `Program.Main`.
-- Tests: LauncherTests `ElevationTests.cs`; `Test-Rights.ps1` (uninstall walker, ACL lock, job params);
+- Start-up and one at a time: `src/SetupStart.cs` (`FirstCopy`: the copy the user started, which asks for
+  rights and waits for the elevated copy's page), `src/SetupSplash.cs` ("Starting setup" on a thread of
+  its own, `Open`/`Dismiss`), `src/SetupInstance.cs` (named mutexes Running/Starting and events
+  Front/Shown in `Local\HtpcSetup*`: `Claim`, `BeginStarting`, `SignalFront`, `WaitForScreen`),
+  `src/MainForm.SetupInstance.cs` (`StartSetupInstance`, `HoldSetupFront`, `OnSetupPageReady`: in front and
+  focused at start, again when the page is up and when a second start signals).
+- Tests: LauncherTests `ElevationTests.cs` ("Setup: one at a time..." on test-only names); `Test-Rights.ps1` (uninstall walker, ACL lock, job params);
   `Test-Drivers.ps1`; `Test-Updates -Only Core` (machine steps, system-before.json: `setup\test\updates\Core.ps1`);
   selftest 'Setup:' (`ui/selftest/pages.js`); audit (`ui/audit/setup.js`) 'setup: welcome' ... 'setup:
   done, many steps failed'; the VM: `setup\test\Test-ReleaseInVm.ps1`.
 - Log: setup-*.log `== {step}` then `  + ...` lines and `== Summary`; launcher.log `Setup started:
-  powershell ...`, `Setup ended (exit code {n})`.
+  powershell ...`, `Setup ended (exit code {n})`, `Setup: already running or starting ...; brought to the
+  front`, `Setup: in front ({how})`, `Setup: started again; brought to the front`.
 
 ## Jobs (installs and updates from the TV, as SYSTEM)
 

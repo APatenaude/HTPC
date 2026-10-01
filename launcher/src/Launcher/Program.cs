@@ -189,7 +189,25 @@ static class Program
         var elevated = Environment.IsPrivilegedProcess;
         var trusted = SetupElevation.RunsFromTrustedPlace(Environment.ProcessPath, AppContext.BaseDirectory, SetupElevation.TrustedDir);
         var step = SetupElevation.Decide(options.Setup, elevated, trusted, args);
-        if (step != SetupElevation.Step.Run) { SetupElevation.GetRights(step, args); return; }
+        if (step != SetupElevation.Step.Run) { SetupStart.FirstCopy(step, args); return; }
+        // One setup at a time: a second start brings the first forward (SetupInstance), before anything is
+        // ended. The splash is this copy's own, up before the slow parts, then the first copy's goes (it may
+        // be ended below with the other copies of this program). A copy that replaces one whose screens did
+        // not show (Try again) waits for it to go.
+        using var setupRunning = options.Setup ? SetupInstance.Claim(elevated, wait: TimeSpan.FromSeconds(5)) : null;
+        if (options.Setup)
+        {
+            if (setupRunning is null)
+            {
+                Log.Info("Setup: another one is running; brought to the front");
+                SetupInstance.SignalShown();
+                Log.Flush();
+                return;
+            }
+            SetupElevation.ScreenIsUp = SetupSplash.Dismiss;
+            SetupSplash.Open(waitUntilUp: true);
+            SetupInstance.SignalShown();
+        }
         if (Rights.SetupElevated)
         {
             // Setup sets up the account it runs as: only the one signed in here. A standard account
@@ -241,12 +259,7 @@ static class Program
         // launcher takes the settings and the TV's files in, as the user, at its next start.
         // The elevated setups' WebView2 profiles, one per run in the user's profile: the launcher removes them, as the user.
         if (!options.Setup) SetupElevation.ClearSetupWebViews();
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled", e.ExceptionObject as Exception);
-        Application.ThreadException += (_, e) => Log.Error("UI thread", e.Exception);
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
+        SetupElevation.PrepareUi();
         try { Application.Run(new MainForm(options)); }
         finally
         {

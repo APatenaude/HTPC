@@ -24,6 +24,42 @@ static class ElevationTests
         T.Group("Setup elevation: arguments and the command line", Arguments);
         T.Group("Setup elevation: who takes over after setup", AfterSetup);
         T.Group("Setup elevation: the mutex, setup.ps1, the task, the profiles, the screen", Seams);
+        T.Group("Setup: one at a time, a second start brings the first forward", OneAtATime);
+    }
+
+    static void OneAtATime()
+    {
+        // Names of the test's own, never a real setup's.
+        var prefix = $@"Local\HtpcSetupTest-{Guid.NewGuid():N}-";
+        Check(!SetupInstance.IsUp(prefix), "nothing running: not up");
+        Check(!SetupInstance.SignalFront(prefix), "... and nothing to bring forward");
+
+        // First copy: starting, then the elevated one running.
+        using var starting = SetupInstance.BeginStarting(prefix);
+        Check(starting is not null && SetupInstance.IsUp(prefix), "a first copy waiting for the prompt: up");
+        using (var second = SetupInstance.BeginStarting(prefix)) Check(second is null, "a second start while it waits does not start another");
+        using var shown = SetupInstance.ShownEvent(prefix);
+        Check(!shown.WaitOne(0), "the first copy's event is not set before the elevated copy's page is up");
+
+        using var running = SetupInstance.Claim(elevated: true, prefix);
+        Check(running is not null, "the elevated copy takes the running mutex");
+        using var front = SetupInstance.FrontEvent(prefix);
+        // Another process, in life: a mutex is the owner thread's own, so the second copy's try is on another thread.
+        using (var other = Task.Run(() => SetupInstance.Claim(elevated: true, prefix)).Result) Check(other is null, "a second elevated copy does not: it is told to stop");
+        Check(front.WaitOne(0), "... and it told the running one to come forward");
+        using (var late = Task.Run(() => SetupInstance.Claim(elevated: true, prefix, TimeSpan.FromMilliseconds(100))).Result) Check(late is null, "... not even after waiting, while the first one lives");
+        front.WaitOne(0);
+        Check(SetupInstance.IsUp(prefix), "running: up");
+
+        // A second start's signal reaches the running one, once per signal.
+        Check(!front.WaitOne(0), "nobody asked yet: the running copy stays where it is");
+        Check(SetupInstance.SignalFront(prefix) && front.WaitOne(1000), "a second start sets its front event");
+        Check(!front.WaitOne(0), "... which resets: the next start is heard again");
+
+        // The page is up: the first copy's wait ends.
+        var waited = Task.Run(() => SetupInstance.WaitForScreen(shown, TimeSpan.FromSeconds(10), prefix));
+        SetupInstance.SignalShown(prefix);
+        Check(waited.Wait(3000) && waited.Result, "the first copy waits for the page, and goes when it is up");
     }
 
     static void Decisions()
