@@ -52,11 +52,34 @@ static class Input
     static INPUT Mouse(uint flags, int x = 0, int y = 0, int data = 0) =>
         new() { Type = INPUT_MOUSE, U = new Union { Mouse = new MouseInput { X = x, Y = y, Data = data, Flags = flags, Extra = Tag } } };
 
+    /// <summary>
+    /// An elevated window is in front (MainForm.UpdateMapper): Windows would not deliver what this
+    /// process sends to it, so it goes through the elevated input helper (ElevatedInput) once that
+    /// is connected. Nothing changes for any other window.
+    /// </summary>
+    public static volatile bool ToElevated;
+
+    /// <summary>The helper's end of it (ElevatedInput.TrySend, set at start): the records, true when it took them.</summary>
+    public static Func<byte[], bool>? ElevatedSink;
+
     static void Send(params INPUT[] inputs)
     {
         if (inputs.Length == 0) return;
+        if (ToElevated && ElevatedSink?.Invoke(MemoryMarshal.AsBytes(inputs.AsSpan()).ToArray()) == true) return;
+        SendLocal(inputs);
+    }
+
+    static void SendLocal(INPUT[] inputs)
+    {
         if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) != inputs.Length)
             Log.Warn($"SendInput sent less than asked (error {Marshal.GetLastWin32Error()}); a higher-privilege window is probably in front");
+    }
+
+    /// <summary>The input helper (elevated): records the launcher framed (InputFrame), sent as they are.</summary>
+    public static void SendRecords(byte[] records)
+    {
+        if (Marshal.SizeOf<INPUT>() != 40) { Log.Error("Input records are not the size the helper expects"); return; } // InputFrame.RecordSize
+        SendLocal(MemoryMarshal.Cast<byte, INPUT>(records).ToArray());
     }
 
     /// <summary>Presses a key or a combination (modifiers first) and keeps it down.</summary>

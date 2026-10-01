@@ -75,6 +75,7 @@ sealed partial class MainForm : Form
         library.Changed += () => OnUi(PushLibraryProgress);
         library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
+        Input.ElevatedSink = ElevatedInput.TrySend; // input for windows that run as administrator goes through the elevated helper
         keyboard.Message += OnKeyboardMessage;
         keyboard.Broken += why => ExitForRestart($"the on-screen keyboard: {why}");
         closeSoon.Tick += (_, _) =>
@@ -496,6 +497,7 @@ sealed partial class MainForm : Form
         tv.Dispose(); // Google TV's client key file in the user's profile goes with it
         tray?.Dispose(); // MainForm.Shell.cs: no icon left behind in the taskbar
         cursor.Restore();
+        ElevatedInput.Close(); // the helper ends with its pipe, before an update swaps the launcher's files
         dimmer.ResetGamma(); // a layer never shown leaves no close event to do it
         dimmer.Close();
         base.OnFormClosed(e);

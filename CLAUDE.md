@@ -37,7 +37,9 @@ remote, GitHub releases. Where to look:
 - TV safety: never bind a TV automatically; power tests only with the owner there; only this box's TV.
 - `.ps1` files stay ASCII (PowerShell 5.1). Commit messages from a file written without a BOM.
 - The launcher never runs elevated; nothing elevated or SYSTEM reads or writes user-writable places.
-  Never design around UAC (an elevated window or the prompt can't take the controller, by design).
+  Windows that run as administrator take the controller through the input helper (an elevated copy,
+  `--input-helper`, started on demand by the `\HTPC\Input` task; CODEMAP "Controller"); the UAC prompt
+  itself (secure desktop) still can't (the owner, 1 Oct 2026: the old "never" is lifted for windows).
 - UI: every view in the audit walker (`launcher/ui/audit.js`); `Test-Quick -Ui` before showing a change.
 - Edits with an editor that fails when the text is not found; after a scripted edit, `git diff --stat`
   must show every file meant to change.

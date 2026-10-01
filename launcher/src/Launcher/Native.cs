@@ -288,10 +288,33 @@ static class Native
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32FirstW(IntPtr snapshot, ref ProcessEntry32 entry);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32NextW(IntPtr snapshot, ref ProcessEntry32 entry);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
-    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr process, int flags, System.Text.StringBuilder name, ref int size);
     [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int infoClass, IntPtr info, int length, out int returnLength);
     const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+
+    /// <summary>
+    /// Whether a process runs with administrator rights (an elevated token). A standard process cannot
+    /// open an elevated one's token at all (access denied): that counts as elevated too, as does any
+    /// process of higher integrity (SYSTEM's). Unknown or gone: false.
+    /// </summary>
+    public static bool IsElevatedProcess(uint processId)
+    {
+        const uint TOKEN_QUERY = 0x8;
+        const int TokenElevation = 20, ERROR_ACCESS_DENIED = 5;
+        var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+        if (process == IntPtr.Zero) return Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED;
+        try
+        {
+            if (!OpenProcessToken(process, TOKEN_QUERY, out var token)) return Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED;
+            try { return GetTokenInformation(token, TokenElevation, out var elevated, sizeof(int), out _) && elevated != 0; }
+            finally { CloseHandle(token); }
+        }
+        finally { CloseHandle(process); }
+    }
 
     /// <summary>A process's program path and command line (null where it cannot be read).</summary>
     public static (string? Path, string? CommandLine) ProcessInfo(int processId)

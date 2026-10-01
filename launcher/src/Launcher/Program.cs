@@ -159,6 +159,16 @@ static class Program
             Log.Flush();
             return;
         }
+        // --input-helper: the \HTPC\Input task's elevated copy that sends the controller's input to
+        // windows that run with administrator rights (InputHelper). Only beside a standard-rights token
+        // (it logs in setup's admin-only folder, Log.PickPath); with none, the launcher can do it itself.
+        if (args.Contains("--input-helper"))
+        {
+            Rights.Set(setupElevated: false, token);
+            if (token == Rights.Token.Split) Environment.ExitCode = InputHelper.Run();
+            Log.Flush();
+            return;
+        }
         var options = Options.Parse(args);
         // Setup from TV mode: its first copy started Explorer for it, which closes as setup ends.
         SetupElevation.OwnDesktop = options.Setup && args.Contains(SetupElevation.DesktopFlag);

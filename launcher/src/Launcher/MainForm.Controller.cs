@@ -24,6 +24,7 @@ sealed partial class MainForm
     IntPtr lastForeground;
     CatalogApp? foregroundApp;
     bool foregroundIsOurs;
+    bool foregroundElevated;   // the window in front (lastForeground) runs with administrator rights
     readonly HashSet<IntPtr> windowsSeen = new();
 
     /// <summary>
@@ -65,13 +66,19 @@ sealed partial class MainForm
                 foregroundApp = apps.ForegroundApp();
                 foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
                 MaximizeOpenedWindow(window);
+                // A window that runs with administrator rights takes no input from this process: the
+                // elevated helper is started and its input goes there (ElevatedInput).
+                foregroundElevated = window != IntPtr.Zero && !foregroundIsOurs && Rights.Elevation == Rights.Token.Standard && Native.IsElevatedProcess(Native.ProcessOf(window));
+                if (foregroundElevated) Log.Info($"An elevated window is in front ({foregroundApp?.Id ?? "not a tile"}): its input goes through the input helper");
             }
+            Input.ToElevated = foregroundElevated && window != IntPtr.Zero && !foregroundIsOurs;
             if (window != IntPtr.Zero && !foregroundIsOurs)
             {
                 map = MapFor(foregroundApp);
                 preset = PresetFor(foregroundApp);
             }
         }
+        else Input.ToElevated = false; // the launcher, standby or setup has the screen: nothing goes to the helper
         // Text fields are watched (for the keyboard to pop up) only while a Mouse or Keyboard
         // preset app without a keyboard of its own is in front: Chromium-based apps build their
         // accessibility tree while anyone listens. Not while the launcher is on its way up (it
@@ -80,6 +87,8 @@ sealed partial class MainForm
         textFields.Enabled = settings.ShowKeyboardAutomatically && !desktopMode && (preset is "mouse" or "keyboard")
             && foregroundApp is not { OwnKeyboard: true } && !LauncherComing;
         if (keyboard.Visible) map = null; // the controller drives the keyboard
+        if (Input.ToElevated) ElevatedInput.Wanted(); // each pass: keeps it for as long as the window is in front
+        ElevatedInput.Tick();
         // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
         if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
         mapper.Map = map;

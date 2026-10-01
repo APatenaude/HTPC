@@ -307,6 +307,14 @@ if ($environment.GetValue('DOTNET_BUNDLE_EXTRACT_BASE_DIR', $null, 'DoNotExpandE
     Write-Change "single-file apps unpack to $bundleDir (DOTNET_BUNDLE_EXTRACT_BASE_DIR)"
 }
 
+# The input helper's task: elevated on demand, so the controller works in windows that run with
+# administrator rights too (Device Manager). As this user, the one the launcher runs as.
+try {
+    & (Join-Path $PSScriptRoot 'Register-InputTask.ps1') -User "$env:USERDOMAIN\$env:USERNAME" -Exe $launcher
+} catch {
+    Write-Attention "the input helper task was not made (windows that run as administrator will not take the controller): $($_.Exception.Message)"
+}
+
 # Started at sign-in: by the watchdog, from Run while Explorer is the shell. As the shell (Shell
 # step) it needs no Run value.
 $shellValue = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' -Name Shell -ErrorAction SilentlyContinue).Shell

@@ -166,9 +166,11 @@ function Switch-WatchdogToWatch($Paths) {
 
 # --- The running launcher ------------------------------------------------------------------------
 
+# Not the input helper (the same file with --input-helper, elevated): it says nothing of leaving, and
+# ends by itself when the launcher it serves does.
 function Get-LauncherProcesses($Paths) {
     @(Get-CimInstance Win32_Process -Filter "Name = 'HtpcLauncher.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $Paths.Exe, [StringComparison]::OrdinalIgnoreCase) })
+        Where-Object { $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $Paths.Exe, [StringComparison]::OrdinalIgnoreCase) -and "$($_.CommandLine)" -notmatch '--input-helper' })
 }
 
 # For a rollback to end: every launcher running from the launcher's own folder under a name an
@@ -412,6 +414,7 @@ $MachineSteps = [ordered]@{ Edge = 'Set-EdgePolicy.ps1'; Power = 'Set-Power.ps1'
 function Update-MachineSettings($Paths, [scriptblock]$Run) {
     if (-not $Run) {
         if (-not (Test-BoxJob $Paths)) { return }
+        Update-InputTask $Paths
         $Run = {
             param($Script)
             $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -444,6 +447,23 @@ function Update-MachineSettings($Paths, [scriptblock]$Run) {
         }
     }
     if ($changed) { Write-AtomicText $record (([pscustomobject]$applied) | ConvertTo-Json -Compress) }
+}
+
+# The \HTPC\Input task (the launcher's elevated input helper, lib\Register-InputTask.ps1) for a box set up
+# before it existed: made here, for the user the running launcher belongs to (this job is SYSTEM and
+# knows no user of its own). No launcher running: left for TV Box Setup. Never fails the update.
+function Update-InputTask($Paths) {
+    try {
+        $process = Get-LauncherProcesses $Paths | Select-Object -First 1
+        $owner = if ($process) { Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop }
+        if (-not $owner -or -not $owner.User) { Write-Host '  the input helper task: no launcher running to say whose it is; TV Box Setup makes it'; return }
+        $script = Join-Path $Paths.LauncherDir 'lib\Register-InputTask.ps1'
+        if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { return }
+        Assert-TrustedPath $script $Paths.InstallRoot
+        & $script -User "$($owner.Domain)\$($owner.User)" -Exe $Paths.Exe
+    } catch {
+        Write-Host "  the input helper task was not made: $($_.Exception.Message)"
+    }
 }
 
 # A \HTPC\Jobs task registered before the bootstrap (it starts lib\Invoke-AppJob.ps1 itself)

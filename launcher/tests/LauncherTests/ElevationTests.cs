@@ -25,6 +25,33 @@ static class ElevationTests
         T.Group("Setup elevation: who takes over after setup", AfterSetup);
         T.Group("Setup elevation: the mutex, setup.ps1, the task, the profiles, the screen", Seams);
         T.Group("Setup: one at a time, a second start brings the first forward", OneAtATime);
+        T.Group("Input helper: what the elevated copy takes, and who is elevated", InputHelperChecks);
+    }
+
+    static void InputHelperChecks()
+    {
+        byte[] Records(int count, uint type = 1)
+        {
+            var bytes = new byte[count * InputFrame.RecordSize];
+            for (var i = 0; i < count; i++) BitConverter.TryWriteBytes(bytes.AsSpan(i * InputFrame.RecordSize), type);
+            return bytes;
+        }
+        Check(InputFrame.Valid(Records(1)) && InputFrame.Valid(Records(1, 0)) && InputFrame.Valid(Records(InputFrame.MaxRecords)), "whole keyboard and mouse records are taken");
+        Check(!InputFrame.Valid([]) && !InputFrame.Valid(new byte[InputFrame.RecordSize + 1]) && !InputFrame.Valid(Records(InputFrame.MaxRecords + 1)), "none, a part of a record, or too many are not");
+        Check(!InputFrame.Valid(Records(2, 2)) && !InputFrame.Valid(Records(1, 99)), "hardware input and any other kind are not");
+        var frame = InputFrame.Encode(Records(3));
+        Check(frame.Length == 4 + 3 * InputFrame.RecordSize && BitConverter.ToInt32(frame) == 3 * InputFrame.RecordSize, "a frame: its length, then the records");
+        using (var stream = new MemoryStream([.. frame, .. InputFrame.Encode(Records(1))]))
+        {
+            Check(InputFrame.Read(stream)?.Length == 3 * InputFrame.RecordSize && InputFrame.Read(stream)?.Length == InputFrame.RecordSize && InputFrame.Read(stream) is null, "frames are read one after the other, then the end");
+        }
+        using (var cut = new MemoryStream(frame[..^7])) Check(InputFrame.Read(cut) is null, "a frame cut short ends the connection");
+        using (var big = new MemoryStream(BitConverter.GetBytes(int.MaxValue))) Check(InputFrame.Read(big) is null, "a length too big is refused before anything is read");
+        using (var odd = new MemoryStream([.. BitConverter.GetBytes(InputFrame.RecordSize), .. Records(1, 2)])) Check(InputFrame.Read(odd) is null, "a frame of hardware input is refused");
+
+        Check(Native.IsElevatedProcess((uint)Environment.ProcessId) == Environment.IsPrivilegedProcess, "this process: elevated as Windows says");
+        Check(Native.IsElevatedProcess(4), "the System process: higher than a standard one (its token cannot be opened)");
+        Check(!Native.IsElevatedProcess(0x7FFFFFF0), "no such process: not elevated");
     }
 
     static void OneAtATime()

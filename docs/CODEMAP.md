@@ -151,6 +151,14 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   options" (menuKeys); selftest "Button maps..." (`ui/selftest/maps.js`), "Settings: opening, moving..."
   ('Controller:', `settings.js`); audit (`ui/audit/settings.js`) 'button maps', 'button map editor' (+ its
   choice, key combination, presets), 'settings: Controller', 'settings: Controller, button test'. Without a controller: `launcher\dev\Send-Pad.ps1` (a `--dev` launcher).
+- Windows that run as administrator (Device Manager, installers): `Input.ToElevated` (set in `UpdateMapper` from
+  `Native.IsElevatedProcess` when the window in front changes) sends `Input.Send`'s records through
+  `ElevatedInput.TrySend` to the input helper (`InputHelper.Run`, `--input-helper`: elevated, no window, started
+  by the `\HTPC\Input` task that `setup/lib/Register-InputTask.ps1` makes from `Install-Launcher.ps1` and
+  `LauncherUpdate.ps1` `Update-InputTask` for older boxes; a clean-environment command line, pipe
+  `HtpcInput-<session>`, frames in `InputFrame.cs`). Other windows get SendInput directly, as before. Tests:
+  "Input helper: ..." (`ElevationTests.cs`). Log: `An elevated window is in front`, `Input helper: connected
+  after {ms} ms`, `Input helper: could not start the \HTPC\Input task`.
 - Log: `Controller connected in slot {n}`, `Home down` / `Home held` / `Home up after {ms} ms`,
   `Buttons: {name} preset`, `Button map {id}: {what}`.
 
