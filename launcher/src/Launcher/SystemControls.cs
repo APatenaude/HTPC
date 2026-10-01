@@ -257,6 +257,18 @@ sealed class Dimmer : Form
         FitScreen();
     }
 
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>
+    /// Back on top of the topmost windows shown after it (the on-screen keyboard is one, and was
+    /// not dimmed: the brightness layer sat under it), without activating anything.
+    /// </summary>
+    public void Raise()
+    {
+        const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
+        if (Visible && IsHandleCreated) SetWindowPos(Handle, new IntPtr(-1) /* HWND_TOPMOST */, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
     /// <summary>100 = no dimming; 10 = darkest allowed (never fully black).</summary>
     public void SetBrightness(int percent)
     {

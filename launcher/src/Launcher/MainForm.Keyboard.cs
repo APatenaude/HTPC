@@ -47,6 +47,7 @@ sealed partial class MainForm
         keyboardAuto = auto;
         mapper.Map = null; // at once: the controller now drives the keyboard
         keyboard.Open(field?.Name ?? "", field?.IsPassword ?? false);
+        dimmer.Raise(); // the keyboard is dimmed with everything else
         // The label of one of the launcher's own fields can hold a network's name ("Password for ..."): not logged.
         // An app's field: what the app calls it too ("textbox", "combobox"), should one that is no text field slip through.
         var label = field is null || field.ProcessId == Environment.ProcessId ? "" : $" \"{field.Name}\"{(field.Kind.Length > 0 ? $", {field.Kind}" : "")}";
