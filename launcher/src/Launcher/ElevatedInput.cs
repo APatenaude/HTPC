@@ -26,6 +26,9 @@ static class ElevatedInput
     static bool connecting;
     static bool warnedMissing;
 
+    /// <summary>The \HTPC\Input task is not there (once per run): the launcher asks SYSTEM to make it (UpdateService.RegisterInputTask).</summary>
+    public static event Action? TaskMissing;
+
     /// <summary>One helper per signed-in session.</summary>
     public static string PipeName { get; } = $"HtpcInput-{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
 
@@ -130,8 +133,12 @@ static class ElevatedInput
         }
         catch (Exception e)
         {
-            if (!warnedMissing) Log.Warn($"Input helper: could not start the \\HTPC\\Input task ({e.Message}); run TV Box Setup again to make it. Elevated windows do not take the controller until then");
-            warnedMissing = true;
+            if (!warnedMissing)
+            {
+                Log.Warn($"Input helper: could not start the \\HTPC\\Input task ({e.Message}); asking for it to be made");
+                warnedMissing = true;
+                TaskMissing?.Invoke();
+            }
             return false;
         }
     }

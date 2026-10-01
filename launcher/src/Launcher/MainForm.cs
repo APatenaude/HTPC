@@ -75,6 +75,7 @@ sealed partial class MainForm : Form
         library.Changed += () => OnUi(PushLibraryProgress);
         library.Finished += (job, ok, text) => OnUi(() => OnJobFinished(job, ok, text));
         controller.Mapper = mapper;
+        ElevatedInput.TaskMissing += () => OnUi(() => { if (updates?.RegisterInputTask() is { } why) Log.Warn($"Input helper: the task could not be queued: {why}"); });
         Input.ElevatedSink = ElevatedInput.TrySend; // input for windows that run as administrator goes through the elevated helper
         keyboard.Message += OnKeyboardMessage;
         keyboard.Broken += why => ExitForRestart($"the on-screen keyboard: {why}");

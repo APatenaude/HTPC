@@ -275,6 +275,7 @@ as SYSTEM, take no argument unless shown, and first put right an interrupted lau
 | `launcher-update:<x.y.z>` | release v<x.y.z> of APatenaude/HTPC replaces the launcher, `lib\`, `jobs\`, `catalog.json` and the kept setup (`lib/LauncherUpdate.ps1`) |
 | `launcher-rollback` | back to the launcher before the last update (support only: the update rolls back by itself) |
 | `reconcile` | finishes or undoes an interrupted launcher update, from its journal (`state\launcher-update.json`) and the files; then the autostart guard for every catalog app (at every Windows start) |
+| `input-task` | the `\HTPC\Input` task (the launcher's elevated input helper, `lib/Register-InputTask.ps1`) for the TV user, when the launcher finds it missing |
 | `windows-scan` | the waiting Windows updates, into `state\windows-updates.json` (`lib/WindowsUpdate.ps1`, `lib/WuaChild.ps1`) |
 | `windows-install` | a restore point (checked), then those updates one at a time |
 | `restorepoint` | a restore point, checked with `Get-ComputerRestorePoint` (before "Update all") |

@@ -9,7 +9,7 @@ Write-Host 'Core'
 # an exit code); and the real watchdog's compile (further down).
 $enterRun = Start-Child $psExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ". '$lib\UpdateCore.ps1'; try { Enter-UpdateJob; 'entered' } catch { `$_.Exception.Message }")
 $dryRuns = @(
-    foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update') {
+    foreach ($t in 'launcher-update:0.2.0', 'launcher-rollback', 'reconcile', 'windows-scan', 'windows-install', 'restorepoint', 'winget-update', 'input-task') {
         @{ Accepted = $true; What = "job token accepted: $t"; Child = Start-PowerShell "$lib\Invoke-AppJob.ps1" @('-Job', $t, '-DryRun') }
     }
     foreach ($t in 'launcher-update:1.2;calc', 'WINDOWS-SCAN', 'launcher-update:../x', 'nosuchverb') {

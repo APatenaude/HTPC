@@ -340,6 +340,9 @@ sealed class UpdateService
         return ok ? null : error;
     }
 
+    /// <summary>The \HTPC\Input task is missing (a box set up or updated before it existed): SYSTEM makes it for the TV user (jobs\input-task.ps1).</summary>
+    public string? RegisterInputTask() => QueueBox("input-task", "", "Setting up the controller for administrator windows");
+
     string? QueueBox(string verb, string arg, string label, TimeSpan? stall = null, Func<bool>? waitUntil = null)
     {
         var job = new LibraryJob(arg, verb, false) { BoxJob = true, Label = label, Stall = stall, WaitUntil = waitUntil };
