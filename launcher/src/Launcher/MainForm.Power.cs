@@ -41,7 +41,7 @@ sealed partial class MainForm
     {
         Log.Info(active ? "In standby" : "Awake");
         mouseWatchPaused = active;
-        if (!active) mouseWatch.Start();
+        if (!active) { mouseWatch.Start(); dimmer.Reapply(); }
         overlay.Suppress(active);
         volumeOsd.Suppress(active);
         // The TV follows the box, unless the TV's own remote started this.

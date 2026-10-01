@@ -344,6 +344,12 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   watchdog unit tests (Test-Updates Core checks its rules); selftest 'Menu over the desktop:'
   (`ui/selftest/menu.js`); audit 'home menu in desktop mode', 'power in desktop mode' (`ui/audit/home.js`),
   'settings: About & Desktop mode' (`ui/audit/settings.js`).
+- Back to the desktop from the dashboard or an app without ending Explorer: the Power menu's Desktop card and
+  the Home menu's Desktop row (`state.desktop`; `power-action` 'desktop' sends at once when the desktop is up,
+  `EnterDesktop` finds Explorer running). Brightness in desktop mode: `Dimmer.UseGamma` (set by
+  `MainForm.RefreshDimming`) dims through the displays' gamma ramp as far as Windows accepts (`GammaLevel`)
+  and the layer does the rest (`LayerLevel`): the Start menu is above any topmost window; tests "Brightness
+  at start".
 - Log: `Desktop mode ({how})`, `Desktop mode: Explorer started (pid {n})`, `Back to TV`, `Tray icon: added`;
   watchdog.log `Launcher started (pid {n})`, `Paused (...)`.
 

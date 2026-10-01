@@ -196,6 +196,9 @@ sealed class AudioVolume
 /// <summary>
 /// Global brightness (SPEC N12): a black, click-through, topmost layer over every app. It can
 /// only darken; the TV's own brightness is set once to the brightest comfortable level.
+/// In desktop mode (UseGamma) the displays' gamma ramp does the dimming as far as Windows allows
+/// (about half by default), the layer the rest: the Start menu, search and the flyouts live in a
+/// window band above any topmost window, so only the ramp reaches them.
 /// </summary>
 sealed class Dimmer : Form
 {
@@ -232,6 +235,70 @@ sealed class Dimmer : Form
 
     protected override bool ShowWithoutActivation => true;
 
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateDC(string driver, string device, string? port, IntPtr devMode);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] static extern bool SetDeviceGammaRamp(IntPtr hdc, [In] ushort[] ramp);
+
+    /// <summary>Dim through the displays' gamma ramp too (desktop mode). Set it, then SetBrightness again.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool UseGamma { get; set; }
+
+    int gammaNow = 100;   // what the ramp is at: 100 = untouched by this program
+
+    /// <summary>The ramp for a level: red, green and blue, 256 entries each, linear, scaled to percent.</summary>
+    public static ushort[] GammaRamp(int percent)
+    {
+        var ramp = new ushort[3 * 256];
+        for (var i = 0; i < ramp.Length; i++) ramp[i] = (ushort)(i % 256 * 257 * Math.Clamp(percent, 0, 100) / 100);
+        return ramp;
+    }
+
+    /// <summary>The first level at or above percent (in steps of 5) that accepts takes, 100 when none does: Windows turns down a ramp too far from the plain one.</summary>
+    public static int GammaLevel(int percent, Func<int, bool> accepts)
+    {
+        for (var level = percent; level < 100; level += 5)
+            if (accepts(level)) return level;
+        return 100;
+    }
+
+    /// <summary>The layer's own level once the ramp is at gamma: what is left of percent.</summary>
+    public static int LayerLevel(int percent, int gamma) =>
+        gamma >= 100 ? percent : Math.Clamp((int)Math.Round(100.0 * percent / gamma), Darkest, 100);
+
+    bool TrySetRamp(int level)
+    {
+        var ramp = GammaRamp(level);
+        var all = true;
+        foreach (var screen in Screen.AllScreens)
+        {
+            var dc = CreateDC("DISPLAY", screen.DeviceName, null, IntPtr.Zero);
+            if (dc == IntPtr.Zero) { all = false; continue; }
+            try { all &= SetDeviceGammaRamp(dc, ramp); }
+            finally { DeleteDC(dc); }
+        }
+        if (all) gammaNow = level;
+        return all;
+    }
+
+    /// <summary>The ramp back to the plain one (a start after a launcher that ended while dimmed this way, leaving desktop mode, closing).</summary>
+    public void ResetGamma()
+    {
+        if (gammaNow != 100 && !TrySetRamp(100)) Log.Warn("Brightness: could not put the display's gamma back");
+    }
+
+    /// <summary>The ramp again, as it was: a display that came back (standby, a signal change) may have dropped it.</summary>
+    public void Reapply()
+    {
+        if (gammaNow != 100) TrySetRamp(gammaNow);
+    }
+
+    /// <summary>A launcher that ended while dimming through the ramp left it there: plain again before the first frame.</summary>
+    public static void ClearStaleGamma()
+    {
+        using var stale = new Dimmer { gammaNow = 0 };
+        stale.ResetGamma();
+    }
+
     /// <summary>The darkest the layer goes (never fully black).</summary>
     public const int Darkest = 10;
 
@@ -247,6 +314,7 @@ sealed class Dimmer : Form
     /// <summary>The primary screen changed (MainForm.Screen.cs): the layer covers the new one.</summary>
     public void FitScreen()
     {
+        Reapply();
         if (Visible) Bounds = Screen.PrimaryScreen!.Bounds;
     }
 
@@ -273,11 +341,15 @@ sealed class Dimmer : Form
     public void SetBrightness(int percent)
     {
         percent = Math.Clamp(percent, Darkest, 100);
+        var gamma = 100;
+        if (UseGamma && percent < 100) gamma = GammaLevel(percent, TrySetRamp);
+        if (gamma == 100) ResetGamma(); // none taken, or not in desktop mode: the plain ramp
+        var layer = LayerLevel(percent, gamma);
         Bounds = Screen.PrimaryScreen!.Bounds;
-        Opacity = (100 - percent) / 100.0;
+        Opacity = (100 - layer) / 100.0;
         var front = Native.GetForegroundWindow();
-        if (percent < 100 && !Visible) Show();
-        if (percent == 100 && Visible) Hide();
+        if (layer < 100 && !Visible) Show();
+        if (layer == 100 && Visible) Hide();
         // Should Windows still activate the layer, the window that was in front gets it back.
         if (IsHandleCreated && Native.GetForegroundWindow() == Handle && front != IntPtr.Zero && front != Handle)
         {

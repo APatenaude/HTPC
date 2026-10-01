@@ -197,6 +197,7 @@ sealed partial class MainForm : Form
     void OnResumed()
     {
         Log.Info("Resumed");
+        dimmer.Reapply();
         if (standby is null) { _ = tv.TurnOn(); return; }
         standby.Resumed();
         if (standby.Active) standby.Wake("resumed"); // the TV comes on with it (OnStandbyChanged)
@@ -495,6 +496,7 @@ sealed partial class MainForm : Form
         tv.Dispose(); // Google TV's client key file in the user's profile goes with it
         tray?.Dispose(); // MainForm.Shell.cs: no icon left behind in the taskbar
         cursor.Restore();
+        dimmer.ResetGamma(); // a layer never shown leaves no close event to do it
         dimmer.Close();
         base.OnFormClosed(e);
     }

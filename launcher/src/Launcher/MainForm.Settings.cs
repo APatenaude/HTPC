@@ -94,10 +94,19 @@ sealed partial class MainForm
     /// </summary>
     void RestoreBrightness()
     {
+        if (settings.Brightness < 100) Dimmer.ClearStaleGamma();
         brightness = Dimmer.StartLevel(settings.Brightness);
         if (brightness == 100) return;
         dimmer.SetBrightness(brightness);
         Log.Info($"Brightness {brightness}{(brightness != settings.Brightness ? $" (set to {settings.Brightness} last; a start is never darker than {Dimmer.FloorAtStart})" : "")}");
+    }
+
+    /// <summary>Desktop mode entered or left (or found up at start): the gamma ramp dims there, so the Start menu is dimmed too.</summary>
+    void RefreshDimming()
+    {
+        if (dimmer.UseGamma == desktopMode) return;
+        dimmer.UseGamma = desktopMode;
+        dimmer.SetBrightness(brightness);
     }
 
     /// <summary>The Home menu's slider or the phone: at once on screen, kept for the next start.</summary>
