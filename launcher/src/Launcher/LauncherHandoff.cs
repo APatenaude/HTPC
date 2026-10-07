@@ -11,9 +11,11 @@ namespace Htpc.Launcher;
 /// Standby: the box was in standby, so the new launcher goes straight back to it, sends the TV
 /// nothing (no "TV on at start"), and after waking puts the apps listed in EfficiencyPids back
 /// to normal priority. QuietBoot: a restart at night; after the boot the TV stays off.
+/// App: the app the Home menu was open over when the launcher left; the new launcher puts it back
+/// in front (or the app stays in front of a launcher that believes it has the screen, and Home does nothing).
 /// Read once at start and deleted; too old a handoff (the box was off for days) is ignored.
 /// </summary>
-sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[] EfficiencyPids, DateTime WrittenUtc, string FromVersion)
+sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[] EfficiencyPids, DateTime WrittenUtc, string FromVersion, string? App = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     static readonly string FilePath = Path.Combine(
@@ -30,7 +32,7 @@ sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[]
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
-            Log.Info($"Handoff written: {Reason}, standby {Standby}, quiet boot {QuietBoot}");
+            Log.Info($"Handoff written: {Reason}, standby {Standby}, quiet boot {QuietBoot}, app {App ?? "none"}");
         }
         catch (Exception e) { Log.Warn($"Handoff not written: {e.Message}"); }
     }
@@ -54,7 +56,7 @@ sealed record LauncherHandoff(string Reason, bool Standby, bool QuietBoot, int[]
             if (age < TimeSpan.Zero || age > limit) { Log.Info($"Handoff from {h.WrittenUtc:u} ignored (too old)"); return null; }
             // A restart handoff counts only after a restart (the box booted after it was written).
             if (h.Reason == "windows-restart" && BootTimeUtc() < h.WrittenUtc) { Log.Info("Handoff for a restart that did not happen: ignored"); return null; }
-            Log.Info($"Handoff: {h.Reason} from {h.FromVersion}, standby {h.Standby}, quiet boot {h.QuietBoot}");
+            Log.Info($"Handoff: {h.Reason} from {h.FromVersion}, standby {h.Standby}, quiet boot {h.QuietBoot}, app {h.App ?? "none"}");
             return h;
         }
         catch (Exception e)

@@ -1453,6 +1453,18 @@ T.Group("Owns the controller: only the app's own program counts as it", () =>
     finally { try { root.Kill(true); } catch (Exception) { } }
 });
 
+// ---------------------------------------------------------------- The handoff between launchers
+// The app the Home menu was open over travels in it; a handoff from an older launcher has none.
+T.Group("Handoff: the app the menu was over", () =>
+{
+    var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    var now = DateTime.UtcNow;
+    var withApp = JsonSerializer.Deserialize<LauncherHandoff>(JsonSerializer.Serialize(new LauncherHandoff("launcher-update", false, false, [], now, "1.0.14", "youtube"), web), web);
+    Check(withApp is { Reason: "launcher-update", App: "youtube", Standby: false }, "the app is written and read back");
+    var old = JsonSerializer.Deserialize<LauncherHandoff>("{\"reason\":\"launcher-update\",\"standby\":true,\"quietBoot\":false,\"efficiencyPids\":[7],\"writtenUtc\":\"2026-10-07T06:00:00Z\",\"fromVersion\":\"1.0.13\"}", web);
+    Check(old is { App: null, Standby: true, EfficiencyPids: [7] }, "a handoff from a launcher before 1.0.15: no app, the rest as before");
+});
+
 return T.Summary();
 
 /// <summary>Windows' device enumerator through a [ComImport] class of its own, as the launcher's files each had one.</summary>

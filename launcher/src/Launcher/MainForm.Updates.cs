@@ -44,6 +44,15 @@ sealed partial class MainForm
         standby.Enter($"back in standby after {h.Reason}");
     }
 
+    /// <summary>The Home menu was open over an app when the launcher left: back to that app.</summary>
+    [UiReady]
+    void ReturnToAppAfterHandoff()
+    {
+        if (setupMode || standby.Active || startHandoff is not { Standby: false, App: { } id } || !apps.IsRunning(id)) return;
+        Log.Info($"Back to {id}: the Home menu was open over it when the launcher was replaced");
+        SwitchTo(id);
+    }
+
     [UiReady]
     void PostUpdates()
     {
@@ -206,7 +215,7 @@ sealed partial class MainForm
         leaving = true;
         Log.Info($"Leaving for launcher {leavingFor}");
         if (!standby.Active && leavingSignal is null) Post(new { type = "updates.restarting", version = leavingFor ?? "" });
-        new LauncherHandoff("launcher-update", standby.Active, QuietBoot: false, EfficiencyPids(), DateTime.UtcNow, Program.Version).Save();
+        new LauncherHandoff("launcher-update", standby.Active, QuietBoot: false, EfficiencyPids(), DateTime.UtcNow, Program.Version, menuOver).Save();
         _ = Task.Delay(standby.Active ? 100 : 1200).ContinueWith(_ => BeginInvoke(() =>
         {
             Environment.ExitCode = 75;
