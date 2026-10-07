@@ -71,6 +71,7 @@ static partial class Program
         T.Group("Certificates", CertificateTests);
         T.GroupAsync("HTTPS (a key in the user's key store for the test, deleted after)", HttpsTests);
         T.GroupAsync("Share and the Shortcut", ShareTests);
+        T.GroupAsync("Logs for the development machine", LogTests);
         T.Group("Afterwards: the CA stores", () =>
             Check(IntermediatesInStore(PhoneCertificates.BoxName).IsSubsetOf(boxOnes), "no intermediate under the box's own name added to the CA stores"));
         return T.Summary();

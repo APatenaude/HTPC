@@ -128,6 +128,8 @@ sealed class PhoneClient
 /// One exception: /api/open, for the iPhone's Share-sheet Shortcut, which sends no Origin; it
 /// needs a Shortcut key instead (Settings › Phone remote can remove it), 4 KB at most, 20 links
 /// a minute per key; a device sending 10 wrong keys in a minute is shut out for a minute.
+/// One more door, /logs (PhoneLogs): the box's logs, read-only, for the development machine on the home
+/// network (no pairing; other addresses are refused).
 /// Messages are at most 4 KB; a phone that sends nothing for 15 s (it sends a heartbeat every
 /// 5 s) is dropped; at most 8 phones at once.
 /// </summary>
@@ -398,6 +400,7 @@ sealed class PhoneServer
                 case "/ca.crt": await ServeAuthority(ctx); break;
                 case "/api/open": await OpenShared(ctx); break;
                 case "/share": await Share(ctx); break;
+                case { } p when p == "/logs" || p.StartsWith("/logs/"): await Logs(ctx); break;
                 default: await StaticFile(ctx); break;
             }
         }
@@ -448,6 +451,28 @@ sealed class PhoneServer
         if (type.StartsWith("text/html")) response.Headers.ContentSecurityPolicy = Policy(ctx);
         response.ContentLength = bytes.Length;
         if (!HttpMethods.IsHead(request.Method)) await response.Body.WriteAsync(bytes);
+    }
+
+    /// <summary>The box's logs for the development machine (PhoneLogs): no pairing, the home network only.</summary>
+    async Task Logs(HttpContext ctx)
+    {
+        var request = ctx.Request;
+        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)) { ctx.Response.StatusCode = 405; return; }
+        if (!PhoneLogs.IsLocalNetwork(ctx.Connection.RemoteIpAddress)) { ctx.Response.StatusCode = 403; return; }
+        var name = (request.Path.Value ?? "").Substring("/logs".Length).Trim('/');
+        string text;
+        if (name.Length == 0) text = PhoneLogs.Index();
+        else if (PhoneLogs.Find(name) is { } file)
+        {
+            var lines = int.TryParse(request.Query["lines"], out var n) ? Math.Clamp(n, 1, PhoneLogs.MaxLines) : PhoneLogs.DefaultLines;
+            text = PhoneLogs.Tail(file, lines);
+        }
+        else { ctx.Response.StatusCode = 404; return; }
+        var bytes = Encoding.UTF8.GetBytes(text);
+        ctx.Response.ContentType = "text/plain; charset=utf-8";
+        ctx.Response.Headers.CacheControl = "no-store";
+        ctx.Response.ContentLength = bytes.Length;
+        if (!HttpMethods.IsHead(request.Method)) await ctx.Response.Body.WriteAsync(bytes);
     }
 
     async Task Art(HttpContext ctx)

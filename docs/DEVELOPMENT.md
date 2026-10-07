@@ -347,6 +347,11 @@ exists for answer ISOs only; `setup\test` is in neither the setup exe nor setup.
   releases; tell him to update only after the post-release VM update has passed.
 - Look before claiming: logs on the box (`%LOCALAPPDATA%\HTPC\logs`), Windows' event logs, the
   app's own logs. Say plainly what was and was not tested.
+- The box that runs the software is not the development PC: read its logs over the home network,
+  `curl http://tv.local/logs` (the list; or the box's address), then
+  `curl "http://tv.local/logs/user/launcher.log?lines=300"` (Moonlight's own: `moonlight/Moonlight-*.log`).
+  Needs a launcher with the phone remote running (1.0.14 on); use the box's IPv4 address if `tv.local`
+  resolves to a global IPv6 one (403: only home-network addresses are served). Nothing secret may ever reach a log.
 
 ## 8. Where it stands (30 September 2026)
 

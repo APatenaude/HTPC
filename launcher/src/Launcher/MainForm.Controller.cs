@@ -45,6 +45,12 @@ sealed partial class MainForm
         Log.Info($"{who}: its window maximized");
     }
 
+    static string ProgramOf(IntPtr window)
+    {
+        try { using var p = System.Diagnostics.Process.GetProcessById((int)Native.ProcessOf(window)); return p.ProcessName; }
+        catch (Exception) { return "a program"; }
+    }
+
     /// <summary>
     /// Picks the button map for the app in front (its tile's map: preset and changes). None
     /// while the launcher is in front or in standby. A window that belongs to none of the
@@ -70,6 +76,9 @@ sealed partial class MainForm
                 // elevated helper is started and its input goes there (ElevatedInput).
                 foregroundElevated = window != IntPtr.Zero && !foregroundIsOurs && Rights.Elevation == Rights.Token.Standard && Native.IsElevatedProcess(Native.ProcessOf(window));
                 if (foregroundElevated) Log.Info($"An elevated window is in front ({foregroundApp?.Id ?? "not a tile"}): its input goes through the input helper");
+                if (window != IntPtr.Zero)
+                    Log.Info($"In front: {ProgramOf(window)}, window class {Native.ClassOf(window) ?? "?"}, " +
+                        (foregroundIsOurs ? "the launcher's own" : foregroundApp is { } front ? $"the {front.Id} app, {PresetFor(front)} preset" : $"not a tile, {PresetFor(null)} preset"));
             }
             Input.ToElevated = foregroundElevated && window != IntPtr.Zero && !foregroundIsOurs;
             if (window != IntPtr.Zero && !foregroundIsOurs)

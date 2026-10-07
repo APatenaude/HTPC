@@ -1430,6 +1430,29 @@ T.Group("Soak line", () =>
     Check(Says(unknown, "?", "5 min", "7 min") && !unknown.Contains('\n'), "nothing known: still one line, with the uptimes: " + unknown);
 });
 
+// ---------------------------------------------------------------- An app that owns the controller
+// Moonlight opens a browser for its update notice and Help: that window is another program of the
+// app's tree, so the Other windows' map (the pointer) applies to it, not "the app reads the pad".
+T.Group("Owns the controller: only the app's own program counts as it", () =>
+{
+    using var root = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+        Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/c ping -n 8 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
+    try
+    {
+        uint other = 0;
+        for (var i = 0; i < 50 && other == 0; i++)
+        {
+            other = Native.ProcessTreeNames((uint)root.Id).Where(p => p.Key != (uint)root.Id && p.Value.EndsWith("ping.exe", StringComparison.OrdinalIgnoreCase)).Select(p => p.Key).FirstOrDefault();
+            if (other == 0) Thread.Sleep(100);
+        }
+        Check(other != 0, "a second program started under the app");
+        Check(AppManager.IsOwnProgram(root, (uint)root.Id), "the app's own process is the app's");
+        Check(other != 0 && !AppManager.IsOwnProgram(root, other), "another program in its tree (a browser it opened) is not");
+        Check(!AppManager.IsOwnProgram(root, uint.MaxValue - 1), "a process outside its tree is not");
+    }
+    finally { try { root.Kill(true); } catch (Exception) { } }
+});
+
 return T.Summary();
 
 /// <summary>Windows' device enumerator through a [ComImport] class of its own, as the launcher's files each had one.</summary>

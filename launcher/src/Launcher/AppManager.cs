@@ -15,8 +15,8 @@ namespace Htpc.Launcher;
 /// app that outlives its window (Stremio hides to a notification area the TV lacks) is ended; 0 off
 /// (WindowlessQuit, AppManager.CheckWindowless).</param>
 /// <param name="OwnController">ownController: the app uses every button itself, Home included
-/// (Moonlight: a tap on Home is the game PC's; any app in its process tree, a game it started,
-/// counts as it). There a tap on Home is the app's and holding it opens the Home menu; R3 and Start + D-pad
+/// (Moonlight: a tap on Home is the game PC's; only windows of its own program count as it, a browser
+/// it opened is another window: AppManager.ForegroundApp). There a tap on Home is the app's and holding it opens the Home menu; R3 and Start + D-pad
 /// are the app's too (MainForm.OnPad, OnChord; Alerts' chips say "Hold Home").</param>
 /// <param name="Category">category: the id of one of the catalog's categories (Add a tile's library
 /// and setup's app list are shown by category); null for an added tile.</param>
@@ -593,7 +593,12 @@ sealed class AppManager
         return Native.TopLevelWindows(Native.ProcessTree((uint)p.Id)).FirstOrDefault();
     }
 
-    /// <summary>Which running app owns the foreground window, if any.</summary>
+    /// <summary>
+    /// Which running app owns the foreground window, if any: the app's own process or any program
+    /// in its process tree, except for an app that owns the controller: there only its own program
+    /// counts, so a browser it opened (Moonlight's update notice and Help) is another window, which
+    /// gets the Other windows' map and can be closed.
+    /// </summary>
     public CatalogApp? ForegroundApp()
     {
         var pid = Native.ProcessOf(Native.GetForegroundWindow());
@@ -601,9 +606,21 @@ sealed class AppManager
         List<KeyValuePair<string, Process>> list;
         lock (running) list = running.Where(r => !r.Value.HasExited).ToList();
         foreach (var (id, p) in list)
-            if (p.Id == pid || Native.ProcessTree((uint)p.Id).Contains(pid))
-                return Get(id);
+        {
+            if (p.Id == pid) return Get(id);
+            var app = Get(id);
+            if (app?.OwnController == true ? IsOwnProgram(p, pid) : Native.ProcessTree((uint)p.Id).Contains(pid))
+                return app;
+        }
         return null;
+    }
+
+    /// <summary>A process of the app's tree that runs the same program as the app's own.</summary>
+    internal static bool IsOwnProgram(Process root, uint pid)
+    {
+        var tree = Native.ProcessTreeNames((uint)root.Id);
+        return tree.TryGetValue(pid, out var name) && name.Length > 0
+            && string.Equals(name, tree.GetValueOrDefault((uint)root.Id, ""), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

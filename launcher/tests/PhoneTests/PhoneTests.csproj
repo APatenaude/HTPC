@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\src\Launcher\PhoneProtocol.cs;..\..\src\Launcher\PhoneLinks.cs;..\..\src\Launcher\PhonePointer.cs;..\..\src\Launcher\PhoneRouting.cs;..\..\src\Launcher\PhonePairing.cs;..\..\src\Launcher\PhoneNetwork.cs;..\..\src\Launcher\PhoneServer.cs;..\..\src\Launcher\PhoneCertificates.cs;..\..\src\Launcher\ButtonMap.cs;..\..\src\Launcher\Input.cs" />
+    <Compile Include="..\..\src\Launcher\PhoneProtocol.cs;..\..\src\Launcher\PhoneLinks.cs;..\..\src\Launcher\PhonePointer.cs;..\..\src\Launcher\PhoneRouting.cs;..\..\src\Launcher\PhonePairing.cs;..\..\src\Launcher\PhoneNetwork.cs;..\..\src\Launcher\PhoneServer.cs;..\..\src\Launcher\PhoneCertificates.cs;..\..\src\Launcher\PhoneLogs.cs;..\..\src\Launcher\ButtonMap.cs;..\..\src\Launcher\Input.cs" />
   </ItemGroup>
 
   <ItemGroup>

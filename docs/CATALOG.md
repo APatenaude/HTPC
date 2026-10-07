@@ -44,7 +44,9 @@ Readers: the launcher's `AppManager.Parse` (`launcher/src/Launcher/AppManager.cs
   itself there (R3 still opens it).
 - `ownController`: true = the app uses every button itself, Home included (Moonlight: the game
   PC's): a tap on Home is the app's, holding Home opens the Home menu, and R3 and Start + D-pad are
-  the app's too.
+  the app's too. Only windows of the app's own program count as it: a browser it opens (Moonlight's
+  update notice and Help) is another window, with the Other windows' map (the pointer), so it can
+  be closed.
 - `menuKeys`: for an app on the Controller preset, a key the launcher types when a button goes down
   (keys as in a button map, `"select": "key:Shift+Tab"`; buttons a b x y lb rb lt rt select start
   l3 r3), only while the window in front has the `whileClass` window class (`*` a wildcard) and no
@@ -101,7 +103,9 @@ An entry with `install` can be installed from the TV (the library); one without 
 - `install.id`: the winget id.
 - `install.wingetScope`: the `--scope` handed to winget when it differs from `install.scope` (Kodi
   ships only a user-scoped installer but writes to Program Files, so it is installed as machine
-  with `--scope user`).
+  with `--scope user`). An upgrade winget refuses because of the scope (Moonlight 6.2.0.0 is
+  user-scoped, a 6.1.0.0 install machine-wide) is done by `jobs\upgrade.ps1` as an install over the
+  old one with the other scope.
 - `install.elevated`: false marks an app that refuses to install elevated (Spotify): setup's Apps
   step skips it and it is offered only from the library, never in the setup pick list.
 - GitHub apps: `install.repo` (owner/name), `install.asset` (a regular expression for the release's

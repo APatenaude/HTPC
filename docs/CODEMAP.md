@@ -160,6 +160,10 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   environment and starts the exe; pipe `HtpcInput-<session>`, frames in `InputFrame.cs`). Other windows get SendInput directly, as before. Tests:
   "Input helper: ..." (`ElevationTests.cs`). Log: `An elevated window is in front`, `Input helper: connected
   after {ms} ms`, `Input helper: could not start the \HTPC\Input task`.
+- Which window is in front: `In front: {program}, window class {class}, {the app or "not a tile"}, {preset} preset`
+  (`MainForm.UpdateMapper`). `AppManager.ForegroundApp`: an app that owns the controller (Moonlight) is
+  only its own program's windows (`IsOwnProgram`); a browser it opened is "not a tile" (Other windows'
+  map). Test: LauncherTests "Owns the controller".
 - Log: `Controller connected in slot {n}`, `Home down` / `Home held` / `Home up after {ms} ms`,
   `Buttons: {name} preset`, `Button map {id}: {what}`.
 
@@ -343,7 +347,8 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
 - Files: `launcher/phone/` (the page phones load: `phone.js`, `phone-logic.js`), `src/PhoneServer.cs`
   (Kestrel, routes), `PhoneProtocol.cs`, `PhoneRouting.cs` (`PhoneRouter`), `PhonePointer.cs`,
   `PhonePairing.cs`, `PhoneNetwork.cs` (Host/Origin), `PhoneLinks.cs`, `PhoneCertificates.cs` (HTTPS for
-  Android's Share), `PhoneAdapters.cs`, `src/MainForm.Phone.cs`, `ui/phone-settings.js`, `ui/phone-card.js`,
+  Android's Share), `PhoneLogs.cs` (the box's logs at /logs, for the development machine),
+  `PhoneAdapters.cs`, `src/MainForm.Phone.cs`, `ui/phone-settings.js`, `ui/phone-card.js`,
   `ui/qr.js`; setup step `setup/lib/Set-PhoneRemote.ps1` (firewall).
 - Names: `PhoneServer.StartAsync`, `Handle`; `PhoneProtocol.Parse`; `PhoneRouter.Route`; `PhonePairing.Find`;
   `StartPhone`, `OnPhoneCommand`, `HandlePhone`, `PhoneKeyPress`, `PhoneType`, `OpenPhoneLink`,
@@ -355,6 +360,10 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   selftest 'Phone remote:' (`ui/selftest/network.js`); audit 'home with the phone card' (`ui/audit/home.js`),
   'settings: Phone remote' (`ui/audit/settings.js`); on a box
   `launcher\dev\Test-Phone.ps1`.
+- Logs over the network: `GET http://tv.local/logs` lists them (user: the launcher's and watchdog's,
+  setup, moonlight: its own Moonlight*.log files in the user's temp folder), `/logs/{area}/{file}?lines=N`
+  is the end of one (500 lines by default). Read-only, no pairing, refused from addresses outside the
+  home network; names come from the listing only; Moonlight's launch request values (rikey, ids) are redacted. Test: PhoneTests "Logs for the development machine".
 - Log: `Phone remote on port {n}`, `Phone remote: HTTPS on port {n}`, `Phone paired: {name} ({id})`,
   `Phone pairing: code shown on the TV`.
 
