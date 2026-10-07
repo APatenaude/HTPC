@@ -483,10 +483,26 @@ sealed class Standby
 
     [DllImport("powrprof.dll")] static extern bool GetPwrCapabilities(byte[] capabilities);
 
+    long wokeAt = long.MinValue;
+
+    /// <summary>
+    /// The TV came on after a wake (the phone's Wake, say): the screen was switched on while the TV
+    /// was still off, and its picture stayed black until the controller was touched. Switched on
+    /// again now and twice more while the HDMI link settles. Only within 2 minutes of a wake.
+    /// </summary>
+    public void WakeScreenAgain()
+    {
+        if (Active || Environment.TickCount64 - wokeAt > 120_000) return;
+        Log.Info("The TV came on after a wake: the screen is switched on again");
+        foreach (var wait in new[] { 0, 3000, 8000 })
+            _ = Task.Delay(wait).ContinueWith(_ => { if (!Active) { display.On(); NudgeMouse(); } }, TaskScheduler.Default);
+    }
+
     public void Wake(string reason)
     {
         if (!Active) return;
         turn++; // an Enter still waiting stops there
+        wokeAt = Environment.TickCount64;
         Log.Info($"Wake ({reason})");
         var clock = System.Diagnostics.Stopwatch.StartNew();
         countFrom = Environment.TickCount64; // woken by the TV's own remote, say: no input of ours to count from
