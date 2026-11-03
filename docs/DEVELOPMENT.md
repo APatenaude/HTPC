@@ -69,6 +69,7 @@ A Linux machine (x64, tried on Ubuntu 24.04) covers the C# compile and the TV UI
 | Once (and after a `global.json` change) | `launcher/dev/linux/setup.sh` (needs Node.js): exactly the SDK `global.json` names, in `~/.dotnet`; the UI runner's packages and its Chrome |
 | Compile every project | `dotnet build <project> -c Release` (`Directory.Build.props` turns on `EnableWindowsTargeting`; the watchdog is an empty stand-in, the Linux build is never shipped) |
 | The UI self-test and audits (`Test-Ui.ps1 -SelfTest`), then the phone page (`dev/phone-test.html`) | `node launcher/dev/linux/test-ui.mjs` (`--all-sizes`: every size) |
+| The box's address, where `tv.local` does not resolve (a container: no mDNS); its logs are then at `http://<address>/logs` | `node launcher/dev/linux/find-box.mjs <the LAN's first three numbers>` |
 
 Not on Linux: running the test projects and TvLab (WinForms), every `.ps1` (Test-Quick, Test-All,
 the setup tests, screenshots, releases), the VM and the box. The Tests workflow covers part of it
