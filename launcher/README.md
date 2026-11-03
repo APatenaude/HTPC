@@ -292,6 +292,12 @@ SPEC W1, W5. App library and tile editing:
   Forgetting; the Wi-Fi switch (Windows.Devices.Radios).
 - Since 24H2 the network list needs location permission for the launcher: an Allow row when it is
   refused; setup allows it.
+- Test speed (Settings only; `src/SpeedTest.cs`, `MainForm.Wifi.cs`): A on the row measures the delay
+  (median of 8 requests), then the download and the upload (4 streams, about 5 s each) against
+  speed.cloudflare.com, only when asked. The row shows the phase and the live figure as it goes, then
+  "312 Mb/s down · 41 Mb/s up · 12 ms · over Wi-Fi"; A or B stops it, leaving the section too. Straight to
+  the internet (no proxy, nothing on the LAN), refused offline and in standby; scans pause meanwhile.
+  Cloudflare answers 429 for about an hour to a network that tests too often: the row says when to retry.
 - `ui/wifi.js` (WifiUI) is the piece Settings and the first-run Wi-Fi step share.
   `dev/Run-NetProbe.ps1`: what this code sees on a box, read-only, names masked.
 

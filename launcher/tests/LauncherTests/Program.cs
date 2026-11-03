@@ -1221,6 +1221,7 @@ WindowlessQuitTests.Run();  // Apps left running with no window
 AddTileTests.Run();         // Add a tile, the keyboard: the owner's 29 Sept list
 ResourceTests.Run();        // The Home menu's resource view
 TileStoreTests.Run();       // Added tiles: website addresses, names, glyphs, colours, ids
+SpeedTests.Run();           // Settings > Wi-Fi > Test speed: the numbers and a run over a fake server
 
 // ---------------------------------------------------------------- The Home menu's backdrop
 // ScreenCapture's own part: sizes, scaling (the GPU halves a 4K screen; this is what 2560 wide

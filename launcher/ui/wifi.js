@@ -5,18 +5,21 @@
 // talks to the host. It needs the page's send(), esc() and icon(), and textinput.js for the
 // password field (the on-screen keyboard; the phone's typing).
 //
-//   WifiUI.start(opts)    shown: the host starts scanning. opts: { changed(focusId), ask?({title, text, yes, onYes}), toast?(text, kind) }
+//   WifiUI.start(opts)    shown: the host starts scanning. opts: { changed(focusId), ask?({title, text, yes, onYes}), toast?(text, kind), speed? }
 //                         changed: redraw (html() again), then focus data-id focusId if given
-//   WifiUI.stop()         hidden: scanning stops, a form in progress is dropped
+//                         speed: draws the "Test speed" row (Settings only; the setup step has none)
+//   WifiUI.stop()         hidden: scanning stops, a form in progress is dropped, a speed test is cancelled
 //   WifiUI.handle(msg)    host messages wifi.state / wifi.result; true if it was one
 //   WifiUI.html()         the rows (list, or the join form)
 //   WifiUI.press(button, el) -> handled   el: the focused data-nav element
 //   WifiUI.afterRender()  after the page drew html(): the form's field gets the focus and the keyboard
-//   WifiUI.demo(name)     sample data (a plain browser): ethernet, wifi, password, hidden, location, noadapter, off
+//   WifiUI.demo(name)     sample data (a plain browser): ethernet, wifi, password, hidden, location, noadapter, off,
+//                         speed, speed-running, speed-error
 //   From the host: {type:'wifi.state', adapter, radio, location, wired, current, networks, wifiInternet, askRadioOff}
 //                  {type:'wifi.result', ssid, ok, reason, text}
+//                  {type:'wifi.speed', phase: delay|down|up|done|error|cancelled, downMbps, upMbps, delayMs, via, error}
 //   To the host:   {type:'wifi.watch', on} {type:'wifi.join', ssid, password?, hidden?, security?}
-//                  {type:'wifi.forget', ssid} {type:'wifi.radio', on} {type:'wifi.allowLocation'}
+//                  {type:'wifi.forget', ssid} {type:'wifi.radio', on} {type:'wifi.allowLocation'} {type:'wifi.speed', on}
 
 // Two line icons from the design that icons.js lacks.
 if (typeof ICONS === 'object') Object.assign(ICONS, {
@@ -44,6 +47,46 @@ const WifiUI = (() => {
   }
   const toggle = (on) => `<div class="toggle${on ? ' on' : ''}"><span></span></div>`;
 
+  // The speed test (Settings only: opts.speed). The row's caption is patched in place as numbers
+  // come in (patchSpeed); html() draws the same text, so a redraw in between loses nothing.
+  // run: null, or the last host step { phase, downMbps, upMbps }. result: { downMbps, upMbps, delayMs, via } of the last test.
+  const speed = { run: null, result: null, error: null };
+  const mbps = (n) => Math.round(n * 10) / 10 >= 10 ? String(Math.round(n)) : n.toFixed(1);
+
+  function speedCaption() {
+    const r = speed.run, d = speed.result;
+    if (r) {
+      const live = r.phase === 'down' ? r.downMbps : r.phase === 'up' ? r.upMbps : null;
+      const word = { delay: 'Delay', down: 'Download', up: 'Upload' }[r.phase];
+      return `${word}${live ? ' ' + mbps(live) + ' Mb/s' : ''}… · A to stop`;
+    }
+    if (speed.error) return `<span class="fail">${esc(speed.error)}</span>`;
+    if (d) return esc([`${mbps(d.downMbps)} Mb/s down`, `${mbps(d.upMbps)} Mb/s up`, `${d.delayMs} ms`, d.via ? 'over ' + d.via : ''].filter(Boolean).join(' · '));
+    return 'Measures how fast the box downloads and uploads, in about 15 seconds';
+  }
+  const speedRow = () => opts.speed ? row('wifi-speed', 'download', 'Test speed', speedCaption(), '') : '';
+
+  function patchSpeed() {
+    const caption = document.querySelector('[data-id="wifi-speed"] .caption');
+    if (caption) caption.innerHTML = speedCaption();
+  }
+
+  function stopSpeed() {
+    if (!speed.run) return;
+    speed.run = null;
+    send({ type: 'wifi.speed', on: false });
+    patchSpeed();
+  }
+
+  function speedMessage(msg) {
+    if (!speed.run) return;   // cancelled here already: a late step of it
+    if (msg.phase === 'done') { speed.result = msg; speed.run = null; }
+    else if (msg.phase === 'error') { speed.error = msg.error; speed.run = null; }
+    else if (msg.phase === 'cancelled') speed.run = null;
+    else speed.run = msg;
+    patchSpeed();
+  }
+
   function listHtml() {
     if (!st) return '<p class="wifi-note">Looking for Wi-Fi…</p>';
     let h = '';
@@ -51,10 +94,10 @@ const WifiUI = (() => {
     if (w && w.up) {
       h += row('wifi-cable', 'cable', 'Network cable', `<span class="ok">Connected · ${w.mbps >= 1000 ? w.mbps / 1000 + ' Gb/s' : w.mbps + ' Mb/s'}${w.internet ? ' · in use' : ''}</span>`, '');
     }
-    if (!st.adapter) return h + '<p class="wifi-note">This box has no Wi-Fi.</p>';
+    if (!st.adapter) return h + speedRow() + '<p class="wifi-note">This box has no Wi-Fi.</p>';
     const radioOn = st.radio === 'on';
     h += row('wifi-radio', null, 'Wi-Fi', st.radio === 'disabled' ? 'Turned off by a switch on the box or flight mode' : '', st.radio === 'disabled' ? '' : toggle(radioOn));
-    if (!radioOn) return h;
+    if (!radioOn) return h + speedRow();
     if (st.location === 'denied') {
       h += row('wifi-allow', 'warn', 'Allow location to see networks', 'Windows shows Wi-Fi networks only to apps allowed to know the location.', '<div class="value link">Allow</div>', 'warn');
     } else if (st.location === 'device') {
@@ -64,6 +107,7 @@ const WifiUI = (() => {
       h += row('wifi-current', 'wifi', st.current.ssid, `<span class="ok">Connected · ${esc(st.current.words)}</span>`, '', 'current');
     }
     const others = (st.networks || []).filter((n) => !n.connected);
+    h += speedRow();
     h += '<span class="section">Other networks</span><div class="wifi-scroll">';
     // Rows by name, not place: the host sorts the list again with each scan, and the focus stays on
     // its network (A must never join the one that moved under it).
@@ -155,8 +199,9 @@ const WifiUI = (() => {
 
   return {
     start(o) { opts = o || {}; send({ type: 'wifi.watch', on: true }); },
-    stop() { if (form) closeForm(); send({ type: 'wifi.watch', on: false }); },
+    stop() { if (form) closeForm(); stopSpeed(); send({ type: 'wifi.watch', on: false }); },
     handle(msg) {
+      if (msg.type === 'wifi.speed') { speedMessage(msg); return true; }
       if (msg.type === 'wifi.state') {
         const typing = form && document.activeElement && document.activeElement.tagName === 'INPUT';
         st = msg;
@@ -227,8 +272,14 @@ const WifiUI = (() => {
         }
         return false;
       }
+      if (speed.run && button === 'b') { stopSpeed(); return true; }   // B stops the test; the next B leaves
       if (!st) return false;
       if (button === 'a') {
+        if (id === 'wifi-speed') {
+          if (speed.run) stopSpeed();
+          else { speed.run = { phase: 'delay' }; speed.error = null; send({ type: 'wifi.speed', on: true }); patchSpeed(); }
+          return true;
+        }
         if (id === 'wifi-radio') { setRadio(st.radio !== 'on'); return true; }
         if (id === 'wifi-allow') { send({ type: 'wifi.allowLocation' }); return true; }
         if (id === 'wifi-hidden') { openForm({ ssid: '', hidden: true, security: 'wpa2psk' }, 'wifi-name'); return true; }
@@ -254,6 +305,13 @@ const WifiUI = (() => {
         st.wired = null; st.wifiInternet = true; st.askRadioOff = true;
         st.current = { ssid: '[Network name]', signal: 85, words: 'strong signal' };
         st.networks = [{ ...st.current, security: 'wpa2psk', password: true, saved: true, connected: true }, ...nets];
+      }
+      // The speed test row (Settings): speed = a result, speed-running = in the download, speed-error = a failure with a long text.
+      speed.run = speed.result = speed.error = null;
+      if (name.startsWith('speed')) {
+        speed.result = { downMbps: 312.4, upMbps: 41.2, delayMs: 12, via: st.wired ? 'Ethernet' : 'Wi-Fi' };
+        if (name === 'speed-running') speed.run = { phase: 'down', downMbps: 245.3 };
+        if (name === 'speed-error') speed.error = 'Could not reach the speed test server (The SSL connection could not be established, see inner exception. No such host is known)';
       }
       if (name === 'location') { st.location = 'denied'; st.networks = []; }
       if (name === 'noadapter') st.adapter = false;

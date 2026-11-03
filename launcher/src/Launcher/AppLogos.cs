@@ -252,7 +252,7 @@ sealed class AppLogos
     /// network (the router's page, a NAS, a service on localhost). A literal address is judged
     /// the same way; a name with only local addresses fails as NotOnInternetException.
     /// </summary>
-    static async ValueTask<Stream> ConnectToInternet(SocketsHttpConnectionContext context, CancellationToken cancel)
+    internal static async ValueTask<Stream> ConnectToInternet(SocketsHttpConnectionContext context, CancellationToken cancel)
     {
         var host = context.DnsEndPoint.Host;
         var addresses = IPAddress.TryParse(host, out var literal) ? new[] { literal } : await Dns.GetHostAddressesAsync(host, cancel);

@@ -167,7 +167,11 @@ user) are folded into the items below; what was dropped is listed under "Not now
   all day for no one); Settings › Bluetooth turns it on while it shows and a minute after (to
   pair); anything paired keeps it on. The page's switch is the user's: turned off there, the
   radio stays off. Sound: one volume level for the box whatever
-  the output.
+  the output. Wi-Fi has a Test speed row (the owner, 3 Nov 2026: instead of a browser and a
+  speed test site): delay, download and upload in about 15 s, over whichever connection Windows
+  uses. It contacts speed.cloudflare.com only when asked, from Settings › Wi-Fi, never on its own
+  and never from setup; Cloudflare refuses a network that tests too often for about an hour,
+  and the row says so.
 - **W4 First-run setup.** Welcome, controller check, Wi-Fi (only without a cable), find the TV,
   the TV's input, pick apps, install, done. The phone remote is not a step.
 - **W5 App library.** Client apps only, from one catalog file that drives setup and the

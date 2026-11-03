@@ -65,6 +65,12 @@ if (AUDIT_PAGE === 'index') {
   // In a Wi-Fi form, B first leaves the form (then the pane, then Settings).
   sectionState('Wi-Fi, a password to type', 'wifi', () => WifiUI.demo('password'), { back: 3, tick: () => WifiUI.handle(auditClone(AUDIT_WIFI)) });
   sectionState('Wi-Fi, a hidden network', 'wifi', () => WifiUI.demo('hidden'), { back: 3, tick: () => WifiUI.handle(auditClone(AUDIT_WIFI)) });
+  // The speed test row, where it sits among many networks: a test in the download (B stops it, then leaves), a result, a long error.
+  const speedRow = () => $('settings').querySelector('[data-id="wifi-speed"]');
+  const speedState = (name, demo, extra) => sectionState(`Wi-Fi, speed test ${name}`, 'wifi', () => { WifiUI.demo(demo); WifiUI.handle(AUDIT_WIFI); }, { focus: speedRow, ...extra });
+  speedState('running', 'speed-running', { back: 3 });
+  speedState('result', 'speed');
+  speedState('failed', 'speed-error');
   sectionState('Bluetooth, looking for devices', 'bluetooth', () => { bt.scanning = true; }, { back: 3 });
   sectionState('Bluetooth, a PIN to type', 'bluetooth', () => { bt.pin = { name: `[Keyboard ${AUDIT_LONG}]`, pin: '482915' }; }, { back: 3 });
   sectionState('TV, pairing keypad', 'tv', () => { state.tv = TvUi.demo('pair-code'); });

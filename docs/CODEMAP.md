@@ -244,15 +244,23 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   `OnBluetoothMessage` (bt.*).
 - Wi-Fi files: `src/Wifi.cs` (`WifiService`, `LocationConsent`), `src/WlanNative.cs`, `src/WifiProfile.cs`,
   `src/MainForm.Wifi.cs`, `ui/wifi.js` (`WifiUI`, shared with setup), `ui/settings-network.js`.
+- Speed test files: `src/SpeedTest.cs` (no WinForms: `SpeedRules` the numbers and texts, `SpeedMeter`,
+  `SpeedTest` the run over any `HttpMessageHandler`; `CreateHandler` is the box's), the "Test speed" row of
+  `ui/wifi.js` (Settings only: `start({ speed: true })`; the setup step has none).
 - Names: `WifiService.Watch`, `Scan`, `Join`, `Forget`, `SetRadio`; `WifiProfile.Choose`, `Build`, `Refusal`;
   `JoinWifi`, `PostWifi`, `OnWifiMessage` (wifi.*). Read-only probe: `launcher\dev\Run-NetProbe.ps1`.
+  Speed test: `StartSpeedTest`, `CancelSpeedTest`, `RunSpeedTest` (wifi.speed {on} / {phase, downMbps, upMbps,
+  delayMs, via, error}; scans pause while it runs), `SpeedTest.Run`, `SpeedRules.Summary`, `LimitedText`;
+  `WifiUI` `speedCaption`, `patchSpeed` (progress patches the row's caption, no redraw).
 - Tests: AlertsTests `BluetoothChecks` (pairing answers, kinds, sound follows headphones, volume),
-  `WifiChecks`; LauncherTests "The Bluetooth radio: off while nothing is paired"; selftest 'Bluetooth:',
-  'Wi-Fi:' (`ui/selftest/network.js`); audit (`ui/audit/settings.js`) 'settings: Bluetooth' (+ looking for
-  devices, a PIN to type), 'settings: Wi-Fi' (+ a password to type, a hidden network); 'setup: Wi-Fi'
-  (`ui/audit/setup.js`).
+  `WifiChecks`; LauncherTests "Speed test: ..." (`SpeedTests.cs`: Mb/s, median, request sizes, the meter, a
+  whole run and its failures over a fake server); "The Bluetooth radio: off while nothing is paired";
+  selftest 'Bluetooth:', 'Wi-Fi:', 'Wi-Fi speed:' (`ui/selftest/network.js`); audit (`ui/audit/settings.js`)
+  'settings: Bluetooth' (+ looking for devices, a PIN to type), 'settings: Wi-Fi' (+ a password to type, a
+  hidden network, speed test running / result / failed); 'setup: Wi-Fi' (`ui/audit/setup.js`).
 - Log: `Bluetooth radio {on|off} ({why}...)`, `Bluetooth: pairing asks {kind}: {decision}`,
-  `Wi-Fi: joining a network ({security}, {mode}): {result}`, `Wi-Fi: join failed, reason {n}`.
+  `Wi-Fi: joining a network ({security}, {mode}): {result}`, `Wi-Fi: join failed, reason {n}`,
+  `Speed test: {n} Mb/s down, {n} Mb/s up, {n} ms, over {Wi-Fi|Ethernet} ({n} s)`, `Speed test failed: {why}`.
 
 ## Updates: the launcher and the apps
 

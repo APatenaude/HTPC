@@ -1,7 +1,7 @@
 'use strict';
 // Settings › Wi-Fi (design: Settings: Wi-Fi): WifiUI (wifi.js) in a Settings section. Scans run
 // while the section is on screen. Demo: index.html#settings/wifi, and other states with
-// ?wifi=wifi|password|hidden|location|noadapter|off before the #.
+// ?wifi=wifi|password|hidden|location|noadapter|off|speed|speed-running|speed-error before the #.
 
 // The network list scrolls: a row the focus moves to comes into view (app.js's setFocus, wrapped).
 const setFocusBeforeWifi = setFocus;
@@ -24,7 +24,7 @@ settingsSection('wifi', {
       WifiUI.html();
   },
   press: (button, el) => WifiUI.press(button, el),
-  shown() { WifiUI.start({ changed: wifiChanged, ask, toast }); },
+  shown() { WifiUI.start({ changed: wifiChanged, ask, toast, speed: true }); },
   left() { WifiUI.stop(); },
   demo() { WifiUI.demo(new URLSearchParams(location.search).get('wifi') || 'ethernet'); },
 });
