@@ -12,6 +12,7 @@ sealed partial class MainForm
     async void ShowOver(CatalogApp? app, string view)
     {
         var asked = Environment.TickCount64;
+        var behind = Native.GetForegroundWindow();
         LauncherComes(); // from Home's press already (CaptureEarly), or a button map's Home menu
         if (view == "menu") PrimeResources(); // taken at Home's press already, unless a button map or the phone asked
         var focus = LauncherComingForward(view); // the alerts' cards leave the app for the launcher's own
@@ -36,6 +37,7 @@ sealed partial class MainForm
             if (turn != showOverTurn || standby.Active || LauncherActive) { Log.Info($"Home over {current}: no longer wanted"); return; }
         }
         menuOver = app?.Id;
+        menuOverOther = app is null && !overDesktop && behind != IntPtr.Zero && Native.ProcessOf(behind) != Environment.ProcessId;
         Post(new { type = "show", view, current, backdrop, focus, ack = backdrop is not null });
         PushState();
         if (backdrop is null) { Reveal(asked); return; }
@@ -54,6 +56,9 @@ sealed partial class MainForm
     // goes home or standby: while it is up over that app, the app is never ended for want of a
     // window (AppManager.CheckWindowless).
     string? menuOver;
+    // The menu is over another program's window that is no tile's (one an installer opened): the
+    // launcher's update waits for Home (ConfirmLeave). Cleared with menuOver.
+    bool menuOverOther;
     bool revealPending;
     long menuAskedAt;                              // the Home that ShowOver's pending menu is for
     int showOverTurn;                              // a newer ShowOver, or an app coming forward, ends an older one

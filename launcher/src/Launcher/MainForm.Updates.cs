@@ -184,7 +184,7 @@ sealed partial class MainForm
     bool ConfirmLeave(string version)
     {
         if (leaving || leavingSignal is not null) return true;
-        if (!(standby.Active || (LauncherActive && !keyboard.Visible && apps.ForegroundApp() is null))) return false;
+        if (!(standby.Active || (LauncherActive && !keyboard.Visible && apps.ForegroundApp() is null && !menuOverOther))) return false;
         try { leavingSignal = UpdateSignal($@"Local\HtpcLeaving_{Program.Version}_{Environment.ProcessId}"); }
         catch (Exception e) { Log.Warn($"Leaving signal: {e.Message}"); return false; }
         leavingFor = version;

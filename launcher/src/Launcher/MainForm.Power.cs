@@ -52,6 +52,7 @@ sealed partial class MainForm
             mapper.Map = null;
             CloseKeyboard("standby");
             menuOver = null;
+            menuOverOther = false;
             appBeforeStandby = LauncherActive ? null : apps.ForegroundApp()?.Id;
             Post(new { type = "blank" }); // the page's sections stop their timers (app.js sectionHooks)
             tv.UiShowing(false);          // no TV search every 10 s all night, whatever the page did

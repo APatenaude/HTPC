@@ -130,6 +130,7 @@ sealed partial class MainForm
     async void StepAside(string id)
     {
         menuOver = null;
+        menuOverOther = false;
         revealTimer.Stop();
         revealPending = false; // a Home menu still waiting to show is not wanted any more
         showOverTurn++;        // nor one still waiting for its backdrop

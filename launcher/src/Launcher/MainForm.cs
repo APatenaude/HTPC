@@ -379,7 +379,7 @@ sealed partial class MainForm : Form
                 RunUiReady();
                 break;
             case "wake": standby.Wake("keyboard"); break;
-            case "home": menuOver = null; break; // the page went home: the Home menu is over no app now
+            case "home": menuOver = null; menuOverOther = false; break; // the page went home: the Home menu is over no app now
             case "shown": RevealPending("page ready", m); break; // ShowOver: the backdrop is in place
             case "perf": LogSlowPress(m); break;
             // The TV's messages ("tv.*"): MainForm.Tv.cs.
