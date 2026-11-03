@@ -57,8 +57,9 @@ Readers: the launcher's `AppManager.Parse` (`launcher/src/Launcher/AppManager.cs
   no menuKeys.
 - `phoneKeys`: the phone remote's keys where the preset's do not fit: `ok`, `back`, `options`, each
   a key name (`enter`, `esc`, `browserBack`, `altLeft`, `apps`, `space`); `backspace: "afterTyping"`
-  (Backspace only deletes what the phone just typed: in YouTube and Jellyfin, Backspace outside a
-  text field goes back a screen); `typing: false` (the Type tab does nothing: Moonlight sends keys
+  (live typing's Backspaces only delete what the phone just typed: in YouTube and Jellyfin,
+  Backspace outside a text field goes back a screen; the Type tab's Delete and Clear always reach
+  the field); `typing: false` (the Type tab does nothing: Moonlight sends keys
   to the game PC).
 
 ## launch: how the launcher starts it

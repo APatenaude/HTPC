@@ -7,7 +7,7 @@
 // ?demo=remote|arrows|connecting|type|playing|nothing|live|longtitle|link|linksheet|pair|paircode|asleep|lost|sleep|timer|share|send|sendkey shows a screen with made-up data and
 // no box (screenshots). It sends nothing.
 
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 const params = new URLSearchParams(location.search);
 const demo = params.get('demo');
 const $ = (id) => document.getElementById(id);
@@ -535,15 +535,18 @@ function startOver() { text.value = ''; state.sentText = ''; }
 function pressEnter() { syncText(); key('enter'); startOver(); }
 
 pressable($('enter'), pressEnter);
+// Delete and Clear always reach the TV's field, even after Enter or a touchpad click (the live
+// typing's own Backspaces only erase what was just typed in YouTube and Jellyfin).
 pressable($('delete'), () => {
+  syncText();
   if (text.value) {
     const g = PhoneLogic.graphemes(text.value);
     g.pop();
-    text.value = g.join('');
-    syncText();
-  } else key('backspace');
+    text.value = state.sentText = g.join('');
+  }
+  key('backspace');
 }, { repeat: true });
-pressable($('clear'), () => { text.value = ''; syncText(); });
+pressable($('clear'), () => { startOver(); key('clear'); });
 pressable($('tab'), () => { syncText(); key('tab'); startOver(); });
 pressable($('shift-tab'), () => { syncText(); key('shiftTab'); startOver(); });
 $('kbd-space').addEventListener('click', () => text.focus());

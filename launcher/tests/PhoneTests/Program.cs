@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Htpc.Launcher;
 
@@ -83,6 +84,7 @@ static partial class Program
     {
         Check(P("{\"t\":\"key\",\"k\":\"up\"}") is KeyCommand { Key: PhoneKey.Up }, "key up");
         Check(P("{\"t\":\"key\",\"k\":\"shiftTab\"}") is KeyCommand { Key: PhoneKey.ShiftTab }, "key shiftTab");
+        Check(P("{\"t\":\"key\",\"k\":\"clear\"}") is KeyCommand { Key: PhoneKey.Clear }, "key clear");
         CheckAll(new[] { "\"LWin\"", "\"win\"", "\"lwin\"", "\"alt\"", "\"F4\"", "\"0x5B\"", "\"\"", "91" }, k => P($"{{\"t\":\"key\",\"k\":{k}}}") is null,
             "keys that are not the remote's rejected (the Windows key, Alt, F4, a key code)");
         Check(P("{\"t\":\"type\",\"text\":\"" + new string('a', 256) + "\"}") is TypeCommand { Text.Length: 256 }, "type 256 characters");
@@ -135,8 +137,10 @@ static partial class Program
         var l = Ctx(launcher: true, app: null);
         Check(PhoneRouter.Route(PhoneKey.Up, l) is ToLauncher { Button: "up" } && PhoneRouter.Route(PhoneKey.Ok, l) is ToLauncher { Button: "a" }, "launcher: D-pad and OK as controller buttons");
         Check(PhoneRouter.Route(PhoneKey.Back, l) is ToLauncher { Button: "b" } && PhoneRouter.Route(PhoneKey.Options, l) is ToLauncher { Button: "start" }, "launcher: Back = B, Options = Start");
-        CheckAll(new[] { PhoneKey.Enter, PhoneKey.Backspace, PhoneKey.Tab, PhoneKey.ShiftTab }, k => PhoneRouter.Route(k, l) is Ignore,
-            "launcher: Enter, Backspace, Tab, Shift+Tab ignored (never SendInput over the launcher)");
+        CheckAll(new[] { PhoneKey.Enter, PhoneKey.Tab, PhoneKey.ShiftTab }, k => PhoneRouter.Route(k, l) is Ignore,
+            "launcher: Enter, Tab, Shift+Tab ignored (never SendInput over the launcher)");
+        Check(PhoneRouter.Route(PhoneKey.Backspace, l) is ToLauncherField { Key: "backspace" } && PhoneRouter.Route(PhoneKey.Clear, l) is ToLauncherField { Key: "clear" },
+            "launcher: Delete and Clear go to its own field");
         var kb = Ctx(keyboard: true, map: ButtonMap.Mouse);
         Check(PhoneRouter.Route(PhoneKey.Left, kb) is ToKeyboard { Button: "left" } && PhoneRouter.Route(PhoneKey.Back, kb) is ToKeyboard { Button: "b" }, "on-screen keyboard: driven like the controller");
         var edge = Ctx(map: ButtonMap.Mouse);
@@ -151,7 +155,12 @@ static partial class Program
         var changedMouse = new ButtonMap { Name = "Mouse + 1 change (twitch)", LeftStick = StickRole.Pointer, RightStick = StickRole.Scroll, Buttons = new Dictionary<PadControl, PadAction>(ButtonMap.Mouse.Buttons) };
         Check(Keys(PhoneRouter.Route(PhoneKey.Back, new PhoneContext(false, false, false, "twitch", changedMouse, PhoneAppKeys.Default, "mouse")), 0xA6), "changed Mouse map: Back = browser Back (by preset)");
         var moon = Ctx(app: "moonlight", map: null, keys: new PhoneAppKeys(null, null, null, false, false));
-        Check(PhoneRouter.Route(PhoneKey.Enter, moon) is Ignore && PhoneRouter.Route(PhoneKey.Home, moon) is OpenOver { View: "menu" }, "Moonlight: no typing keys, Home = our menu");
+        Check(PhoneRouter.Route(PhoneKey.Enter, moon) is Ignore && PhoneRouter.Route(PhoneKey.Clear, moon) is Ignore && PhoneRouter.Route(PhoneKey.Home, moon) is OpenOver { View: "menu" },
+            "Moonlight: no typing keys, Home = our menu");
+        var jf = Ctx(app: "jellyfin", map: ButtonMap.Keyboard, keys: new PhoneAppKeys(null, new ushort[] { 0x1B }, null, true, true));
+        Check(Keys(PhoneRouter.Route(PhoneKey.Backspace, jf), 0x08) && Keys(PhoneRouter.Route(PhoneKey.Backspace, yt), 0x08),
+            "afterTyping apps: Delete routes to a Backspace");
+        Check(PhoneRouter.Route(PhoneKey.Clear, jf) is ClearAppField && PhoneRouter.Route(PhoneKey.Clear, edge) is ClearAppField, "app: Clear empties the field");
 
         var g = new TypingGuard();
         Check(g.Backspaces("youtube", 3, true) == 0, "guard: no Backspace before typing");
@@ -159,11 +168,20 @@ static partial class Program
         Check(g.Backspaces("youtube", 5, true) == 3 && g.Backspaces("youtube", 1, true) == 0, "guard: only what the phone typed");
         g.Typed("youtube", 2); g.Reset();
         Check(g.Backspaces("youtube", 1, true) == 0, "guard: none after another key");
+        g.Typed("youtube", 2); g.Erased();
+        Check(g.Backspaces("youtube", 5, true) == 1, "guard: a Delete press uses up one typed character");
         Check(g.Backspaces("edge", 4, false) == 4, "guard: apps without the rule get all");
 
         var catalog = FindUp(Path.Combine("setup", "catalog.json"));
         var keys = catalog is null ? new() : PhoneAppKeys.Load(catalog);
-        Check(keys.TryGetValue("youtube", out var y) && y.BackspaceAfterTypingOnly && keys.TryGetValue("moonlight", out var m) && !m.Typing, "catalog phoneKeys read");
+        Check(keys.TryGetValue("youtube", out var y) && y.BackspaceAfterTypingOnly && keys.TryGetValue("jellyfin", out var j) && j.BackspaceAfterTypingOnly
+            && keys.TryGetValue("moonlight", out var m) && !m.Typing, "catalog phoneKeys read");
+
+        // A phone page with another PROTOCOL than the server's never connects (it reloads, then gives up).
+        var phoneJs = FindUp(Path.Combine("launcher", "phone", "phone.js"));
+        var protocol = phoneJs is null ? null : Regex.Match(File.ReadAllText(phoneJs), @"const PROTOCOL = (\d+);");
+        Check(protocol is { Success: true } && int.Parse(protocol.Groups[1].Value) == PhoneProtocol.Version,
+            $"phone.js PROTOCOL = PhoneProtocol.Version ({PhoneProtocol.Version})");
     }
 
     // ---- Pointer --------------------------------------------------------------------------------------

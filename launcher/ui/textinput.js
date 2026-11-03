@@ -9,7 +9,7 @@
 // - R3, or a field taking the focus with the controller, asks for the on-screen keyboard. It
 //   opens across the bottom of the screen, always; the host says where it starts, and a field
 //   it would cover is lifted above it with its screen until it closes (textKeyboardAt).
-//   From the host: {type:'text.insert', text} {type:'text.key', key: backspace|left|right|enter}
+//   From the host: {type:'text.insert', text} {type:'text.key', key: backspace|clear|left|right|enter}
 //                  {type:'text.keyboardAt', top: share of the height from the top, null: closed}
 //   To the host:   {type:'text.keyboard', field, password} {type:'text.done'}
 // A field's Enter (from either keyboard) raises 'textsubmit' on it; its screen decides what that does.
@@ -45,6 +45,10 @@ function textKey(key) {
     case 'backspace':
       if (start !== end) el.setRangeText('', start, end, 'end');
       else if (start > 0) el.setRangeText('', start - 1, start, 'end');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      break;
+    case 'clear':
+      el.setRangeText('', 0, el.value.length, 'end');
       el.dispatchEvent(new Event('input', { bubbles: true }));
       break;
     case 'left': { const p = Math.max(0, start - (start === end ? 1 : 0)); el.setSelectionRange(p, p); break; }

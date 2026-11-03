@@ -5,8 +5,9 @@ namespace Htpc.Launcher;
 /// <summary>
 /// An app's phone remote keys where its preset's defaults do not fit (catalog.json "phoneKeys"):
 /// ok, back, options: a key name (enter, esc, browserBack, altLeft, apps, space);
-/// backspace "afterTyping": Backspace only deletes what the phone just typed there (in
-/// YouTube and Jellyfin, Backspace outside a text field goes back a screen);
+/// backspace "afterTyping": live typing's Backspaces only delete what the phone just typed there
+/// (in YouTube and Jellyfin, Backspace outside a text field goes back a screen); the Type tab's
+/// Delete button always sends one;
 /// typing false: the Type tab does nothing (Moonlight sends keys to the game PC).
 /// </summary>
 sealed record PhoneAppKeys(ushort[]? Ok, ushort[]? Back, ushort[]? Options, bool BackspaceAfterTypingOnly, bool Typing)
@@ -66,6 +67,15 @@ sealed record ToApp(PadAction Action, bool Typing = false) : PhoneRoute;
 /// <summary>The launcher comes up over the app with this view (Home menu or Power).</summary>
 sealed record OpenOver(string View) : PhoneRoute;
 
+/// <summary>To the launcher's own text field (textinput.js textKey): backspace or clear.</summary>
+sealed record ToLauncherField(string Key) : PhoneRoute;
+
+/// <summary>
+/// Empties the app's focused field: Ctrl+A, then Delete. Delete, not Backspace: with no field
+/// focused, Backspace goes back a screen in YouTube and Jellyfin.
+/// </summary>
+sealed record ClearAppField : PhoneRoute;
+
 sealed record WakeUp : PhoneRoute;
 
 sealed record Ignore : PhoneRoute;
@@ -95,10 +105,19 @@ static class PhoneRouter
             case PhoneKey.HomeHold: return c.LauncherFront ? new ToLauncher("homeHold") : new OpenOver("power");
         }
 
-        // Typing keys (the Type tab) go to the app's text field; the launcher has none.
-        if (key is PhoneKey.Enter or PhoneKey.Backspace or PhoneKey.Tab or PhoneKey.ShiftTab)
+        // Typing keys (the Type tab) go to the app's text field; over the launcher only the
+        // erasing ones, posted to its own field (never SendInput over the launcher).
+        if (key is PhoneKey.Enter or PhoneKey.Backspace or PhoneKey.Clear or PhoneKey.Tab or PhoneKey.ShiftTab)
         {
-            if (c.LauncherFront || !c.Keys.Typing) return new Ignore();
+            if (c.LauncherFront)
+                return key switch
+                {
+                    PhoneKey.Backspace => new ToLauncherField("backspace"),
+                    PhoneKey.Clear => new ToLauncherField("clear"),
+                    _ => new Ignore(),
+                };
+            if (!c.Keys.Typing) return new Ignore();
+            if (key == PhoneKey.Clear) return new ClearAppField();
             return new ToApp(key switch
             {
                 PhoneKey.Enter => Keys(Enter),
@@ -142,9 +161,10 @@ static class PhoneRouter
 }
 
 /// <summary>
-/// Keeps Backspace from the phone out of apps where it would leave the screen (YouTube and
+/// Keeps live typing's Backspaces out of apps where they would leave the screen (YouTube and
 /// Jellyfin go back on Backspace outside a text field): there, only as many Backspaces as
-/// characters the phone typed into that app since its last other key or click.
+/// characters the phone typed into that app since its last other key or click. The Delete
+/// button is not held back (the owner, 3 Nov 2026: after Enter or a click nothing could be erased).
 /// </summary>
 sealed class TypingGuard
 {
@@ -165,6 +185,12 @@ sealed class TypingGuard
         var allowed = Math.Min(wanted, typed);
         typed -= allowed;
         return allowed;
+    }
+
+    /// <summary>The Delete button erased one of them.</summary>
+    public void Erased()
+    {
+        if (typed > 0) typed--;
     }
 
     /// <summary>Another key or a click: the focus may have left the field.</summary>

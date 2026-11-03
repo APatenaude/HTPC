@@ -538,7 +538,9 @@ the next start), SPEC N8. Files: `phone/` (the page phones load), `src/Phone*.cs
   Power), Options. Volume −/mute/+ (steps of 2), brightness.
 - Remote: the Power button: sleep (asks first); wake while asleep.
 - Type: live typing into the focused field on the TV (Backspaces for what changed, then the text),
-  Enter, Delete, Clear, Tab, Shift+Tab.
+  Enter, Delete, Clear, Tab, Shift+Tab. Delete is always one Backspace on the TV, even after Enter
+  or a click; Clear empties the whole field (in an app: Ctrl+A, Delete, only when UI Automation sees
+  a text field with the focus).
 - Playing: what plays, ±10 s, play/pause, previous/next, seek bar, volume; sleep timer (the 1-minute
   warning reaches the phone, with +15 min).
 - A live stream (no timeline, an endless one, or one that grows as it plays, as Twitch channels
@@ -552,8 +554,9 @@ the next start), SPEC N8. Files: `phone/` (the page phones load), `src/Phone*.cs
 - In an app, the D-pad and OK go through the app's button map (arrow keys; OK = the map's A), Back is
   always "go back" (browser Back in Mouse-preset apps, Esc otherwise), Options is the context-menu
   key, Home is our Home menu (in Moonlight too).
-- catalog.json's `phoneKeys` changes that per app (docs/CATALOG.md). Nothing typed from the phone
-  reaches the launcher's own screens.
+- catalog.json's `phoneKeys` changes that per app (docs/CATALOG.md). Over the launcher, the Type
+  tab's text, Delete and Clear go to its focused field (posted to the page, never typed through
+  Windows); Enter and Tab are ignored there.
 - Touchpad motion goes to PadMapper's frame thread (one writer for the pointer, in step with the TV);
   a phone that goes quiet for 15 s lets go of a held button.
 - Phone use counts as activity for idle sleep, and while the phone is newer than the controller, the

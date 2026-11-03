@@ -82,11 +82,34 @@ sealed class TextFieldWatcher : IDisposable
         return done.Task;
     }
 
-    void Queue(Action job)
+    bool Queue(Action job)
     {
         Interlocked.Increment(ref queued);
-        try { work.Add(job); }
-        catch (InvalidOperationException) { Interlocked.Decrement(ref queued); } // disposed
+        try { work.Add(job); return true; }
+        catch (InvalidOperationException) { Interlocked.Decrement(ref queued); return false; } // disposed
+    }
+
+    /// <summary>
+    /// Whether another app's text field has the focus now, asked once whether or not this listens
+    /// (the phone's Clear: Ctrl+A, Delete would empty a folder or a playlist). False when UI
+    /// Automation cannot tell.
+    /// </summary>
+    public Task<bool> FocusIsTextField()
+    {
+        var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queuedJob = Queue(() =>
+        {
+            try
+            {
+                automation ??= (IUIAutomation)new CUIAutomation();
+                if (automation.GetFocusedElement(out var focused) != 0 || focused is null) return;
+                object? Get(int property) => focused.GetCurrentPropertyValue(property, out var value) == 0 ? value : null;
+                answer.TrySetResult(Get(ProcessId) as int? != Environment.ProcessId && IsTextField(Get));
+            }
+            finally { answer.TrySetResult(false); }
+        });
+        if (!queuedJob) answer.TrySetResult(false);
+        return answer.Task;
     }
 
     void Start()

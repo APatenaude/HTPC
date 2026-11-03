@@ -226,6 +226,11 @@ partial class MainForm
         switch (route)
         {
             case ToLauncher l: Post(new { type = "input", button = l.Button }); break;
+            case ToLauncherField f: Post(new { type = "text.key", key = f.Key }); break;
+            case ClearAppField:
+                if (keyboard.Visible) CloseKeyboard("typing on the phone");
+                _ = ClearAppTextField();
+                break;
             case ToKeyboard k: keyboard.Post(new { type = "input", button = k.Button }); break;
             case OpenOver o:
                 if (keyboard.Visible) CloseKeyboard("Home");
@@ -234,10 +239,22 @@ partial class MainForm
             case WakeUp: standby.Wake("phone"); break;
             case ToApp a:
                 if (a.Typing && keyboard.Visible) CloseKeyboard("typing on the phone");
-                if (key == PhoneKey.Backspace && phoneTyping.Backspaces(c.AppId, 1, c.Keys.BackspaceAfterTypingOnly) == 0) break;
+                if (key == PhoneKey.Backspace) phoneTyping.Erased();
                 PressAndRelease(a.Action);
                 break;
         }
+    }
+
+    /// <summary>The phone's Clear in an app: Ctrl+A, then Delete, only into a text field.</summary>
+    async Task ClearAppTextField()
+    {
+        if (!await textFields.FocusIsTextField())
+        {
+            Log.Info("Phone Clear: no text field has the focus, nothing sent");
+            return;
+        }
+        Input.Tap(0x11, 0x41);
+        Input.Tap(0x2E);
     }
 
     void PressAndRelease(PadAction action)

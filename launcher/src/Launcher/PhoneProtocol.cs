@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Htpc.Launcher;
 
 /// <summary>The phone remote's buttons: a fixed list, never a raw key code.</summary>
-enum PhoneKey { Up, Down, Left, Right, Ok, Back, Home, HomeHold, Options, Enter, Backspace, Tab, ShiftTab }
+enum PhoneKey { Up, Down, Left, Right, Ok, Back, Home, HomeHold, Options, Enter, Backspace, Clear, Tab, ShiftTab }
 
 enum PhoneMediaAction { Toggle, Next, Previous, Back10, Forward10, Seek }
 
@@ -56,7 +56,7 @@ sealed record ShortcutKeyCommand : PhoneCommand;
 static class PhoneProtocol
 {
     /// <summary>Goes up when the messages change: a phone still showing an older page reloads it.</summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
     public const int MaxMessageBytes = 4096;
     public const int MaxText = 256;
@@ -67,7 +67,7 @@ static class PhoneProtocol
         ["up"] = PhoneKey.Up, ["down"] = PhoneKey.Down, ["left"] = PhoneKey.Left, ["right"] = PhoneKey.Right,
         ["ok"] = PhoneKey.Ok, ["back"] = PhoneKey.Back, ["home"] = PhoneKey.Home, ["homeHold"] = PhoneKey.HomeHold,
         ["options"] = PhoneKey.Options, ["enter"] = PhoneKey.Enter, ["backspace"] = PhoneKey.Backspace,
-        ["tab"] = PhoneKey.Tab, ["shiftTab"] = PhoneKey.ShiftTab,
+        ["clear"] = PhoneKey.Clear, ["tab"] = PhoneKey.Tab, ["shiftTab"] = PhoneKey.ShiftTab,
     };
 
     static readonly Dictionary<string, PhoneMediaAction> MediaActions = new()
