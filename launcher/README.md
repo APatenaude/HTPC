@@ -67,6 +67,9 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
 - Mouse (Edge, Twitch, Stremio, websites) and Keyboard (Plex HTPC: its own controller support drops
   controllers its input maps do not name, such as the 8BitDo). Applied to the app in front on the
   controller thread, sent with SendInput; pointer and scroll speed from Settings › Controller.
+- The pointer (`CursorHider`, SystemControls.cs): hidden while the controller drives the launcher
+  (parked at the right edge), and anywhere once still for 5 s (blanked where it is, so no hover
+  changes); it shows again as soon as it moves (mouse, stick, phone). Not in desktop mode.
 - Controller preset = the app reads the pad itself (the games, and the cloud gaming sites through
   the browser's Gamepad API).
 

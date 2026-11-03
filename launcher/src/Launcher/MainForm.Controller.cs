@@ -98,8 +98,12 @@ sealed partial class MainForm
         if (keyboard.Visible) map = null; // the controller drives the keyboard
         if (Input.ToElevated) ElevatedInput.Wanted(); // each pass: keeps it for as long as the window is in front
         ElevatedInput.Tick();
-        // The pointer shows when a preset moves it (it is hidden while the controller drives the launcher).
-        if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer)) cursor.Show();
+        // A preset that moves the pointer gets it back from the edge, hidden until its stick moves
+        // it; the desktop shows it at once.
+        if (map is not null && (map.LeftStick == StickRole.Pointer || map.RightStick == StickRole.Pointer))
+        {
+            if (desktopMode) cursor.Show(); else cursor.Unpark();
+        }
         mapper.Map = map;
     }
 

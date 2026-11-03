@@ -356,12 +356,12 @@ sealed class DisplayPower
 }
 
 /// <summary>
-/// Hides the mouse pointer while the controller is in use and shows it again when a real mouse
-/// moves: every system cursor is swapped for a blank one (SetSystemCursor), and the pointer is
-/// parked at the right edge so no hover effects linger. Showing reloads the standard cursors
-/// and puts the pointer back where it was: coming back from the Home menu to an app on the
-/// Mouse preset, a jump to the middle of the screen woke the player's controls over the video
-/// (Twitch) each time.
+/// Hides the mouse pointer, which shows again only once it moves (a mouse, a stick, the phone):
+/// every system cursor is swapped for a blank one (SetSystemCursor). Hide parks the pointer at
+/// the right edge (the launcher over an app, the controller driving it) so no hover effects
+/// linger; Blank leaves it where it is, after IdleMs still: moving it there would wake a
+/// player's controls. Coming back from the edge puts it where it was: a jump to the middle of
+/// the screen woke the player's controls over the video (Twitch) each time.
 /// </summary>
 sealed class CursorHider
 {
@@ -374,47 +374,84 @@ sealed class CursorHider
     const uint SPI_SETCURSORS = 0x57;
     static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32640, 32641, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
 
-    Point parkedAt;
-    Point? hiddenAt;   // where the pointer was when hidden
+    /// <summary>How long the pointer stays on screen without moving.</summary>
+    public const int IdleMs = 5000;
+
+    Point parkedAt;    // where the hidden pointer stays: the right edge, or where it was blanked
+    Point? hiddenAt;   // where the pointer was when parked
+    bool parked;
+    Point lastSeen;
+    long stillSince;
     public bool Hidden { get; private set; }
+    /// <summary>Hidden and away from where it was (at the right edge).</summary>
+    public bool Parked => parked;
 
     public CursorHider() => Restore(); // a previous crash may have left the cursors blank
 
+    /// <summary>Hides the pointer and parks it at the right edge.</summary>
     public void Hide()
     {
-        if (Hidden) return;
+        if (parked) return;
         hiddenAt = GetCursorPos(out var at) ? at : null;
-        var blankAnd = Enumerable.Repeat((byte)0xFF, 32 * 4).ToArray();
-        var blankXor = new byte[32 * 4];
-        foreach (var id in CursorIds) SetSystemCursor(CreateCursor(IntPtr.Zero, 0, 0, 32, 32, blankAnd, blankXor), id);
+        if (!Hidden) BlankCursors();
         var screen = Screen.PrimaryScreen!.Bounds;
         parkedAt = new Point(screen.Right - 1, screen.Top + screen.Height / 2);
         SetCursorPos(parkedAt.X, parkedAt.Y);
-        Hidden = true;
+        (Hidden, parked) = (true, true);
     }
 
-    /// <summary>Shows the pointer again where it was (it was parked at the edge).</summary>
+    /// <summary>Hides the pointer where it is.</summary>
+    public void Blank()
+    {
+        if (Hidden || !GetCursorPos(out var at)) return;
+        BlankCursors();
+        (parkedAt, Hidden) = (at, true);
+    }
+
+    /// <summary>A parked pointer goes back where it was, still hidden (it shows once it moves).</summary>
+    public void Unpark()
+    {
+        if (!parked) return;
+        var at = ComeBackTo(hiddenAt, Screen.PrimaryScreen!.Bounds, parkedAt);
+        SetCursorPos(at.X, at.Y);
+        (parkedAt, parked) = (at, false);
+    }
+
+    /// <summary>Shows the pointer again where it was.</summary>
     public void Show()
     {
         if (!Hidden) return;
+        Unpark();
         Restore();
-        var at = ComeBackTo(hiddenAt, Screen.PrimaryScreen!.Bounds, parkedAt);
-        SetCursorPos(at.X, at.Y);
     }
 
     /// <summary>Where the pointer shows again: where it was when hidden, else the middle of the screen.</summary>
     public static Point ComeBackTo(Point? hiddenAt, Rectangle screen, Point parkedAt) =>
         hiddenAt is { } p && screen.Contains(p) && p != parkedAt ? p : new Point(screen.X + screen.Width / 2, screen.Y + screen.Height / 2);
 
-    /// <summary>Call regularly: shows the pointer again once the mouse has moved.</summary>
-    public void Check()
+    /// <summary>
+    /// Call regularly: shows the pointer again once it has moved; with idleHide, blanks it after
+    /// IdleMs without moving.
+    /// </summary>
+    public void Check(bool idleHide)
     {
-        if (Hidden && GetCursorPos(out var now) && now != parkedAt) Restore();
+        if (!GetCursorPos(out var now)) return;
+        var ms = Environment.TickCount64;
+        if (now != lastSeen) (lastSeen, stillSince) = (now, ms);
+        if (Hidden) { if (now != parkedAt) Restore(); }
+        else if (idleHide && ms - stillSince >= IdleMs) Blank();
     }
 
     public void Restore()
     {
         SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-        Hidden = false;
+        (Hidden, parked, stillSince) = (false, false, Environment.TickCount64);
+    }
+
+    static void BlankCursors()
+    {
+        var blankAnd = Enumerable.Repeat((byte)0xFF, 32 * 4).ToArray();
+        var blankXor = new byte[32 * 4];
+        foreach (var id in CursorIds) SetSystemCursor(CreateCursor(IntPtr.Zero, 0, 0, 32, 32, blankAnd, blankXor), id);
     }
 }

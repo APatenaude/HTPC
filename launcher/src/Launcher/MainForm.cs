@@ -119,7 +119,8 @@ sealed partial class MainForm : Form
             // the log says so, since the controller cannot wake it from there (a key or the power button can).
             else if (e.Mode == Microsoft.Win32.PowerModes.Suspend) Log.Info($"Windows is suspending{(standby is { Active: true } ? " (from standby)" : "")}");
         };
-        mouseWatch.Tick += (_, _) => { cursor.Check(); UpdateMapper(); GuardSetup(); };
+        // A still pointer is hidden everywhere but the desktop (a mouse's place).
+        mouseWatch.Tick += (_, _) => { cursor.Check(idleHide: !desktopMode); UpdateMapper(); GuardSetup(); };
         revealTimer.Tick += (_, _) => RevealPending("400 ms");
         Directory.CreateDirectory(captureDir);
         // The layers over apps stay out of the Home menu's backdrop (ScreenCapture).

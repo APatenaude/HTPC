@@ -300,8 +300,10 @@ partial class MainForm
     {
         if (standby.Active) return;
         if (LauncherActive) { Post(new { type = "input", button = right ? "b" : "a" }); return; }
-        // The pointer was hidden (parked at the edge): the first tap brings it back, it does not click there.
-        if (cursor.Hidden) { cursor.Show(); return; }
+        // The pointer was parked at the edge: the first tap brings it back, it does not click there.
+        // Hidden where it was (still for a while), it shows and the tap clicks.
+        if (cursor.Parked) { cursor.Show(); return; }
+        cursor.Show();
         phoneTyping.Reset();
         var button = right ? Input.Button.Right : Input.Button.Left;
         Input.MouseButton(button, true);

@@ -137,7 +137,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
   controller map below. Mouse and Keyboard apps can have any button remapped on the TV (only
   there) to a key, key combination, mouse action, media key or launcher action; YouTube
-  and Moonlight can only switch preset. Pointer and scroll speeds are global. R3 (the
+  and Moonlight can only switch preset. Pointer and scroll speeds are global. The pointer shows
+  only while it moves: 5 s still, it is hidden where it is, in every app and the launcher; the
+  desktop keeps it (the owner, 3 Nov 2026). R3 (the
   keyboard) can be changed, Home cannot. Website tiles are separate windows, so each has its
   own map. Start + D-pad is the volume in every app but Moonlight (Up and Down by 2, repeating
   while held; Left mutes); Start's own action then comes as it is let go, without a direction.
