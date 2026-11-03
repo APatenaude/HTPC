@@ -44,6 +44,17 @@ jobs:
         with:
           global-json-file: global.json
 
+      # The release restores in locked mode: a lock file the SDK no longer agrees with (NU1004, a
+      # package the SDK adds moved) would only fail at release time. The same restore as a publish.
+      - name: Release lock file matches the SDK
+        if: matrix.part == 'launcher'
+        shell: powershell
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: |
+          dotnet restore launcher\src\Launcher\Launcher.csproj --force -p:Configuration=Release -p:RestoreLockedMode=true -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:PublishSingleFile=true -p:_IsPublishing=true
+          if ($LASTEXITCODE -ne 0) { throw 'packages.release.lock.json is stale: renew it (DEVELOPMENT.md section 5, "Updating .NET")' }
+
       - name: Tests
         shell: powershell
         env:

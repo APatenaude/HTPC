@@ -8,8 +8,8 @@
     The development machine can be any x64 Windows 10/11 PC; it does not have to be a TV box.
     What it needs (docs/DEVELOPMENT.md explains each):
     - Git (winget: Git.Git);
-    - the .NET SDK that global.json names (winget Microsoft.DotNet.SDK.10, else Microsoft's
-      dotnet-install.ps1 from https://dot.net/v1/dotnet-install.ps1);
+    - exactly the .NET SDK that global.json names (Microsoft's dotnet-install.ps1 from
+      https://dot.net/v1/dotnet-install.ps1; winget only has the newest);
     - Microsoft Edge (for the headless UI and phone tests; present on Windows);
     - optional: Hyper-V (Windows Pro/Enterprise) for the test VM (setup\test\New-TestVM.ps1);
     - the GitHub CLI (winget GitHub.cli) for releases and repo settings;
@@ -68,16 +68,14 @@ $wanted = $null
 $globalJson = Join-Path $Path 'global.json'
 if (Test-Path $globalJson) { $wanted = (Get-Content $globalJson -Raw | ConvertFrom-Json).sdk.version }
 $sdks = if (Test-Path $dotnet) { @(& $dotnet --list-sdks | ForEach-Object { ($_ -split ' ')[0] }) } else { @() }
-$feature = if ($wanted) { $wanted.Substring(0, $wanted.LastIndexOf('.') + 2) } else { '10.0.4' }   # e.g. 10.0.4: latestPatch roll-forward
-if ($sdks | Where-Object { $_ -like "$feature*" }) { ".NET SDK: $($sdks -join ', ') (global.json: $wanted)" }
+# global.json pins the exact SDK (no roll-forward: the release lock file follows it), and winget
+# only offers the newest one, so dotnet-install.ps1 installs that version.
+if ($sdks -contains $wanted) { ".NET SDK: $($sdks -join ', ') (global.json: $wanted)" }
 elseif ($Install) {
-    try { Winget-Install 'Microsoft.DotNet.SDK.10' }
-    catch {
-        $script = Join-Path $env:TEMP 'dotnet-install.ps1'
-        Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile $script -UseBasicParsing
-        & $script -Version $wanted -InstallDir (Join-Path $env:ProgramFiles 'dotnet')
-    }
-} else { $missing += ".NET SDK $wanted (winget install Microsoft.DotNet.SDK.10)" }
+    $script = Join-Path $env:TEMP 'dotnet-install.ps1'
+    Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile $script -UseBasicParsing
+    & $script -Version $wanted -InstallDir (Join-Path $env:ProgramFiles 'dotnet')
+} else { $missing += ".NET SDK $wanted (dotnet-install.ps1 -Version $wanted, see -Install)" }
 
 # Edge, for the UI and phone tests
 $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'

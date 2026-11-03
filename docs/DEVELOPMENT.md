@@ -16,8 +16,8 @@ Any x64 Windows 10/11 PC will do; it does not have to be a TV box. In PowerShell
 powershell -ExecutionPolicy Bypass -File launcher\dev\New-DevMachine.ps1 -Install
 ```
 
-It checks and, with `-Install`, installs: Git, the .NET SDK that `global.json` names (10.0.x,
-`latestPatch`), and checks for Edge (the UI tests drive it headless). It then builds the launcher
+It checks and, with `-Install`, installs: Git, exactly the .NET SDK that `global.json` names
+(no roll-forward: section 5, "Updating .NET"), and checks for Edge (the UI tests drive it headless). It then builds the launcher
 and runs `Test-All.ps1 -SkipSetupTests`. Optional: the GitHub CLI (`winget install GitHub.cli`) for
 releases and repo settings, and Hyper-V (Windows Pro/Enterprise) or an Incus server for the test VM.
 
@@ -165,6 +165,21 @@ routine, scripted in `launcher\dev\Merge-Branch.ps1`:
   that need the user's context need "Run setup again" (the release notes say which).
 - `update.json`'s `minimumFrom` (Build-Release `-MinimumFrom`) makes older boxes run TV Box Setup
   instead of updating themselves.
+
+### Updating .NET
+
+`global.json` names one exact SDK, with no roll-forward: the release restores NuGet in locked mode
+(`packages.release.lock.json`), and the SDK adds packages of its own (the linker,
+`Microsoft.NET.ILLink.Tasks`) whose version follows the SDK. With `latestPatch`, CI picked up each
+new patch by itself and the release failed on NU1004 (3 Nov 2026, 1.0.17). The box ships its own
+.NET runtime, the one of this SDK, so update it on purpose, about monthly (Microsoft's patches come
+out on Patch Tuesday), in one commit:
+1. `global.json`: the new SDK version (the latest 10.0.x on https://dotnet.microsoft.com/download/dotnet/10.0);
+2. install it (`New-DevMachine.ps1 -Install`, or `launcher/dev/linux/setup.sh` on Linux);
+3. renew the lock file, a Release publish with `-p:Relock=true` (Publish-Setup's arguments):
+   `dotnet publish launcher/src/Launcher/Launcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:Relock=true -o <a temp folder>`;
+4. commit both. The Tests workflow's first step does the release's locked restore, so a stale lock
+   file fails on push, not at release time.
 
 ## 6. The test VM
 
