@@ -172,7 +172,7 @@ function editPress(button, el) {
     case 'left': case 'right': {
       const section = EXT.sections[state.section];
       if (section && section.press && section.press(button, el)) return true;
-      if (el.dataset.slider) adjust(el, button === 'right' ? 5 : -5);
+      if (el.dataset.slider) adjust(el, button === 'right' ? SLIDER_STEP : -SLIDER_STEP);
       else if (el.dataset.setting) changeSetting(el.dataset.setting, button === 'right' ? 1 : -1);
       else if (el.dataset.timer !== undefined) stepTimer(button === 'right' ? 1 : -1);
       return true;

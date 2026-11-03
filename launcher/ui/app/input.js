@@ -65,6 +65,10 @@ function activate(el) {
   }
 }
 
+// Left/Right on a volume or brightness slider (the Home menu, Settings): the same step as Start + the
+// D-pad and the phone remote (the owner, 3 Nov 2026: 5 here and 2 there made no sense).
+const SLIDER_STEP = 2;
+
 function adjust(el, delta) {
   const key = el.dataset.slider;
   state[key] = Math.max(0, Math.min(100, state[key] + delta));
@@ -105,7 +109,7 @@ function press(button, held) {
   switch (button) {
     case 'up': case 'down': move(button); break;
     case 'left': case 'right':
-      if (el && el.dataset.slider) { menuUse(el); adjust(el, button === 'right' ? 5 : -5); }
+      if (el && el.dataset.slider) { menuUse(el); adjust(el, button === 'right' ? SLIDER_STEP : -SLIDER_STEP); }
       else if (el && el.dataset.setting) changeSetting(el.dataset.setting, button === 'right' ? 1 : -1);
       else move(button);
       break;
