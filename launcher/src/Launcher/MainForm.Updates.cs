@@ -53,6 +53,32 @@ sealed partial class MainForm
         SwitchTo(id);
     }
 
+    /// <summary>
+    /// The launcher was at Home when it was replaced: the new one takes the front and the top of
+    /// the screen, whatever stayed up meanwhile. On the box (3 Nov 2026) a window that had been
+    /// behind the old launcher's Home menu stayed over the new one, which believed it was at Home:
+    /// the controller's presses went to its hidden page. Checked again 2 s later, as a window the
+    /// departing launcher left can still come forward then; never over a tile's app.
+    /// </summary>
+    [UiReady]
+    void FrontAfterHandoff()
+    {
+        if (setupMode || standby.Active || startHandoff is not { Standby: false, App: null } h) return;
+        TakeFront($"after {h.Reason}");
+        _ = Task.Delay(2000).ContinueWith(_ => BeginInvoke(() =>
+        {
+            if (!standby.Active && !LauncherActive && apps.ForegroundApp() is null) TakeFront($"after {h.Reason}, again");
+        }), TaskScheduler.Default);
+    }
+
+    void TakeFront(string why)
+    {
+        if (!Visible) Show();
+        var how = Native.ForceForeground(Handle);
+        Native.BringWindowToTop(Handle); // in front by focus is not on top: "already" raises nothing
+        Log.Info($"Launcher brought to the front {why} ({how})");
+    }
+
     [UiReady]
     void PostUpdates()
     {
