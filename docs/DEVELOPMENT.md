@@ -66,7 +66,7 @@ A Linux machine (x64, tried on Ubuntu 24.04) covers the C# compile and the TV UI
 
 | Task | Command |
 |---|---|
-| Once | the .NET SDK `global.json` names (`dotnet-install.sh --version <it>`); Node.js; in `launcher/dev/linux`, `npm install` and `npx playwright install --with-deps chrome` |
+| Once (and after a `global.json` change) | `launcher/dev/linux/setup.sh` (needs Node.js): exactly the SDK `global.json` names, in `~/.dotnet`; the UI runner's packages and its Chrome |
 | Compile every project | `dotnet build <project> -c Release` (`Directory.Build.props` turns on `EnableWindowsTargeting`; the watchdog is an empty stand-in, the Linux build is never shipped) |
 | The UI self-test and audits (`Test-Ui.ps1 -SelfTest`), then the phone page (`dev/phone-test.html`) | `node launcher/dev/linux/test-ui.mjs` (`--all-sizes`: every size) |
 
