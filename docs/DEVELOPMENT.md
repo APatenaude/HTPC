@@ -186,10 +186,18 @@ out on Patch Tuesday), in one commit:
 Since 29 Sept 2026 the test VM lives on the owner's Incus server ("The test VM on an Incus server"
 below); the Hyper-V VM on the TV box was deleted, to keep its load off the box. The Hyper-V tools
 still work on any dev PC with Hyper-V. Use the VM for changes a real setup run must show (setup
-steps, elevation, the shell, uninstall, install paths) and for every release (below); not for
+steps, elevation, the shell, uninstall, install paths) and for releases (below); not for
 UI-only or launcher-only changes, which the headless UI self-test and the test projects cover.
 
-**Every release, on the Incus VM (the owner's rule since 29 Sept 2026: 1.0.7 went out without it):**
+**Releases, on the Incus VM, by what changed since the last release** (the owner, 3 Nov 2026; until
+then every release got both, since 1.0.7 went out untested). CI's Tests stay the gate either way.
+Boxes update themselves, so a launcher that does not start reaches every TV:
+- the launcher or `setup\` changed (catalog data included): step 1 before publishing;
+- the updater or setup's scripts changed (`setup\lib`, `setup\jobs`, `LauncherUpdate*`,
+  `UpdateService.cs`, the watchdog): step 2 as well;
+- docs, dev tools and tests only: neither.
+From Linux the same stages run through the `incus` MCP tools (restore, push, exec in the session,
+screenshot); `Test-ReleaseInVm.ps1` itself needs Windows.
 
 1. Before `New-Release.ps1`, the candidate:
    `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build` (or `-Candidate <folder>` with

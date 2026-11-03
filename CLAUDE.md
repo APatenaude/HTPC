@@ -42,8 +42,9 @@ remote, GitHub releases. Where to look:
 - After every push, watch the Tests workflow to the end and report it; fix a flaky test at its cause.
 - Close everything a test starts when it is done (headless Edge, launchers, the VM): the dev tools
   run Edge in a job Windows closes with them; afterwards no msedge on a test profile may remain.
-- Every release gets the VM checklist (DEVELOPMENT.md section 6); the owner is told to update only after
-  it. Release notes are baked into update.json: get them right first.
+- A release gets the VM checks its changes call for (DEVELOPMENT.md section 6: candidate install when the
+  launcher or setup changed, the update check when the updater did); the owner is told to update only
+  after them. Release notes are baked into update.json: get them right first.
 - The dev box may be the owner's TV: nothing shown on its screen during a test.
 
 ## With the owner
