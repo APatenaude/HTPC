@@ -95,7 +95,7 @@ check(same(timeline(null), { live: false, bar: true, seek: false }), 'nothing pl
 // ?grid=playing shows one screen at every size side by side (screenshots), without the tests.
 const SIZES = [[375, 560], [390, 664], [430, 740], [360, 640], [664, 390]];
 const SCREENS = ['remote', 'arrows', 'connecting', 'type', 'playing', 'nothing', 'live', 'longtitle', 'linksheet', 'link', 'linkkbd',
-  'pair', 'paircode', 'asleep', 'lost', 'sleep', 'timer', 'share', 'send', 'sendkey'];
+  'pair', 'paircode', 'asleep', 'lost', 'sleep', 'timer', 'share', 'send', 'sendkey', 'tvinfo', 'tvforget'];
 const pageUrl = (screen, h) => `../phone/index.html?demo=${screen === 'linkkbd' ? 'linksheet' : screen}` +
   (screen === 'linkkbd' ? `&kbd=${Math.round(h * 0.45)}` : '');
 

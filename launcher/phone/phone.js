@@ -80,6 +80,8 @@ const state = {
   box: { standby: false, volume: 50, muted: false, brightness: 100, timer: null, front: null, app: null, canType: true, media: null },
   receivedAt: Date.now(),         // when the last state came (media position and timer count from there)
   sentText: '',                   // what the Type field has sent to the TV so far
+  tv: '', me: '',                 // from hello: the TV box's name, this phone's name in its list
+  forgetting: false,              // this phone asked to forget the TV: its "bye" is no news
 };
 
 const vibrate = (ms = 8) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* no haptics */ } };
@@ -174,6 +176,8 @@ function onBox(m) {
       // Not paired: the pairing screen (as it is, when it shows already: a code may be half typed).
       if (!m.paired) { if (state.conn !== 'pairing') showPairing(); return; }
       hidePairing();
+      state.tv = m.tv || '';
+      state.me = m.me || '';
       setConn('open');
       // /send (card 2's code): the Send page once this phone may use the box, never over pairing.
       if (sendAfterHello) { sendAfterHello = false; openSend(); }
@@ -191,7 +195,7 @@ function onBox(m) {
     case 'warn': showBanner(m.text, m.extend ? '+15 min' : null, () => send({ t: 'timerExtend' })); timerBanner = !!m.extend; break;
     case 'bye':
       if (m.reason === 'sleep') showLost(true);
-      else toast('This phone was removed on the TV', 'warn');
+      else if (!state.forgetting) toast('This phone was removed on the TV', 'warn');
       break;
   }
 }
@@ -255,6 +259,7 @@ function renderTab() {
   // As on the design: the power button on Remote, the playing app's name on Playing.
   const media = state.box.media;
   $('power').hidden = tab !== 'remote';
+  $('tv-info').hidden = tab !== 'remote';
   $('media-app').hidden = tab !== 'playing' || !media || !media.app;
   if (media && media.app) $('media-app').textContent = media.app;
   $('status').hidden = tab === 'playing';
@@ -695,6 +700,34 @@ function closeSheet() {
   if (sheetReturn && sheetReturn.focus) sheetReturn.focus();
 }
 $('sheet-cancel').addEventListener('click', closeSheet);
+
+// This TV: which box this phone is paired with, how to use another one, and forgetting this one.
+function openTvInfo() {
+  const tv = [state.tv, state.tv && location.host ? `(${location.host})` : location.host].filter(Boolean).join(' ') || 'this TV box';
+  const me = state.me ? ` On it, this phone is “${state.me}”.` : '';
+  openSheet('This TV', `Paired with ${tv}.${me} Another TV box: scan the code in its Settings › Phone remote; each TV keeps its own pairing.`, [
+    { label: 'Forget this TV', full: true, run: () => openSheet('Forget this TV?', 'To use it again, this phone pairs again with a code or by scanning the TV’s QR code.', [
+      { label: 'Forget', full: true, primary: true, run: forgetTv },
+    ]) },
+  ]);
+}
+$('tv-info').addEventListener('click', openTvInfo);
+
+async function forgetTv() {
+  if (demo) { showPairing(); return; }
+  state.forgetting = true;
+  try {
+    const res = await fetch('/api/forget', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+  } catch (e) {
+    state.forgetting = false;
+    toast('Could not forget this TV: try again', 'warn');
+    return;
+  }
+  state.tv = state.me = '';
+  showPairing();
+  toast('This TV was forgotten');
+}
 $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) closeSheet(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
 
@@ -961,6 +994,12 @@ function runDemo(view) {
     $('pair-error').textContent = pairError({ status: 400, data: { error: 'wrong', left: 2 } });
   }
   if (view === 'sleep') $('power').click();
+  if (view === 'tvinfo' || view === 'tvforget') {
+    state.tv = 'TV-BOX-LIVING-ROOM';
+    state.me = 'iPhone 2';
+    openTvInfo();
+    if (view === 'tvforget') $('sheet-options').querySelector('button').click();
+  }
   if (view === 'timer') $('timer-button').click();
   if (view === 'send' || view === 'sendkey') {
     onBox({ t: 'hello', v: PROTOCOL, paired: true, state: box, ca: '3A:9F:12:C4:7E:05:B8:61:D2:4A:90:3C:E7:18:6B:F5:21:8D:C9:47:0E:B3:5A:96:F1:2C:84:7D:63:E0:1B:A8' });

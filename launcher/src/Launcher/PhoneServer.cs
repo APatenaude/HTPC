@@ -396,6 +396,7 @@ sealed class PhoneServer
                 case "/api/pair/start": await PairStart(ctx); break;
                 case "/api/pair": await Pair(ctx); break;
                 case "/api/pair/cancel": PairCancel(ctx); break;
+                case "/api/forget": await ForgetSelf(ctx); break;
                 case "/art": await Art(ctx); break;
                 case "/ca.crt": await ServeAuthority(ctx); break;
                 case "/api/open": await OpenShared(ctx); break;
@@ -783,6 +784,24 @@ sealed class PhoneServer
         if (empty is not null) foreach (var name in empty) limits.Remove(name);
     }
 
+    /// <summary>
+    /// The phone forgets this TV (its "This TV" sheet): as Forget in Settings › Phone remote, with
+    /// its Shortcut keys, and its cookie cleared (HttpOnly: the page cannot). Only this scheme's
+    /// cookie can be cleared from here; a pairing over the other one is another entry in the list.
+    /// </summary>
+    async Task ForgetSelf(HttpContext ctx)
+    {
+        if (!HttpMethods.IsPost(ctx.Request.Method) || !FromOurPage(ctx)) { ctx.Response.StatusCode = 403; return; }
+        if (PairedPhone(ctx) is { } phone)
+        {
+            Log.Info($"Phone remote: {phone.Name} forgot this TV");
+            Disconnect(pairing.Forget(phone.Id));
+            host.PhonesChanged();
+        }
+        ctx.Response.Cookies.Delete(PhoneCookie(ctx), new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Path = "/", Secure = ctx.Request.IsHttps });
+        await Reply(ctx, 200, new { ok = true });
+    }
+
     static void SetCookie(HttpContext ctx, string token) =>
         ctx.Response.Cookies.Append(PhoneCookie(ctx), token, new CookieOptions
         {
@@ -828,6 +847,8 @@ sealed class PhoneServer
         {
             t = "hello", v = PhoneProtocol.Version, paired = allowed, name = client.Name, state = allowed ? RawState() : (JsonElement?)null,
             share = shared, ca = allowed ? certificates?.Fingerprint : null,
+            // For the page's "This TV" sheet: which box this is, and this phone's name in its list.
+            tv = allowed ? Environment.MachineName : null, me = phone?.Name,
         }));
         if (!allowed)
         {

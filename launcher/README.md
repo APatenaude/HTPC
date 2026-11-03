@@ -577,7 +577,10 @@ the next start), SPEC N8. Files: `phone/` (the page phones load), `src/Phone*.cs
 - 5 wrong tries lock pairing for 1 minute, then 2, 4... up to an hour, until a phone pairs.
 - A paired phone keeps a long random token in an HttpOnly cookie (on iPhone the Home Screen app pairs
   once more: it has its own cookies). Settings › Phone remote lists the phones (Forget) and can switch
-  codes off.
+  codes off. The phone's own This TV button (Remote tab, next to Power) names the box and this phone
+  in its list, says another box pairs through its own code, and forgets this one (`POST /api/forget`,
+  checked as the pairing calls: its entry and Shortcut keys go, its cookie is cleared). Each box is
+  its own pairing, so one phone can use several.
 - Keys are a fixed list (no Windows key or shortcuts), text is at most 256 characters a message and
   never logged, links must be http(s) with nothing that could become a command-line switch.
 - Apps get links as separate arguments after `--` (VacuumTube only the checked video id). The remote

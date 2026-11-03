@@ -369,6 +369,8 @@ static partial class Program
         var (ws, _) = await Ws(port, origin, cookie);
         hello = await Receive(ws!);
         Check(hello?.GetProperty("paired").GetBoolean() == true && hello?.GetProperty("state").GetProperty("volume").GetInt32() == 5, "paired phone: hello with state");
+        Check(hello?.GetProperty("tv").GetString() == Environment.MachineName && hello?.GetProperty("me").GetString() is { Length: > 0 },
+            "paired phone: hello names the TV and this phone (the page's This TV sheet)");
         await SendText(ws!, "{\"t\":\"ping\"}");
         JsonElement? pong = null;
         for (var i = 0; i < 5 && pong?.GetProperty("t").GetString() != "pong"; i++) pong = await Receive(ws!);
@@ -421,6 +423,19 @@ static partial class Program
         await Until(() => server.ClientCount == 0);
         var (again, _) = await Ws(port, origin, cookie);
         Check(again is not null && (await Receive(again))?.GetProperty("paired").GetBoolean() == false, "its cookie no longer works");
+
+        // The phone forgets this TV itself (its This TV sheet).
+        var repaired = await Post("/api/pair", $"{{\"key\":\"{pairing.NewKey()}\"}}", origin);
+        var cookie2 = repaired.Headers.TryGetValues("Set-Cookie", out var sc2) ? sc2.First().Split(';')[0] : "";
+        var count = pairing.Phones.Count;
+        Check((await Post("/api/forget", "{}", null, cookie2)).StatusCode == HttpStatusCode.Forbidden && pairing.Phones.Count == count,
+            "forget without Origin: 403, the phone stays");
+        var forgot = await Post("/api/forget", "{}", origin, cookie2);
+        var cleared = forgot.Headers.TryGetValues("Set-Cookie", out var sc3) ? sc3.First() : "";
+        Check(forgot.StatusCode == HttpStatusCode.OK && pairing.Phones.Count == count - 1 && cleared.StartsWith("htpc_phone=;") && cleared.Contains("expires="),
+            $"the phone's Forget removes it and clears its cookie ({cleared})");
+        var (afterForget, _) = await Ws(port, origin, cookie2);
+        Check(afterForget is not null && (await Receive(afterForget))?.GetProperty("paired").GetBoolean() == false, "after its own Forget the phone pairs again");
     }
 
     // A phone silent for a while is dropped; one sending its heartbeat stays. On a server of its own
