@@ -55,20 +55,30 @@ const WifiUI = (() => {
 
   function speedCaption() {
     const r = speed.run, d = speed.result;
-    if (r) {
-      const live = r.phase === 'down' ? r.downMbps : r.phase === 'up' ? r.upMbps : null;
-      const word = { delay: 'Delay', down: 'Download', up: 'Upload' }[r.phase];
-      return `${word}${live ? ' ' + mbps(live) + ' Mb/s' : ''}… · A to stop`;
-    }
+    if (r) return `${{ delay: 'Measuring the delay', down: 'Measuring the download', up: 'Measuring the upload' }[r.phase]}… · A to stop`;
     if (speed.error) return `<span class="fail">${esc(speed.error)}</span>`;
-    if (d) return esc([`${mbps(d.downMbps)} Mb/s down`, `${mbps(d.upMbps)} Mb/s up`, `${d.delayMs} ms`, d.via ? 'over ' + d.via : ''].filter(Boolean).join(' · '));
+    if (d) return esc(d.via ? `Last test, over ${d.via}` : 'Last test');
     return 'Measures how fast the box downloads and uploads, in about 15 seconds';
   }
-  const speedRow = () => opts.speed ? row('wifi-speed', 'download', 'Test speed', speedCaption(), '') : '';
+  // The numbers, big on the right (read from the couch): the result, or the test's so far (the one measuring in the accent).
+  function speedStats() {
+    const r = speed.run, d = r || (speed.error ? null : speed.result);
+    if (!d) return '';
+    const stat = (value, unit, phase) => {
+      const live = r && r.phase === phase, known = value !== null && value !== undefined;
+      return `<div class="speed-stat${live ? ' live' : known ? '' : ' pending'}"><b>${known ? value : '–'}</b><span>${unit}</span></div>`;
+    };
+    return stat(d.downMbps == null ? null : mbps(d.downMbps), 'Mb/s down', 'down') +
+      stat(d.upMbps == null ? null : mbps(d.upMbps), 'Mb/s up', 'up') +
+      stat(d.delayMs, 'ms delay', 'delay');
+  }
+  const speedRow = () => opts.speed ? row('wifi-speed', 'download', 'Test speed', speedCaption(), `<div class="speed-stats">${speedStats()}</div>`) : '';
 
   function patchSpeed() {
     const caption = document.querySelector('[data-id="wifi-speed"] .caption');
     if (caption) caption.innerHTML = speedCaption();
+    const stats = document.querySelector('[data-id="wifi-speed"] .speed-stats');
+    if (stats) stats.innerHTML = speedStats();
     if (opts.hintsChanged) opts.hintsChanged();   // B stops a running test: the hint bar says so
   }
 

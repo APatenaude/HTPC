@@ -57,32 +57,35 @@ selftestGroup(async ({ check, asksFirst, tick, sent, lastSent }) => {
   draw();
   const speedRow = () => node('wifi-speed');
   const speedText = () => speedRow().querySelector('.caption').textContent;
+  // The numbers on the right: "312 Mb/s down|41 Mb/s up|12 ms delay", the one measuring marked *.
+  const speedStats = () => [...speedRow().querySelectorAll('.speed-stat')].map((s) => `${s.children[0].textContent} ${s.children[1].textContent}` + (s.classList.contains('live') ? '*' : '')).join('|');
   check('Wi-Fi speed: the row follows the network in use, before Other networks',
     !!speedRow() && !!(node('wifi-current').compareDocumentPosition(speedRow()) & Node.DOCUMENT_POSITION_FOLLOWING) &&
     !!(speedRow().compareDocumentPosition(box.querySelector('.section')) & Node.DOCUMENT_POSITION_FOLLOWING));
   sent.length = 0;
   WifiUI.press('a', speedRow());
-  check('Wi-Fi speed: A starts it and the row says Delay', lastSent('wifi.speed') && lastSent('wifi.speed').on === true && speedText().startsWith('Delay'), speedText());
+  check('Wi-Fi speed: A starts it and the row says so, the delay measuring', lastSent('wifi.speed') && lastSent('wifi.speed').on === true && speedText().startsWith('Measuring the delay') && speedStats() === '– Mb/s down|– Mb/s up|– ms delay*', speedText() + ' ' + speedStats());
   const rowBefore = speedRow();
   WifiUI.handle({ type: 'wifi.speed', phase: 'down', downMbps: 245.3, upMbps: null, delayMs: 12, via: 'Wi-Fi', error: null });
-  check('Wi-Fi speed: progress is patched in the row, which is not redrawn', speedRow() === rowBefore && speedText().startsWith('Download 245 Mb/s'), speedText());
+  check('Wi-Fi speed: progress is patched in the row, which is not redrawn', speedRow() === rowBefore && speedText().startsWith('Measuring the download') && speedStats() === '245 Mb/s down*|– Mb/s up|12 ms delay', speedText() + ' ' + speedStats());
   WifiUI.handle({ type: 'wifi.speed', phase: 'up', downMbps: 250, upMbps: 38.04, delayMs: 12, via: 'Wi-Fi', error: null });
-  check('Wi-Fi speed: ... the upload too', speedRow() === rowBefore && speedText().startsWith('Upload 38 Mb/s'), speedText());
-  check('Wi-Fi speed: B stops it (and is taken, so Settings stays)', WifiUI.press('b', speedRow()) === true && lastSent('wifi.speed').on === false && !/Upload/.test(speedText()), speedText());
+  check('Wi-Fi speed: ... the upload too', speedRow() === rowBefore && speedText().startsWith('Measuring the upload') && speedStats() === '250 Mb/s down|38 Mb/s up*|12 ms delay', speedText() + ' ' + speedStats());
+  check('Wi-Fi speed: B stops it (and is taken, so Settings stays)', WifiUI.press('b', speedRow()) === true && lastSent('wifi.speed').on === false && !speedText().startsWith('Measuring') && speedStats() === '', speedText());
   check('Wi-Fi speed: the next B is Settings\'s again', WifiUI.press('b', speedRow()) === false);
   WifiUI.handle({ type: 'wifi.speed', phase: 'down', downMbps: 90, upMbps: null, delayMs: 12, via: 'Wi-Fi', error: null });
-  check('Wi-Fi speed: a late step of a stopped test is ignored', !/Download/.test(speedText()), speedText());
+  check('Wi-Fi speed: a late step of a stopped test is ignored', !speedText().startsWith('Measuring') && speedStats() === '', speedText());
   WifiUI.press('a', speedRow());
   WifiUI.press('a', speedRow());
-  check('Wi-Fi speed: A while it runs stops it', lastSent('wifi.speed').on === false && !/Delay/.test(speedText()), speedText());
+  check('Wi-Fi speed: A while it runs stops it', lastSent('wifi.speed').on === false && !speedText().startsWith('Measuring'), speedText());
   WifiUI.press('a', speedRow());
   WifiUI.handle({ type: 'wifi.speed', phase: 'done', downMbps: 312.4, upMbps: 41.2, delayMs: 12, via: 'Wi-Fi', error: null });
-  check('Wi-Fi speed: the result is the caption', speedText() === '312 Mb/s down · 41 Mb/s up · 12 ms · over Wi-Fi', speedText());
+  const result = '312 Mb/s down|41 Mb/s up|12 ms delay';
+  check('Wi-Fi speed: the result, big on the right; the caption says how', speedStats() === result && speedText() === 'Last test, over Wi-Fi', speedStats() + ' ' + speedText());
   draw();
-  check('Wi-Fi speed: ... and stays through a redraw', speedText() === '312 Mb/s down · 41 Mb/s up · 12 ms · over Wi-Fi', speedText());
+  check('Wi-Fi speed: ... and stays through a redraw', speedStats() === result && speedText() === 'Last test, over Wi-Fi', speedStats() + ' ' + speedText());
   WifiUI.press('a', speedRow());
   WifiUI.handle({ type: 'wifi.speed', phase: 'error', downMbps: null, upMbps: null, delayMs: null, via: null, error: 'No internet' });
-  check('Wi-Fi speed: a failure shows its text', speedText() === 'No internet', speedText());
+  check('Wi-Fi speed: a failure shows its text, no numbers', speedText() === 'No internet' && speedStats() === '', speedText() + ' ' + speedStats());
   WifiUI.press('a', speedRow());
   sent.length = 0;
   WifiUI.stop();

@@ -5,6 +5,12 @@
 .wifi-row.current .wifi-glyph, .wifi-row .ok { color: #7FD1AE; }
 .wifi-row.warn .wifi-glyph, .wifi-row.warn .label { color: var(--warn); }
 .wifi-row .fail { color: var(--warn); }
+.speed-stats { display: flex; gap: 40px; flex-shrink: 0; }
+.speed-stat { display: flex; flex-direction: column; align-items: flex-end; min-width: 96px; }
+.speed-stat b { font-size: 40px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.speed-stat span { font-size: 20px; color: var(--text-2); white-space: nowrap; }
+.speed-stat.live b { color: var(--accent); }
+.speed-stat.pending b { color: var(--muted); }
 .wifi-lock { display: flex; color: var(--muted); }
 .wifi-note { margin: 18px 0 0; display: flex; align-items: center; gap: 16px; font-size: 23px; color: var(--muted); }
 .wifi-note.error { color: var(--warn); }
