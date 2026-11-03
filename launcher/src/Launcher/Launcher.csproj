@@ -81,7 +81,10 @@
     <MakeDir Directories="$(BaseIntermediateOutputPath)watchdog" />
     <WriteLinesToFile File="$(WatchdogVersionFile)" Overwrite="true"
       Lines="[assembly: System.Reflection.AssemblyVersion(&quot;$(Version)&quot;)];[assembly: System.Reflection.AssemblyFileVersion(&quot;$(Version)&quot;)];[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(Version)&quot;)]" />
-    <Exec Command="&quot;$(FrameworkCsc)&quot; /nologo /target:winexe /optimize+ /warnaserror+ /out:&quot;$(WatchdogExe)&quot; &quot;$(WatchdogSource)&quot; &quot;$(WatchdogVersionFile)&quot;" />
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="&quot;$(FrameworkCsc)&quot; /nologo /target:winexe /optimize+ /warnaserror+ /out:&quot;$(WatchdogExe)&quot; &quot;$(WatchdogSource)&quot; &quot;$(WatchdogVersionFile)&quot;" />
+    <!-- Linux has no .NET Framework csc: an empty stand-in so the launcher still compiles there
+         (a Linux build is only a compile check, never shipped). -->
+    <Touch Condition="'$(OS)' != 'Windows_NT'" Files="$(WatchdogExe)" AlwaysCreate="true" />
   </Target>
 
 </Project>

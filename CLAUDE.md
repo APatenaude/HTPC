@@ -16,6 +16,8 @@ remote, GitHub releases. Where to look:
 - `launcher\dev\Test-Ui.ps1 -Shots settings/wifi,menu-alerts -ShotSize 1536x864`: screenshots of UI
   routes (1536x864 is a 4K TV at 250%). Look at every screen a UI change touches, at the full-size
   PNG when judging details; the audit catches rules, not how it looks.
+- On Linux: `dotnet build` (compile only) and `node launcher/dev/linux/test-ui.mjs` (the UI self-test);
+  DEVELOPMENT.md section 1, "On Linux", says what can't run there.
 - `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build` before a release, `-UpdateFrom <previous>`
   after it (the VM checklist, gated, with a short report).
 

@@ -60,6 +60,21 @@ in a new session from this repo. In that first session:
 The dev machine need not be a TV box: the owner's TV updates from GitHub releases. Only on a TV box
 does `launcher\dev\Start-Launcher.ps1` run the repo's launcher (section 3).
 
+### On Linux
+
+A Linux machine (x64, tried on Ubuntu 24.04) covers the C# compile and the TV UI; nothing else.
+
+| Task | Command |
+|---|---|
+| Once | the .NET SDK `global.json` names (`dotnet-install.sh --version <it>`); Node.js; in `launcher/dev/linux`, `npm install` and `npx playwright install --with-deps chrome` |
+| Compile every project | `dotnet build <project> -c Release` (`Directory.Build.props` turns on `EnableWindowsTargeting`; the watchdog is an empty stand-in, the Linux build is never shipped) |
+| The UI self-test and audits (`Test-Ui.ps1 -SelfTest`), then the phone page (`dev/phone-test.html`) | `node launcher/dev/linux/test-ui.mjs` (`--all-sizes`: every size) |
+
+Not on Linux: running the test projects and TvLab (WinForms), every `.ps1` (Test-Quick, Test-All,
+the setup tests, screenshots, releases), the VM and the box. The Tests workflow covers part of it
+on every push (the test projects, TvLab and the setup tests, not the UI); the rest waits for a
+Windows machine: say so when handing a change over.
+
 ### What is not in git, and how to carry it over
 
 Everything the product needs is in the repo and its GitHub releases. These live only on the machine

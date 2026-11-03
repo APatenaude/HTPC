@@ -20,4 +20,10 @@
     <UpdateMinimumFrom>1.0.5</UpdateMinimumFrom>
   </PropertyGroup>
 
+  <!-- Linux dev machines: the windows-targeted projects compile (to check them), never run.
+       DEVELOPMENT.md section 1, "On Linux". -->
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
 </Project>

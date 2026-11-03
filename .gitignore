@@ -4,6 +4,9 @@ obj/
 .vs/
 *.user
 
+# The Linux UI runner's Playwright (launcher/dev/linux)
+node_modules/
+
 # Published setup exe (launcher\dev\Publish-Setup.ps1)
 dist/
 
