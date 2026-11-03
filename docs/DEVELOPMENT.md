@@ -344,8 +344,7 @@ exists for answer ISOs only; `setup\test` is in neither the setup exe nor setup.
   anything.
 - **Helpers in worktrees** start from the branch as pushed to GitHub, not from local commits:
   push first when a helper needs them.
-- **The box is the owner's TV:** builds and test runs on it make the TV lag. One build at a time,
-  a few helpers at most, and nothing ever shown on its screen during a test (a hidden desktop,
+- **The box is the owner's TV:** nothing ever shown on its screen during a test (a hidden desktop,
   `CreateDesktop`, for anything that needs a real window).
 
 ### Working with the owner

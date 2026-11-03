@@ -21,15 +21,6 @@ remote, GitHub releases. Where to look:
 - `setup\test\Test-ReleaseInVm.ps1 -Candidate -Build` before a release, `-UpdateFrom <previous>`
   after it (the VM checklist, gated, with a short report).
 
-## Token hygiene
-
-- Grep a name (CODEMAP gives them), then Read a range of ~40 lines. Never read a file over ~400
-  lines whole: today LauncherTests\Program.cs, phone.js, AppManager.cs, UpdateService.cs,
-  Watchdog.cs, PhoneServer.cs, SetupElevation.cs, LauncherUpdate.ps1, ui\library.js, ui\setup.js,
-  ui\buttons.js, UpdateCore.ps1 (check with `git ls-files | % { "$((gc $_).Count) $_" }` sorted).
-- Keep command output short: the tools above print one line per part; pipe the rest through
-  `Select-Object -Last N` or `Select-String`.
-
 ## Rules
 
 - Commit and push only to `claude/multimedia-device-software-23aqa5` unless the owner says otherwise.
@@ -53,7 +44,7 @@ remote, GitHub releases. Where to look:
   run Edge in a job Windows closes with them; afterwards no msedge on a test profile may remain.
 - Every release gets the VM checklist (DEVELOPMENT.md section 6); the owner is told to update only after
   it. Release notes are baked into update.json: get them right first.
-- The dev box may be the owner's TV: few helpers, one build at a time, nothing shown on its screen.
+- The dev box may be the owner's TV: nothing shown on its screen during a test.
 
 ## With the owner
 
