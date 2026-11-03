@@ -47,8 +47,8 @@ selftestGroup(async ({ check, checkRows, asksFirst, tick, sent, lastSent, sNode,
   press('left');
   checkRows('Settings: a slider picked with A, its hints saying so: left lowers it; B puts it down, the value kept, the focus on it; then left is the list again', [
     ['A picks it', picked], ['its hints change', pickedHints !== hintsBefore, pickedHints],
-    ['left twice: 10 lower', lowered === vol - 10, `${vol} to ${lowered}`],
-    ['B', putDown[0] === vol - 10 && putDown[1] === 'set-volume' && !putDown[2], putDown.join(' ')],
+    [`left twice: ${2 * SLIDER_STEP} lower`, lowered === vol - 2 * SLIDER_STEP, `${vol} to ${lowered}`],
+    ['B', putDown[0] === vol - 2 * SLIDER_STEP && putDown[1] === 'set-volume' && !putDown[2], putDown.join(' ')],
     ['then left', focusId() === 's-sound', focusId()],
   ]);
 
