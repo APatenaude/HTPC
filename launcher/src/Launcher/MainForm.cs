@@ -164,6 +164,7 @@ sealed partial class MainForm : Form
             AlertsLoaded(); // MainForm.Alerts.cs
             var (hasS3, hasS4) = Standby.Capabilities();
             Log.Info($"Sleep after {settings.IdleMinutes} min idle, mode {settings.SleepMode}; S3 after {settings.SleepAfterStandbyHours} h of standby (0 = never); this PC: S3 {hasS3}, hibernate {hasS4}, Modern Standby {Standby.ModernStandby()}");
+            _ = Task.Run(() => Log.Info($"Network adapters: {NetCable.Describe()}"));
             controller.Start();
             clock.Start();
             // Nothing the 200 ms watch looks after is needed in standby (the pointer, the button

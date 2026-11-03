@@ -25,6 +25,21 @@ static class NetCable
         && !IsVirtual(n.Name, n.Description)
         && !n.Description.Contains("Kernel Debug", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Every adapter for the log: name, description, type, up or not, and whether it counts as the
+    /// cable, so a "cable connected" with none plugged in can be traced on the box. No addresses.
+    /// </summary>
+    public static string Describe()
+    {
+        try
+        {
+            return string.Join("; ", NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .Select(n => $"{n.Name} ({n.Description}) {n.NetworkInterfaceType} {n.OperationalStatus}{(IsCable(n) ? " = the cable" : "")}"));
+        }
+        catch (NetworkInformationException e) { return $"unreadable ({e.Message})"; }
+    }
+
     /// <summary>A cable plugged in: a physical Ethernet port that is up.</summary>
     public static bool Plugged()
     {
