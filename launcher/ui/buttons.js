@@ -544,7 +544,7 @@ function mapsDemo() {
       app('youtube', 'YouTube', 'youtube', '#FF5B52', 'controller'),
       app('twitch', 'Twitch', 'chat', '#B08CFF', 'mouse', { select: 'key:Alt+T', start: 'key:F' }),
       app('stremio', 'Stremio', 'film', '#7C8CFF', 'mouse'),
-      app('jellyfin', 'Jellyfin', 'library', '#3DC0F0', 'controller'),
+      app('jellyfin', 'Jellyfin', 'library', '#3DC0F0', 'keyboard'),
       app('moonlight', 'Moonlight', 'moon', '#F5D16B', 'controller'),
       app('edge', 'Browser', 'globe', '#3CCB9A', 'mouse'),
       app('netflix', 'Netflix', 'play', '#FF4B55', 'keyboard'),

@@ -32,7 +32,8 @@ Readers: the launcher's `AppManager.Parse` (`launcher/src/Launcher/AppManager.cs
 - `preset`: the default button map (SPEC: Controller map): `controller` (the app reads the pad
   itself), `mouse` or `keyboard`. Plex HTPC is on keyboard: its own controller support knows only
   the controllers named in its input maps (Xbox One S over Bluetooth, DualShock 4) and drops the
-  rest (its log: "No match for ..."), while its keyboard map is complete.
+  rest (its log: "No match for ..."), while its keyboard map is complete. Jellyfin too: Jellyfin
+  Media Player ignored the 8BitDo on every screen, and its server's Host field could not be reached.
 - `icon`: `{ "glyph", "color" }`, the glyph (`launcher/ui/icons.js`) and colour shown until the
   app's own logo is cached (the launcher takes it from the installed program or the website:
   AppLogos).

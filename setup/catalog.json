@@ -62,7 +62,7 @@
       "type": "app",
       "category": "media",
       "default": true,
-      "preset": "controller",
+      "preset": "keyboard",
       "icon": { "glyph": "library", "color": "#3DC0F0" },
       "launch": { "exe": "%ProgramFiles%\\Jellyfin\\Jellyfin Media Player\\JellyfinMediaPlayer.exe", "args": "--tv --fullscreen" },
       "phoneKeys": { "back": "esc", "backspace": "afterTyping" },

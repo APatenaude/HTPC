@@ -123,7 +123,7 @@ user) are folded into the items below; what was dropped is listed under "Not now
   list to pick from (Twitch, 29 Sept 2026), and a configurable button opens it anytime (default: R3). Numbers row, @, .com, shift,
   symbols, show password, and a row of what a controller lacks (Tab, refresh, zoom, full
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
-  with their own keyboard (VacuumTube, Jellyfin, Moonlight, Plex HTPC); R3 not intercepted in
+  with their own keyboard (VacuumTube, Moonlight, Plex HTPC); R3 not intercepted in
   Moonlight. No automatic pop-up in desktop mode either (the owner, 29 Sept 2026): R3 opens it
   there. LT is Shift, RT the symbols; moving past an edge wraps round to the other
   side (unlike every list on the TV). 440 of 1080 high (it was 560: half the screen). The
@@ -136,8 +136,8 @@ user) are folded into the items below; what was dropped is listed under "Not now
   ramp is put back when the launcher closes, checked every second, and Settings › Display has a reset.
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
   controller map below. Mouse and Keyboard apps can have any button remapped on the TV (only
-  there) to a key, key combination, mouse action, media key or launcher action; YouTube,
-  Jellyfin and Moonlight can only switch preset. Pointer and scroll speeds are global. R3 (the
+  there) to a key, key combination, mouse action, media key or launcher action; YouTube
+  and Moonlight can only switch preset. Pointer and scroll speeds are global. R3 (the
   keyboard) can be changed, Home cannot. Website tiles are separate windows, so each has its
   own map. Start + D-pad is the volume in every app but Moonlight (Up and Down by 2, repeating
   while held; Left mutes); Start's own action then comes as it is let go, without a direction.
@@ -225,7 +225,7 @@ Launcher & menus: D-pad/L stick move · A select (held 0.5 s on a home tile: mov
 | R3 | keyboard | keyboard | keyboard |
 | Home | launcher | launcher | launcher |
 
-Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Jellyfin, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse; Plex HTPC = Keyboard (29 Sept 2026: its own controller support ignored the 8BitDo, which its input maps do not name). Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
+Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse; Plex HTPC = Keyboard (29 Sept 2026: its own controller support ignored the 8BitDo, which its input maps do not name); Jellyfin = Keyboard (the owner, 3 Nov 2026: Jellyfin Media Player ignored the controller everywhere, its server's Host field included). Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
 
 ## Risks and pushback
 
