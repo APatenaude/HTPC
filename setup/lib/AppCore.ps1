@@ -85,12 +85,18 @@ function Save-WithProgress([string]$Url, [string]$OutFile, [long]$Size, $App, $R
     } finally { $resp.Dispose() }
 }
 
+# The app's running programs (from its program's folder).
+function Get-AppProcess($App) {
+    if (-not $App.launch.exe) { return @() }
+    $dir = Split-Path ([Environment]::ExpandEnvironmentVariables($App.launch.exe)) -Parent
+    @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($dir + '\', [StringComparison]::OrdinalIgnoreCase) })
+}
+
 # Closes what an installer started (a program that did not run before, from the app's folder).
 function Stop-StartedByInstaller($App, [int[]]$Before) {
     if (-not $App.launch.exe) { return }
-    $dir = Split-Path ([Environment]::ExpandEnvironmentVariables($App.launch.exe)) -Parent
     Start-Sleep -Seconds 2
-    $started = Get-Process | Where-Object { $Before -notcontains $_.Id -and $_.Path -and $_.Path.StartsWith($dir + '\', [StringComparison]::OrdinalIgnoreCase) }
+    $started = Get-AppProcess $App | Where-Object { $Before -notcontains $_.Id }
     foreach ($p in $started) {
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
         Write-Change "closed $($p.ProcessName), started by the $($App.name) installer"

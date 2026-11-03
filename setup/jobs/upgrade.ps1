@@ -30,6 +30,10 @@ if ($app.install.source -ne 'winget') { throw "Updating $($app.name) from the TV
 
 $report = Get-JobReporter
 Report-Phase $report 'install' $null "Updating $($app.name)"
+# Some installers start the app when they finish (Stremio): closed again, unless it was open before
+# (its installer then restarts what the user had open).
+$wasOpen = @(Get-AppProcess $app).Count -gt 0
+$before = @(Get-Process | Select-Object -ExpandProperty Id)
 $winget = Get-WingetForContext
 $scope = Get-WingetScope $app
 $code = Invoke-Program $winget @('upgrade', '--id', $app.install.id, '--exact', '--source', 'winget',
@@ -46,6 +50,7 @@ if ($code -ne 0 -and (Test-WingetUpdateListed $winget $app.install.id)) {
     if ($code -ne 0) { throw "winget install over $($app.install.id) failed with exit code $code" }
     if (Test-WingetUpdateListed $winget $app.install.id) { throw "$($app.name) is still not the newest version after the update" }
 }
+if (-not $wasOpen) { Stop-StartedByInstaller $app $before }
 Write-Change "$($app.name) updated"
 # An update may put back what the install's pass took away (lib\AppAutostart.ps1).
 [void](Invoke-AppAutostartGuard -Apps $app -Context "upgrade:$($app.id)")
