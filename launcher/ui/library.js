@@ -149,16 +149,15 @@
     layout() { placeByTile(el('tileopts').querySelector('.to-panel'), lib.target); },
   });
 
-  // Tile options open beside their tile: to its right, or to its left at the right edge, level
-  // with it, and kept on screen above the hints. In stage pixels: the tile's offsets are from
-  // #home, which covers the stage.
+  // Tile options open over their tile (beside it, the owner could not tell which tile they were
+  // for): centred across it, overhanging its top as much as its sides, kept on screen above the
+  // hints. In stage pixels: the tile's offsets are from #home, which covers the stage.
   function placeByTile(panel, id) {
     const tile = document.querySelector(`#tiles [data-id="tile:${CSS.escape(id)}"]`);
     if (!panel || !tile) return;
-    const gap = 32, x = tile.offsetLeft, w = tile.offsetWidth;
-    const left = x + w + gap + panel.offsetWidth <= 1920 - 48 ? x + w + gap : x - gap - panel.offsetWidth;
-    panel.style.left = `${Math.max(48, left)}px`;
-    panel.style.top = `${Math.max(48, Math.min(tile.offsetTop, 1080 - 96 - 24 - panel.offsetHeight))}px`;
+    const clamp = (v, max) => Math.max(48, Math.min(v, max)), overhang = (panel.offsetWidth - tile.offsetWidth) / 2;
+    panel.style.left = `${clamp(tile.offsetLeft - overhang, 1920 - 48 - panel.offsetWidth)}px`;
+    panel.style.top = `${clamp(tile.offsetTop - overhang, 1080 - 96 - 24 - panel.offsetHeight)}px`;
   }
 
   onAction('opt-move', startMove);

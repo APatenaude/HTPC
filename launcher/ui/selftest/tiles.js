@@ -17,12 +17,13 @@ selftestGroup(({ check, asksFirst, sent, lastSent, tileEl }) => {
   setFocus(tileEl('moonlight'));
   press('start');
   const panelR = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), mR = tileEl('moonlight').getBoundingClientRect();
-  check('Tile options: beside the tile, level with it', panelR.left >= mR.right && panelR.top < mR.bottom && panelR.bottom > mR.top, `${panelR.left},${panelR.top} / ${mR.right},${mR.top}`);
+  const over = (p, t) => p.left <= t.left + 1 && p.right >= t.right - 1 && p.top < t.bottom && p.bottom > t.top;
+  check('Tile options: over the tile (the first one: kept off the screen\'s edge)', over(panelR, mR), `${panelR.left}-${panelR.right},${panelR.top} / ${mR.left}-${mR.right},${mR.top}`);
   press('b');
   setFocus(tileEl('jellyfin'));
   press('start');
   const p2 = $('tileopts').querySelector('.to-panel').getBoundingClientRect(), jR = tileEl('jellyfin').getBoundingClientRect();
-  check('Tile options: at the right edge, on the tile\'s left and on screen', p2.right <= jR.left && p2.left >= 0, `${p2.left}-${p2.right} / ${jR.left}`);
+  check('Tile options: at the right edge, over the tile and on screen', p2.left < jR.right && p2.right > jR.left && p2.top < jR.bottom && p2.bottom > jR.top && p2.right <= innerWidth, `${p2.left}-${p2.right} / ${jR.left}-${jR.right}`);
   press('b');
 
   setFocus(tileEl('moonlight'));
