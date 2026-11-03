@@ -201,7 +201,12 @@ sealed class SpeedTest : IDisposable
                 }
             }
             catch (OperationCanceledException) { }   // the window ended, or the test was cancelled
-            catch (Exception e) { Interlocked.CompareExchange(ref failure, e, null); }
+            catch (Exception e)
+            {
+                Interlocked.CompareExchange(ref failure, e, null);
+                // The server refused (429 limiting, 403): the other streams' numbers mean nothing now.
+                if (e is SpeedTestException) phase.Cancel();
+            }
         })));
 
         var meter = new SpeedMeter(options.Warmup);
@@ -225,7 +230,8 @@ sealed class SpeedTest : IDisposable
             await Task.WhenAny(workers, Task.Delay(TimeSpan.FromSeconds(2)));
         }
         cancel.ThrowIfCancellationRequested();
-        // Every stream failed (the server limiting the box, the link dropping): not a rate worth showing.
+        if (failure is SpeedTestException refused) throw refused;
+        // Every stream failed (the link dropping): not a rate worth showing.
         if (failure is not null && (allEnded || Interlocked.Read(ref total) == 0))
             throw failure as SpeedTestException ?? new SpeedTestException(SpeedRules.ErrorText(failure), failure);
         if (Interlocked.Read(ref total) == 0) throw new SpeedTestException("No data came through");

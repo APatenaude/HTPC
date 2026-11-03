@@ -83,12 +83,15 @@ static class SpeedTests
         Check(server.DownSizes.Count(s => s == 1_000_000) >= 4, "four download streams start, each with a 1 MB request");
         Check(server.UploadLengths.Count(s => s == 1_000_000) >= 4, "four upload streams start, each with a 1 MB body");
         Check(server.Foreign == 0, "every request goes to https://speed.cloudflare.com, over HTTP/1.1");
+        using var shipped = SpeedTest.CreateHandler();
+        Check(!shipped.AllowAutoRedirect && !shipped.UseProxy && !shipped.UseCookies && shipped.AutomaticDecompression == DecompressionMethods.None
+            && shipped.ConnectCallback == AppLogos.ConnectToInternet, "the box's handler: no redirect, proxy or cookies, and it connects only to internet addresses");
     }
 
     static async Task Failures()
     {
         foreach (var (mode, expected) in new[] { (FakeMode.Forbidden, "403"), (FakeMode.NoDownload, "403"), (FakeMode.Limited, "limiting speed tests"),
-            (FakeMode.LimitedAfterFirst, "limiting speed tests"),
+            (FakeMode.LimitedAfterFirst, "limiting speed tests"), (FakeMode.LimitedOneStream, "limiting speed tests"),
             (FakeMode.Offline, "Could not reach the speed test server (No such host is known)") })
         {
             using var test = new SpeedTest(new FakeServer { Mode = mode }, Quick);
@@ -111,13 +114,14 @@ static class SpeedTests
         catch (OperationCanceledException) { Check(clock.Elapsed < TimeSpan.FromSeconds(3), "cancelled in the download: stops at once, with a cancellation and not an error"); }
     }
 
-    enum FakeMode { Ok, Forbidden, NoDownload, Limited, LimitedAfterFirst, Offline }
+    // LimitedOneStream: one stream is refused while the others keep sending (a low figure would hide the limit).
+    enum FakeMode { Ok, Forbidden, NoDownload, Limited, LimitedAfterFirst, LimitedOneStream, Offline }
 
     // Cloudflare's two endpoints, in memory: __down?bytes=N answers N zero bytes (N = 0: the delay probe), __up takes a body.
     sealed class FakeServer : HttpMessageHandler
     {
         public FakeMode Mode;
-        public int DelayCalls, Foreign;
+        public int DelayCalls, Foreign, Refused;
         public readonly ConcurrentBag<long> DownSizes = [], UploadLengths = [];
 
         static HttpResponseMessage TooMany()
@@ -140,6 +144,7 @@ static class SpeedTests
                 if (bytes == 0) { Interlocked.Increment(ref DelayCalls); return new(HttpStatusCode.OK) { Content = new ByteArrayContent([]) }; }
                 DownSizes.Add(bytes);
                 if (Mode == FakeMode.LimitedAfterFirst && bytes > 1_000_000) return TooMany();
+                if (Mode == FakeMode.LimitedOneStream && bytes > 1_000_000 && Interlocked.Increment(ref Refused) == 1) return TooMany();
                 return Mode == FakeMode.NoDownload ? new(HttpStatusCode.Forbidden) : new(HttpStatusCode.OK) { Content = new StreamContent(new Body(bytes)) };
             }
             if (url.AbsolutePath == "/__up")

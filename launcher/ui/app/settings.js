@@ -205,7 +205,16 @@ function settingsFocused(el) {
 function settingsHints(el) {
   if (el.dataset.section) return [['A', 'Open'], ['B', 'Back']];
   if (editing === el.dataset.id) return [['←→', 'Change'], ['A', 'Done']];
-  if (el.dataset.noa !== undefined) return [['B', 'Sections']];   // a row A does nothing on
+  // A section whose B does something else for now (Wi-Fi: stops a running speed test).
+  const s = EXT.sections[state.section];
+  const back = (s && s.backLabel && s.backLabel()) || 'Sections';
+  if (el.dataset.noa !== undefined) return [['B', back]];   // a row A does nothing on
   const what = el.dataset.edit !== undefined ? 'Change' : el.querySelector('.toggle') ? 'On / off' : 'Select';
-  return [['A', what], ['B', 'Sections']];
+  return [['A', what], ['B', back]];
+}
+
+// A section's hints changed without the focus moving (settingsSection's backLabel).
+function settingsHintsChanged() {
+  const f = focusedEl();
+  if (f && state.view === 'settings') settingsFocused(f);
 }

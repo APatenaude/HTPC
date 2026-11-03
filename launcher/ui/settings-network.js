@@ -24,8 +24,9 @@ settingsSection('wifi', {
       WifiUI.html();
   },
   press: (button, el) => WifiUI.press(button, el),
-  shown() { WifiUI.start({ changed: wifiChanged, ask, toast, speed: true }); },
+  shown() { WifiUI.start({ changed: wifiChanged, ask, toast, speed: true, hintsChanged: settingsHintsChanged }); },
   left() { WifiUI.stop(); },
+  backLabel: () => WifiUI.speedRunning() ? 'Stop test' : null,
   demo() { WifiUI.demo(new URLSearchParams(location.search).get('wifi') || 'ethernet'); },
 });
 

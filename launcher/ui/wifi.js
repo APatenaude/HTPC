@@ -9,7 +9,7 @@
 //                         changed: redraw (html() again), then focus data-id focusId if given
 //                         speed: draws the "Test speed" row (Settings only; the setup step has none)
 //   WifiUI.stop()         hidden: scanning stops, a form in progress is dropped, a speed test is cancelled
-//   WifiUI.handle(msg)    host messages wifi.state / wifi.result; true if it was one
+//   WifiUI.handle(msg)    host messages wifi.state / wifi.result / wifi.speed; true if it was one
 //   WifiUI.html()         the rows (list, or the join form)
 //   WifiUI.press(button, el) -> handled   el: the focused data-nav element
 //   WifiUI.afterRender()  after the page drew html(): the form's field gets the focus and the keyboard
@@ -69,6 +69,7 @@ const WifiUI = (() => {
   function patchSpeed() {
     const caption = document.querySelector('[data-id="wifi-speed"] .caption');
     if (caption) caption.innerHTML = speedCaption();
+    if (opts.hintsChanged) opts.hintsChanged();   // B stops a running test: the hint bar says so
   }
 
   function stopSpeed() {
@@ -198,6 +199,7 @@ const WifiUI = (() => {
   function others() { return (st && st.networks || []).filter((n) => !n.connected); }
 
   return {
+    speedRunning: () => !!speed.run,
     start(o) { opts = o || {}; send({ type: 'wifi.watch', on: true }); },
     stop() { if (form) closeForm(); stopSpeed(); send({ type: 'wifi.watch', on: false }); },
     handle(msg) {

@@ -190,6 +190,7 @@ function render() {
 //     shown(), left()                the section came into view / went out of it (ask the host
 //                                    for data, stop something live)
 //     demo()                         sample data for index.html#settings/wifi in a browser
+//     backLabel() -> text|null       B's hint while B does something else (settingsHintsChanged)
 //   })
 //   addView('maps', { render(), press(button, el) -> handled, focus(items) -> element,
 //                     overlay (drawn over the view it opened from), demo(arg),

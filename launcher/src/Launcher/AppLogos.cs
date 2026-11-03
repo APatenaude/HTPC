@@ -250,7 +250,8 @@ sealed class AppLogos
     /// the name is looked up here and only an address on the internet is connected to. A site,
     /// a page's icon address or a redirect cannot make the box reach into itself or its own
     /// network (the router's page, a NAS, a service on localhost). A literal address is judged
-    /// the same way; a name with only local addresses fails as NotOnInternetException.
+    /// the same way; a name with only local addresses fails as NotOnInternetException. The speed
+    /// test (SpeedTest.CreateHandler) connects through it too: a change here applies to both.
     /// </summary>
     internal static async ValueTask<Stream> ConnectToInternet(SocketsHttpConnectionContext context, CancellationToken cancel)
     {

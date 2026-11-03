@@ -83,7 +83,7 @@ sealed partial class MainForm
                 break;
             case "wifi.speed":
                 if (Bool("on")) StartSpeedTest();
-                else { CancelSpeedTest(); WifiWatch(); }
+                else { CancelSpeedTest(tellPage: false); WifiWatch(); }
                 break;
         }
     }
@@ -95,7 +95,7 @@ sealed partial class MainForm
 
     void WifiWatch()
     {
-        if (!WifiShown) CancelSpeedTest();
+        if (!WifiShown) CancelSpeedTest(tellPage: true);
         Wifi.Watch(WifiShown && speedCts is null);
     }
 
@@ -132,13 +132,17 @@ sealed partial class MainForm
         _ = Task.Run(() => RunSpeedTest(cts, cts.Token));
     }
 
-    /// <summary>Stops the test in progress and tells the page. Nothing else is posted for it afterwards.</summary>
-    void CancelSpeedTest()
+    /// <summary>
+    /// Stops the test in progress; nothing else is posted for it afterwards. The page hears
+    /// "cancelled" only for a stop it did not ask for: an echo of its own could arrive after it
+    /// had started the next test, and end that one on the page.
+    /// </summary>
+    void CancelSpeedTest(bool tellPage)
     {
         if (speedCts is not { } cts) return;
         speedCts = null;
         cts.Cancel();
-        Post(SpeedMessage("cancelled"));
+        if (tellPage) Post(SpeedMessage("cancelled"));
     }
 
     async Task RunSpeedTest(CancellationTokenSource cts, CancellationToken cancel)

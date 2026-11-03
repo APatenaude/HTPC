@@ -141,8 +141,11 @@ selftestGroup(async ({ check, asksFirst, tick, sent, lastSent }) => {
   sent.length = 0;
   press('a');
   check('Settings › Wi-Fi: A on Test speed starts it', lastSent('wifi.speed') && lastSent('wifi.speed').on === true);
+  const hintBar = () => ($('settings-hints') || {}).textContent || '';
+  check('Settings › Wi-Fi: while it runs, the hint bar says B stops it', /Stop test/.test(hintBar()), hintBar());
   press('b');
   check('Settings › Wi-Fi: B stops the test and stays on its row', lastSent('wifi.speed').on === false && focusedEl() && focusedEl().dataset.id === 'wifi-speed', focusedEl() && focusedEl().dataset.id);
+  check('Settings › Wi-Fi: stopped, B goes back to Sections in the hint bar', /Sections/.test(hintBar()) && !/Stop test/.test(hintBar()), hintBar());
   press('b');
   check('Settings › Wi-Fi: the next B goes back to the section list', focusedEl() && focusedEl().dataset.section === 'wifi', focusedEl() && focusedEl().dataset.id);
   state.memory.settings = null;   // not on the Wi-Fi section when Bluetooth opens Settings next
