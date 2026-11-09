@@ -56,11 +56,12 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
 
 - XInput polling, the Home button included (`XInputGetStateEx`). Home: a tap, or a 0.5 s hold
   (Power; in Moonlight, our menu; in standby, wake with a buzz).
-- Start + D-pad is the volume in every app (`StartChord`): Start + Up / Down up or down by 2,
-  repeating while held; Start + Left mute. Start's own action then comes as it is let go, and only
-  without a direction; the D-pad alone is unchanged.
+- Start + D-pad or trigger is the volume in every app (`StartChord`): Start + Up or RT up, Start +
+  Down or LT down, by 2, repeating while held; Start + Left mute. Start's own action then comes as
+  it is let go, and only without one of these; the D-pad and triggers alone are unchanged (the
+  trigger pressed with Start is held back from the button map and the launcher, as the D-pad is).
 - Not in Moonlight (the game PC's buttons). Controller-preset apps read the pad themselves and see
-  Start and the D-pad too.
+  Start, the D-pad and the triggers too.
 
 ### Presets (`src/ButtonMap.cs`, `PadMapper.cs`, `Input.cs`; SPEC N13)
 

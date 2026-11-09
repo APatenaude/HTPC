@@ -141,8 +141,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   only while it moves: 5 s still, it is hidden where it is, in every app and the launcher; the
   desktop keeps it (the owner, 3 Nov 2026). R3 (the
   keyboard) can be changed, Home cannot. Website tiles are separate windows, so each has its
-  own map. Start + D-pad is the volume in every app but Moonlight (Up and Down by 2, repeating
-  while held; Left mutes); Start's own action then comes as it is let go, without a direction.
+  own map. Start + D-pad or trigger is the volume in every app but Moonlight (Up or RT, Down or LT
+  by 2, repeating while held; Left mutes; the owner added the triggers, 9 Nov 2026); Start's own
+  action then comes as it is let go, without one of them.
 - **N14 Sleep timer.** A countdown set from the Home menu, the Power menu, Settings or the
   phone: 15/30/45 min, 1 h, 1 h 30, 2 h, when the current video ends, off. "When this video
   ends": autoplay moving on counts as the end, so does a 5-minute pause; picked with nothing
@@ -207,7 +208,7 @@ September; Edge draws dark pages itself) · a default playback speed for VacuumT
 
 Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power (in standby: wake) · in
 Moonlight a tap goes to the game PC, a hold of 0.5 s is our menu · R3 = on-screen keyboard
-(not in Moonlight; configurable) · Start + D-pad = volume (not in Moonlight) · in Moonlight's
+(not in Moonlight; configurable) · Start + D-pad or RT/LT = volume (not in Moonlight) · in Moonlight's
 menus (the PC and app grids, not while it streams), Select = Shift+Tab, which reaches their
 toolbar (Add PC, Help, Settings); the owner, 29 Sept 2026 (catalog `menuKeys`).
 

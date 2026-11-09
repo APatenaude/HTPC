@@ -6,59 +6,65 @@ namespace Htpc.Launcher;
 enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT, AHold, AUp }
 
 /// <summary>
-/// Start + D-pad, the volume in every app (the user's request, 27 Sept; Home is out: holding it
-/// turns the controller off): Start + Up or Down turns it up or down, repeating while held;
-/// Start + Left mutes or unmutes. Fed the raw buttons at every poll, it says what the rest of
-/// the launcher sees instead (the button map, the launcher's own buttons): while Start is down,
-/// Start is held back, and so is a D-pad button pressed meanwhile, until it is let go (even if
-/// Start goes first). A direction pressed with Start makes the volume command and drops Start's
-/// own action; Start let go without one is a plain press, seen for one poll as it comes up.
-/// The D-pad alone is untouched (arrow keys, the launcher's menus), and so is a direction
-/// already held when Start goes down. Only the D-pad itself: the stick moves the pointer.
+/// Start + D-pad or trigger, the volume in every app (the user's request, 27 Sept; Home is out:
+/// holding it turns the controller off): Start + Up or RT turns it up, Start + Down or LT turns it
+/// down, repeating while held; Start + Left mutes or unmutes. Fed the raw buttons and triggers at
+/// every poll, it says what the rest of the launcher sees instead (the button map, the launcher's
+/// own buttons): while Start is down, Start is held back, and so is a D-pad button or trigger
+/// pressed meanwhile, until it is let go (even if Start goes first). One of these pressed with
+/// Start makes the volume command and drops Start's own action; Start let go without one is a
+/// plain press, seen for one poll as it comes up. The D-pad and triggers alone are untouched, and
+/// so is one already held when Start goes down. Only the D-pad itself: the stick moves the pointer.
 /// Checked in launcher\tests\LauncherTests.
 /// </summary>
 sealed class StartChord
 {
     public const ushort Up = 0x0001, Down = 0x0002, Left = 0x0004, Right = 0x0008, Start = 0x0010;
-    const ushort DPad = Up | Down | Left | Right;
+    const uint LT = 0x10000, RT = 0x20000;   // a trigger past half-way, as a button of its own
+    const uint DPad = Up | Down | Left | Right, Louder = Up | RT, Quieter = Down | LT;
     public const int RepeatDelayMs = 400, RepeatEveryMs = 110;
+    public const byte TriggerDown = 96, TriggerUp = 48;
 
-    ushort previous, withStart;   // directions pressed while Start was down, held back until let go
-    bool startDown, used;         // used: a direction came while Start was down
+    uint previous, withStart;     // controls pressed while Start was down, held back until let go
+    bool startDown, used;         // used: a control came while Start was down
     long nextRepeat;
 
-    /// <returns>The buttons everything else sees, and the command to run now (volumeUp,
-    /// volumeDown, mute) with Repeat true for a repeat while held.</returns>
-    public (ushort Buttons, string? Command, bool Repeat) Update(ushort raw, long now)
+    /// <returns>The buttons and trigger values everything else sees, and the command to run now
+    /// (volumeUp, volumeDown, mute) with Repeat true for a repeat while held.</returns>
+    public (ushort Buttons, byte LT, byte RT, string? Command, bool Repeat) Update(ushort raw, byte lt, byte rt, long now)
     {
         string? command = null;
         var repeat = false;
+        // Triggers as buttons, with some play so they do not flicker.
+        var controls = (uint)raw
+            | (lt >= ((previous & LT) != 0 ? TriggerUp : TriggerDown) ? LT : 0)
+            | (rt >= ((previous & RT) != 0 ? TriggerUp : TriggerDown) ? RT : 0);
         var start = (raw & Start) != 0;
         var tap = false;
         if (start && !startDown) { startDown = true; used = false; }
         if (startDown && start)
         {
-            var pressed = (ushort)(raw & DPad & ~previous);
+            var pressed = controls & (DPad | LT | RT) & ~previous;
             if (pressed != 0)
             {
                 used = true;
                 withStart |= pressed;
-                command = (pressed & Up) != 0 ? "volumeUp" : (pressed & Down) != 0 ? "volumeDown" : (pressed & Left) != 0 ? "mute" : null;
+                command = (pressed & Louder) != 0 ? "volumeUp" : (pressed & Quieter) != 0 ? "volumeDown" : (pressed & Left) != 0 ? "mute" : null;
                 nextRepeat = now + RepeatDelayMs;
             }
-            else if ((raw & withStart & (Up | Down)) != 0 && now >= nextRepeat)
+            else if ((controls & withStart & (Louder | Quieter)) != 0 && now >= nextRepeat)
             {
-                command = (raw & withStart & Up) != 0 ? "volumeUp" : "volumeDown";
+                command = (controls & withStart & Louder) != 0 ? "volumeUp" : "volumeDown";
                 repeat = true;
                 nextRepeat = now + RepeatEveryMs;
             }
         }
         if (!start && startDown) { startDown = false; tap = !used; }
-        withStart &= raw;   // a direction let go is free again
-        previous = raw;
+        withStart &= controls;   // a control let go is free again
+        previous = controls;
         var buttons = (ushort)(raw & ~withStart & ~Start);
         if (tap) buttons |= Start;
-        return (buttons, command, repeat);
+        return (buttons, (withStart & LT) != 0 ? (byte)0 : lt, (withStart & RT) != 0 ? (byte)0 : rt, command, repeat);
     }
 }
 
@@ -69,7 +75,7 @@ sealed class StartChord
 /// HomeDown the moment it goes down (standby wakes on that), then Home on a short press or
 /// HomeHold as soon as it has been held for 0.5 s. A comes as it goes down, as every button
 /// does, then AHold once it has been held for 0.5 s and AUp when it is let go (hold A on a home
-/// tile to move it). Start + D-pad raises Chord instead (the volume, StartChord); Start alone
+/// tile to move it). Start + D-pad or trigger raises Chord instead (the volume, StartChord); Start alone
 /// then comes as it is let go.
 /// </summary>
 sealed class ControllerService : IDisposable
@@ -139,11 +145,11 @@ sealed class ControllerService : IDisposable
     const ushort HomeBit = 0x0400, ABit = 0x1000;
     const short StickThreshold = 16000;
     const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 500;
-    const int TriggerDown = 96, TriggerUp = 48; // a trigger counts as a button past half-way
+    const int TriggerDown = StartChord.TriggerDown, TriggerUp = StartChord.TriggerUp; // a trigger counts as a button past half-way
 
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
-    public event Action<string, bool>? Chord;         // Start + D-pad (StartChord): (volumeUp|volumeDown|mute, isRepeat)
+    public event Action<string, bool>? Chord;         // Start + D-pad or trigger (StartChord): (volumeUp|volumeDown|mute, isRepeat)
 
     /// <summary>
     /// Poll every 25 ms instead of 8 ms (standby: fewer CPU wake-ups). Not slower: at 80 ms a
@@ -265,10 +271,10 @@ sealed class ControllerService : IDisposable
                 Interlocked.Exchange(ref lastInputTick, Environment.TickCount64);
             }
             LastState = new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY);
-            // Start + D-pad is the volume: the map and the launcher get the buttons without it.
-            var (seen, command, repeat) = chord.Update(pad.Buttons, now);
+            // Start + D-pad or trigger is the volume: the map and the launcher get the buttons without it.
+            var (seen, lt, rt, command, repeat) = chord.Update(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, now);
             if (command is not null) RaiseChord(command, repeat);
-            Mapper?.Update(LastState with { Buttons = seen }, now, enabled: !WakeMode);
+            Mapper?.Update(LastState with { Buttons = seen, LT = lt, RT = rt }, now, enabled: !WakeMode);
 
             var buttons = seen;
             // The left stick counts as the D-pad.
@@ -304,10 +310,10 @@ sealed class ControllerService : IDisposable
             else if (aDown >= 0) { aDown = -1; Raise(Pad.AUp, false); }
 
             // Triggers as buttons (the on-screen keyboard's Shift), with some play so they do not flicker.
-            if (!ltDown && pad.LeftTrigger >= TriggerDown) { ltDown = true; Raise(Pad.LT, false); }
-            else if (ltDown && pad.LeftTrigger < TriggerUp) ltDown = false;
-            if (!rtDown && pad.RightTrigger >= TriggerDown) { rtDown = true; Raise(Pad.RT, false); }
-            else if (rtDown && pad.RightTrigger < TriggerUp) rtDown = false;
+            if (!ltDown && lt >= TriggerDown) { ltDown = true; Raise(Pad.LT, false); }
+            else if (ltDown && lt < TriggerUp) ltDown = false;
+            if (!rtDown && rt >= TriggerDown) { rtDown = true; Raise(Pad.RT, false); }
+            else if (rtDown && rt < TriggerUp) rtDown = false;
 
             // Home is logged (it is rare): the log shows every press, for diagnosing wake.
             var homeNow = (buttons & HomeBit) != 0;

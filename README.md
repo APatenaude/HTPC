@@ -8,7 +8,7 @@ taskbar, nothing popping up over the TV.
   browser (Edge) out of the box; Kodi, VLC, Plex HTPC, Spotify, Feishin and streaming sites
   (Netflix, Disney+, Prime Video...) from the library, installed from the TV.
 - **Home over any app:** tap Home for the Home menu (volume, brightness, sleep timer, button
-  maps, open apps), hold it for Power. Start + D-pad is the volume, R3 opens an on-screen
+  maps, open apps), hold it for Power. Start + D-pad or trigger is the volume, R3 opens an on-screen
   keyboard, and each app gets the buttons it needs (mouse, keyboard or controller).
 - **The TV follows the box:** on when the box starts or wakes, off when it sleeps, and the box
   sleeps when you turn the TV off. Roku TVs; LG webOS, Google TV / Android TV, Sony Bravia and

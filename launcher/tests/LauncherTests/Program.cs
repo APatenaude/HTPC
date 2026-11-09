@@ -222,7 +222,7 @@ T.Group("Controller: A tapped, and held", () =>
     lock (pads) Check(pads.SequenceEqual(new[] { Pad.A, Pad.AHold, Pad.AUp }), "... let go: AUp: " + string.Join(",", pads));
 });
 
-// ---------------------------------------------------------------- Start + D-pad: the volume
+// ---------------------------------------------------------------- Start + D-pad or trigger: the volume
 T.Group("Start + D-pad (StartChord)", () =>
 {
     const ushort St = StartChord.Start, Up = StartChord.Up, Dn = StartChord.Down, Lf = StartChord.Left, Rt = StartChord.Right, A = 0x1000;
@@ -230,14 +230,15 @@ T.Group("Start + D-pad (StartChord)", () =>
     var log = new List<string>();
     // Feeds polls 8 ms apart from `from` to `to` with the same raw buttons; what came out, in order.
     ushort last = 0;
-    void Hold(ushort raw, long from, long to)
+    byte lastLt = 0, lastRt = 0;
+    void Hold(ushort raw, long from, long to, byte lt = 0, byte rt = 0)
     {
         for (var t = from; t <= to; t += 8)
         {
-            var (seen, command, repeat) = c.Update(raw, t);
+            var (seen, seenLt, seenRt, command, repeat) = c.Update(raw, lt, rt, t);
             if (command is not null) log.Add(repeat ? command + "+" : command);
             if ((seen & St) != 0) log.Add("start");
-            last = seen;
+            last = seen; lastLt = seenLt; lastRt = seenRt;
         }
     }
     string Log() { var s = string.Join(" ", log); log.Clear(); return s; }
@@ -268,11 +269,34 @@ T.Group("Start + D-pad (StartChord)", () =>
     Check((last & A) != 0, "other buttons pass while Start is down");
     Hold(0, 3624, 3632); Log();
 
+    // Triggers: RT louder, LT quieter, as the D-pad's Up and Down.
+    Hold(St, 3700, 3716); Hold(St, 3724, 3724, rt: 255);
+    Check(Log() == "volumeUp" && lastRt == 0 && (last & St) == 0, "Start + RT: volume up at once; the trigger does not reach the app");
+    Hold(St, 3732, 3724 + StartChord.RepeatDelayMs + 3 * (StartChord.RepeatEveryMs + 8), rt: 255);
+    held = Log();
+    Check(held == "volumeUp+ volumeUp+ volumeUp+ volumeUp+", "RT held: repeats after the delay, then steadily: " + held);
+    Hold(0, 4000, 4016, rt: 255);
+    Check(Log() == "" && lastRt == 0, "Start let go first: no Start, and the held RT stays back (no stray trigger)");
+    Hold(0, 4024, 4032);
+    Hold(0, 4040, 4048, rt: 200);
+    Check(Log() == "" && lastRt == 200, "RT alone afterwards: the trigger again");
+    Hold(0, 4056, 4064);
+    Hold(St, 4100, 4116); Hold(St, 4124, 4124, lt: 255); Hold(St, 4132, 4148); Hold(0, 4156, 4164);
+    Check(Log() == "volumeDown", "Start + LT, LT let go first: volume down, no Start");
+    Hold(0, 4200, 4216, lt: 255); Hold(St, 4224, 4300, lt: 255);
+    Check(Log() == "" && lastLt == 255 && (last & St) == 0, "LT already held when Start goes down: still a trigger, no volume");
+    Hold(0, 4308, 4316);
+    Check(Log() == "start", "... and Start let go is a plain Start");
+    Hold(St, 4400, 4416); Hold(St, 4424, 4424, lt: 255, rt: 255);
+    Check(Log() == "volumeUp" && lastLt == 0 && lastRt == 0, "Start + both triggers: one command (louder first), both held back");
+    Hold(0, 4432, 4440);
+    Log();
+
     // Through the Mouse preset: Start's play/pause only for a tap, the D-pad's arrows only alone.
     var mouse = new PadMapper { Map = ButtonMap.Mouse };
     var c2 = new StartChord();
     long now = 5000;
-    void Feed(ushort raw, int polls) { for (var i = 0; i < polls; i++) { now += 8; mouse.Update(new PadState(c2.Update(raw, now).Buttons, 0, 0, 0, 0, 0, 0), now, true); } }
+    void Feed(ushort raw, int polls) { for (var i = 0; i < polls; i++) { now += 8; mouse.Update(new PadState(c2.Update(raw, 0, 0, now).Buttons, 0, 0, 0, 0, 0, 0), now, true); } }
     Feed(0, 2); Input.Clear();
     Feed(St, 10); Feed(0, 2);
     Check(Input.Snapshot().SequenceEqual(new[] { "down B3", "up B3" }), "Mouse preset, Start tapped: play/pause down and up, on release: " + string.Join(" | ", Input.Snapshot()));
@@ -290,7 +314,7 @@ T.Group("Start + D-pad (StartChord)", () =>
     var chords = new List<string>();
     controller.Pressed += (pad, repeat) => { lock (pads) pads.Add(pad); };
     controller.Chord += (command, repeat) => { lock (chords) chords.Add(command); };
-    PadState P(ushort b) => new(b, 0, 0, 0, 0, 0, 0);
+    PadState P(ushort b, byte lt = 0, byte rt = 0) => new(b, lt, rt, 0, 0, 0, 0);
     controller.Inject(P(0));
     controller.Start();
     Thread.Sleep(60);
@@ -299,11 +323,14 @@ T.Group("Start + D-pad (StartChord)", () =>
     controller.Inject(P(0)); Thread.Sleep(60);
     controller.Inject(P(St)); Thread.Sleep(60);
     controller.Inject(P(0)); Thread.Sleep(60);
+    controller.Inject(P(St)); Thread.Sleep(60);
+    controller.Inject(P(St, rt: 255)); Thread.Sleep(60);
+    controller.Inject(P(0)); Thread.Sleep(60);
     controller.Dispose();
     lock (pads) lock (chords)
     {
-        Check(chords.SequenceEqual(new[] { "volumeDown" }), "controller: Start + Down raises volume down: " + string.Join(",", chords));
-        Check(pads.SequenceEqual(new[] { Pad.Start }), "controller: the launcher sees one Start (the tap), no Down: " + string.Join(",", pads));
+        Check(chords.SequenceEqual(new[] { "volumeDown", "volumeUp" }), "controller: Start + Down, then Start + RT, raise volume down, then up: " + string.Join(",", chords));
+        Check(pads.SequenceEqual(new[] { Pad.Start }), "controller: the launcher sees one Start (the tap), no Down and no RT: " + string.Join(",", pads));
     }
 
     Check(AudioVolume.NextLevel(47, 5) == 50 && AudioVolume.NextLevel(47, -5) == 40, "volume buttons: steps of 5, to multiples of 5");
