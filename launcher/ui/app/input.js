@@ -77,9 +77,21 @@ function adjust(el, delta) {
 }
 
 // One entry point for the controller (via the host) and the keyboard. held: the controller's A,
-// whose release follows ('aUp'; 'aHold' after 0.5 s): see aWaitStart.
-function press(button, held) {
+// whose release follows ('aUp'; 'aHold' after 0.5 s): see aWaitStart. bumper: the controller's LB
+// or RB, { volume, repeat } (the host's BumperVolume: volumeDown, volumeUp, mute, or null for a
+// repeat it swallowed).
+function press(button, held, bumper) {
   if (button === 'aHold' || button === 'aUp') { aHeldPress(button); return; }
+  // LB and RB are the volume, unless the view takes them (bumpersTaken); then a held one's
+  // repeats, which are for the volume only, are dropped.
+  if (button === 'lb' || button === 'rb') {
+    if (!bumpersTaken()) {
+      const command = bumper ? bumper.volume : button === 'lb' ? 'volumeDown' : 'volumeUp';
+      if (command) send({ type: 'volumeStep', command });
+      return;
+    }
+    if (bumper && bumper.repeat) return;
+  }
   aWaitDrop();   // any other press first: a waiting A is dropped
   if (held && button === 'a' && aWaitStart()) return;
   timePress(button);
@@ -151,6 +163,15 @@ function press(button, held) {
   }
 }
 
+// A view (or a Settings section) that takes LB and RB for itself says so with bumpers(): the
+// button-map editor, Settings › Controller's button test.
+function bumpersTaken() {
+  const view = EXT.views[state.view];
+  if (view && view.bumpers && view.bumpers()) return true;
+  const section = state.view === 'settings' && EXT.sections[state.section];
+  return !!(section && section.bumpers && section.bumpers());
+}
+
 // Hold A on a home tile to move it. The controller's A on an app or site tile waits: let go
 // before 0.5 s ('aUp'), it opens the tile; held ('aHold'), the tile goes into move mode
 // (library.js). Another press or 3 s drops the wait. The phone's and the keyboard's A have no
@@ -196,7 +217,7 @@ function timePress(button) {
 }
 
 const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a',
-  Escape: 'b', Backspace: 'b', x: 'x', y: 'y', h: 'home', p: 'homeHold', PageUp: 'lb', PageDown: 'rb', o: 'start' };
+  Escape: 'b', Backspace: 'b', x: 'x', y: 'y', h: 'home', p: 'homeHold', PageUp: 'lt', PageDown: 'rt', o: 'start' };
 addEventListener('keydown', (e) => {
   // Blank (standby, the launcher black in front): a real key press wakes the box.
   if ($('stage').classList.contains('blank')) { e.preventDefault(); send({ type: 'wake' }); return; }

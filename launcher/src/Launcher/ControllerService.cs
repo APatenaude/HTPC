@@ -3,80 +3,106 @@ using System.Runtime.InteropServices;
 
 namespace Htpc.Launcher;
 
-enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT, AHold, AUp }
+/// <summary>A button as ControllerService raises it. LBWithRB, RBWithLB: that bumper pressed while
+/// the other is down (the pair: mute, BumperVolume), told apart on the controller thread as it goes
+/// down; everything else takes it as LB or RB.</summary>
+enum Pad { Up, Down, Left, Right, A, B, X, Y, Start, Select, LB, RB, L3, R3, Home, HomeHold, HomeDown, LT, RT, AHold, AUp, LBWithRB, RBWithLB }
 
 /// <summary>
-/// Start + D-pad or trigger, the volume in every app (the user's request, 27 Sept; Home is out:
-/// holding it turns the controller off): Start + Up or RT turns it up, Start + Down or LT turns it
-/// down, repeating while held; Start + Left mutes or unmutes. Fed the raw buttons and triggers at
-/// every poll, it says what the rest of the launcher sees instead (the button map, the launcher's
-/// own buttons): while Start is down, Start is held back, and so is a D-pad button or trigger
-/// pressed meanwhile, until it is let go (even if Start goes first). One of these pressed with
-/// Start makes the volume command and drops Start's own action; Start let go without one is a
-/// plain press, seen for one poll as it comes up. The D-pad and triggers alone are untouched, and
-/// so is one already held when Start goes down. Only the D-pad itself: the stick moves the pointer.
-/// Checked in launcher\tests\LauncherTests.
+/// The Start layer (the same map as ControllerNavigation's): Start + LB / RB back and forward,
+/// Start + LT / RT the previous and next track, Start + D-pad left / right the window in front to
+/// the next screen that way, up maximize (or restore), down minimize, Start + Y minimize all.
+/// MainForm says where each one runs (OnLayer). Fed the raw buttons and triggers at every poll,
+/// it says what the rest of the launcher sees instead (the button map, the launcher's own
+/// buttons, the triggers as buttons): while Start is down, Start is held back, and so is a layer
+/// button pressed meanwhile, until it is let go (even if Start goes first). A layer button pressed
+/// with Start makes its command and drops Start's own action; Start let go without one is a plain
+/// press, seen for one poll as it comes up. A layer button already held when Start goes down
+/// keeps its own job. Other buttons (A, B, X, Select, the sticks' presses) pass. Checked in
+/// launcher\tests\LauncherTests.
 /// </summary>
-sealed class StartChord
+sealed class StartLayer
 {
-    public const ushort Up = 0x0001, Down = 0x0002, Left = 0x0004, Right = 0x0008, Start = 0x0010;
-    const uint LT = 0x10000, RT = 0x20000;   // a trigger past half-way, as a button of its own
-    const uint DPad = Up | Down | Left | Right, Louder = Up | RT, Quieter = Down | LT;
-    public const int RepeatDelayMs = 400, RepeatEveryMs = 110;
-    public const byte TriggerDown = 96, TriggerUp = 48;
+    public const ushort Up = 0x0001, Down = 0x0002, Left = 0x0004, Right = 0x0008, Start = 0x0010,
+        LB = 0x0100, RB = 0x0200, Y = 0x8000;
+    public const uint LT = 0x10000, RT = 0x20000;   // the triggers past half-way, as bits above the buttons
+    const uint Layer = Up | Down | Left | Right | LB | RB | Y | LT | RT;
+    const int TriggerDown = 96, TriggerUp = 48;     // ControllerService's and PadMapper's play
 
-    uint previous, withStart;     // controls pressed while Start was down, held back until let go
-    bool startDown, used;         // used: a control came while Start was down
-    long nextRepeat;
+    uint previous, withStart;   // layer buttons pressed while Start was down, held back until let go
+    bool startDown, used;       // used: a layer button came while Start was down
 
-    /// <returns>The buttons and trigger values everything else sees, and the command to run now
-    /// (volumeUp, volumeDown, mute) with Repeat true for a repeat while held.</returns>
-    public (ushort Buttons, byte LT, byte RT, string? Command, bool Repeat) Update(ushort raw, byte lt, byte rt, long now)
+    static readonly (uint Bit, string Command)[] Commands =
     {
+        (LB, "back"), (RB, "forward"), (LT, "prevTrack"), (RT, "nextTrack"),
+        (Left, "windowLeft"), (Right, "windowRight"), (Up, "maximize"), (Down, "minimize"), (Y, "minimizeAll"),
+    };
+
+    /// <returns>The buttons and triggers everything else sees (a trigger held back reads 0), and
+    /// the command to run now, or null.</returns>
+    public (ushort Buttons, byte LT, byte RT, string? Command) Update(ushort buttons, byte lt, byte rt)
+    {
+        uint raw = buttons;
+        if (lt >= ((previous & LT) != 0 ? TriggerUp : TriggerDown)) raw |= LT;
+        if (rt >= ((previous & RT) != 0 ? TriggerUp : TriggerDown)) raw |= RT;
         string? command = null;
-        var repeat = false;
-        // Triggers as buttons, with some play so they do not flicker.
-        var controls = (uint)raw
-            | (lt >= ((previous & LT) != 0 ? TriggerUp : TriggerDown) ? LT : 0)
-            | (rt >= ((previous & RT) != 0 ? TriggerUp : TriggerDown) ? RT : 0);
         var start = (raw & Start) != 0;
         var tap = false;
         if (start && !startDown) { startDown = true; used = false; }
         if (startDown && start)
         {
-            var pressed = controls & (DPad | LT | RT) & ~previous;
+            var pressed = raw & Layer & ~previous;
             if (pressed != 0)
             {
                 used = true;
                 withStart |= pressed;
-                command = (pressed & Louder) != 0 ? "volumeUp" : (pressed & Quieter) != 0 ? "volumeDown" : (pressed & Left) != 0 ? "mute" : null;
-                nextRepeat = now + RepeatDelayMs;
-            }
-            else if ((controls & withStart & (Louder | Quieter)) != 0 && now >= nextRepeat)
-            {
-                command = (controls & withStart & Louder) != 0 ? "volumeUp" : "volumeDown";
-                repeat = true;
-                nextRepeat = now + RepeatEveryMs;
+                command = Commands.First(c => (pressed & c.Bit) != 0).Command;
             }
         }
         if (!start && startDown) { startDown = false; tap = !used; }
-        withStart &= controls;   // a control let go is free again
-        previous = controls;
-        var buttons = (ushort)(raw & ~withStart & ~Start);
-        if (tap) buttons |= Start;
-        return (buttons, (withStart & LT) != 0 ? (byte)0 : lt, (withStart & RT) != 0 ? (byte)0 : rt, command, repeat);
+        withStart &= raw;   // a layer button let go is free again
+        previous = raw;
+        var seen = (ushort)(raw & ~withStart & ~Start);
+        if (tap) seen |= Start;
+        return (seen, (withStart & LT) != 0 ? (byte)0 : lt, (withStart & RT) != 0 ? (byte)0 : rt, command);
+    }
+}
+
+/// <summary>
+/// LB and RB as the volume (the Mouse and Keyboard presets, the launcher's own screens, over the
+/// on-screen keyboard): each press a step down or up, and its repeats while held; the second one
+/// pressed while the first is down mutes or unmutes instead, and both are then used up (no step,
+/// no repeat) until let go. MainForm.OnPad feeds it every bumper press. Checked in
+/// launcher\tests\LauncherTests.
+/// </summary>
+sealed class BumperVolume
+{
+    bool used;   // the pair ran: repeats are swallowed until a bumper is pressed afresh alone
+
+    /// <param name="otherDown">The other bumper is down at this press.</param>
+    /// <returns>volumeDown, volumeUp, mute, or null for a repeat swallowed.</returns>
+    public string? Press(Pad pad, bool repeat, bool otherDown)
+    {
+        if (!repeat)
+        {
+            used = otherDown;
+            if (otherDown) return "mute";
+        }
+        else if (used) return null;
+        return pad == Pad.LB ? "volumeDown" : "volumeUp";
     }
 }
 
 /// <summary>
 /// Reads the controller through XInput directly, including the Home (Guide) button, which only
 /// the undocumented XInputGetStateEx (ordinal 100) reports. Works whichever window has focus.
-/// Raises Pressed on a background thread: D-pad and left stick repeat while held; Home fires
-/// HomeDown the moment it goes down (standby wakes on that), then Home on a short press or
-/// HomeHold as soon as it has been held for 0.5 s. A comes as it goes down, as every button
-/// does, then AHold once it has been held for 0.5 s and AUp when it is let go (hold A on a home
-/// tile to move it). Start + D-pad or trigger raises Chord instead (the volume, StartChord); Start alone
-/// then comes as it is let go.
+/// Raises Pressed on a background thread: D-pad and left stick repeat while held, LB and RB too
+/// (the volume: 400 ms, then every 125 ms), a bumper pressed while the other is down coming as
+/// LBWithRB or RBWithLB; Home fires HomeDown the moment it goes down (standby
+/// wakes on that), then Home on a short press or HomeHold as soon as it has been held for 0.5 s.
+/// A comes as it goes down, as every button does, then AHold once it has been held for 0.5 s and
+/// AUp when it is let go (hold A on a home tile to move it). A Start layer button raises Command
+/// instead (StartLayer); Start alone then comes as it is let go.
 /// </summary>
 sealed class ControllerService : IDisposable
 {
@@ -142,14 +168,20 @@ sealed class ControllerService : IDisposable
         (0x0010, Pad.Start), (0x0020, Pad.Select), (0x0040, Pad.L3), (0x0080, Pad.R3),
         (0x0100, Pad.LB), (0x0200, Pad.RB), (0x1000, Pad.A), (0x2000, Pad.B), (0x4000, Pad.X), (0x8000, Pad.Y)
     };
-    const ushort HomeBit = 0x0400, ABit = 0x1000;
+    const ushort HomeBit = 0x0400, ABit = 0x1000, BumperBits = 0x0300;
     const short StickThreshold = 16000;
     const int RepeatDelayMs = 400, RepeatEveryMs = 110, HoldMs = 500;
-    const int TriggerDown = StartChord.TriggerDown, TriggerUp = StartChord.TriggerUp; // a trigger counts as a button past half-way
+    public const int VolumeRepeatEveryMs = 125;  // a held bumper, the right stick's volume (StickVolume)
+    const int TriggerDown = 96, TriggerUp = 48; // a trigger counts as a button past half-way
 
     public event Action<Pad, bool>? Pressed;          // (button, isRepeat)
     public event Action<bool, string?>? StatusChanged; // (connected, battery level)
-    public event Action<string, bool>? Chord;         // Start + D-pad or trigger (StartChord): (volumeUp|volumeDown|mute, isRepeat)
+    /// <summary>
+    /// (command, isRepeat): a Start layer command (StartLayer: back, forward, prevTrack, nextTrack,
+    /// windowLeft, windowRight, maximize, minimize, minimizeAll), or the right stick's volumeUp and
+    /// volumeDown (StickVolume), which repeat.
+    /// </summary>
+    public event Action<string, bool>? Command;
 
     /// <summary>
     /// Poll every 25 ms instead of 8 ms (standby: fewer CPU wake-ups). Not slower: at 80 ms a
@@ -218,6 +250,14 @@ sealed class ControllerService : IDisposable
     public PadMapper? Mapper { get; set; }
 
     /// <summary>
+    /// The app in front reads the controller itself and leaves its right stick to the launcher
+    /// (catalog stickVolume: VacuumTube): right stick up or down past the arrows' threshold raises
+    /// Command volumeUp or volumeDown, repeating while held. Set from the UI thread.
+    /// </summary>
+    public bool StickVolume { get => stickVolumeOn; set => stickVolumeOn = value; }
+    volatile bool stickVolumeOn;
+
+    /// <summary>
     /// The controller as last polled (Settings › Controller's button test). Read from another
     /// thread it may mix two polls, which a display does not mind.
     /// </summary>
@@ -246,7 +286,9 @@ sealed class ControllerService : IDisposable
     long homeDown = -1, aDown = -1;
     bool homeHeld, aHeld, ltDown, rtDown;
     long nextScan, nextBattery;
-    StartChord chord = new();
+    StartLayer layer = new();
+    int stickVolume;            // the right stick's volume: 1 up, -1 down, 0 none
+    long nextStickVolume;
 
     void Run()
     {
@@ -271,10 +313,18 @@ sealed class ControllerService : IDisposable
                 Interlocked.Exchange(ref lastInputTick, Environment.TickCount64);
             }
             LastState = new PadState(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, pad.LX, pad.LY, pad.RX, pad.RY);
-            // Start + D-pad or trigger is the volume: the map and the launcher get the buttons without it.
-            var (seen, lt, rt, command, repeat) = chord.Update(pad.Buttons, pad.LeftTrigger, pad.RightTrigger, now);
-            if (command is not null) RaiseChord(command, repeat);
+            // The Start layer: the map and the launcher get the buttons and triggers without it.
+            var (seen, lt, rt, command) = layer.Update(pad.Buttons, pad.LeftTrigger, pad.RightTrigger);
+            if (command is not null) RaiseCommand(command, false);
             Mapper?.Update(LastState with { Buttons = seen, LT = lt, RT = rt }, now, enabled: !WakeMode);
+
+            var volume = StickVolume ? (pad.RY > StickThreshold ? 1 : pad.RY < -StickThreshold ? -1 : 0) : 0;
+            if (volume != 0 && (volume != stickVolume || now >= nextStickVolume))
+            {
+                nextStickVolume = now + (volume != stickVolume ? RepeatDelayMs : VolumeRepeatEveryMs);
+                RaiseCommand(volume > 0 ? "volumeUp" : "volumeDown", volume == stickVolume);
+            }
+            stickVolume = volume;
 
             var buttons = seen;
             // The left stick counts as the D-pad.
@@ -283,6 +333,7 @@ sealed class ControllerService : IDisposable
             if (pad.LX < -StickThreshold) buttons |= 0x0004;
             if (pad.LX > StickThreshold) buttons |= 0x0008;
 
+            ushort raised = 0;   // went down this poll, raised already (LB before RB)
             foreach (var (bit, button) in Buttons)
             {
                 var down = (buttons & bit) != 0;
@@ -290,11 +341,14 @@ sealed class ControllerService : IDisposable
                 if (down && !was)
                 {
                     nextRepeat[button] = now + RepeatDelayMs;
-                    Raise(button, false);
+                    var other = (ushort)(bit ^ BumperBits);
+                    var paired = button is Pad.LB or Pad.RB && (buttons & other) != 0 && ((previous | raised) & other) != 0;
+                    raised |= bit;
+                    Raise(paired ? button == Pad.LB ? Pad.LBWithRB : Pad.RBWithLB : button, false);
                 }
-                else if (down && button <= Pad.Right && now >= nextRepeat[button])
+                else if (down && (button <= Pad.Right || button is Pad.LB or Pad.RB) && now >= nextRepeat[button])
                 {
-                    nextRepeat[button] = now + RepeatEveryMs;
+                    nextRepeat[button] = now + (button <= Pad.Right ? RepeatEveryMs : VolumeRepeatEveryMs);
                     Raise(button, true);
                 }
             }
@@ -309,7 +363,8 @@ sealed class ControllerService : IDisposable
             }
             else if (aDown >= 0) { aDown = -1; Raise(Pad.AUp, false); }
 
-            // Triggers as buttons (the on-screen keyboard's Shift), with some play so they do not flicker.
+            // Triggers as buttons (the on-screen keyboard's cursor, Add a tile's tabs), with some
+            // play so they do not flicker.
             if (!ltDown && lt >= TriggerDown) { ltDown = true; Raise(Pad.LT, false); }
             else if (ltDown && lt < TriggerUp) ltDown = false;
             if (!rtDown && rt >= TriggerDown) { rtDown = true; Raise(Pad.RT, false); }
@@ -365,7 +420,7 @@ sealed class ControllerService : IDisposable
             {
                 Log.Info($"Controller connected in slot {slot}");
                 currentSlot = slot;
-                chord = new StartChord();
+                layer = new StartLayer();
                 if (WakeMode) RumbleWake(); // switched on in standby: that wakes the box
                 nextBattery = 0;
                 // Buttons already down at connect (the Home press that switched the controller
@@ -387,7 +442,7 @@ sealed class ControllerService : IDisposable
         if (XInputGetStateEx((uint)slot, out state) != 0)
         {
             Log.Info("Controller disconnected");
-            slot = -1; currentSlot = -1; previous = 0; homeDown = -1; aDown = -1;
+            slot = -1; currentSlot = -1; previous = 0; homeDown = -1; aDown = -1; stickVolume = 0;
             Mapper?.Update(default, now, enabled: false); // lets go of anything the map holds down
             SetStatus(false, null);
             return false;
@@ -405,10 +460,10 @@ sealed class ControllerService : IDisposable
         catch (Exception e) { Log.Error($"Handling {pad}", e); }
     }
 
-    void RaiseChord(string command, bool repeat)
+    void RaiseCommand(string command, bool repeat)
     {
-        try { Chord?.Invoke(command, repeat); }
-        catch (Exception e) { Log.Error($"Handling Start + {command}", e); }
+        try { Command?.Invoke(command, repeat); }
+        catch (Exception e) { Log.Error($"Handling {command}", e); }
     }
 
     void SetStatus(bool connected, string? battery)

@@ -127,8 +127,8 @@ function changeSetting(key, step) {
 
 // Settings, two columns: the section list and the section's pane. Up/down stay in their column
 // and stop at its ends (up/down in the list changes section). In the pane, left and right go to
-// what is beside the focus; left with nothing there, B or LB go back to the list. Right, A or RB
-// from the list go into the pane.
+// what is beside the focus; left with nothing there, B or LT go back to the list. Right, A or RT
+// from the list go into the pane (LB and RB are the volume).
 function settingsPress(button, el) {
   const inNav = el && el.dataset.section;
   const navItem = () => $('settings').querySelector(`[data-section="${state.section}"]`);
@@ -136,8 +136,8 @@ function settingsPress(button, el) {
   const firstOption = () => pane()[0];
   const focusTo = (to) => { if (to) setFocus(to); return true; };
   switch (button) {
-    case 'lb': return focusTo(navItem());
-    case 'rb': return focusTo(firstOption());
+    case 'lt': return focusTo(navItem());
+    case 'rt': return focusTo(firstOption());
     case 'up': case 'down': {
       if (!el) return false;
       const column = inNav ? [...$('settings').querySelectorAll('.snav [data-nav]')] : pane();

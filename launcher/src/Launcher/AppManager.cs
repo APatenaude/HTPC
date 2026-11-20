@@ -16,10 +16,13 @@ namespace Htpc.Launcher;
 /// (WindowlessQuit, AppManager.CheckWindowless).</param>
 /// <param name="OwnController">ownController: the app uses every button itself, Home included
 /// (Moonlight: a tap on Home is the game PC's; only windows of its own program count as it, a browser
-/// it opened is another window: AppManager.ForegroundApp). There a tap on Home is the app's and holding it opens the Home menu; R3 and Start + D-pad
-/// are the app's too (MainForm.OnPad, OnChord; Alerts' chips say "Hold Home").</param>
+/// it opened is another window: AppManager.ForegroundApp). There a tap on Home is the app's and holding it opens the Home menu; R3, the
+/// bumpers and the Start layer's tracks are the app's too (MainForm.OnPad, OnControllerCommand; Alerts' chips say "Hold Home").</param>
 /// <param name="Category">category: the id of one of the catalog's categories (Add a tile's library
 /// and setup's app list are shown by category); null for an added tile.</param>
+/// <param name="StickVolume">stickVolume: an app on the Controller preset that leaves its right
+/// stick unused (VacuumTube): there right stick up and down is Windows' volume, from the launcher
+/// (ControllerService.StickVolume), since its bumpers are its own.</param>
 sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool Default, string Preset,
     string Glyph, string Color, string? Exe, string? Args, bool Installable, string Scope, bool Fill,
     string? WingetScope = null, string? InstallSource = null, bool Custom = false,
@@ -27,7 +30,7 @@ sealed record CatalogApp(string Id, string Name, string Type, string? Url, bool 
     string? LogoUrl = null,
     bool OwnKeyboard = false, int CropTop = 0, MenuKeys? MenuKeys = null,
     int QuitWhenWindowless = 0, bool OwnController = false, string? Category = null,
-    IReadOnlyList<string>? ClearBeforeStart = null)
+    IReadOnlyList<string>? ClearBeforeStart = null, bool StickVolume = false)
 {
     /// <summary>A website tile (opens in its own Edge app window), catalog or user-added.</summary>
     public bool IsWebsite => Type == "website";
@@ -182,7 +185,8 @@ sealed class AppManager
             QuitWhenWindowless: launch.ValueKind == JsonValueKind.Object ? QuitWhenWindowlessOf(launch) : 0,
             OwnController: a.TryGetProperty("ownController", out var oc) && oc.ValueKind == JsonValueKind.True,
             Category: Str(a, "category"),
-            ClearBeforeStart: launch.ValueKind == JsonValueKind.Object ? ClearBeforeStartOf(launch) : null);
+            ClearBeforeStart: launch.ValueKind == JsonValueKind.Object ? ClearBeforeStartOf(launch) : null,
+            StickVolume: a.TryGetProperty("stickVolume", out var sv) && sv.ValueKind == JsonValueKind.True);
     }
 
     /// <summary>The catalog's "categories", each with an id and a name, the first of an id kept; none: an empty list.</summary>

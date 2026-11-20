@@ -44,10 +44,15 @@ Readers: the launcher's `AppManager.Parse` (`launcher/src/Launcher/AppManager.cs
 - `ownKeyboard`: true = the app has its own on-screen keyboard, so the launcher's does not pop up by
   itself there (R3 still opens it).
 - `ownController`: true = the app uses every button itself, Home included (Moonlight: the game
-  PC's): a tap on Home is the app's, holding Home opens the Home menu, and R3 and Start + D-pad are
-  the app's too. Only windows of the app's own program count as it: a browser it opens (Moonlight's
-  update notice and Help) is another window, with the Other windows' map (the pointer), so it can
-  be closed.
+  PC's): a tap on Home is the app's, holding Home opens the Home menu, and R3, the bumpers and
+  Start + LT / RT are the app's too. Only windows of the app's own program count as it: a browser
+  it opens (Moonlight's update notice and Help) is another window, with the Other windows' map
+  (the pointer), so it can be closed.
+- `stickVolume`: true = an app on the Controller preset whose right stick does nothing (VacuumTube):
+  while it is in front, right stick up and down past the arrows' threshold is Windows' volume (by
+  2, repeating while held, the volume indicator showing), from the launcher, since its bumpers are
+  its own (the launcher's volume elsewhere). Not for an app with a right-stick volume of its own
+  (Kodi). True or absent.
 - `menuKeys`: for an app on the Controller preset, a key the launcher types when a button goes down
   (keys as in a button map, `"select": "key:Shift+Tab"`; buttons a b x y lb rb lt rt select start
   l3 r3), only while the window in front has the `whileClass` window class (`*` a wildcard) and no
@@ -144,7 +149,7 @@ What the app sets up to start or run by itself, beyond what runs from its `launc
 ## Checks
 
 LauncherTests: the "Catalog: ..." groups in `Program.cs` (every app fills the screen; launch
-options: fill, cropTop, menuKeys, ownController, clearBeforeStart; the apps dropped stay out),
+options: fill, cropTop, menuKeys, ownController, stickVolume, clearBeforeStart; the apps dropped stay out),
 `WindowlessQuitTests.cs` (quitWhenWindowless) and `AddTileTests.Categories` (categories, ASCII);
 `AutostartTests.cs` and `setup\test\Test-Autostart.ps1 -Only Catalog` (autostart entries); PhoneTests
 (phoneKeys).

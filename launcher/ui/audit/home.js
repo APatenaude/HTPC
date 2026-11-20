@@ -142,11 +142,11 @@ if (AUDIT_PAGE === 'index') {
   auditPage('add tile: library', { view: 'addtile', covers: ['addtile'], tick: () => onHost(AUDIT_PROGRESS), open() { auditLibrary(); EXT.actions.addtile(); auditLibrary(); render(); } });
   // The programs' icons arrive as the host makes them: the list is sent again, more with theirs.
   auditPage('add tile: on this box', { view: 'addtile', tick: () => onHost({ type: 'library.programs', list: auditPrograms().map((p, i) => ({ ...p, logo: i % 3 ? AUDIT_LOGO : null })) }),
-    open() { auditLibrary(); EXT.actions.addtile(); press('rb'); auditLibrary(); render(); } });
-  auditPage('add tile: website', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb'); } });
+    open() { auditLibrary(); EXT.actions.addtile(); press('rt'); auditLibrary(); render(); } });
+  auditPage('add tile: website', { view: 'addtile', open() { auditLibrary(); EXT.actions.addtile(); press('rt'); press('rt'); } });
   // A long address and name typed in (the fields scroll their text; the preview's name wraps inside it).
   auditPage('add tile: website, a long address typed', { view: 'addtile', covers: [], open() {
-    auditLibrary(); EXT.actions.addtile(); press('rb'); press('rb');
+    auditLibrary(); EXT.actions.addtile(); press('rt'); press('rt');
     const url = $('addtile').querySelector('[data-field="url"]'), name = $('addtile').querySelector('[data-field="name"]');
     url.focus(); textInsert(`https://www.${'a-very-long-address-'.repeat(8)}example.com/watch?list=${'x'.repeat(200)}`);
     name.focus(); textInsert(`Site ${AUDIT_LONG}`);

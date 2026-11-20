@@ -395,6 +395,7 @@ sealed partial class MainForm : Form
             case "close": apps.Close(Str("id")!); break;
             case "power": Power(Str("action")!); break;
             case "volume": audio.Set(m.GetProperty("value").GetInt32()); break;
+            case "volumeStep": BumperVolumeNow(Str("command")!); break;   // LB, RB in the launcher's own screens (input.js press, OnPad)
             case "brightness": SetBrightness(m.GetProperty("value").GetInt32()); break;
             case "timer": SetSleepTimer(m.GetProperty("minutes")); break;
             default:

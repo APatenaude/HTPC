@@ -324,9 +324,8 @@
       if (bar) patchHtml(bar, hints(tabHints(node)));
     },
     press(button, node) {
-      if (button === 'lb') { switchTab(-1); return true; }
-      if (button === 'rb') { switchTab(1); return true; }
-      if (lib.tab === 'library' && (button === 'lt' || button === 'rt')) { jumpCategory(button === 'rt' ? 1 : -1, node); return true; }
+      if (button === 'lt') { switchTab(-1); return true; }
+      if (button === 'rt') { switchTab(1); return true; }
       if (lib.tab === 'website') {
         if (button === 'start') { saveWebsite(); return true; }
         if (button === 'r3') { typeInto(node); return true; }
@@ -337,9 +336,9 @@
   });
 
   // The hints for the focused card or row: A, named for what it offers (it asks first), where it
-  // does something. The bumpers (tabs) and, in the library, the triggers (categories) share a chip each.
+  // does something. The triggers (tabs) share a chip.
   function tabHints(node) {
-    const tabs = [[['LB', 'RB'], 'Tabs'], ['B', 'Back']];
+    const tabs = [[['LT', 'RT'], 'Tabs'], ['B', 'Back']];
     if (lib.tab === 'website') {
       const field = !node || node.dataset.act === 'field';
       return [['A', field ? 'Type' : 'Add tile'], ...(field ? [['Start', 'Add tile']] : []), ...tabs];
@@ -348,13 +347,12 @@
       const add = !node || node.dataset.act === 'addprog' && !node.classList.contains('on-home');
       return [...(add ? [['A', 'Add to home']] : []), ...tabs];
     }
-    const cats = [['LT', 'RT'], 'Category'];
     const card = node && node.dataset.arg ? findCard(node.dataset.arg) : null;
-    if (!card) return [['A', 'Install or add'], cats, ...tabs];
+    if (!card) return [['A', 'Install or add'], ...tabs];
     const kind = cardKind(card);
     const a = kind === 'install' ? (lib.failed.has(card.id) ? 'Try again' : 'Install') : kind === 'uninstall' ? 'Uninstall'
       : kind === 'add' ? 'Add to Home' : kind === 'remove' ? 'Remove from Home' : null;
-    return [...(a ? [['A', a]] : []), cats, ...tabs];
+    return [...(a ? [['A', a]] : []), ...tabs];
   }
 
   function openAddTile() {
@@ -437,15 +435,6 @@
       (g.sites.length ? `<div class="lc-grid sites">${g.sites.map(site).join('')}</div>` : '') + '</section>').join('');
   }
 
-  // LT / RT in the library: the first card of the category before or after the focused one's (at
-  // either end, the first card of that end's category).
-  function jumpCategory(step, node) {
-    const groups = [...el('addtile').querySelectorAll('.lc-group')];
-    const at = node ? groups.findIndex((g) => g.contains(node)) : -1;
-    const to = groups[Math.max(0, Math.min(groups.length - 1, at + step))];
-    const first = to && to.querySelector('[data-nav]');
-    if (first && first !== node) setFocus(first);
-  }
 
   // A card in its category's first row: the category's heading shows above it too.
   function headingInView(node, main) {
@@ -459,7 +448,7 @@
   // Each program with its own icon (its Start menu shortcut's, made and kept by the host in the
   // background: they fill in as they come), else the glyph.
   function onboxTabHtml() {
-    if (!lib.programs.length) return `<p class="at-empty">${hostWaitText('programs', 'Reading what’s installed…', 'The list of programs didn’t come. Switch tabs (LB, RB) to try once more.', 15000)}</p>`;
+    if (!lib.programs.length) return `<p class="at-empty">${hostWaitText('programs', 'Reading what’s installed…', 'The list of programs didn’t come. Switch tabs (LT, RT) to try once more.', 15000)}</p>`;
     const rows = lib.programs.map((p) => {
       const glyph = appIcon({ glyph: 'app', logo: p.logo }, 40);
       if (!p.launchable)

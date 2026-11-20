@@ -9,11 +9,13 @@ namespace Htpc.Launcher;
 ///
 ///     "buttonMaps": { "twitch": { "preset": "mouse", "start": "key:F", "select": "key:Alt+T" } }
 ///
-/// Controls: a b x y dpad lb rb lt rt select start l3 r3 leftStick rightStick.
+/// Controls: a b x y dpad lt rt select start l3 r3 leftStick rightStick (LB and RB are the
+/// volume, fixed: a stored change to them, from before, is dropped and logged).
 /// Actions: key:Enter, key:Ctrl+Shift+Tab (Ctrl, Alt, Shift and one key), mouse:left|right|
-/// middle|precise, do:menu|power|timer|keyboard|volumeUp|volumeDown|mute, none. Sticks:
+/// middle|precise|slow, do:menu|power|timer|keyboard|volumeUp|volumeDown|mute, none. Sticks:
 /// pointer|scroll|arrows|none; the D-pad: arrows|none. Anything unreadable is skipped (and
-/// logged), never fatal; a change equal to the preset's own is not kept.
+/// logged), never fatal; a change equal to the preset's own is not kept. A change to LT or RT
+/// drops the preset's LT + RT pair (ButtonMap.Triggers).
 ///
 /// Controller-preset apps (the app reads the controller itself) take no changes: the launcher
 /// cannot keep a button from reaching them. "_other" holds the map for windows that are not
@@ -24,7 +26,7 @@ sealed class ButtonMapStore
     public const string Other = "_other";
     public static readonly string[] Presets = { "controller", "mouse", "keyboard" };
     public static readonly string[] Controls =
-        { "leftStick", "rightStick", "a", "b", "x", "y", "dpad", "lb", "rb", "lt", "rt", "select", "start", "l3", "r3" };
+        { "leftStick", "rightStick", "a", "b", "x", "y", "dpad", "lt", "rt", "select", "start", "l3", "r3" };
     public static readonly string[] Commands = { "menu", "power", "timer", "keyboard", "volumeUp", "volumeDown", "mute" };
 
     // Key names and virtual-key codes. Modifiers first; no Win key (it would open the Start menu).
@@ -88,6 +90,7 @@ sealed class ButtonMapStore
                     else Log.Warn($"Button map {app.Name}: preset {p.Value} unknown, skipped");
                 }
                 else if (value is not null && Controls.Contains(p.Name) && Valid(p.Name, value)) entry.Changes[p.Name] = value;
+                else if (p.Name is "lb" or "rb") Log.Warn($"Button map {app.Name}: {p.Name} = {p.Value} dropped, LB and RB are the volume now");
                 else Log.Warn($"Button map {app.Name}: {p.Name} = {p.Value} not understood, skipped");
             }
             entries[app.Name] = entry;
@@ -151,6 +154,7 @@ sealed class ButtonMapStore
             LeftStick = left,
             RightStick = right,
             Buttons = buttons,
+            Triggers = changes.ContainsKey("lt") || changes.ContainsKey("rt") ? null : preset.Triggers,
         };
         if (changes.Count == 0) plain[preset.Name] = map;
         return map;
@@ -261,12 +265,16 @@ sealed class ButtonMapStore
 
     static string? DefaultOf(string preset, string control) => Describe(ButtonMap.For(preset)).GetValueOrDefault(control);
 
-    /// <summary>A tile's stored map for the UI: preset in use, its catalog preset, the changes.</summary>
+    /// <summary>
+    /// A tile's stored map for the UI: preset in use, its catalog preset, the changes, and what LT
+    /// and RT together do (null: nothing, a change to either drops it).
+    /// </summary>
     public object DescribeApp(string id, string catalogPreset) => new
     {
         preset = PresetOf(id, catalogPreset),
         defaultPreset = Normalize(catalogPreset),
         changes = ChangesOf(id, catalogPreset),
+        triggers = For(id, catalogPreset)?.Triggers is { } both ? Format(both) : null,
     };
 
     // --- Strings ----------------------------------------------------------------------------
@@ -274,7 +282,7 @@ sealed class ButtonMapStore
     static PadControl ControlOf(string control) => control switch
     {
         "a" => PadControl.A, "b" => PadControl.B, "x" => PadControl.X, "y" => PadControl.Y,
-        "lb" => PadControl.LB, "rb" => PadControl.RB, "lt" => PadControl.LT, "rt" => PadControl.RT,
+        "lt" => PadControl.LT, "rt" => PadControl.RT,
         "select" => PadControl.Select, "start" => PadControl.Start, "l3" => PadControl.L3, "r3" => PadControl.R3,
         _ => throw new ArgumentException(control),
     };
@@ -326,6 +334,7 @@ sealed class ButtonMapStore
                     "right" => new ClickAction(Input.Button.Right),
                     "middle" => new ClickAction(Input.Button.Middle),
                     "precise" => new PreciseAction(),
+                    "slow" => new SlowToggleAction(),
                     _ => null,
                 };
             case "do":
@@ -346,6 +355,7 @@ sealed class ButtonMapStore
         ClickAction { Button: Input.Button.Right } => "mouse:right",
         ClickAction => "mouse:middle",
         PreciseAction => "mouse:precise",
+        SlowToggleAction => "mouse:slow",
         CommandAction c => "do:" + c.Command,
         _ => "none",
     };

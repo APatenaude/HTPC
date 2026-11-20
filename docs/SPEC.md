@@ -125,8 +125,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   screen, volume, mute); types through Windows input (SendInput). No automatic pop-up in apps
   with their own keyboard (VacuumTube, Moonlight, Plex HTPC); R3 not intercepted in
   Moonlight. No automatic pop-up in desktop mode either (the owner, 29 Sept 2026): R3 opens it
-  there. LT is Shift, RT the symbols; moving past an edge wraps round to the other
-  side (unlike every list on the TV). 440 of 1080 high (it was 560: half the screen). The
+  there. LT and RT move the cursor, LB and RB are the volume as everywhere (20 Nov 2026: Shift
+  and the symbols through their keys); moving past an edge wraps round to the other side (unlike
+  every list on the TV). 440 of 1080 high (it was 560: half the screen). The
   launcher's own fields (Wi-Fi, a website's address, a tile's name) use it too; no page draws a
   keyboard of its own (the owner, 29 Sept 2026).
 - **N12 Global brightness.** One slider dims the whole screen in every app, the dashboard and the
@@ -137,13 +138,20 @@ user) are folded into the items below; what was dropped is listed under "Not now
 - **N13 Buttons per app.** Presets: Controller (pass-through), Mouse and Keyboard, as in the
   controller map below. Mouse and Keyboard apps can have any button remapped on the TV (only
   there) to a key, key combination, mouse action, media key or launcher action; YouTube
-  and Moonlight can only switch preset. Pointer and scroll speeds are global. The pointer shows
-  only while it moves: 5 s still, it is hidden where it is, in every app and the launcher; the
-  desktop keeps it (the owner, 3 Nov 2026). R3 (the
-  keyboard) can be changed, Home cannot. Website tiles are separate windows, so each has its
-  own map. Start + D-pad or trigger is the volume in every app but Moonlight (Up or RT, Down or LT
-  by 2, repeating while held; Left mutes; the owner added the triggers, 9 Nov 2026); Start's own
-  action then comes as it is let go, without one of them.
+  and Moonlight can only switch preset. Pointer and scroll speeds and the pointer's
+  acceleration are global. The pointer shows only while it moves: 5 s still, it is hidden where
+  it is, in every app and the launcher; the desktop keeps it (the owner, 3 Nov 2026). R3 (the
+  keyboard) can be changed; Home, LB and RB cannot. Website tiles are separate windows, so each
+  has its own map. The volume (20 Nov 2026, replacing Start + D-pad or trigger): LB and RB, by 2,
+  repeating while held (400 ms, then every 125 ms), both together mute, in the launcher's screens
+  and the Mouse and Keyboard apps (Jellyfin included), desktop mode included; not in apps that
+  read the controller (their bumpers are theirs: Kodi scrolls and rewinds) nor in Moonlight.
+  YouTube (VacuumTube) gets it on the right stick instead (catalog `stickVolume`); Kodi has its
+  own there. The Start layer: Start + LB / RB back and forward (where a
+  map drives the app), Start + LT / RT the previous and next track (not in apps that read the
+  controller), Start + D-pad the window in front to the next screen left or right, maximize,
+  minimize, Start + Y minimize all (desktop mode only); Start's own action comes as it is let
+  go, without a layer button. The same map as ControllerNavigation's.
 - **N14 Sleep timer.** A countdown set from the Home menu, the Power menu, Settings or the
   phone: 15/30/45 min, 1 h, 1 h 30, 2 h, when the current video ends, off. "When this video
   ends": autoplay moving on counts as the end, so does a 5-minute pause; picked with nothing
@@ -190,8 +198,9 @@ user) are folded into the items below; what was dropped is listed under "Not now
   tile, taking the tile away uninstalls (asked first); sites and the Browser, which install
   nothing, come and go from Home freely.
   Shown by category (29 September: the list is long now), in setup's app list too: Movies &
-  shows, Canadian TV, Sports, Music, Games, Your media & tools (catalog `categories`); LT and RT
-  jump from one to the next in Add a tile.
+  shows, Canadian TV, Sports, Music, Games, Your media & tools (catalog `categories`). Add a
+  tile's tabs are on LT and RT (20 Nov 2026: LB and RB are the volume; the jump from one
+  category to the next went).
 
 ## Not now
 
@@ -208,31 +217,40 @@ September; Edge draws dark pages itself) · a default playback speed for VacuumT
 
 Always (launcher): Home tap = Home menu · Home hold 0.5 s = Power (in standby: wake) · in
 Moonlight a tap goes to the game PC, a hold of 0.5 s is our menu · R3 = on-screen keyboard
-(not in Moonlight; configurable) · Start + D-pad or RT/LT = volume (not in Moonlight) · in Moonlight's
-menus (the PC and app grids, not while it streams), Select = Shift+Tab, which reaches their
-toolbar (Add PC, Help, Settings); the owner, 29 Sept 2026 (catalog `menuKeys`).
+(not in Moonlight; configurable) · LB / RB = volume down / up, LB + RB = mute (not in apps on
+the Controller preset nor Moonlight; YouTube: right stick up / down) · the Start layer below · in
+Moonlight's menus (the PC and app grids, not while it streams), Select = Shift+Tab, which reaches
+their toolbar (Add PC, Help, Settings); the owner, 29 Sept 2026 (catalog `menuKeys`).
 
-Launcher & menus: D-pad/L stick move · A select (held 0.5 s on a home tile: move it; let go after moving drops it) · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LB/RB tabs.
+Launcher & menus: D-pad/L stick move · A select (held 0.5 s on a home tile: move it; let go after moving drops it) · B back · X close app (Home menu) / delete (keyboard) · Y space (keyboard) · Start tile options / done · LT/RT tabs (Add a tile), the cursor (keyboard) · LB/RB volume (the button-map editor and Settings › Controller's button test keep them; setup too).
 
 | Button | Controller preset | Mouse preset (Browser, Twitch, Stremio, websites) | Keyboard preset |
 |---|---|---|---|
-| L stick | app | pointer | arrow keys |
-| R stick | app | scroll | pointer |
+| L stick | app | pointer (accelerates at its edge) | arrow keys |
+| R stick | app (YouTube: volume up / down) | scroll | pointer |
 | A | app | Enter | Enter |
 | B | app | Esc | Esc |
 | X | app | click (hold = drag) | Space |
 | Y | app | Space | Tab |
 | D-pad | app | arrow keys | arrow keys |
-| LB / RB | app | back / forward (page history) | Page Up / Page Down |
-| LT | app | right-click | Home |
-| RT | app | hold: precise pointer | End |
+| LB / RB | app | volume down / up, by 2, repeating; both: mute | volume down / up, by 2, repeating; both: mute |
+| LT | app | right-click | Page Up |
+| RT | app | click (hold = drag) | Page Down |
+| LT + RT | app | middle click | - |
 | Select | app | Esc | Backspace |
 | Start | app | play/pause | Menu key |
-| L3 | app | middle click | click |
+| L3 | app | slow pointer on / off (off when another app comes in front) | click |
 | R3 | keyboard | keyboard | keyboard |
 | Home | launcher | launcher | launcher |
 
-Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse; Plex HTPC = Keyboard (29 Sept 2026: its own controller support ignored the 8BitDo, which its input maps do not name); Jellyfin = Keyboard (the owner, 3 Nov 2026: Jellyfin Media Player ignored the controller everywhere, its server's Host field included). Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
+Start layer (Start held, then the button; Start alone keeps its own job, on release): LB / RB =
+back / forward (Alt+Left / Alt+Right, Mouse and Keyboard apps) · LT / RT = previous / next track
+(not in apps on the Controller preset nor Moonlight) · D-pad left / right = the window in front to
+the next screen that way, up = maximize or restore, down = minimize · Y = minimize all (the window
+ones in desktop mode only). LT and RT together: within 80 ms of each other, the pointer held
+still meanwhile.
+
+Defaults (the Mouse column reviewed with the user on 26 Sept 2026, made ControllerNavigation's map on 20 Nov 2026): YouTube, Moonlight = Controller; Browser, Twitch, Stremio, website tiles = Mouse; Plex HTPC = Keyboard (29 Sept 2026: its own controller support ignored the 8BitDo, which its input maps do not name); Jellyfin = Keyboard (the owner, 3 Nov 2026: Jellyfin Media Player ignored the controller everywhere, its server's Host field included). Example per-app change: Twitch Start = F (full screen), Select = Alt+T (theater).
 
 ## Risks and pushback
 
@@ -241,7 +259,7 @@ Defaults (the Mouse column reviewed with the user on 26 Sept 2026): YouTube, Moo
 | PCs differ: sleep states, GPUs (AMD, NVIDIA, Intel; integrated or discrete), screens | Standby is the launcher's own, whatever sleep the PC has; the decoding check asks the driver; the Home backdrop is captured on the GPU driving the TV; the launcher follows any resolution, scaling or primary screen; a lost GPU process renews the WebView's browser; the Drivers step brings the box's drivers once |
 | Waking from the 8BitDo dongle | Tested: it cannot wake from S3 (no USB remote wakeup), the keyboard can. Answer: stay-awake standby |
 | Twitch ad blocking is weaker in Edge | Try a week; moving only the Twitch tile to Firefox is small |
-| Mouse mode has a ceiling (Edge, Twitch, Stremio) | Precise pointer on RT; phone touchpad and keyboard |
+| Mouse mode has a ceiling (Edge, Twitch, Stremio) | Slow pointer on L3, acceleration at the stick's edge; phone touchpad and keyboard |
 | Some tasks need Explorer (Windows Settings, packaged apps) | Desktop mode from the Power menu |
 | Two volumes (Windows vs TV remote) | Set TV once and leave it |
 | Roku ECP needs "Control by mobile apps" and "Fast TV start"; PowerOn not in official docs | Setup and Settings › TV list both; Wake-on-LAN first |

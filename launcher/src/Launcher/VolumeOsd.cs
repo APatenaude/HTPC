@@ -7,7 +7,7 @@ namespace Htpc.Launcher;
 /// <summary>
 /// The volume indicator: a small card at the top left over whatever is on screen (an app, the
 /// launcher, the desktop) for 2 s after each change of the volume or mute, from anywhere (the
-/// controller, Start + D-pad, the phone, a keyboard's volume keys, Settings: VolumeWatch), with
+/// controller's bumpers or right stick, the phone, a keyboard's volume keys, Settings: VolumeWatch), with
 /// the output's name for 3 s when the sound has moved to another output. The alert cards' look
 /// (AlertsForm) and window: painted with GDI+ into a layered window that is click-through,
 /// never takes the focus, stays out of the Home menu's screen capture and is hidden in standby.

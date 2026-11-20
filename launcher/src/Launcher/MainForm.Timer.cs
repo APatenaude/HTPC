@@ -4,8 +4,8 @@ namespace Htpc.Launcher;
 
 /// <summary>
 /// The sleep timer (SPEC N14) and its warning over apps, media sessions, alerts, and volume
-/// from the controller (its map's buttons, Start + D-pad) or the keyboard, with the volume
-/// indicator over everything. MainForm.cs calls in through a few hooks.
+/// from the controller (the bumpers, the right stick in a stickVolume app) or the keyboard, with
+/// the volume indicator over everything. MainForm.cs calls in through a few hooks.
 /// </summary>
 sealed partial class MainForm
 {
@@ -47,7 +47,7 @@ sealed partial class MainForm
             if (volumeAfterStandby) { volumeAfterStandby = false; volumeWatch.Renew(); }
             PollVolume();
         };
-        controller.Chord += (command, repeat) => OnUiQueued(() => OnChord(command, repeat));
+        controller.Command += (command, repeat) => OnUiQueued(() => OnControllerCommand(command, repeat));
         sleepTimer = new SleepTimer(() => media.Sessions, on => media.Want("timer", on));
         sleepTimer.Changed += () =>
         {
@@ -109,10 +109,11 @@ sealed partial class MainForm
     }
 
     /// <summary>
-    /// volumeUp, volumeDown, mute: Windows volume in steps of 5 (2 from Start + D-pad, which
-    /// repeats), shown by the volume indicator (no Windows flyout).
+    /// volumeUp, volumeDown, mute: Windows volume in steps of 2 (the bumpers and the right stick,
+    /// which repeat; the on-screen keyboard's keys 5), shown by the volume indicator (no Windows flyout).
     /// </summary>
-    void Volume(string command, int step = 5)
+    /// <param name="muted">For mute: the state to set; null toggles.</param>
+    void Volume(string command, int step = 2, bool? muted = null)
     {
         switch (command)
         {
@@ -121,30 +122,15 @@ sealed partial class MainForm
                 audio.Step(command == "volumeUp" ? step : -step);
                 break;
             case "mute":
-                audio.Muted = !(audio.Muted ?? false);
+                audio.Muted = muted ?? !(audio.Muted ?? false);
                 break;
         }
         // At once, without waiting for Windows' call back (VolumeWatch), which shows the same: the
         // level just asked for (AudioVolume applies it on its own thread).
         if (audio.Level is { } level) ShowVolume(level, null);
         // The launcher's slider, when it is up (hidden behind an app, the next Home brings the
-        // state): Start + D-pad repeats about nine times a second.
+        // state): a held bumper repeats eight times a second.
         if (Visible) PushState();
-    }
-
-    /// <summary>
-    /// Start + D-pad or trigger (StartChord): the volume over any app, the launcher included. Not in
-    /// standby, nor in an app that owns the controller (catalog ownController: Moonlight, whose
-    /// buttons all belong to the game PC, its Home tap too).
-    /// Apps on the Controller preset (VacuumTube, Kodi...) read the controller
-    /// themselves: they see Start, the D-pad and the triggers as well, which the launcher cannot hold back.
-    /// </summary>
-    void OnChord(string command, bool repeat)
-    {
-        if (setupMode || standby.Active) return;
-        if (!LauncherActive && foregroundApp?.OwnController == true) return;
-        if (!repeat) Log.Info($"Start + D-pad or trigger: {command}");
-        Volume(command, step: 2);
     }
 
     /// <summary>

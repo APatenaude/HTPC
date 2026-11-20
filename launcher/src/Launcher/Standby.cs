@@ -45,10 +45,13 @@ sealed class LauncherSettings
     /// </summary>
     public JsonElement? ButtonMaps { get; set; }
 
-    /// <summary>Pointer, precise pointer (RT) and scroll speed, 1 to 10 (5 = the tuned default).</summary>
+    /// <summary>Pointer, slow pointer (L3) and scroll speed, 1 to 10 (5 = the tuned default).</summary>
     public int PointerSpeed { get; set; } = 5;
     public int PreciseSpeed { get; set; } = 5;
     public int ScrollSpeed { get; set; } = 5;
+
+    /// <summary>Pointer acceleration with the stick at its edge, 1 (off) to 10; 5 = up to 3 times as fast (MainForm.ApplySettings).</summary>
+    public int Acceleration { get; set; } = 5;
 
     /// <summary>The launcher's interface sounds (ui\sounds.js): "off", "low" or "medium".</summary>
     public string InterfaceSounds { get; set; } = "low";
@@ -234,6 +237,7 @@ sealed class LauncherSettings
             case "pointerSpeed": PointerSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "preciseSpeed": PreciseSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "scrollSpeed": ScrollSpeed = Math.Clamp(value.GetInt32(), 1, 10); break;
+            case "acceleration": Acceleration = Math.Clamp(value.GetInt32(), 1, 10); break;
             case "interfaceSounds":
                 var level = value.GetString();
                 if (level is not ("off" or "low" or "medium")) return false;

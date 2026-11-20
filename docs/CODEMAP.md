@@ -49,13 +49,13 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   `reset(view)`, `back`, `toast`), then `ui/app/<area>.js`, plain scripts sharing their globals: `home.js`
   (top bar, tiles), `menu.js`, `dialogs.js` (Power, timer, confirm, `ask`), `settings.js` (`SECTIONS`,
   `CHOICES`, `settingsPress`), `focus.js` (`setFocus(el)`, `focusedEl()`, `nearest`, `move`), `input.js`
-  (`press(button)`, `activate`, `KEYS`), `host.js` (`onHost(msg)`: init, tiles, blank, opened, state, input,
+  (`press(button)`, `bumpersTaken` (a view's or section's `bumpers()`), `activate`, `KEYS`), `host.js` (`onHost(msg)`: init, tiles, blank, opened, state, input,
   show, toast; the rest goes to `EXT.host` by type, then by prefix; the demo data; the start). Extension
   API (commented above `const EXT` in app.js): `settingsSection`, `addView`, `onAction`, `hostMessage`,
   `ask`, `onHome`, `onTiles`, `sectionHooks`. Script order: `ui/index.html`. Demo keys (`KEYS`): arrows,
-  Enter/Space = A, Esc/Backspace = B, x, y, h = Home, p = hold Home, o = Start, PageUp/PageDown = LB/RB.
+  Enter/Space = A, Esc/Backspace = B, x, y, h = Home, p = hold Home, o = Start, PageUp/PageDown = LT/RT.
 - Host (`src/MainForm.cs`; each area in a `src/MainForm.<Area>.cs` part): `HandleWebMessage` (ready,
-  wake, home, shown, perf, setting, launch, switchTo/resume, close, power, volume, brightness, timer;
+  wake, home, shown, perf, setting, launch, switchTo/resume, close, power, volume, volumeStep, brightness, timer;
   else `DispatchUiMessage`), `Post`, `StateObject`/`PushState` (the "state" message), `TileList`.
 - `src/MainForm.Messages.cs`: `[UiMessages("prefix.")]` methods in any `MainForm.*.cs` part
   (`RegisterUiHandlers`, the longest prefix wins) and `[UiReady]` methods run when the page is up.
@@ -118,7 +118,8 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
 - Names: `KeyboardForm.Open`, `Dismiss`, `FitScreen`, `Band`, `HeightOf1080` (the band's height, also in
   keyboard.css and keyboard.js); keyboard.js `render`, `press`, `typeText`, `moveVertical`, `onButton`;
   `MainForm.OpenKeyboard`, `CloseKeyboard`, `OnKeyboardMessage`. The password preview keeps its own `typed`
-  and `cursor` (`moveCursor`: LB/RB and the cursor keys; letters go in at it, X deletes before it).
+  and `cursor` (`moveCursor`: LT/RT and the cursor keys; letters go in at it, X deletes before it).
+  LB/RB never reach it: the volume (`MainForm.OnPad`).
 - Tests: LauncherTests "On-screen keyboard: its window as high as its page" (`AddTileTests.cs`); selftest
   'Keyboard:' (the preview's cursor too) and 'fit():' checks (`ui/selftest/pages.js`); audit (`ui/audit/keyboard.js`) 'keyboard: letters',
   'keyboard: symbols, shift locked', 'keyboard: a password' (keyboard.html).
@@ -140,15 +141,19 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
 
 - Files: `src/ControllerService.cs` (XInput, Home), `src/ButtonMap.cs`, `src/ButtonMapStore.cs`,
   `src/PadMapper.cs`, `src/Input.cs` (SendInput), `src/MainForm.Maps.cs`, `src/MainForm.Controller.cs`
-  (`OnPad`, `UpdateMapper`), `src/MainForm.Timer.cs` (`OnChord`), `src/MainForm.Settings.cs`
-  (controller.*), `ui/buttons.js`, `ui/settings-more.js` (Controller section).
-- Names: `enum Pad`, `StartChord`, `ControllerService.Run`, `Buzz`; `ButtonMap.For(preset)`, `PadAction`,
-  `KeyAction`; `ButtonMapStore.For`, `Build`, `ParseAction`, `SetPreset`, `SetControl`, `DescribeApp`;
-  `PadMapper.Update`; `MainForm.UpdateMapper`, `OnPad`, `OnChord`; `RunMappedCommand`, `OnMapsMessage`
+  (`OnPad`, `UpdateMapper`, `OnControllerCommand`), `src/MainForm.Timer.cs` (`Volume`), `src/Native.cs`
+  (`WindowActions`), `src/MainForm.Settings.cs` (controller.*), `ui/buttons.js`, `ui/settings-more.js`
+  (Controller section), `ui/app/input.js` (`bumpersTaken`).
+- Names: `enum Pad`, `StartLayer`, `BumperVolume`, `ControllerService.Run`, `Command`, `StickVolume`, `Buzz`;
+  `ButtonMap.For(preset)`, `Triggers` (LT + RT), `PadAction`, `KeyAction`, `SlowToggleAction` (mouse:slow);
+  `ButtonMapStore.For`, `Build`, `ParseAction`, `SetPreset`, `SetControl`, `DescribeApp`; `PadMapper.Update`,
+  `PairTriggers`, `Slow`, `Boost` (acceleration); `MainForm.UpdateMapper`, `OnPad`, `BumperStep`,
+  `PadReadingAppInFront`, `OnControllerCommand`; `WindowActions.Run`, `PickScreen`; `RunMappedCommand`, `OnMapsMessage`
   (maps.*), `PostMaps`; `OnControllerMessage`; buttons.js views `maps`, `buttons`, `openEditor`,
   `choosePreset`, `startPicking`, `pickPress`. Catalog `preset`, `menuKeys` (`MenuKeys.Parse` in AppManager.cs).
-- Tests: LauncherTests "ButtonMapStore", "PadMapper", "Start + D-pad (StartChord)", "Catalog: launch
-  options" (menuKeys); selftest "Button maps..." (`ui/selftest/maps.js`), "Settings: opening, moving..."
+- Tests: LauncherTests "ButtonMapStore", "PadMapper" (LT + RT, the slow pointer, the acceleration),
+  "Start layer (StartLayer), the bumpers' volume" (the right stick's volume, the next screen too),
+  "Catalog: launch options" (menuKeys, stickVolume); selftest "Button maps..." (`ui/selftest/maps.js`), "Settings: opening, moving..."
   ('Controller:', `settings.js`); audit (`ui/audit/settings.js`) 'button maps', 'button map editor' (+ its
   choice, key combination, presets), 'settings: Controller', 'settings: Controller, button test'. Without a controller: `launcher\dev\Send-Pad.ps1` (a `--dev` launcher).
 - Windows that run as administrator (Device Manager, installers): `Input.ToElevated` (set in `UpdateMapper` from
@@ -405,7 +410,7 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
   (`Get-AutostartRules`: autostart.*), `AppUpdaters.ps1`, `tools/Get-AppUpdates.ps1`, `Set-PhoneRemote.ps1`
   (install.allowInbound), `Job-Common.ps1` `Get-JobApp` (the trusted copy in Program Files).
 - Tests: LauncherTests "Catalog: ..." groups in Program.cs (full screen; launch options: fill,
-  cropTop, menuKeys, ownController, clearBeforeStart), `WindowlessQuitTests.cs` and
+  cropTop, menuKeys, ownController, stickVolume, clearBeforeStart), `WindowlessQuitTests.cs` and
   `AddTileTests.Categories` (categories, ASCII); `Test-Autostart -Only Catalog`;
   PhoneTests (phoneKeys).
 

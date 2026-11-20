@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Htpc.Launcher;
 
 /// <summary>The controller's raw state, one XInput poll.</summary>
@@ -14,16 +16,38 @@ readonly record struct PadState(ushort Buttons, byte LT, byte RT, short LX, shor
 /// </summary>
 sealed class PadMapper
 {
-    /// <summary>Stick motion as last polled, for the frame thread; swapped whole.</summary>
-    sealed record Motion(StickRole Left, StickRole Right, short LX, short LY, short RX, short RY, bool Precise, Speeds Speed);
+    /// <summary>Stick motion as last polled, for the frame thread; swapped whole. Frozen: a trigger waits for its partner (Triggers).</summary>
+    sealed record Motion(StickRole Left, StickRole Right, short LX, short LY, short RX, short RY, bool Precise, bool Frozen, Speeds Speed);
 
     /// <summary>
-    /// Settings › Controller: pointer, precise pointer (RT) and scroll speed as factors of the
-    /// defaults below (1 = default). Handed to the frame thread inside Motion.
+    /// Settings › Controller: pointer, slow pointer (L3) and scroll speed as factors of the
+    /// defaults below (1 = default), and the most the acceleration multiplies the pointer's speed
+    /// by (1 = none; Boost). Handed to the frame thread inside Motion.
     /// </summary>
-    public sealed record Speeds(double Pointer, double Precise, double Scroll)
+    public sealed record Speeds(double Pointer, double Precise, double Scroll, double Acceleration = 3)
     {
         public static readonly Speeds Default = new(1, 1, 1);
+    }
+
+    /// <summary>
+    /// Pointer acceleration (the same as ControllerNavigation's): the stick held at its edge (its
+    /// travel past the dead zone, before the curve, at 0.9 or more, until it drops under 0.85) for
+    /// 200 ms, the speed then ramps from 1 to the most over 500 ms; off the edge it is 1 at once.
+    /// Calm on small moves, quick across the screen. Frame thread.
+    /// </summary>
+    internal sealed class Boost
+    {
+        public const double On = 0.9, Off = 0.85, DelayMs = 200, RampMs = 500;
+        double since = -1;   // ms the stick reached the edge; -1: not at it
+
+        public double At(double travel, double now, double most)
+        {
+            if (most <= 1 || travel < (since >= 0 ? Off : On)) { since = -1; return 1; }
+            if (since < 0) since = now;
+            return 1 + (most - 1) * Math.Clamp((now - since - DelayMs) / RampMs, 0, 1);
+        }
+
+        public void Reset() => since = -1;
     }
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")] static extern int DwmFlush();
@@ -44,13 +68,21 @@ sealed class PadMapper
     const double PointerSpeed = 1.1;      // screen heights per second at full tilt
     const double PreciseFactor = 0.25;
     const double ScrollSpeed = 2400;      // wheel units per second at full tilt (20 notches)
+    public const int PairWindowMs = 80;   // LT and RT this close are both together (ButtonMap.Triggers)
+    const uint LtBit = 1u << (int)PadControl.LT, RtBit = 1u << (int)PadControl.RT, TriggerBits = LtBit | RtBit;
 
     volatile ButtonMap? map;
     ButtonMap? active;
     uint down;                            // PadControl bits currently down (as last applied)
     uint inherited;                       // down when the map took over: not pressed, so not released either
     readonly long[] nextRepeat = new long[16];
+    uint waiting;                         // a trigger pressed alone, its partner may still come: nothing sent yet
+    long waitSince;
+    uint paired;                          // triggers used up by Triggers, each until it is let go
+    bool pairDown;                        // Triggers' action is held down
+    volatile bool slow;                   // the slow pointer toggled on (SlowToggleAction)
     double pointerX, pointerY, scrollX, scrollY;   // sub-pixel and sub-unit remainders (frame thread)
+    readonly Boost boost = new();                   // frame thread
     volatile Motion? motion;                        // null: sticks at rest, nothing to move
     Motion? lastMotion;                             // controller thread: what it last handed over
     readonly ManualResetEventSlim moving = new(false);
@@ -71,6 +103,9 @@ sealed class PadMapper
     public Speeds Speed { get => speed; set => speed = value; }
     volatile Speeds speed = Speeds.Default;
 
+    /// <summary>The slow pointer toggled on (SlowToggleAction: the Mouse preset's L3); MainForm turns it off when the app in front changes. Any thread.</summary>
+    public bool Slow { get => slow; set => slow = value; }
+
     /// <summary>Called by the controller thread at every poll; enabled = false in standby.</summary>
     public void Update(in PadState s, long now, bool enabled)
     {
@@ -90,6 +125,7 @@ sealed class PadMapper
 
         var nowDown = Controls(s, current, down);
         var changed = nowDown ^ down;
+        var handled = current.Triggers is { } both ? PairTriggers(current, both, nowDown, changed, now) : 0;
         for (var c = 0; c < 16; c++)
         {
             var bit = 1u << c;
@@ -98,6 +134,7 @@ sealed class PadMapper
                 if ((nowDown & bit) == 0) inherited &= ~bit; // let go: a normal button from now on
                 continue;
             }
+            if ((handled & bit) != 0) continue;
             if (!current.Buttons.TryGetValue((PadControl)c, out var action)) continue;
             if ((changed & bit) != 0)
             {
@@ -112,12 +149,63 @@ sealed class PadMapper
         }
         down = nowDown;
 
-        var precise = false;
+        var precise = slow;
         foreach (var (control, action) in current.Buttons)
             if (action is PreciseAction && (down & (1u << (int)control)) != 0) precise = true;
         bool Tilted(StickRole role, short x, short y) => role is StickRole.Pointer or StickRole.Scroll && Curve(x, y) != (0, 0);
         var tilted = Tilted(current.LeftStick, s.LX, s.LY) || Tilted(current.RightStick, s.RX, s.RY);
-        SetMotion(tilted ? new Motion(current.LeftStick, current.RightStick, s.LX, s.LY, s.RX, s.RY, precise, speed) : null);
+        SetMotion(tilted ? new Motion(current.LeftStick, current.RightStick, s.LX, s.LY, s.RX, s.RY, precise, waiting != 0, speed) : null);
+    }
+
+    /// <summary>
+    /// LT and RT with an action together (ButtonMap.Triggers): a trigger pressed alone waits up to
+    /// PairWindowMs for the other, the pointer frozen meanwhile so that a drag starts where it was
+    /// aimed. The other one in time (or both at once) makes the pair's action, and both are used up
+    /// until each is let go (the action goes up with the first); let go in time, it is a tap of its
+    /// own action; the time up, its own action from then on. Only fresh presses pair: next to a
+    /// trigger held when the map took over (inherited) or already at its own job, no wait. Under
+    /// Start they never get here (StartLayer holds them back).
+    /// </summary>
+    /// <returns>The trigger bits dealt with here, which the button loop leaves alone this poll.</returns>
+    uint PairTriggers(ButtonMap map, PadAction both, uint nowDown, uint changed, long now)
+    {
+        var handled = paired | waiting;
+        if ((paired & ~nowDown) != 0)
+        {
+            paired &= nowDown;
+            if (pairDown) { pairDown = false; Release(both); }
+        }
+        if (waiting != 0)
+        {
+            var c = BitOperations.TrailingZeroCount(waiting);
+            var own = map.Buttons.GetValueOrDefault((PadControl)c);
+            if ((nowDown & waiting) == 0)
+            {
+                if (own is not null) { Press(own); Release(own); }
+                waiting = 0;
+            }
+            else if (now - waitSince >= PairWindowMs)
+            {
+                if (own is not null) Press(own);
+                nextRepeat[c] = now + RepeatDelayMs;
+                waiting = 0;
+            }
+        }
+        var pressed = changed & nowDown & TriggerBits & ~inherited;
+        if (pressed == 0) return handled;
+        var partner = pressed ^ TriggerBits;
+        if (partner == 0 || waiting == partner)
+        {
+            waiting = 0;
+            paired = TriggerBits;
+            pairDown = true;
+            Press(both);
+            return handled | TriggerBits;
+        }
+        if ((nowDown & partner) != 0) return handled;
+        waiting = pressed;
+        waitSince = now;
+        return handled | pressed;
     }
 
     void SetMotion(Motion? m)
@@ -145,6 +233,7 @@ sealed class PadMapper
                 moving.Reset();
                 if (motion is not null || Feed.Pending) moving.Set(); // moved again meanwhile
                 pointerX = pointerY = scrollX = scrollY = 0;
+                boost.Reset();
                 last = -1;
                 continue;
             }
@@ -159,8 +248,8 @@ sealed class PadMapper
             {
                 if (m is not null)
                 {
-                    Stick(m.Left, m.LX, m.LY, dt, m);
-                    Stick(m.Right, m.RX, m.RY, dt, m);
+                    Stick(m.Left, m.LX, m.LY, dt, now, m);
+                    Stick(m.Right, m.RX, m.RY, dt, now, m);
                 }
                 Feed.Frame();
             }
@@ -168,9 +257,9 @@ sealed class PadMapper
         }
     }
 
-    void Stick(StickRole role, short x, short y, double dt, Motion m)
+    void Stick(StickRole role, short x, short y, double dt, double now, Motion m)
     {
-        if (role == StickRole.Pointer) MovePointer(x, y, dt, m.Precise ? PreciseFactor * m.Speed.Precise : m.Speed.Pointer);
+        if (role == StickRole.Pointer && !m.Frozen) MovePointer(x, y, dt, now, m);
         else if (role == StickRole.Scroll) Scroll(x, y, dt * m.Speed.Scroll);
     }
 
@@ -198,20 +287,28 @@ sealed class PadMapper
         return bits;
     }
 
+    /// <summary>The stick's travel past the dead zone, 0 to 1.</summary>
+    static double Travel(short x, short y)
+    {
+        var magnitude = Math.Sqrt((double)x * x + (double)y * y);
+        return magnitude < Deadzone ? 0 : Math.Min(1, (magnitude - Deadzone) / (32767 - Deadzone));
+    }
+
     /// <summary>0..1 past the dead zone, squared: small tilts are slow and exact, full tilt is quick.</summary>
     static (double X, double Y) Curve(short x, short y)
     {
-        var magnitude = Math.Sqrt((double)x * x + (double)y * y);
-        if (magnitude < Deadzone) return (0, 0);
-        var m = Math.Min(1, (magnitude - Deadzone) / (32767 - Deadzone));
-        var scale = m * m / magnitude;
+        var m = Travel(x, y);
+        if (m == 0) return (0, 0);
+        var scale = m * m / Math.Sqrt((double)x * x + (double)y * y);
         return (x * scale, y * scale);
     }
 
-    void MovePointer(short x, short y, double dt, double factor)
+    void MovePointer(short x, short y, double dt, double now, Motion m)
     {
         var (cx, cy) = Curve(x, y);
-        if (cx == 0 && cy == 0) { pointerX = pointerY = 0; return; }
+        if (cx == 0 && cy == 0) { pointerX = pointerY = 0; boost.Reset(); return; }
+        if (m.Precise) boost.Reset();
+        var factor = m.Precise ? PreciseFactor * m.Speed.Precise : m.Speed.Pointer * boost.At(Travel(x, y), now, m.Speed.Acceleration);
         // The screen's height read at each step, not once: the primary screen can change under the
         // launcher (Windows' placeholder monitor all night, then the TV on at 4K).
         var speed = PointerSpeed * (Screen.PrimaryScreen?.Bounds.Height ?? 1080) * dt * factor;
@@ -234,12 +331,16 @@ sealed class PadMapper
         Input.Wheel(h, horizontal: true);
     }
 
-    static void Press(PadAction action)
+    void Press(PadAction action)
     {
         switch (action)
         {
             case KeyAction k: Input.KeysDown(k.Keys); break;
             case ClickAction c: Input.MouseButton(c.Button, true); break;
+            case SlowToggleAction:
+                slow = !slow;
+                Log.Info($"Slow pointer {(slow ? "on" : "off")}");
+                break;
         }
     }
 
@@ -257,9 +358,11 @@ sealed class PadMapper
     {
         if (active is not null)
             for (var c = 0; c < 16; c++)
-                if ((down & ~inherited & (1u << c)) != 0 && active.Buttons.TryGetValue((PadControl)c, out var action))
+                if ((down & ~inherited & ~waiting & ~paired & (1u << c)) != 0 && active.Buttons.TryGetValue((PadControl)c, out var action))
                     Release(action);
-        down = inherited = 0;
+        if (pairDown && active?.Triggers is { } both) Release(both);
+        down = inherited = waiting = paired = 0;
+        pairDown = false;
         SetMotion(null);
     }
 }

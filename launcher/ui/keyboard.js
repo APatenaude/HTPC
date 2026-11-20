@@ -87,9 +87,10 @@ function render() {
   document.getElementById('kb-field').textContent = field || 'the app';
   const shown = password ? (reveal ? typed : '•'.repeat(typed.length)) : '';
   document.getElementById('kb-typed').innerHTML = password ? `${esc(shown.slice(0, cursor))}<span class="kb-caret"></span>${esc(shown.slice(cursor))}` : '';
-  // The triggers each their own (the owner, 29 Sept 2026: LT is Shift, RT the symbols); the
-  // bumpers, which go together, one: the bar holds the password's Show too, at every screen width.
-  const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], ['LT', 'Shift'], ['RT', 'Symbols'], [['LB', 'RB'], 'Cursor'], ['Start', 'Enter']];
+  // The triggers move the cursor, the bumpers are the volume (the launcher does it: they never
+  // come here), as everywhere; Shift and the symbols are their keys'. The bar holds the
+  // password's Show too, at every screen width.
+  const list = [['A', 'Type'], ['X', 'Delete'], ['Y', 'Space'], [['LT', 'RT'], 'Cursor'], [['LB', 'RB'], 'Volume'], ['Start', 'Enter']];
   if (password) list.push(['Select', reveal ? 'Hide password' : 'Show password']);
   list.push(['B', 'Close']);
   document.getElementById('kb-hints').innerHTML = list.map(([btn, label]) => '<div class="hint">' +
@@ -167,10 +168,8 @@ function onButton(button) {
     case 'a': flash(focus.row, focus.col); press(layout[focus.row][focus.col]); break;
     case 'x': backspace(); break;
     case 'y': typeText(' '); break;
-    case 'lt': cycleShift(); break;
-    case 'rt': symbols = !symbols; break;   // the symbols page and back, as its key (#+= / abc)
-    case 'lb': moveCursor('left'); break;
-    case 'rb': moveCursor('right'); break;
+    case 'lt': moveCursor('left'); break;
+    case 'rt': moveCursor('right'); break;
     case 'start': send({ type: 'key', key: 'enter' }); break;
     case 'select': if (password) reveal = !reveal; break;
     case 'b': send({ type: 'close' }); return;
@@ -196,7 +195,7 @@ if (host) {
 } else {
   // A normal browser: the keyboard stands in for the controller.
   const keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', Escape: 'b',
-    Backspace: 'x', ' ': 'y', Shift: 'lt', Control: 'rt', PageUp: 'lb', PageDown: 'rb', F2: 'select', F10: 'start' };
+    Backspace: 'x', ' ': 'y', PageUp: 'lt', PageDown: 'rt', F2: 'select', F10: 'start' };
   addEventListener('keydown', (e) => { if (keys[e.key]) { e.preventDefault(); onButton(keys[e.key]); } });
   onHost({ type: 'open', field: 'Password', password: true });
   // keyboard.html#audit (#audit?page=...): the UI audit's keyboard pages (audit.js), loaded

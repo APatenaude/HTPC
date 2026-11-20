@@ -16,6 +16,9 @@ sealed record ClickAction(Input.Button Button) : PadAction;
 /// <summary>While held, the pointer moves slower (aiming at small things).</summary>
 sealed record PreciseAction : PadAction;
 
+/// <summary>Each press turns the slow pointer on or off (the Mouse preset's L3); off again when the app in front changes.</summary>
+sealed record SlowToggleAction : PadAction;
+
 /// <summary>
 /// Something the launcher does instead of input for the app (SPEC N13 "launcher action"):
 /// menu, power, timer, keyboard, volumeUp, volumeDown, mute. PadMapper sends nothing for it;
@@ -28,6 +31,7 @@ sealed record CommandAction(string Command) : PadAction;
 /// front. Presets: Controller (null map: the app reads the controller itself), Mouse, Keyboard.
 /// Home always belongs to the launcher and is not in the map. R3 opens the on-screen keyboard
 /// (KeyboardButton) unless the app's map gives it another job (ButtonMapStore adds the changes).
+/// LB and RB are the volume in both presets, fixed (not in ButtonMapStore.Controls).
 /// </summary>
 sealed class ButtonMap
 {
@@ -35,14 +39,18 @@ sealed class ButtonMap
     public StickRole LeftStick { get; init; }
     public StickRole RightStick { get; init; }
     public required IReadOnlyDictionary<PadControl, PadAction> Buttons { get; init; }
+    /// <summary>LT and RT pressed together (PadMapper.PairWindowMs apart at most): the Mouse preset's middle click; null for none.</summary>
+    public PadAction? Triggers { get; init; }
 
     // Virtual-key codes.
     const ushort Back = 0x08, Tab = 0x09, Enter = 0x0D, Shift = 0x10, Ctrl = 0x11, Esc = 0x1B, Space = 0x20,
-        PageUp = 0x21, PageDown = 0x22, End = 0x23, HomeKey = 0x24, LeftKey = 0x25, UpKey = 0x26, RightKey = 0x27, DownKey = 0x28,
-        Apps = 0x5D, Alt = 0x12, PlayPause = 0xB3;
+        PageUp = 0x21, PageDown = 0x22, LeftKey = 0x25, UpKey = 0x26, RightKey = 0x27, DownKey = 0x28,
+        Apps = 0x5D, PlayPause = 0xB3;
 
     static KeyAction Key(params ushort[] keys) => new(keys);
     static KeyAction Held(ushort key) => new(new[] { key }, Repeat: true);
+    // Declared before the presets: static fields are set in this order.
+    static readonly CommandAction VolumeDown = new("volumeDown"), VolumeUp = new("volumeUp");
 
     static Dictionary<PadControl, PadAction> Arrows() => new()
     {
@@ -51,9 +59,10 @@ sealed class ButtonMap
     };
 
     /// <summary>
-    /// Browser, Twitch, Stremio, website tiles: the controller as a mouse, plus a few keys.
-    /// Defaults picked with the user (26 Sept 2026): website apps have no tabs, so LB/RB move
-    /// through the page history; X clicks and A is Enter; Start is play/pause for any player.
+    /// Browser, Twitch, Stremio, website tiles: the controller as a mouse, plus a few keys; the
+    /// same map as ControllerNavigation's. X and RT click (held = drag), LT right-clicks, both
+    /// triggers together middle-click; A is Enter; LB and RB the volume; L3 the slow pointer on
+    /// and off; Start is play/pause for any player (Start + LB / RB: back and forward, StartLayer).
     /// </summary>
     public static readonly ButtonMap Mouse = new()
     {
@@ -62,18 +71,19 @@ sealed class ButtonMap
         RightStick = StickRole.Scroll,
         Buttons = new Dictionary<PadControl, PadAction>(Arrows())
         {
-            [PadControl.X] = new ClickAction(Input.Button.Left),   // held = drag
+            [PadControl.X] = new ClickAction(Input.Button.Left),
             [PadControl.A] = Key(Enter),
             [PadControl.B] = Key(Esc),
             [PadControl.Y] = Key(Space),
-            [PadControl.LB] = Key(Alt, LeftKey),                    // back
-            [PadControl.RB] = Key(Alt, RightKey),                   // forward
+            [PadControl.LB] = VolumeDown,
+            [PadControl.RB] = VolumeUp,
             [PadControl.LT] = new ClickAction(Input.Button.Right),
-            [PadControl.RT] = new PreciseAction(),
+            [PadControl.RT] = new ClickAction(Input.Button.Left),
             [PadControl.Select] = Key(Esc),
             [PadControl.Start] = Key(PlayPause),
-            [PadControl.L3] = new ClickAction(Input.Button.Middle),
+            [PadControl.L3] = new SlowToggleAction(),
         },
+        Triggers = new ClickAction(Input.Button.Middle),
     };
 
     /// <summary>Keyboard-driven apps: keys first, the right stick still moves a pointer.</summary>
@@ -88,10 +98,10 @@ sealed class ButtonMap
             [PadControl.B] = Key(Esc),
             [PadControl.X] = Key(Space),
             [PadControl.Y] = Key(Tab),
-            [PadControl.LB] = Held(PageUp),
-            [PadControl.RB] = Held(PageDown),
-            [PadControl.LT] = Key(HomeKey),
-            [PadControl.RT] = Key(End),
+            [PadControl.LB] = VolumeDown,
+            [PadControl.RB] = VolumeUp,
+            [PadControl.LT] = Held(PageUp),
+            [PadControl.RT] = Held(PageDown),
             [PadControl.Select] = Held(Back),
             [PadControl.Start] = Key(Apps),
             [PadControl.L3] = new ClickAction(Input.Button.Left),

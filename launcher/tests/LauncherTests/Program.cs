@@ -16,7 +16,7 @@ T.Group("ButtonMapStore", () =>
     {
       "twitch": { "preset": "mouse", "start": "key:F", "select": "key:Alt+T", "leftStick": "pointer", "bogus": "key:A", "a": "key:NoSuchKey", "b": 5 },
       "stremio": { "dpad": "none", "rightStick": "none", "lt": "do:volumeDown", "rt": "do:volumeUp", "r3": "key:Ctrl+Shift+Tab" },
-      "youtube": { "preset": "keyboard", "a": "none" },
+      "youtube": { "preset": "keyboard", "a": "none", "lb": "key:PageUp" },
       "moonlight": { "start": "key:F" },
       "broken": [1, 2, 3],
       "weird": { "preset": "gamepad", "x": "mouse:middle", "y": "key:Win+D", "l3": "key:A+B" }
@@ -24,7 +24,8 @@ T.Group("ButtonMapStore", () =>
     """).RootElement.Clone();
     JsonElement? saved = null;
     var store = new ButtonMapStore(stored, j => saved = j);
-    Check(Log.Lines.Count(l => l.StartsWith("WARN Button map")) == 7, $"7 unreadable entries skipped and logged (got {Log.Lines.Count(l => l.StartsWith("WARN Button map"))})");
+    Check(Log.Lines.Count(l => l.StartsWith("WARN Button map")) == 8, $"8 unreadable entries skipped and logged (got {Log.Lines.Count(l => l.StartsWith("WARN Button map"))})");
+    Check(Log.Lines.Any(l => l.StartsWith("WARN Button map youtube: lb") && l.Contains("volume")), "a stored LB change (from before LB was the volume): dropped, and the log says why");
 
     var twitch = store.For("twitch", "mouse");
     Check(twitch is not null, "twitch has a map");
@@ -46,8 +47,17 @@ T.Group("ButtonMapStore", () =>
     Check(ButtonMapStore.CommandFor(twitch, Pad.Up) is null, "CommandFor D-pad never");
     Check(ButtonMapStore.CommandFor(null, Pad.R3) is null, "CommandFor without a map");
 
+    // LB and RB: the volume in both presets, whatever was stored; LT + RT, the Mouse preset's middle
+    // click, kept through the changes to other buttons, dropped by a change to LT or RT.
+    Check(ButtonMapStore.CommandFor(twitch, Pad.LB) == "volumeDown" && ButtonMapStore.CommandFor(twitch, Pad.RB) == "volumeUp", "Mouse preset: LB, RB the volume");
+    Check(twitch.Triggers is ClickAction { Button: Input.Button.Middle }, "twitch (Start, Select changed): LT + RT still the middle click");
+    Check(stremio.Triggers is null, "stremio (LT and RT changed): no LT + RT");
+    Check(((dynamic)store.DescribeApp("twitch", "mouse")).triggers == "mouse:middle" && ((dynamic)store.DescribeApp("stremio", "mouse")).triggers == null,
+        "the editor is told what LT + RT does, or that it does nothing");
+
     var youtube = store.For("youtube", "controller")!;
     Check(youtube is not null && youtube.LeftStick == StickRole.Arrows && !youtube.Buttons.ContainsKey(PadControl.A), "youtube switched to keyboard, A none");
+    Check(ButtonMapStore.CommandFor(youtube, Pad.LB) == "volumeDown" && youtube is { Triggers: null }, "... its stored LB change gone: the volume; the Keyboard preset has no LT + RT");
     Check(store.For("moonlight", "controller") is null, "controller preset: no map, changes ignored");
     Check(((dynamic)store.DescribeApp("moonlight", "controller")).changes.Count == 0, "controller preset shows no changes");
     Check(store.For("weird", "mouse") is { } w && w.Buttons[PadControl.X] is ClickAction { Button: Input.Button.Middle }, "weird: bad preset/keys skipped, x kept");
@@ -78,17 +88,22 @@ T.Group("ButtonMapStore", () =>
 
     // Round trip: what was saved reads back the same.
     store.SetControl("twitch", "start", "key:F", "mouse");
-    store.SetControl("twitch", "lb", "key:PageUp", "mouse");
+    Check(!store.SetControl("twitch", "lb", "key:PageUp", "mouse"), "LB cannot be changed (the volume)");
+    store.SetControl("twitch", "y", "key:PageUp", "mouse");
+    store.SetControl("twitch", "x", "mouse:slow", "mouse");
     var json = store.ToJson();
     var again = new ButtonMapStore(json, _ => { });
     Check(JsonSerializer.Serialize(again.ToJson()) == JsonSerializer.Serialize(json), "round trip through settings.json");
-    Check(again.For("twitch", "mouse")!.Buttons[PadControl.LB] is KeyAction { Repeat: true }, "PageUp repeats when held");
+    var twitchAgain = again.For("twitch", "mouse")!;
+    Check(twitchAgain.Buttons[PadControl.Y] is KeyAction { Repeat: true }, "PageUp repeats when held");
+    Check(twitchAgain.Buttons[PadControl.X] is SlowToggleAction && JsonSerializer.Serialize(json).Contains("mouse:slow"), "mouse:slow (the slow pointer on and off) kept and read back");
+    Check(twitchAgain.Triggers is ClickAction { Button: Input.Button.Middle }, "... and LT + RT with it");
     T.Info("saved: " + JsonSerializer.Serialize(json));
 
     // Every key name, click and command parses and formats back to itself.
     var actions = new[] { "A", "Z", "0", "9", "F1", "F12", "Enter", "Space", "Esc", "Tab", "Backspace", "Delete", "PageUp", "Left", "Menu",
         "Minus", "Equal", "Comma", "Period", "Slash", "MediaPlayPause", "MediaNext", "BrowserBack", "Ctrl+Alt+Delete", "Alt+Left", "Ctrl+Shift+Tab", "Shift+F10" }
-        .Select(k => "key:" + k).Concat(["mouse:left", "mouse:right", "mouse:middle", "mouse:precise", "do:menu", "do:keyboard", "do:mute", "do:timer"]);
+        .Select(k => "key:" + k).Concat(["mouse:left", "mouse:right", "mouse:middle", "mouse:precise", "mouse:slow", "do:menu", "do:keyboard", "do:mute", "do:timer"]);
     var notBack = actions.Where(v => ButtonMapStore.ParseAction(v) is not { } a || ButtonMapStore.Format(a) != v)
         .Select(v => $"{v} -> {(ButtonMapStore.ParseAction(v) is { } a ? ButtonMapStore.Format(a) : "null")}").ToList();
     Check(notBack.Count == 0,"every key name, click and command round trips: " + T.Misses(notBack));
@@ -101,6 +116,11 @@ T.Group("ButtonMapStore", () =>
     Check(presets["controller"].Count == 0, "controller preset: nothing to show");
     Check(presets["mouse"]["r3"] == "do:keyboard" && presets["keyboard"]["r3"] == "do:keyboard", "R3 keyboard in both presets");
     Check(presets["mouse"]["dpad"] == "arrows", "mouse dpad arrows");
+    Check(presets["mouse"] is { } pm && pm["x"] == "mouse:left" && pm["rt"] == "mouse:left" && pm["lt"] == "mouse:right" && pm["l3"] == "mouse:slow"
+        && pm["a"] == "key:Enter" && pm["b"] == "key:Esc" && pm["y"] == "key:Space" && pm["select"] == "key:Esc" && pm["start"] == "key:MediaPlayPause",
+        "Mouse preset: X and RT click, LT right-clicks, L3 the slow pointer (ControllerNavigation's map)");
+    Check(presets["keyboard"]["lt"] == "key:PageUp" && presets["keyboard"]["rt"] == "key:PageDown" && presets["keyboard"]["l3"] == "mouse:left", "Keyboard preset: LT, RT Page Up, Page Down; L3 still clicks");
+    Check(!presets["mouse"].ContainsKey("lb") && !presets["keyboard"].ContainsKey("rb"), "LB, RB not described as changeable");
 
     // A corrupt buttonMaps never costs the other settings.
     var opts = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -141,7 +161,7 @@ T.Group("ButtonMapStore", () =>
 // ---------------------------------------------------------------- PadMapper
 T.Group("PadMapper", () =>
 {
-    var store = new ButtonMapStore(JsonDocument.Parse("""{ "t": { "a": "key:Ctrl+T", "b": "mouse:right", "lb": "key:PageUp", "r3": "do:keyboard", "x": "key:Enter" } }""").RootElement, _ => { });
+    var store = new ButtonMapStore(JsonDocument.Parse("""{ "t": { "a": "key:Ctrl+T", "b": "mouse:right", "y": "key:PageUp", "r3": "do:keyboard", "x": "key:Enter" } }""").RootElement, _ => { });
     var map = store.For("t", "mouse")!;
     var mapper = new PadMapper { Map = map };
     long now = 0;
@@ -163,8 +183,8 @@ T.Group("PadMapper", () =>
     U(0x2000, 50); U(0, 60);
     Check(Input.Snapshot().SequenceEqual(new[] { "mouse Right down", "mouse Right up" }), "B = right click hold/release");
     Input.Clear();
-    // LB (PageUp, repeats): held 350 ms delay then every 60 ms.
-    for (long t = 100; t <= 100 + 350 + 60 * 3; t += 8) U(0x0100, t);
+    // Y (PageUp, repeats): held 350 ms delay then every 60 ms.
+    for (long t = 100; t <= 100 + 350 + 60 * 3; t += 8) U(0x8000, t);
     U(0, 700);
     var downs = Input.Snapshot().Count(x => x == "down 21");
     Check(downs == 4, $"PageUp repeats while held (1 press + 3 repeats), got {downs}");
@@ -197,6 +217,62 @@ T.Group("PadMapper", () =>
     mapper.Update(S(), now += 8, true);
     Thread.Sleep(50);
     Check(Input.Snapshot().Contains("move"), "left stick moves the pointer on the frame thread");
+
+    // LT + RT, the Mouse preset's middle click (ButtonMap.Triggers): a trigger alone waits up to
+    // 80 ms for the other one, then does its own job; let go before, a tap of its own.
+    var pair = new PadMapper { Map = ButtonMap.Mouse };
+    long at = 0;
+    void Triggers(byte lt, byte rt, int polls = 1) { for (var i = 0; i < polls; i++) pair.Update(new PadState(0, lt, rt, 0, 0, 0, 0), at += 8, true); }
+    string Sent() => string.Join(" | ", Input.Snapshot());
+    Triggers(0, 0); Input.Clear();
+    Triggers(255, 0, 3);
+    Check(Input.Snapshot().Length == 0, "LT alone, 24 ms: nothing yet (RT may come): " + Sent());
+    Triggers(255, 255, 2);
+    Check(Sent() == "mouse Middle down", "RT within 80 ms: the middle click, neither trigger's own: " + Sent());
+    Triggers(0, 255, 2);
+    Check(Sent() == "mouse Middle down | mouse Middle up", "LT let go: the middle button up: " + Sent());
+    Triggers(0, 0, 2);
+    Check(Sent() == "mouse Middle down | mouse Middle up", "RT, used up, let go: nothing more: " + Sent());
+    Input.Clear();
+    Triggers(255, 0, 3); Triggers(0, 0);
+    Check(Sent() == "mouse Right down | mouse Right up", "LT tapped within the window: a right click: " + Sent());
+    Input.Clear();
+    Triggers(0, 255, 12);
+    Check(Sent() == "mouse Left down", "RT held past 80 ms: its own click, held (a drag): " + Sent());
+    Triggers(255, 255, 3);
+    Check(Sent() == "mouse Left down | mouse Right down", "LT late, RT already at its job: LT's own right click, no pair: " + Sent());
+    Triggers(0, 0, 2); Input.Clear();
+    Triggers(255, 255, 2); Triggers(0, 0, 2);
+    Check(Sent() == "mouse Middle down | mouse Middle up", "both at once: the middle click: " + Sent());
+    Input.Clear();
+    var held = new PadMapper { Map = ButtonMap.Mouse };
+    held.Update(new PadState(0, 255, 0, 0, 0, 0, 0), 0, true);    // LT down when the map takes over
+    held.Update(new PadState(0, 255, 255, 0, 0, 0, 0), 8, true);
+    Check(Sent() == "mouse Left down", "next to an inherited LT, RT clicks at once: no wait, no pair: " + Sent());
+    held.Update(new PadState(0, 0, 0, 0, 0, 0, 0), 16, true);
+    Check(Sent() == "mouse Left down | mouse Left up", "... the inherited LT let go sends nothing: " + Sent());
+
+    // L3 (mouse:slow): the slow pointer on and off; MainForm turns it off when another app comes in front.
+    var slow = new PadMapper { Map = ButtonMap.Mouse };
+    void L3(long t) { slow.Update(new PadState(0x0040, 0, 0, 0, 0, 0, 0), t, true); slow.Update(new PadState(0, 0, 0, 0, 0, 0, 0), t + 8, true); }
+    slow.Update(new PadState(0, 0, 0, 0, 0, 0, 0), 0, true);
+    L3(8);
+    var on = slow.Slow;
+    L3(40);
+    var off = !slow.Slow;
+    L3(80);
+    slow.Map = ButtonMap.Keyboard; slow.Update(new PadState(0, 0, 0, 0, 0, 0, 0), 120, true);
+    var keptOverMaps = slow.Slow;
+    slow.Slow = false;
+    Check(on && off && keptOverMaps && !slow.Slow, $"L3: slow on, off, on again; kept over a map change, off when told (another app): {on} {off} {keptOverMaps} {slow.Slow}");
+
+    // Acceleration (PadMapper.Boost): at the edge (0.9, off under 0.85) for 200 ms, then from 1 to the most in 500 ms.
+    var boost = new PadMapper.Boost();
+    var ramp = new List<double> { boost.At(0.5, 0, 3), boost.At(0.95, 1000, 3), boost.At(0.95, 1150, 3), boost.At(0.95, 1450, 3), boost.At(0.87, 1700, 3), boost.At(0.95, 2500, 3),
+        boost.At(0.84, 2510, 3), boost.At(0.87, 2520, 3), boost.At(1, 3000, 1), boost.At(1, 4000, 1) };
+    Check(ramp.Select(v => v.ToString("0.##")).SequenceEqual(new[] { "1", "1", "1", "2", "3", "3", "1", "1", "1", "1" }),
+        "acceleration: 1 short of the edge and for its first 200 ms, halfway at 450 ms, the most at 700 ms (0.87 still the edge), 1 at once under 0.85, " +
+        "0.87 again not the edge, level 1 off: " + string.Join(" ", ramp.Select(v => v.ToString("0.##"))));
 });
 
 // A: A as it goes down (as ever), then AHold at 0.5 s and AUp when let go (hold A on a home tile
@@ -222,120 +298,170 @@ T.Group("Controller: A tapped, and held", () =>
     lock (pads) Check(pads.SequenceEqual(new[] { Pad.A, Pad.AHold, Pad.AUp }), "... let go: AUp: " + string.Join(",", pads));
 });
 
-// ---------------------------------------------------------------- Start + D-pad or trigger: the volume
-T.Group("Start + D-pad (StartChord)", () =>
+// ---------------------------------------------------------------- The Start layer, the bumpers' volume
+T.Group("Start layer (StartLayer), the bumpers' volume", () =>
 {
-    const ushort St = StartChord.Start, Up = StartChord.Up, Dn = StartChord.Down, Lf = StartChord.Left, Rt = StartChord.Right, A = 0x1000;
-    var c = new StartChord();
+    const ushort St = StartLayer.Start, Up = StartLayer.Up, Dn = StartLayer.Down, Lf = StartLayer.Left, Rt = StartLayer.Right,
+        LB = StartLayer.LB, RB = StartLayer.RB, Y = StartLayer.Y, A = 0x1000;
+    var c = new StartLayer();
     var log = new List<string>();
-    // Feeds polls 8 ms apart from `from` to `to` with the same raw buttons; what came out, in order.
-    ushort last = 0;
-    byte lastLt = 0, lastRt = 0;
-    void Hold(ushort raw, long from, long to, byte lt = 0, byte rt = 0)
+    // Feeds polls with the same raw buttons and triggers; what came out, in order.
+    (ushort Buttons, byte LT, byte RT) last = default;
+    void Hold(ushort raw, int polls, byte lt = 0, byte rt = 0)
     {
-        for (var t = from; t <= to; t += 8)
+        for (var i = 0; i < polls; i++)
         {
-            var (seen, seenLt, seenRt, command, repeat) = c.Update(raw, lt, rt, t);
-            if (command is not null) log.Add(repeat ? command + "+" : command);
+            var (seen, l, r, command) = c.Update(raw, lt, rt);
+            if (command is not null) log.Add(command);
             if ((seen & St) != 0) log.Add("start");
-            last = seen; lastLt = seenLt; lastRt = seenRt;
+            last = (seen, l, r);
         }
     }
     string Log() { var s = string.Join(" ", log); log.Clear(); return s; }
 
-    Hold(St, 0, 200); Hold(0, 208, 216);
+    Hold(St, 25); Hold(0, 2);
     Check(Log() == "start", "Start alone: one Start, as it is let go");
-    Hold(St, 300, 340); Hold(St | Up, 348, 348);
-    Check(Log() == "volumeUp" && (last & (St | Up)) == 0, "Start + Up: volume up at once; neither button reaches the app or the launcher");
-    Hold(St | Up, 356, 348 + StartChord.RepeatDelayMs + 3 * (StartChord.RepeatEveryMs + 8)); // polls every 8 ms: a repeat can come up to 8 ms late
-    var held = Log();
-    Check(held == "volumeUp+ volumeUp+ volumeUp+ volumeUp+", "held: repeats after the delay, then steadily: " + held);
-    Hold(Up, 900, 916);
-    Check(Log() == "" && (last & Up) == 0, "Start let go first: no Start, and the held Up stays back (no stray arrow)");
-    Hold(0, 924, 932); Hold(Up, 940, 948);
-    Check(Log() == "" && (last & Up) != 0, "Up alone afterwards: an arrow again");
-    Hold(0, 956, 964);
-    Hold(St, 1000, 1016); Hold(St | Dn, 1024, 1040); Hold(St, 1048, 1064); Hold(0, 1072, 1080);
-    Check(Log() == "volumeDown", "Start + Down, Down let go first: volume down, no Start");
-    Hold(St, 1100, 1116); Hold(St | Lf, 1124, 1124 + 2000); Hold(0, 3200, 3208);
-    Check(Log() == "mute", "Start + Left: mute once, however long it is held");
-    Hold(St, 3300, 3316); Hold(St | Rt, 3324, 3340); Hold(0, 3348, 3356);
-    Check(Log() == "", "Start + Right: nothing, and Start's own action is dropped");
-    Hold(Dn, 3400, 3416); Hold(Dn | St, 3424, 3500);
-    Check(Log() == "" && (last & Dn) != 0 && (last & St) == 0, "Down already held when Start goes down: still an arrow, no volume");
-    Hold(Dn, 3508, 3508); Hold(0, 3516, 3524);
+    Hold(St, 5); Hold(St | LB, 60);
+    Check(Log() == "back" && (last.Buttons & (St | LB)) == 0, "Start + LB: back at once, once however long; neither button reaches the app or the launcher");
+    Hold(LB, 3);
+    Check(Log() == "" && (last.Buttons & LB) == 0, "Start let go first: no Start, and the held LB stays back (no volume step)");
+    Hold(0, 2); Hold(LB, 2);
+    Check(Log() == "" && (last.Buttons & LB) != 0, "LB alone afterwards: a bumper again");
+    Hold(0, 2);
+    var each = new List<string>();
+    foreach (var (bits, lt, rt) in new (ushort, byte, byte)[] { (RB, 0, 0), (0, 255, 0), (0, 0, 255), (Lf, 0, 0), (Rt, 0, 0), (Up, 0, 0), (Dn, 0, 0), (Y, 0, 0) })
+    {
+        Hold(St, 2); Hold((ushort)(St | bits), 3, lt, rt);
+        var back = (last.Buttons & bits) == 0 && last.LT == 0 && last.RT == 0;
+        Hold(St, 2); Hold(0, 2);
+        each.Add(Log() + (back ? "" : " (not held back)"));
+    }
+    Check(string.Join(",", each) == "forward,prevTrack,nextTrack,windowLeft,windowRight,maximize,minimize,minimizeAll",
+        "Start + RB, LT, RT, the D-pad, Y: each its command, the button held back, no Start: " + string.Join(",", each));
+    Hold(St, 2); Hold(St, 3, lt: 255); Hold(0, 3, lt: 255);
+    Check(Log() == "prevTrack" && last.LT == 0, "Start + LT, Start let go first: LT stays back until let go (no right click)");
+    Hold(0, 2); Hold(0, 2, lt: 255);
+    Check(Log() == "" && last.LT == 255, "LT alone afterwards: seen again");
+    Hold(0, 2, rt: 40);
+    Check(last.RT == 40, "a trigger short of half-way passes as it is");
+    Hold(0, 2, rt: 200); Hold(St, 4, rt: 200);
+    Check(Log() == "" && last.RT == 200 && (last.Buttons & St) == 0, "RT already held when Start goes down: still RT (a drag goes on), no track");
+    Hold(0, 2, rt: 200); Hold(0, 2);
     Check(Log() == "start", "... and Start let go is a plain Start");
-    Hold(St | A, 3600, 3616);
-    Check((last & A) != 0, "other buttons pass while Start is down");
-    Hold(0, 3624, 3632); Log();
+    Hold(St | A, 3);
+    Check((last.Buttons & A) != 0, "other buttons pass while Start is down");
+    Hold(0, 2); Log();
 
-    // Triggers: RT louder, LT quieter, as the D-pad's Up and Down.
-    Hold(St, 3700, 3716); Hold(St, 3724, 3724, rt: 255);
-    Check(Log() == "volumeUp" && lastRt == 0 && (last & St) == 0, "Start + RT: volume up at once; the trigger does not reach the app");
-    Hold(St, 3732, 3724 + StartChord.RepeatDelayMs + 3 * (StartChord.RepeatEveryMs + 8), rt: 255);
-    held = Log();
-    Check(held == "volumeUp+ volumeUp+ volumeUp+ volumeUp+", "RT held: repeats after the delay, then steadily: " + held);
-    Hold(0, 4000, 4016, rt: 255);
-    Check(Log() == "" && lastRt == 0, "Start let go first: no Start, and the held RT stays back (no stray trigger)");
-    Hold(0, 4024, 4032);
-    Hold(0, 4040, 4048, rt: 200);
-    Check(Log() == "" && lastRt == 200, "RT alone afterwards: the trigger again");
-    Hold(0, 4056, 4064);
-    Hold(St, 4100, 4116); Hold(St, 4124, 4124, lt: 255); Hold(St, 4132, 4148); Hold(0, 4156, 4164);
-    Check(Log() == "volumeDown", "Start + LT, LT let go first: volume down, no Start");
-    Hold(0, 4200, 4216, lt: 255); Hold(St, 4224, 4300, lt: 255);
-    Check(Log() == "" && lastLt == 255 && (last & St) == 0, "LT already held when Start goes down: still a trigger, no volume");
-    Hold(0, 4308, 4316);
-    Check(Log() == "start", "... and Start let go is a plain Start");
-    Hold(St, 4400, 4416); Hold(St, 4424, 4424, lt: 255, rt: 255);
-    Check(Log() == "volumeUp" && lastLt == 0 && lastRt == 0, "Start + both triggers: one command (louder first), both held back");
-    Hold(0, 4432, 4440);
-    Log();
-
-    // Through the Mouse preset: Start's play/pause only for a tap, the D-pad's arrows only alone.
+    // Through the Mouse preset: Start's play/pause only for a tap, the layer's buttons never reach the app.
     var mouse = new PadMapper { Map = ButtonMap.Mouse };
-    var c2 = new StartChord();
+    var c2 = new StartLayer();
     long now = 5000;
-    void Feed(ushort raw, int polls) { for (var i = 0; i < polls; i++) { now += 8; mouse.Update(new PadState(c2.Update(raw, 0, 0, now).Buttons, 0, 0, 0, 0, 0, 0), now, true); } }
+    void Feed(ushort raw, int polls, byte rt = 0)
+    {
+        for (var i = 0; i < polls; i++)
+        {
+            now += 8;
+            var (b, l, r, _) = c2.Update(raw, 0, rt);
+            mouse.Update(new PadState(b, l, r, 0, 0, 0, 0), now, true);
+        }
+    }
     Feed(0, 2); Input.Clear();
     Feed(St, 10); Feed(0, 2);
     Check(Input.Snapshot().SequenceEqual(new[] { "down B3", "up B3" }), "Mouse preset, Start tapped: play/pause down and up, on release: " + string.Join(" | ", Input.Snapshot()));
     Input.Clear();
-    Feed(St, 5); Feed(St | Up, 60); Feed(Up, 5); Feed(0, 2);
-    Check(Input.Snapshot().Length == 0, "Start + Up held 0.5 s: nothing reaches the app (no arrow, no play/pause): " + string.Join(" | ", Input.Snapshot()));
+    Feed(St, 5); Feed(St, 30, rt: 255); Feed(0, 5, rt: 255); Feed(0, 20);
+    Check(Input.Snapshot().Length == 0, "Start + RT, Start let go first: nothing reaches the app (no click, no play/pause): " + string.Join(" | ", Input.Snapshot()));
+    Feed(St, 5); Feed(St | Dn, 60); Feed(Dn, 5); Feed(0, 2);
+    Check(Input.Snapshot().Length == 0, "Start + Down held 0.5 s: no arrow, no play/pause: " + string.Join(" | ", Input.Snapshot()));
     Input.Clear();
     Feed(Dn, 60); Feed(0, 2);
     var arrows = Input.Snapshot();
     Check(arrows.First() == "down 28" && arrows.Count(x => x == "down 28") >= 3 && arrows.Last() == "up 28", "Down alone held 0.5 s: the arrow key, repeating like a held key (Edge scrolls the page): " + string.Join(" | ", arrows));
 
-    // End to end: the controller thread raises the chord, not the buttons.
+    // LB + RB (BumperVolume): a step at once and its repeats; the second one pressed while the
+    // first is down mutes, and both are used up until a bumper is pressed afresh alone.
+    var bumpers = new BumperVolume();
+    var steps = new[]
+    {
+        bumpers.Press(Pad.LB, false, false), bumpers.Press(Pad.LB, true, false),
+        bumpers.Press(Pad.RB, false, true), bumpers.Press(Pad.LB, true, true), bumpers.Press(Pad.RB, true, true),
+        bumpers.Press(Pad.LB, true, false),
+        bumpers.Press(Pad.RB, false, false), bumpers.Press(Pad.RB, true, false),
+    }.Select(s => s ?? "-");
+    Check(string.Join(" ", steps) == "volumeDown volumeDown mute - - - volumeUp volumeUp",
+        "LB, held; RB with it: mute, no repeat from either, nor from LB once RB is let go; RB afresh: a step again: " + string.Join(" ", steps));
+
+    // End to end: the controller thread raises the layer's command, not the buttons; a bumper
+    // comes once as it goes down (what setup and the button-map editor take), then its repeats
+    // (the volume's: 400 ms, then every 125 ms); the right stick's volume only where it is wanted.
     using var controller = new ControllerService();   // stopped by a throw too (Dispose again is harmless)
-    var pads = new List<Pad>();
-    var chords = new List<string>();
-    controller.Pressed += (pad, repeat) => { lock (pads) pads.Add(pad); };
-    controller.Chord += (command, repeat) => { lock (chords) chords.Add(command); };
-    PadState P(ushort b, byte lt = 0, byte rt = 0) => new(b, lt, rt, 0, 0, 0, 0);
+    var pads = new List<(Pad Pad, bool Repeat)>();
+    var commands = new List<string>();
+    controller.Pressed += (pad, repeat) => { lock (pads) pads.Add((pad, repeat)); };
+    controller.Command += (command, repeat) => { lock (commands) commands.Add(repeat ? command + "+" : command); };
+    PadState P(ushort b, short ry = 0) => new(b, 0, 0, 0, 0, 0, ry);
     controller.Inject(P(0));
     controller.Start();
     Thread.Sleep(60);
     controller.Inject(P(St)); Thread.Sleep(60);
-    controller.Inject(P(St | Dn)); Thread.Sleep(60);
+    controller.Inject(P(St | Y)); Thread.Sleep(60);
     controller.Inject(P(0)); Thread.Sleep(60);
     controller.Inject(P(St)); Thread.Sleep(60);
     controller.Inject(P(0)); Thread.Sleep(60);
-    controller.Inject(P(St)); Thread.Sleep(60);
-    controller.Inject(P(St, rt: 255)); Thread.Sleep(60);
+    lock (pads) lock (commands)
+    {
+        Check(commands.SequenceEqual(new[] { "minimizeAll" }), "controller: Start + Y raises minimizeAll: " + string.Join(",", commands));
+        Check(pads.SequenceEqual(new[] { (Pad.Start, false) }), "controller: the launcher sees one Start (the tap), no Y: " + string.Join(",", pads));
+        pads.Clear(); commands.Clear();
+    }
+    controller.Inject(P(LB)); Thread.Sleep(720);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    lock (pads)
+    {
+        var repeats = pads.Count(p => p == (Pad.LB, true));
+        Check(pads.Count > 0 && pads[0] == (Pad.LB, false) && pads.Skip(1).All(p => p == (Pad.LB, true)) && repeats is >= 1 and <= 3,
+            "LB held 0.7 s: one press as it goes down, then 2 or 3 repeats (400 ms, then every 125 ms): " + string.Join(",", pads));
+        pads.Clear();
+    }
+    // The pair told on the controller thread as it goes down (the UI thread handles presses
+    // later, by when both read as down): exactly one bumper comes as the pair.
+    controller.Inject(P(LB)); Thread.Sleep(60);
+    controller.Inject(P(LB | RB)); Thread.Sleep(60);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    controller.Inject(P(LB | RB)); Thread.Sleep(60);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    lock (pads)
+    {
+        Check(pads.SequenceEqual(new[] { (Pad.LB, false), (Pad.RBWithLB, false), (Pad.LB, false), (Pad.RBWithLB, false) }),
+            "RB while LB is down, then both in the same poll: LB, then RB as the pair, each time: " + string.Join(",", pads));
+        pads.Clear();
+    }
+    controller.Inject(P(0, 30000)); Thread.Sleep(200);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    lock (commands) { Check(commands.Count == 0, "right stick up, no stickVolume app in front: nothing: " + string.Join(",", commands)); }
+    controller.StickVolume = true;
+    controller.Inject(P(0, 30000)); Thread.Sleep(600);
+    controller.Inject(P(0)); Thread.Sleep(60);
+    controller.Inject(P(0, -30000)); Thread.Sleep(60);
     controller.Inject(P(0)); Thread.Sleep(60);
     controller.Dispose();
-    lock (pads) lock (chords)
+    lock (commands)
     {
-        Check(chords.SequenceEqual(new[] { "volumeDown", "volumeUp" }), "controller: Start + Down, then Start + RT, raise volume down, then up: " + string.Join(",", chords));
-        Check(pads.SequenceEqual(new[] { Pad.Start }), "controller: the launcher sees one Start (the tap), no Down and no RT: " + string.Join(",", pads));
+        Check(commands.Count >= 3 && commands[0] == "volumeUp" && commands.Skip(1).Take(commands.Count - 2).All(x => x == "volumeUp+") && commands[^1] == "volumeDown",
+            "stickVolume app in front: right stick up 0.6 s, volume up then its repeats; down: volume down: " + string.Join(",", commands));
     }
+    lock (pads) Check(pads.Count == 0, "... and the right stick is no button for the launcher: " + string.Join(",", pads));
 
-    Check(AudioVolume.NextLevel(47, 5) == 50 && AudioVolume.NextLevel(47, -5) == 40, "volume buttons: steps of 5, to multiples of 5");
-    Check(AudioVolume.NextLevel(45, 2) == 46 && AudioVolume.NextLevel(45, -2) == 42 && AudioVolume.NextLevel(46, 2) == 48, "Start + D-pad: steps of 2");
+    Check(AudioVolume.NextLevel(47, 5) == 50 && AudioVolume.NextLevel(47, -5) == 40, "the keyboard's volume keys: steps of 5, to multiples of 5");
+    Check(AudioVolume.NextLevel(45, 2) == 46 && AudioVolume.NextLevel(45, -2) == 42 && AudioVolume.NextLevel(46, 2) == 48, "the bumpers, the right stick: steps of 2");
     Check(AudioVolume.NextLevel(99, 2) == 100 && AudioVolume.NextLevel(100, 2) == 100 && AudioVolume.NextLevel(1, -2) == 0, "stays within 0 to 100");
+
+    // Start + D-pad left, right: the window to the next screen that way (WindowActions, lifted from ControllerNavigation).
+    var row = new List<Rectangle> { new(0, 0, 1920, 1080), new(1920, 0, 3840, 2160), new(-1280, 0, 1280, 1024) };
+    Check(WindowActions.PickScreen(row, 0, true) == 1 && WindowActions.PickScreen(row, 0, false) == 2 && WindowActions.PickScreen(row, 1, true) == 2
+        && WindowActions.PickScreen([new(0, 0, 1920, 1080)], 0, true) == -1, "next screen: the nearest that way, round at the end, none with one screen");
+    Check(WindowActions.Transfer(new(480, 270, 960, 540), new(0, 0, 1920, 1080), new(1920, 0, 3840, 2160)) == new Rectangle(2880, 540, 1920, 1080),
+        "a window moved to a 4K screen keeps its share of it");
 });
 
 // ---------------------------------------------------------------- Standby: waking with Home
@@ -1178,8 +1304,9 @@ T.Group("Catalog: every app opens filling the screen", () =>
 // Feishin draws its own - [] x bar, 30 CSS px, even full screen: filled, it sits just above the
 // screen), keys for an app's own menus (menuKeys: Moonlight's Qt menus reach their toolbar only
 // with Shift+Tab, which Select, unused there, sends; its stream is an SDL window: nothing, ever),
-// the apps that own the controller, and files cleared before a start (clearBeforeStart).
-T.Group("Catalog: launch options (fill, cropTop, menuKeys, ownController, clearBeforeStart)", () =>
+// the apps that own the controller, the one whose right stick is the volume (stickVolume), and
+// files cleared before a start (clearBeforeStart).
+T.Group("Catalog: launch options (fill, cropTop, menuKeys, ownController, stickVolume, clearBeforeStart)", () =>
 {
     var tv4k = new Rectangle(0, 0, 3840, 2160);
     var hd = new Rectangle(0, 0, 1920, 1080);
@@ -1223,6 +1350,10 @@ T.Group("Catalog: launch options (fill, cropTop, menuKeys, ownController, clearB
     Check(MenuKeys.Parse(Fixtures.Json("""{ "start": "do:menu", "whileClass": "Qt*QWindow*" }""")) is null, "no key left: no menu keys");
     // Apps that own the controller, Home included: a tap on Home is theirs, holding it opens the menu.
     Check(apps.Get("moonlight") is { OwnController: true }, "Moonlight owns the controller, Home included");
+    // The right stick's volume (stickVolume): VacuumTube reads the pad and leaves its right stick
+    // unused; Kodi has a right-stick volume of its own, left alone.
+    Check(apps.Catalog.Where(a => a.StickVolume).Select(a => a.Id).SequenceEqual(new[] { "youtube" }) && apps.Get("youtube") is { Preset: "controller" },
+        "stickVolume: YouTube (VacuumTube, on the Controller preset) only: " + string.Join(",", apps.Catalog.Where(a => a.StickVolume).Select(a => a.Id)));
 
     Check(apps.Get("playnite")?.ClearBeforeStart is [@"%APPDATA%\Playnite\safestart.flag"], "Playnite: its safe-start marker cleared before it starts (else it stops to ask about safe mode)");
     Check(AppManager.ClearBeforeStartOf(Fixtures.Json("""{ "clearBeforeStart": [ "%APPDATA%\\X\\a.flag", "%LOCALAPPDATA%\\Y\\b.lock" ] }""")) is { Count: 2 }, "clearBeforeStart: files in the user's own folders are read");

@@ -7,7 +7,8 @@
 //   To the host:   {type:'maps.get'} {type:'maps.preset', id, preset} {type:'maps.control', id, control, value}
 //                  {type:'maps.reset', id, control} {type:'resume', id} (test in the app)
 //   From the host: {type:'maps.data', presets: {mouse: {a: 'key:Enter', ...}, ...},
-//                   apps: [{id, name, glyph, color, map: {preset, defaultPreset, changes}}]}
+//                   apps: [{id, name, glyph, color, map: {preset, defaultPreset, changes, triggers}}]}
+//                   (triggers: what LT and RT together do, or null)
 
 const maps = {
   data: null,        // from the host
@@ -20,10 +21,12 @@ const maps = {
   asked: 0,          // when the maps were last asked for or came (the Home menu's card asks again)
 };
 
-// Rows of the editor, two columns, pairs side by side: [control, badge]. Home is last, fixed.
+// Rows of the editor, two columns, pairs side by side: [control, badge]. Home is last, fixed, and
+// so are LB and RB, the volume in every map (ButtonMapStore.cs leaves them out of its controls).
 const MAP_CONTROLS = [['leftStick', 'L stick'], ['rightStick', 'R stick'], ['a', 'A'], ['b', 'B'], ['x', 'X'], ['y', 'Y'],
   ['lb', 'LB'], ['rb', 'RB'], ['lt', 'LT'], ['rt', 'RT'], ['select', 'Select'], ['start', 'Start'],
   ['dpad', 'D-pad'], ['l3', 'L3'], ['r3', 'R3']];
+const BUMPERS = { lb: 'Volume down (fixed)', rb: 'Volume up (fixed)' };
 
 // What a button can do, by category (design: Keys, Mouse, Media, Launcher, Nothing).
 const MAP_ACTIONS = {
@@ -32,7 +35,8 @@ const MAP_ACTIONS = {
     ['key:Alt+Left', 'Back (Alt+←)'], ['key:Alt+Right', 'Forward (Alt+→)'], ['key:Ctrl+Tab', 'Next tab'], ['key:Ctrl+Shift+Tab', 'Previous tab'],
     ['key:F', 'F (full screen on video sites)'], ['key:M', 'M (mute on video sites)'], ['key:F11', 'F11 (full screen)'], ['key:F5', 'F5 (refresh)'],
     ['key:Menu', 'Menu key'], ['combo', 'Key combination…']],
-  mouse: [['mouse:left', 'Click (hold to drag)'], ['mouse:right', 'Right-click'], ['mouse:middle', 'Middle click'], ['mouse:precise', 'Hold: slow pointer']],
+  mouse: [['mouse:left', 'Click (hold to drag)'], ['mouse:right', 'Right-click'], ['mouse:middle', 'Middle click'], ['mouse:slow', 'Slow pointer on/off'],
+    ['mouse:precise', 'Hold: slow pointer']],
   media: [['key:MediaPlayPause', 'Play / pause'], ['key:MediaNext', 'Next'], ['key:MediaPrev', 'Previous'], ['key:MediaStop', 'Stop'],
     ['do:volumeUp', 'Volume up'], ['do:volumeDown', 'Volume down'], ['do:mute', 'Mute']],
   launcher: [['do:menu', 'Home menu'], ['do:keyboard', 'On-screen keyboard'], ['do:power', 'Power menu'], ['do:timer', 'Sleep timer']],
@@ -165,9 +169,9 @@ hostMessage('maps.data', (m) => {
 // ---- The Home menu over an app: what its buttons do -----------------------------------------
 // Beside the menu's panel while it is up over an app (app.js's renderMenu draws it into
 // #menu-app), instead of a hint over the app each time it opens: the same buttons (the sticks,
-// A B X Y, LB RB, Start, R3, Home) from the app's map, how to go back to it and where to change
+// A B X Y, LT RT, Start, R3; LB RB the volume, Home) from the app's map, how to go back to it and where to change
 // them. The maps come from the host, asked again after a minute.
-const MENU_CARD_CONTROLS = ['leftStick', 'rightStick', 'a', 'b', 'x', 'y', 'lb', 'rb', 'start', 'r3'];
+const MENU_CARD_CONTROLS = ['leftStick', 'rightStick', 'a', 'b', 'x', 'y', 'lt', 'rt', 'start', 'r3'];
 
 function menuAppCard() {
   const id = state.current;
@@ -187,7 +191,7 @@ function menuAppCard() {
     how = `${PRESET_NAMES[app.map.preset] || app.map.preset} preset${Object.keys(app.map.changes).length ? ', changed' : ''}`;
     rows = MENU_CARD_CONTROLS.map((c) => [(MAP_CONTROLS.find(([k]) => k === c) || [c, c])[1], valueOf(app, c), c])
       .filter(([, v]) => v && v !== 'none').map(([badge, v, c]) => [badge, actionLabel(c, v)]);
-    rows.push(['Home', 'This menu']);
+    rows.push(['LB RB', 'Volume'], ['Home', 'This menu']);
   }
   return '<div class="ma-card">' +
     `<div class="ma-head">${appIcon(tile, 40)}` +
@@ -233,6 +237,10 @@ function editorRows(app) {
   const tile = state.tiles.find((t) => t.id === app.id);
   const ownsPad = app.id === 'moonlight' || !!(tile && tile.ownController);   // R3 is the app's (a game button)
   const rows = MAP_CONTROLS.map(([control, badge]) => {
+    if (BUMPERS[control]) {
+      return `<div class="brow fixed"><span class="bkey${badge.length > 1 ? ' wide' : ''}">${esc(badge)}</span>` +
+        `<span class="bdoes">${esc(controller ? 'To the app' : BUMPERS[control])}</span></div>`;
+    }
     const value = valueOf(app, control);
     const changed = app.map.changes[control] !== undefined;
     let does = actionLabel(control, value);
@@ -243,6 +251,8 @@ function editorRows(app) {
       `<span class="bkey${badge.length > 1 ? ' wide' : ''}">${esc(badge)}</span>` +
       `<span class="bdoes">${esc(does)}</span>${changed ? '<span class="bdot" aria-label="Changed"></span>' : ''}</div>`;
   });
+  // LT and RT together (the Mouse preset's middle click), gone once either is changed.
+  if (app.map.triggers) rows.push(`<div class="brow fixed"><span class="bkey wide">LT+RT</span><span class="bdoes">${esc(actionLabel('lt', app.map.triggers))}</span></div>`);
   rows.push(ownsPad ? '<div class="brow fixed"><span class="bkey wide">Home</span><span class="bdoes">To the app</span></div>' +
       '<div class="brow fixed"><span class="bkey wide">Hold Home</span><span class="bdoes">Home menu (fixed)</span></div>'
     : '<div class="brow fixed"><span class="bkey wide">Home</span><span class="bdoes">Home menu (fixed)</span></div>');
@@ -362,6 +372,7 @@ addView('buttons', {
       '.blist, .bkeys', `${app.id}:${row}:${maps.picking ? maps.cat : ''}:${maps.combo ? 'combo' : ''}:${maps.choosingPreset ? 'preset' : ''}`);
   },
   focused() { keepInView('buttons', '.blist, .bkeys'); },   // the lists scroll to the focus
+  bumpers() { return true; },   // LB: test in the app; LB and RB: the categories (input.js bumpersTaken)
   focus(list) {
     if (maps.combo) return list.find((e) => e.dataset.key === maps.combo.key) || list.find((e) => e.dataset.key);
     if (maps.picking) return list.find((e) => e.classList.contains('on') && e.dataset.value) || list.find((e) => e.dataset.value);
@@ -533,11 +544,11 @@ function comboPress(button, el, app) {
 function mapsDemo() {
   if (maps.data) return;
   const mouse = { leftStick: 'pointer', rightStick: 'scroll', dpad: 'arrows', a: 'key:Enter', b: 'key:Esc', x: 'mouse:left', y: 'key:Space',
-    lb: 'key:Alt+Left', rb: 'key:Alt+Right', lt: 'mouse:right', rt: 'mouse:precise', select: 'key:Esc', start: 'key:MediaPlayPause',
-    l3: 'mouse:middle', r3: 'do:keyboard' };
+    lt: 'mouse:right', rt: 'mouse:left', select: 'key:Esc', start: 'key:MediaPlayPause', l3: 'mouse:slow', r3: 'do:keyboard' };
   const keyboard = { leftStick: 'arrows', rightStick: 'pointer', dpad: 'arrows', a: 'key:Enter', b: 'key:Esc', x: 'key:Space', y: 'key:Tab',
-    lb: 'key:PageUp', rb: 'key:PageDown', lt: 'key:Home', rt: 'key:End', select: 'key:Backspace', start: 'key:Menu', l3: 'mouse:left', r3: 'do:keyboard' };
-  const app = (id, name, glyph, color, preset, changes) => demoLogo({ id, name, glyph, color, map: { preset, defaultPreset: preset, changes: changes || {} } });
+    lt: 'key:PageUp', rt: 'key:PageDown', select: 'key:Backspace', start: 'key:Menu', l3: 'mouse:left', r3: 'do:keyboard' };
+  const app = (id, name, glyph, color, preset, changes) => demoLogo({ id, name, glyph, color,
+    map: { preset, defaultPreset: preset, changes: changes || {}, triggers: preset === 'mouse' ? 'mouse:middle' : null } });
   maps.data = {
     presets: { controller: {}, mouse, keyboard },
     apps: [

@@ -107,33 +107,36 @@ selftestGroup(async ({ check, checkRows, pin }) => {
   kw.onButton('down');
   check('Keyboard: down from the bottom row: the top row, the key nearest above', kAt() === `0,${nearest(0, x)}`, kAt());
   const firstKey = () => kRow(1)[0].textContent;
-  kw.onButton('rt');
-  check('Keyboard: RT: the symbols', kw.eval('symbols') === true && firstKey() === '!', firstKey());
-  kw.onButton('rt');
-  check('Keyboard: RT again: the letters', kw.eval('symbols') === false && firstKey() === 'q', firstKey());
-  kw.onButton('lt');
-  check('Keyboard: LT is still Shift', kw.eval('shift') === 'once' && firstKey() === 'Q', firstKey());
+  // The symbols and Shift only through their keys: the triggers move the cursor, the bumpers are the volume.
+  kw.onButton('rt'); kw.onButton('lt');
+  check('Keyboard: RT and LT neither the symbols nor Shift', kw.eval('symbols') === false && kw.eval('shift') === 'off' && firstKey() === 'q', firstKey());
+  kw.press({ id: 'symbols' }); kw.render();
+  check('Keyboard: the #+= key: the symbols', kw.eval('symbols') === true && firstKey() === '!', firstKey());
+  kw.press({ id: 'symbols' }); kw.render();
+  check('Keyboard: its abc key: the letters', kw.eval('symbols') === false && firstKey() === 'q', firstKey());
+  kw.press({ id: 'shift' }); kw.render();
+  check('Keyboard: the Shift key: Shift', kw.eval('shift') === 'once' && firstKey() === 'Q', firstKey());
   kw.onHost({ type: 'open', field: 'Password', password: true });
-  // The typed preview follows the cursor: LB / RB move it, a letter goes in at it, X deletes before it.
+  // The typed preview follows the cursor: LT / RT move it, a letter goes in at it, X deletes before it.
   const typedEl = kd.getElementById('kb-typed'), beforeCaret = () => typedEl.querySelector('.kb-caret').previousSibling.textContent;
   kw.onButton('select');
   for (const c of 'abc') kw.typeText(c);
-  kw.onButton('lb'); kw.onButton('lb'); kw.typeText('X'); kw.render();   // a key's A press renders after typing: onButton
-  check('Keyboard: LB moves the cursor in the preview, the next letter goes in at it', typedEl.textContent === 'aXbc' && beforeCaret() === 'aX', typedEl.textContent + ' / ' + beforeCaret());
+  kw.onButton('lt'); kw.onButton('lt'); kw.typeText('X'); kw.render();   // a key's A press renders after typing: onButton
+  check('Keyboard: LT moves the cursor in the preview, the next letter goes in at it', typedEl.textContent === 'aXbc' && beforeCaret() === 'aX', typedEl.textContent + ' / ' + beforeCaret());
   kw.onButton('x');
   check('Keyboard: X deletes before the cursor, not the last letter', typedEl.textContent === 'abc' && beforeCaret() === 'a', typedEl.textContent + ' / ' + beforeCaret());
-  for (let i = 0; i < 6; i++) kw.onButton('rb');
-  check('Keyboard: RB stops at the end of what was typed', beforeCaret() === 'abc', beforeCaret());
+  for (let i = 0; i < 6; i++) kw.onButton('rt');
+  check('Keyboard: RT stops at the end of what was typed', beforeCaret() === 'abc', beforeCaret());
   kw.onButton('select');
   kw.onHost({ type: 'open', field: 'Password', password: true });
   for (const [w, h] of [[1920, 440], [1536, 352]]) {   // the band's window: the screen's width, 440/1080 of its height
     const resized = await resize(kf, w, h);
     const hints = kd.getElementById('kb-hints'), band = kd.getElementById('kb').getBoundingClientRect(), s = w / 1920;
-    // Each hint's buttons, as the bar shows them: LT and RT each their own, LB RB one; a password's Select too.
+    // Each hint's buttons, as the bar shows them: LT RT one, LB RB one; a password's Select too.
     const chips = [...hints.children].map((c) => [...c.querySelectorAll('.key')].map((k) => k.textContent).join(' '));
     const lastRight = hints.lastElementChild.getBoundingClientRect().right;
-    check(`Keyboard at ${w} wide: every hint fits (a password's Show too): LT, RT, LB RB, Select`, hints.scrollWidth <= hints.clientWidth
-      && lastRight <= band.right - 96 * s + 1 && ['LT', 'RT', 'LB RB', 'Select'].every((c) => chips.includes(c)),
+    check(`Keyboard at ${w} wide: every hint fits (a password's Show too): LT RT, LB RB, Select`, hints.scrollWidth <= hints.clientWidth
+      && lastRight <= band.right - 96 * s + 1 && ['LT RT', 'LB RB', 'Select'].every((c) => chips.includes(c)),
       `${hints.scrollWidth} > ${hints.clientWidth}, ${lastRight} / ${band.right - 96 * s}: ${chips.join(' | ')}`);
     const bar = hints.getBoundingClientRect();
     const out = [...kd.querySelectorAll('.kb-key')].filter((k) => { const r = k.getBoundingClientRect(); return r.top < band.top - 0.5 || r.bottom > bar.top + 0.5; });

@@ -32,7 +32,7 @@ function onHost(msg) {
       if ('timer' in msg) state.timer = msg.timer;
       render();
       break;
-    case 'input': press(msg.button, !!msg.held); break;
+    case 'input': press(msg.button, !!msg.held, 'repeat' in msg ? { volume: msg.volume || null, repeat: msg.repeat } : null); break;
     case 'show': {
       hideOpening();
       const asked = performance.now();

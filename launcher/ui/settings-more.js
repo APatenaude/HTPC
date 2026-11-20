@@ -5,7 +5,7 @@
 //   To the host:   {type:'controller.test', on} {type:'controller.rumble'} {type:'sound.outputs'}
 //                  {type:'sound.output', id} {type:'sound.test'} {type:'display.decodeCheck'} {type:'display.resetBrightness'}
 //                  {type:'system.info'} {type:'system.saveLogs'} {type:'system.restart'} {type:'system.setup'}
-//                  {type:'setting', key, value} (pointerSpeed, preciseSpeed, scrollSpeed 1-10; showKeyboardAutomatically)
+//                  {type:'setting', key, value} (pointerSpeed, preciseSpeed, scrollSpeed, acceleration 1-10; showKeyboardAutomatically)
 //   From the host: {type:'controller.pad', connected, buttons, lt, rt, lx, ly, rx, ry} (while testing)
 //                  {type:'sound.outputs', outputs: [{id, name, isDefault}], canSwitch}
 //                  {type:'display.decode', running, result} (Test-HwDecode.ps1's report, or {error})
@@ -141,14 +141,16 @@ settingsSection('controller', {
         '</div>' +
         '<div class="scol-right">' +
           levelRow('pointerSpeed', 'Pointer speed', 'Mouse and Keyboard modes') +
-          levelRow('preciseSpeed', 'Slow pointer', 'While RT is held') +
+          levelRow('acceleration', 'Pointer acceleration', 'Faster at the stick’s edge; 1 is off') +
+          levelRow('preciseSpeed', 'Slow pointer', 'L3 turns it on and off') +
           levelRow('scrollSpeed', 'Scroll speed', 'Mouse mode, right stick') +
           '<div class="srow" data-nav data-id="set-maps" data-act="maps">' +
             '<div class="text"><span class="label">Button maps per app</span><span class="caption">What each button does in each app: keys, clicks, media, the keyboard</span></div>' +
             `<div class="value">${icon('chevright', 30, 2)}</div></div>` +
           flagRow('showKeyboardAutomatically', 'Show keyboard automatically', 'When a text or password box is selected. Never in YouTube, Moonlight and Plex, which have their own.') +
           '<p class="snote">R3 (right stick press) opens the keyboard; an app’s map can give it to another button. ' +
-            'Start + Up/Down or Start + RT/LT changes the volume in every app, Start + Left mutes. ' +
+            'LB and RB change the volume, both together mute, except in apps that read the controller (YouTube: right stick up and down). ' +
+            'Start + LB/RB: back and forward; Start + LT/RT: the previous and next track. ' +
             'Home: tap for the menu, hold for Power. In Moonlight a tap goes to the game PC and holding opens this menu.</p>' +
         '</div>' +
       '</div>';
@@ -161,6 +163,7 @@ settingsSection('controller', {
     }
     return pressRows(button, el);
   },
+  bumpers() { return more.testing; },   // the button test lights them up: no volume meanwhile
   left() { if (more.testing) setTesting(false); },
   demo() { state.controller = true; state.battery = 'wired'; },
 });

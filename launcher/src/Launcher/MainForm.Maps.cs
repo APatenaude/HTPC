@@ -19,11 +19,16 @@ sealed partial class MainForm
         ApplySettings();
     }
 
-    /// <summary>After a setting changed: the pointer and scroll speeds reach the controller thread.</summary>
+    /// <summary>
+    /// After a setting changed: the pointer and scroll speeds reach the controller thread, and the
+    /// acceleration, level 1 to 10 as the most it multiplies by: 1 + (level - 1) / 2 (1 off, 5 = 3x,
+    /// ControllerNavigation's default).
+    /// </summary>
     void ApplySettings()
     {
         double F(int level) => SpeedFactors[Math.Clamp(level, 1, 10) - 1];
-        mapper.Speed = new PadMapper.Speeds(F(settings.PointerSpeed), F(settings.PreciseSpeed), F(settings.ScrollSpeed));
+        mapper.Speed = new PadMapper.Speeds(F(settings.PointerSpeed), F(settings.PreciseSpeed), F(settings.ScrollSpeed),
+            1 + (Math.Clamp(settings.Acceleration, 1, 10) - 1) / 2.0);
     }
 
     /// <summary>The map for the window in front: its tile's, or Other windows' (Mouse unless changed).</summary>
@@ -70,7 +75,7 @@ sealed partial class MainForm
             case "zoomIn": Input.Tap(0x11, 0xBB); break;      // Ctrl and =
             case "zoomOut": Input.Tap(0x11, 0xBD); break;     // Ctrl and -
             case "fullscreen": Input.Tap(0x7A); break;        // F11
-            case "volumeUp": case "volumeDown": case "mute": Volume(key); break;
+            case "volumeUp": case "volumeDown": case "mute": Volume(key, step: 5); break;   // one press each, no repeat: bigger steps
         }
     }
 

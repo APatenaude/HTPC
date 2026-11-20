@@ -18,6 +18,7 @@
       "category": "movies",
       "default": true,
       "preset": "controller",
+      "stickVolume": true,
       "icon": { "glyph": "youtube", "color": "#FF5B52" },
       "launch": { "exe": "%ProgramFiles%\\VacuumTube\\VacuumTube.exe", "args": "--fullscreen" },
       "phoneKeys": { "back": "esc", "backspace": "afterTyping" },

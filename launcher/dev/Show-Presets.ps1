@@ -12,12 +12,12 @@
     Opens input-test.html (a page that shows the keyboard and mouse input it receives) in an Edge
     app window, as the signed-in user without admin rights (the launcher's SendInput cannot reach
     an elevated window), brings it to the front, then plays controller input into the running
-    launcher with Send-Pad.ps1: pointer, precise pointer, click, right-click, scroll, keys. Prints
+    launcher with Send-Pad.ps1: pointer, slow pointer, click, right-click, scroll, keys. Prints
     how far the pointer went; the page's own log and counters are in the screenshot it saves.
 
     -Keyboard: clicks the page's password field with the controller (pointer + A), so the
-    on-screen keyboard must pop up by itself; then types through it (q, w, Shift+w, space,
-    delete, show password), saves a screenshot with the keyboard open, and checks that the page
+    on-screen keyboard must pop up by itself; then types through it (q, w, the cursor back with
+    LT, w, space, delete, show password), saves a screenshot with the keyboard open, and checks that the page
     kept the focus all along. The page's log shows what arrived.
 
     With the TV off Windows may count the display as off, and Edge then neither draws nor
@@ -112,8 +112,8 @@ try {
             @{ Press = @('A') },             # q
             @{ Press = @('Right') },
             @{ Press = @('A') },             # w
-            @{ LT = 255 },                   # Shift
-            @{ Press = @('A') },             # W
+            @{ LT = 255 },                   # the cursor back one
+            @{ Press = @('A') },             # w, before the other one
             @{ Press = @('Y') },             # space
             @{ Press = @('X') },             # delete the space
             @{ Press = @('Select') }         # show password
@@ -142,9 +142,11 @@ try {
     Pad -LX 32767 -HoldMs 500
     $afterFull = Cursor
     $results['Pointer, full tilt right 0.5 s (px)'] = $afterFull.X - $start.X
-    Pad -LX -32767 -RT 255 -HoldMs 500
+    Pad -Press L3       # the slow pointer on
+    Pad -LX -32767 -HoldMs 500
+    Pad -Press L3       # and off
     $afterPrecise = Cursor
-    $results['Pointer, precise (RT) left 0.5 s (px)'] = $afterPrecise.X - $afterFull.X
+    $results['Pointer, slow (L3) left 0.5 s (px)'] = $afterPrecise.X - $afterFull.X
     Pad -LY 12000 -HoldMs 500
     $results['Pointer, light tilt up 0.5 s (px)'] = (Cursor).Y - $afterPrecise.Y
     Pad -Press X        # click
@@ -154,8 +156,8 @@ try {
     Pad -Press A        # Enter
     Pad -Press Y        # Space
     Pad -Press Down -HoldMs 700    # held: repeats
-    Pad -Press L3       # middle click
-    Pad -Press LB       # back (Alt+Left)
+    Pad -LT 255 -RT 255 # both triggers: middle click
+    Pad -Press Start, LB   # back (Alt+Left)
     Pad -Release
     Start-Sleep -Milliseconds 400
 

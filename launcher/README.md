@@ -56,21 +56,36 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
 
 - XInput polling, the Home button included (`XInputGetStateEx`). Home: a tap, or a 0.5 s hold
   (Power; in Moonlight, our menu; in standby, wake with a buzz).
-- Start + D-pad or trigger is the volume in every app (`StartChord`): Start + Up or RT up, Start +
-  Down or LT down, by 2, repeating while held; Start + Left mute. Start's own action then comes as
-  it is let go, and only without one of these; the D-pad and triggers alone are unchanged (the
-  trigger pressed with Start is held back from the button map and the launcher, as the D-pad is).
-- Not in Moonlight (the game PC's buttons). Controller-preset apps read the pad themselves and see
-  Start, the D-pad and the triggers too.
+- The same map as ControllerNavigation's. LB / RB are the volume (`BumperVolume`, `MainForm.OnPad`):
+  by 2, repeating while held (400 ms, then every 125 ms), the second pressed while the first is
+  down mutes (both then used up: no step, no repeat). In the launcher's screens (the page turns
+  them into `volumeStep`, except in the button-map editor and Settings › Controller's button test;
+  setup keeps them), in the Mouse and Keyboard apps, desktop mode included, and over the on-screen
+  keyboard. Not in apps that read the pad (Controller preset) nor Moonlight: their bumpers are
+  theirs. YouTube (VacuumTube, catalog `stickVolume`) gets the volume on its unused right stick.
+- The Start layer (`StartLayer`, one filter for the buttons and the triggers): Start + LB / RB
+  back and forward (only where a map drives the app), Start + LT / RT the previous and next track
+  (not in apps that read the pad), Start + D-pad the window in front to the next screen left or
+  right, maximize or restore, minimize, Start + Y minimize all (desktop mode only:
+  `WindowActions`, lifted from ControllerNavigation). A button pressed under Start stays the
+  layer's until let go, one held before keeps its job, Start alone is a tap (its own action, on
+  release). `MainForm.OnControllerCommand` says where each runs.
 
 ### Presets (`src/ButtonMap.cs`, `PadMapper.cs`, `Input.cs`; SPEC N13)
 
 - Mouse (Edge, Twitch, Stremio, websites) and Keyboard (Plex HTPC: its own controller support drops
   controllers its input maps do not name, such as the 8BitDo). Applied to the app in front on the
-  controller thread, sent with SendInput; pointer and scroll speed from Settings › Controller.
+  controller thread, sent with SendInput; pointer and scroll speed and the acceleration from
+  Settings › Controller.
 - The pointer (`CursorHider`, SystemControls.cs): hidden while the controller drives the launcher
   (parked at the right edge), and anywhere once still for 5 s (blanked where it is, so no hover
   changes); it shows again as soon as it moves (mouse, stick, phone). Not in desktop mode.
+- Mouse: X and RT click (held = drag), LT right-clicks, LT + RT together middle-click (a trigger
+  pressed alone waits up to 80 ms for the other, the pointer held still meanwhile; let go before,
+  a tap), L3 turns the slow pointer on and off (off when another app comes in front).
+- Acceleration (`PadMapper.Boost`): the stick held at its edge (0.9 of its travel past the dead
+  zone, until under 0.85) for 200 ms, the pointer's speed ramps up over 500 ms to the setting's
+  most (level 5 = 3 times); off the edge it is back at once. Not with the slow pointer.
 - Controller preset = the app reads the pad itself (the games, and the cloud gaming sites through
   the browser's Gamepad API).
 
@@ -80,8 +95,9 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
   kept in settings.json (`buttonMaps`, plain strings such as `"start": "key:F"`, read leniently).
 - Keys and combinations (Ctrl, Alt, Shift), clicks, media keys, volume, launcher actions (Home
   menu, keyboard, Power, sleep timer), nothing; sticks as pointer, scroll, arrows.
-- R3 is the keyboard unless changed; Home is fixed; Controller-preset apps take no changes (the
-  app reads the pad itself). "Other windows" is the map for windows that are not catalog apps.
+- R3 is the keyboard unless changed; Home, LB and RB are fixed (a stored LB or RB change from
+  before is dropped and logged); a change to LT or RT drops LT + RT; Controller-preset apps take no
+  changes (the app reads the pad itself). "Other windows" is the map for windows that are not catalog apps.
 - The editor: Settings › Controller › Button maps, or Buttons in the Home menu (the app it was
   opened over).
 
@@ -170,9 +186,10 @@ SPEC W1, W5. App library and tile editing:
   keys (SendInput) land in the app's text field.
 - Pops up when a text field gets the focus in an app on the Mouse or Keyboard preset, except apps
   with a keyboard of their own (catalog `ownKeyboard`: Plex HTPC). R3 opens it anywhere but Moonlight.
-- A type, X delete, Y space, LT shift, RT the symbols (and back), LB/RB move the cursor, Start Enter,
-  Select shows a password, B closes (and it stays closed for that field); the hint bar gives the
-  triggers one chip, and the bumpers another.
+- A type, X delete, Y space, LT/RT move the cursor, LB/RB the volume (as without the keyboard; the
+  launcher does it), Start Enter, Select shows a password, B closes (and it stays closed for that
+  field); Shift and the symbols through their keys; the hint bar gives the triggers one chip, and
+  the bumpers another.
 - Moving past an edge wraps round: a row's first key to its last and back, the top row to the bottom
   one (the key nearest by position) and back. A last row has what a controller lacks: Tab, refresh,
   zoom, full screen, volume, mute.

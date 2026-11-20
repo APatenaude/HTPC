@@ -23,6 +23,7 @@ sealed partial class MainForm
 
     IntPtr lastForeground;
     CatalogApp? foregroundApp;
+    string? foregroundProgram;   // the tile in front, else its process: the slow pointer goes off when it changes
     bool foregroundIsOurs;
     bool foregroundElevated;   // the window in front (lastForeground) runs with administrator rights
     readonly HashSet<IntPtr> windowsSeen = new();
@@ -61,6 +62,7 @@ sealed partial class MainForm
     {
         ButtonMap? map = null;
         string? preset = null;
+        var stickVolume = false;
         // In setup nothing gets a button map: an installer's window in front must not get
         // clicks from the controller (the wizard reads the controller itself).
         if (!setupMode && !standby.Active && !LauncherActive)
@@ -71,6 +73,13 @@ sealed partial class MainForm
                 lastForeground = window;
                 foregroundApp = apps.ForegroundApp();
                 foregroundIsOurs = Native.ProcessOf(window) == Environment.ProcessId;
+                // The slow pointer (L3) is for the app it was turned on in.
+                var program = foregroundApp?.Id ?? $"process {Native.ProcessOf(window)}";
+                if (program != foregroundProgram)
+                {
+                    foregroundProgram = program;
+                    if (mapper.Slow) { mapper.Slow = false; Log.Info("Slow pointer off: another app in front"); }
+                }
                 MaximizeOpenedWindow(window);
                 // A window that runs with administrator rights takes no input from this process: the
                 // elevated helper is started and its input goes there (ElevatedInput).
@@ -85,6 +94,7 @@ sealed partial class MainForm
             {
                 map = MapFor(foregroundApp);
                 preset = PresetFor(foregroundApp);
+                stickVolume = foregroundApp is { StickVolume: true } && preset == "controller";
             }
         }
         else Input.ToElevated = false; // the launcher, standby or setup has the screen: nothing goes to the helper
@@ -105,10 +115,79 @@ sealed partial class MainForm
             if (desktopMode) cursor.Show(); else cursor.Unpark();
         }
         mapper.Map = map;
+        controller.StickVolume = stickVolume;
+    }
+
+    /// <summary>
+    /// The app in front reads the controller itself (its preset is Controller, or it owns the
+    /// controller: Moonlight): bumpers and the Start layer's tracks stay the app's. Not "no map":
+    /// the open keyboard takes the map away too.
+    /// </summary>
+    bool PadReadingAppInFront => !LauncherActive && (foregroundApp?.OwnController == true || PresetFor(foregroundApp) == "controller");
+
+    readonly BumperVolume bumpers = new();
+    // Muted or not as the first bumper of a pair found it: its step up unmutes, so the pair's mute
+    // goes from before that step (a plain toggle undid it when RB came first).
+    bool mutedBeforeBumpers;
+
+    /// <summary>What LB or RB does to the volume now (BumperVolume): volumeDown, volumeUp, mute, or null.</summary>
+    string? BumperCommand(Pad pad, bool repeat, bool otherDown)
+    {
+        var command = bumpers.Press(pad, repeat, otherDown);
+        if (!repeat && !otherDown) mutedBeforeBumpers = audio.Muted ?? false;
+        return command;
+    }
+
+    /// <summary>A bumper's command applied: a step, or the pair's mute set from before its first step.</summary>
+    void BumperVolumeNow(string command) => Volume(command, muted: command == "mute" ? !mutedBeforeBumpers : null);
+
+    /// <summary>LB or RB as the volume in an app a map drives, or over the open keyboard.</summary>
+    void BumperStep(Pad pad, bool repeat, bool otherDown)
+    {
+        if (BumperCommand(pad, repeat, otherDown) is not { } command) return;
+        if (!repeat) Log.Info($"{pad}: {command}");
+        BumperVolumeNow(command);
+    }
+
+    /// <summary>
+    /// The controller thread's commands: the Start layer (StartLayer) and the right stick's volume
+    /// (StickVolume). Not in setup or standby. Back and forward (Alt+Left, Alt+Right) only while a
+    /// map drives the app in front; the tracks (media keys) not in an app that reads the
+    /// controller itself; the windows only in desktop mode (there are none to arrange on the TV),
+    /// never Moonlight's.
+    /// </summary>
+    void OnControllerCommand(string command, bool repeat)
+    {
+        if (setupMode || standby.Active) return;
+        const ushort Alt = 0x12, Left = 0x25, Right = 0x27, PrevTrack = 0xB1, NextTrack = 0xB0;
+        switch (command)
+        {
+            case "volumeUp" or "volumeDown":
+                if (LauncherActive || foregroundApp is not { StickVolume: true }) return;
+                if (!repeat) Log.Info($"Right stick: {command}");
+                Volume(command);
+                return;
+            case "back" or "forward":
+                if (mapper.Map is null) return;
+                Input.Tap(Alt, command == "back" ? Left : Right);
+                Log.Info($"Start layer: {command}");
+                return;
+            case "prevTrack" or "nextTrack":
+                if (PadReadingAppInFront) return;
+                Input.Tap(command == "prevTrack" ? PrevTrack : NextTrack);
+                Log.Info($"Start layer: {command}");
+                return;
+            default:
+                if (!desktopMode || !LauncherActive && foregroundApp?.OwnController == true) return;
+                Log.Info($"Start layer: {command}, {WindowActions.Run(command, Native.GetForegroundWindow())}");
+                return;
+        }
     }
 
     void OnPad(Pad pad, bool repeat)
     {
+        var otherBumperDown = pad is Pad.LBWithRB or Pad.RBWithLB;
+        if (otherBumperDown) pad = pad == Pad.LBWithRB ? Pad.LB : Pad.RB;
         // In standby only holding Home for 0.5 s wakes the box (a deliberate press; taps and
         // other buttons are swallowed), and the controller buzzes to say so while the screen and
         // TV come on. The release after a hold raises nothing, so it does not open the menu.
@@ -133,6 +212,12 @@ sealed partial class MainForm
         {
             if (pad == Pad.R3) { CloseKeyboard("R3"); return; }
             if (pad is Pad.Home or Pad.HomeHold) CloseKeyboard("Home"); // and on to Home as usual
+            else if (pad is Pad.LB or Pad.RB)
+            {
+                // The volume, as without the keyboard; over an app that reads the pad they are its.
+                if (!PadReadingAppInFront) BumperStep(pad, repeat, otherBumperDown);
+                return;
+            }
             else
             {
                 if (ButtonName(pad) is { } name) keyboard.Post(new { type = "input", button = name });
@@ -163,7 +248,19 @@ sealed partial class MainForm
                 return;
         }
 
-        // A launcher action on one of the map's buttons (Home menu, keyboard, volume...).
+        // LB and RB: the volume (BumperVolume) in the launcher's own screens, where the page's view
+        // may take them instead (the button-map editor, the button test: it gets the repeats too,
+        // to drop them), and in the apps a map drives (their LB and RB, fixed). An app that reads
+        // the controller keeps them (Kodi scrolls and rewinds). Setup gets each press once, as ever.
+        if (pad is Pad.LB or Pad.RB)
+        {
+            if (setupMode) { if (repeat) return; }
+            else if (active) { Post(new { type = "input", button = ButtonName(pad), repeat, volume = BumperCommand(pad, repeat, otherBumperDown) }); return; }
+            else if (ButtonMapStore.CommandFor(mapper.Map, pad) is "volumeDown" or "volumeUp") { BumperStep(pad, repeat, otherBumperDown); return; }
+            else if (repeat) return;
+        }
+
+        // A launcher action on one of the map's buttons (Home menu, keyboard...).
         if (!active && RunMappedCommand(pad, app)) return;
 
         // R3 in apps without a map (Controller preset): the on-screen keyboard, for the text

@@ -55,8 +55,8 @@ sealed class AudioVolume
     }
 
     /// <summary>
-    /// Up or down by a step (the controller's and keyboard's volume buttons, 5; Start + D-pad,
-    /// 2: no Windows flyout); the new level. From the level as last known: a step while the one
+    /// Up or down by a step (the on-screen keyboard's volume keys, 5; the bumpers and the right
+    /// stick, 2: no Windows flyout); the new level. From the level as last known: a step while the one
     /// before is still queued goes on from it.
     /// </summary>
     public int? Step(int delta)

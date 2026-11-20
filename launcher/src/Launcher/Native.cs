@@ -402,3 +402,141 @@ static class Native
         return (children, names);
     }
 }
+
+/// <summary>
+/// The Start layer's window commands, in desktop mode (MainForm.OnControllerCommand), lifted from
+/// ControllerNavigation's ActionRunner: done through the window APIs; the Windows shortcut doing
+/// the same is sent only where Windows refuses (an elevated window: the keys then go through the
+/// input helper). Never the desktop, the taskbar or the launcher's own windows.
+/// </summary>
+static class WindowActions
+{
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool ShowWindowAsync(IntPtr hWnd, int command);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    const int SW_MAXIMIZE = 3, SW_MINIMIZE = 6, SW_RESTORE = 9;
+    const uint GA_ROOTOWNER = 3, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_NOOWNERZORDER = 0x200;
+    const ushort Win = 0x5B, Shift = 0x10, LeftKey = 0x25, UpKey = 0x26, RightKey = 0x27, DownKey = 0x28;
+    static readonly string[] ShellClasses = { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
+
+    /// <param name="command">windowLeft, windowRight (to the next screen that way), maximize (restore
+    /// a maximized window), minimize, minimizeAll.</param>
+    /// <param name="front">The window in front (its root owner is the one acted on).</param>
+    /// <returns>What was done, for the log.</returns>
+    public static string Run(string command, IntPtr front)
+    {
+        if (command == "minimizeAll") return MinimizeAll();
+        var window = front == IntPtr.Zero || !IsWindow(front) ? IntPtr.Zero : GetAncestor(front, GA_ROOTOWNER) is var root && root != IntPtr.Zero ? root : front;
+        if (window == IntPtr.Zero) return "no window in front";
+        if (Native.ClassOf(window) is { } cls && ShellClasses.Contains(cls)) return "skipped, the desktop or the taskbar";
+        if (Native.ProcessOf(window) == Environment.ProcessId) return "skipped, the launcher's own window";
+        var maximized = IsZoomed(window);
+        var (done, what) = command switch
+        {
+            "maximize" => (ShowWindowAsync(window, maximized ? SW_RESTORE : SW_MAXIMIZE), maximized ? "restored" : "maximized"),
+            "minimize" => (ShowWindowAsync(window, SW_MINIMIZE), "minimized"),
+            "windowLeft" or "windowRight" => MoveToSide(window, command == "windowRight", maximized),
+            _ => (true, "not a window command"),
+        };
+        if (done) return what;
+        ushort[] keys = command switch
+        {
+            "windowLeft" => [Win, Shift, LeftKey],
+            "windowRight" => [Win, Shift, RightKey],
+            "maximize" => [Win, maximized ? DownKey : UpKey],
+            _ => [Win, DownKey],
+        };
+        Input.Tap(keys);
+        return $"{what}: refused, sent the Windows shortcut";
+    }
+
+    // Done: false when Windows refused (the caller sends the shortcut); true when done or when there is nothing to do.
+    static (bool Done, string What) MoveToSide(IntPtr window, bool toRight, bool maximized)
+    {
+        var side = toRight ? "right" : "left";
+        var screens = Screen.AllScreens;
+        var here = Screen.FromHandle(window);
+        var from = Array.FindIndex(screens, s => s.DeviceName == here.DeviceName);
+        if (from < 0 || Native.IsIconic(window)) return (true, "not moved: no screen to move it from");
+        var to = PickScreen(screens.Select(s => s.Bounds).ToList(), from, toRight);
+        if (to < 0) return (true, $"not moved: no screen on the {side}");
+        // A maximized window is restored, moved and maximized again on the other screen.
+        if (maximized)
+        {
+            Native.ShowWindow(window, SW_RESTORE);
+            if (IsZoomed(window)) return (false, "the window would not restore");
+        }
+        if (!Native.GetWindowRect(window, out var r))
+        {
+            if (maximized) Native.ShowWindow(window, SW_MAXIMIZE);
+            return (false, "its size could not be read");
+        }
+        var wanted = Transfer(Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom), screens[from].WorkingArea, screens[to].WorkingArea);
+        var moved = Place(window, wanted);
+        // Between screens of different scale the window resizes itself: once more fixes the size.
+        if (moved && Native.GetWindowRect(window, out var after) && Rectangle.FromLTRB(after.Left, after.Top, after.Right, after.Bottom) != wanted)
+            moved = Place(window, wanted);
+        if (maximized) Native.ShowWindow(window, SW_MAXIMIZE);
+        return (moved, moved ? $"moved to the screen on the {side}" : "SetWindowPos refused");
+    }
+
+    static bool Place(IntPtr window, Rectangle r) =>
+        SetWindowPos(window, IntPtr.Zero, r.X, r.Y, r.Width, r.Height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+
+    /// <summary>
+    /// The screen on one side of the current one: among those whose centre is left (or right) of
+    /// the current one's, the nearest, then the one closest vertically. None on that side (the end
+    /// of the row, screens stacked): the next one round, as Windows' Win+Shift+Left / Right does,
+    /// in left-then-top order. -1 with one screen.
+    /// </summary>
+    internal static int PickScreen(IReadOnlyList<Rectangle> screens, int current, bool toRight)
+    {
+        var here = screens[current];
+        var best = -1;
+        long bestAcross = 0, bestUp = 0;
+        for (var i = 0; i < screens.Count; i++)
+        {
+            if (i == current) continue;
+            // Left + Right is twice the centre: no fractions.
+            long across = toRight ? (screens[i].Left + screens[i].Right) - (here.Left + here.Right) : (here.Left + here.Right) - (screens[i].Left + screens[i].Right);
+            if (across <= 0) continue;
+            long up = Math.Abs((screens[i].Top + screens[i].Bottom) - (here.Top + here.Bottom));
+            if (best < 0 || across < bestAcross || (across == bestAcross && up < bestUp)) (best, bestAcross, bestUp) = (i, across, up);
+        }
+        if (best >= 0 || screens.Count < 2) return best;
+        var round = Enumerable.Range(0, screens.Count).OrderBy(i => screens[i].Left).ThenBy(i => screens[i].Top).ToList();
+        return round[(round.IndexOf(current) + (toRight ? 1 : screens.Count - 1)) % screens.Count];
+    }
+
+    /// <summary>A window's rectangle on another work area: the same share of it (position and size), shrunk to fit and kept inside it.</summary>
+    internal static Rectangle Transfer(Rectangle window, Rectangle from, Rectangle to)
+    {
+        double sx = (double)to.Width / Math.Max(1, from.Width), sy = (double)to.Height / Math.Max(1, from.Height);
+        var width = Math.Clamp((int)Math.Round(window.Width * sx), 1, Math.Max(1, to.Width));
+        var height = Math.Clamp((int)Math.Round(window.Height * sy), 1, Math.Max(1, to.Height));
+        var left = Math.Clamp(to.Left + (int)Math.Round((window.Left - from.Left) * sx), to.Left, Math.Max(to.Left, to.Right - width));
+        var top = Math.Clamp(to.Top + (int)Math.Round((window.Top - from.Top) * sy), to.Top, Math.Max(to.Top, to.Bottom - height));
+        return new Rectangle(left, top, width, height);
+    }
+
+    // Shell.Application's MinimizeAll (late-bound COM; the UI thread is STA); Win+M where the shell refuses.
+    static string MinimizeAll()
+    {
+        object? shell = null;
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application", true)!);
+            shell!.GetType().InvokeMember("MinimizeAll", System.Reflection.BindingFlags.InvokeMethod, null, shell, null);
+            return "every window minimized";
+        }
+        catch (Exception e)
+        {
+            Input.Tap(Win, 0x4D);
+            return $"the shell refused ({e.Message}), sent Win+M";
+        }
+        finally { if (shell is not null && Marshal.IsComObject(shell)) Marshal.ReleaseComObject(shell); }
+    }
+}

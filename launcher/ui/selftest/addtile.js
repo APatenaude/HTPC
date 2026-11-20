@@ -14,7 +14,7 @@ selftestGroup(async ({ check, pin, until, imagesIn, sent, lastSent, tileEl, PNG1
 
   // On this box: two of three icons made so far; the third comes with the list sent again.
   EXT.actions.addtile();
-  press('rb');
+  press('rt');
   const programs = (calcLogo) => [{ name: 'Calculator', launchable: true, logo: calcLogo }, { name: 'Paint', launchable: true, logo: PNG1 },
     { name: 'Run', launchable: false, note: 'No program file', logo: PNG1 }];
   onHost({ type: 'library.programs', list: programs(null) });
@@ -30,7 +30,7 @@ selftestGroup(async ({ check, pin, until, imagesIn, sent, lastSent, tileEl, PNG1
     && focusedEl() === at('ob-Paint'), focusedEl() && focusedEl().dataset.id);
 
   // The Website form: two real fields and Add tile, the launcher's keyboard for them.
-  press('rb');
+  press('rt');
   const field = (f) => $('addtile').querySelector(`input[data-field="${f}"]`);
   check('Website: real text fields, no keyboard drawn in the page', field('url') && field('name') && !$('addtile').querySelector('.kbi, [data-act="key"]') && !!at('wf-add'));
   check('Website: it opens on the address', focusedEl() === at('wf-url'), focusedEl() && focusedEl().dataset.id);
@@ -110,17 +110,17 @@ selftestGroup(async ({ check, pin, until, imagesIn, sent, lastSent, tileEl, PNG1
   const lc = at('app-app1').getBoundingClientRect(), top = at('app-app1').querySelector('.lc-top').getBoundingClientRect(), st = at('app-app1').querySelector('.lc-status').getBoundingClientRect();
   pin('a library app card at most 132 px tall, its status at most 24 px under its name', lc.height / scale() <= 132 && (st.top - top.bottom) / scale() <= 24,
     `${Math.round(lc.height / scale())} px, ${Math.round((st.top - top.bottom) / scale())} px gap`);
-  setFocus(at('app-app0'));
-  const jumps = [];
-  for (const b of ['rt', 'rt', 'rt', 'rt', 'rt', 'rt', 'rt', 'lt', 'lt']) { press(b); jumps.push(groupOf(focusedEl().dataset.id)); }
-  check('Library: RT, LT: the first card of the next or the category before, and stop at the ends',
-    jumps.join(',') === 'canada,sports,music,games,media,,,media,games' && focusedEl() === at('app-app4'), jumps.join(','));
+  // Down at the end of the list, then on the first card of a category further up: its heading shows above it.
+  setFocus(at('app-app17'));
   const main = $('addtile').querySelector('.at-main');
   const headShows = () => focusedEl().closest('.lc-group').querySelector('.at-label').getBoundingClientRect().top >= main.getBoundingClientRect().top - 1;
-  press('lt'); press('lt');
-  check('Library: back up to a category: its heading shows above its first card', headShows() && main.scrollTop > 0, `${main.scrollTop}`);
+  setFocus($('addtile').querySelector('.lc-group[data-cat="games"] [data-nav]'));
+  check('Library: back up to a category: its heading shows above its first card', groupOf(focusedEl().dataset.id) === 'games' && headShows() && main.scrollTop > 0, `${main.scrollTop}`);
   const bar = $('addtile').querySelector('footer.hints'), barKeys = [...bar.querySelectorAll('.key')].map((k) => k.textContent);
-  check('Library: the hints have LT RT (categories) and LB RB (tabs), and fit', ['LT', 'RT', 'LB', 'RB'].every((k) => barKeys.includes(k)) && bar.scrollWidth <= bar.clientWidth,
-    `${bar.scrollWidth} > ${bar.clientWidth}: ${barKeys.join(' ')}`);
+  check('Library: the hints have LT RT (tabs), no LB RB (the volume), and fit', ['LT', 'RT'].every((k) => barKeys.includes(k)) && !barKeys.includes('LB')
+    && bar.scrollWidth <= bar.clientWidth, `${bar.scrollWidth} > ${bar.clientWidth}: ${barKeys.join(' ')}`);
+  sent.length = 0;
+  press('lb', false, { volume: 'volumeDown', repeat: false });
+  check('Library: LB is the volume, the tab stays', lastSent('volumeStep') && lastSent('volumeStep').command === 'volumeDown' && $('addtile').dataset.tab === 'library', JSON.stringify(sent));
   reset('home');
 });
