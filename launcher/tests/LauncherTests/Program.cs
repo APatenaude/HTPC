@@ -266,13 +266,13 @@ T.Group("PadMapper", () =>
     slow.Slow = false;
     Check(on && off && keptOverMaps && !slow.Slow, $"L3: slow on, off, on again; kept over a map change, off when told (another app): {on} {off} {keptOverMaps} {slow.Slow}");
 
-    // Acceleration (PadMapper.Boost): at the edge (0.9, off under 0.85) for 200 ms, then from 1 to the most in 2 s.
+    // Acceleration (PadMapper.Boost): at the edge (0.9, off under 0.85) for 200 ms, then a straight line from 1 to the most in 1.3 s.
     var boost = new PadMapper.Boost();
-    var ramp = new List<double> { boost.At(0.5, 0, 3), boost.At(0.95, 1000, 3), boost.At(0.95, 1150, 3), boost.At(0.95, 2200, 3), boost.At(0.87, 3200, 3), boost.At(0.95, 4000, 3),
-        boost.At(0.84, 4010, 3), boost.At(0.87, 4020, 3), boost.At(1, 4500, 1), boost.At(1, 5500, 1) };
-    Check(ramp.Select(v => v.ToString("0.##")).SequenceEqual(new[] { "1", "1", "1", "2", "3", "3", "1", "1", "1", "1" }),
-        "acceleration: 1 short of the edge and for its first 200 ms, halfway at 1.2 s, the most at 2.2 s (0.87 still the edge), 1 at once under 0.85, " +
-        "0.87 again not the edge, level 1 off: " + string.Join(" ", ramp.Select(v => v.ToString("0.##"))));
+    var ramp = new List<double> { boost.At(0.5, 0, 4), boost.At(0.95, 1000, 4), boost.At(0.95, 1150, 4), boost.At(0.95, 1525, 4), boost.At(0.95, 1850, 4), boost.At(0.87, 2500, 4),
+        boost.At(0.95, 4000, 4), boost.At(0.84, 4010, 4), boost.At(0.87, 4020, 4), boost.At(1, 4500, 1), boost.At(1, 5500, 1) };
+    Check(ramp.Select(v => v.ToString("0.##")).SequenceEqual(new[] { "1", "1", "1", "1.75", "2.5", "4", "4", "1", "1", "1", "1" }),
+        "acceleration: 1 short of the edge and for its first 200 ms, x1.75 a quarter of the way, x2.5 halfway at 0.85 s, the most at 1.5 s (0.87 still the edge), " +
+        "1 at once under 0.85, 0.87 again not the edge, level 1 off: " + string.Join(" ", ramp.Select(v => v.ToString("0.##"))));
 
     // Pointer speed (PadMapper.FullTilt): mm a second from the height the screen reports, faster on a taller one.
     double MmPerSecond(int pixels, int mm) => PadMapper.FullTilt(pixels, mm) / pixels * mm;

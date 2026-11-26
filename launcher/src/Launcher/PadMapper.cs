@@ -24,7 +24,7 @@ sealed class PadMapper
     /// defaults below (1 = default), and the most the acceleration multiplies the pointer's speed
     /// by (1 = none; Boost). Handed to the frame thread inside Motion.
     /// </summary>
-    public sealed record Speeds(double Pointer, double Precise, double Scroll, double Acceleration = 3.5)
+    public sealed record Speeds(double Pointer, double Precise, double Scroll, double Acceleration = 4.5)
     {
         public static readonly Speeds Default = new(1, 1, 1);
     }
@@ -32,12 +32,12 @@ sealed class PadMapper
     /// <summary>
     /// Pointer acceleration (the same as ControllerNavigation's): the stick held at its edge (its
     /// travel past the dead zone, before the curve, at 0.9 or more, until it drops under 0.85) for
-    /// 200 ms, the speed then ramps from 1 to the most over 2 s; off the edge it is 1 at once.
-    /// Calm on small moves, quick across the screen. Frame thread.
+    /// 200 ms, the speed then ramps in a straight line from 1 to the most over 1.3 s; off the edge
+    /// it is 1 at once. Calm on small moves, quick across the screen. Frame thread.
     /// </summary>
     internal sealed class Boost
     {
-        public const double On = 0.9, Off = 0.85, DelayMs = 200, RampMs = 2000;
+        public const double On = 0.9, Off = 0.85, DelayMs = 200, RampMs = 1300;
         double since = -1;   // ms the stick reached the edge; -1: not at it
 
         public double At(double travel, double now, double most)
