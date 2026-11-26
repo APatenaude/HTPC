@@ -25,6 +25,11 @@ static class Input
     [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateDC(string? driver, string device, string? output, IntPtr mode);
+    [DllImport("gdi32.dll")] static extern int GetDeviceCaps(IntPtr dc, int index);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+
+    const int VERTSIZE = 6; // the screen's height in millimetres
 
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2, KEYEVENTF_UNICODE = 0x4, KEYEVENTF_SCANCODE = 0x8;
@@ -131,6 +136,31 @@ static class Input
         // Absolute coordinates are 0..65535 across the screen; round to the pixel's centre.
         Send(Mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, (int)((x * 65536L + 32768) / width), (int)((y * 65536L + 32768) / height)));
     }
+
+    /// <summary>
+    /// The primary screen's height (MoveBy keeps the pointer on it), in pixels and in millimetres as
+    /// the screen reports it (its EDID; 0 when it does not, as Windows' placeholder monitor).
+    /// </summary>
+    public static (int Pixels, int Mm) ScreenHeight()
+    {
+        if (Screen.PrimaryScreen is not { } screen) return (1080, 0);
+        var key = (screen.DeviceName, screen.Bounds.Height);
+        var now = Environment.TickCount64;
+        var known = heightsMm.TryGetValue(key, out var read);
+        if (!known || now - read.At > 5000)
+        {
+            var dc = CreateDC(null, screen.DeviceName, null, IntPtr.Zero);
+            if (dc == IntPtr.Zero) return (key.Height, known ? read.Mm : 0); // not ready (the TV waking): read again next frame
+            read = (GetDeviceCaps(dc, VERTSIZE), now);
+            DeleteDC(dc);
+            heightsMm[key] = read;
+        }
+        return (key.Height, read.Mm);
+    }
+
+    // By output and pixel height, read again every 5 s: a TV that reported nothing while waking, or
+    // another screen on that output at the same resolution.
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, int), (int Mm, long At)> heightsMm = new();
 
     /// <summary>Wheel scroll: positive = up (or right, for horizontal). 120 is one notch.</summary>
     public static void Wheel(int amount, bool horizontal = false)

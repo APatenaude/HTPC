@@ -50,7 +50,7 @@ sealed class LauncherSettings
     public int PreciseSpeed { get; set; } = 5;
     public int ScrollSpeed { get; set; } = 5;
 
-    /// <summary>Pointer acceleration with the stick at its edge, 1 (off) to 10; 5 = up to 3 times as fast (MainForm.ApplySettings).</summary>
+    /// <summary>Pointer acceleration with the stick at its edge, 1 (off) to 10; 5 = up to 3.5 times as fast (MainForm.ApplySettings).</summary>
     public int Acceleration { get; set; } = 5;
 
     /// <summary>The launcher's interface sounds (ui\sounds.js): "off", "low" or "medium".</summary>

@@ -21,14 +21,14 @@ sealed partial class MainForm
 
     /// <summary>
     /// After a setting changed: the pointer and scroll speeds reach the controller thread, and the
-    /// acceleration, level 1 to 10 as the most it multiplies by: 1 + (level - 1) / 2 (1 off, 5 = 3x,
-    /// ControllerNavigation's default).
+    /// acceleration, level 1 to 10 as the most it multiplies by: 1 + (level - 1) * 0.625 (1 off,
+    /// 5 = 3.5x, ControllerNavigation's default; 10 = 6.6x).
     /// </summary>
     void ApplySettings()
     {
         double F(int level) => SpeedFactors[Math.Clamp(level, 1, 10) - 1];
         mapper.Speed = new PadMapper.Speeds(F(settings.PointerSpeed), F(settings.PreciseSpeed), F(settings.ScrollSpeed),
-            1 + (Math.Clamp(settings.Acceleration, 1, 10) - 1) / 2.0);
+            1 + (Math.Clamp(settings.Acceleration, 1, 10) - 1) * 0.625);
     }
 
     /// <summary>The map for the window in front: its tile's, or Other windows' (Mouse unless changed).</summary>

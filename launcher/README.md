@@ -84,8 +84,14 @@ log lines of each area: [docs/CODEMAP.md](../docs/CODEMAP.md). Paths below are u
   pressed alone waits up to 80 ms for the other, the pointer held still meanwhile; let go before,
   a tap), L3 turns the slow pointer on and off (off when another app comes in front).
 - Acceleration (`PadMapper.Boost`): the stick held at its edge (0.9 of its travel past the dead
-  zone, until under 0.85) for 200 ms, the pointer's speed ramps up over 500 ms to the setting's
-  most (level 5 = 3 times); off the edge it is back at once. Not with the slow pointer.
+  zone, until under 0.85) for 200 ms, the pointer's speed ramps up over 2 s to the setting's
+  most (level 5 = 3.5 times); off the edge it is back at once. Not with the slow pointer.
+- Pointer speed is physical (`PadMapper.FullTilt`, `Input.ScreenHeight`): at level 5, full tilt
+  is 134 mm a second on any TV, from the height the screen reports (its EDID), so a big or
+  scaled-up TV is not faster (read again every 5 s); a screen that reports none, or under 10 cm (an
+  aspect ratio only), gets 0.4 of its height a second. The slow
+  pointer is half that, never accelerated. The same values as ControllerNavigation (the owner,
+  26 Nov 2026).
 - Controller preset = the app reads the pad itself (the games, and the cloud gaming sites through
   the browser's Gamepad API).
 

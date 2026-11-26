@@ -147,7 +147,8 @@ walker; the pages are registered with `auditPage(name, spec)` in `ui/audit/home.
 - Names: `enum Pad`, `StartLayer`, `BumperVolume`, `ControllerService.Run`, `Command`, `StickVolume`, `Buzz`;
   `ButtonMap.For(preset)`, `Triggers` (LT + RT), `PadAction`, `KeyAction`, `SlowToggleAction` (mouse:slow);
   `ButtonMapStore.For`, `Build`, `ParseAction`, `SetPreset`, `SetControl`, `DescribeApp`; `PadMapper.Update`,
-  `PairTriggers`, `Slow`, `Boost` (acceleration); `MainForm.UpdateMapper`, `OnPad`, `BumperStep`,
+  `PairTriggers`, `Slow`, `Boost` (acceleration), `FullTilt` and `Input.ScreenHeight` (the speed in mm a
+  second, from the screen's reported size); `MainForm.UpdateMapper`, `OnPad`, `BumperStep`,
   `PadReadingAppInFront`, `OnControllerCommand`; `WindowActions.Run`, `PickScreen`; `RunMappedCommand`, `OnMapsMessage`
   (maps.*), `PostMaps`; `OnControllerMessage`; buttons.js views `maps`, `buttons`, `openEditor`,
   `choosePreset`, `startPicking`, `pickPress`. Catalog `preset`, `menuKeys` (`MenuKeys.Parse` in AppManager.cs).

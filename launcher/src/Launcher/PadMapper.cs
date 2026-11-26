@@ -24,7 +24,7 @@ sealed class PadMapper
     /// defaults below (1 = default), and the most the acceleration multiplies the pointer's speed
     /// by (1 = none; Boost). Handed to the frame thread inside Motion.
     /// </summary>
-    public sealed record Speeds(double Pointer, double Precise, double Scroll, double Acceleration = 3)
+    public sealed record Speeds(double Pointer, double Precise, double Scroll, double Acceleration = 3.5)
     {
         public static readonly Speeds Default = new(1, 1, 1);
     }
@@ -32,12 +32,12 @@ sealed class PadMapper
     /// <summary>
     /// Pointer acceleration (the same as ControllerNavigation's): the stick held at its edge (its
     /// travel past the dead zone, before the curve, at 0.9 or more, until it drops under 0.85) for
-    /// 200 ms, the speed then ramps from 1 to the most over 500 ms; off the edge it is 1 at once.
+    /// 200 ms, the speed then ramps from 1 to the most over 2 s; off the edge it is 1 at once.
     /// Calm on small moves, quick across the screen. Frame thread.
     /// </summary>
     internal sealed class Boost
     {
-        public const double On = 0.9, Off = 0.85, DelayMs = 200, RampMs = 500;
+        public const double On = 0.9, Off = 0.85, DelayMs = 200, RampMs = 2000;
         double since = -1;   // ms the stick reached the edge; -1: not at it
 
         public double At(double travel, double now, double most)
@@ -65,8 +65,12 @@ sealed class PadMapper
     const short ArrowThreshold = 16000;   // a stick used as arrows, as in the launcher's menus
     const int TriggerDown = 96, TriggerUp = 48;
     const int RepeatDelayMs = 350, RepeatEveryMs = 60;
-    const double PointerSpeed = 1.1;      // screen heights per second at full tilt
-    const double PreciseFactor = 0.25;
+    // Full tilt before acceleration: 134 mm a second (0.4 heights of a 34-inch ultrawide, the owner's
+    // choice in ControllerNavigation), physical so that a big or scaled-up TV is not faster.
+    const double PointerMmPerSecond = 134;
+    const double UnknownScreenMm = 335;   // a screen that reports no size: 0.4 of its height a second
+    const int SmallestMm = 100;           // under it, no size or an EDID that holds only the aspect ratio (16 x 9 cm)
+    const double PreciseFactor = 0.5;
     const double ScrollSpeed = 2400;      // wheel units per second at full tilt (20 notches)
     public const int PairWindowMs = 80;   // LT and RT this close are both together (ButtonMap.Triggers)
     const uint LtBit = 1u << (int)PadControl.LT, RtBit = 1u << (int)PadControl.RT, TriggerBits = LtBit | RtBit;
@@ -303,15 +307,19 @@ sealed class PadMapper
         return (x * scale, y * scale);
     }
 
+    /// <summary>Pixels a second at full tilt, before acceleration, on a screen this tall in pixels and millimetres (0: unknown).</summary>
+    internal static double FullTilt(int pixels, int mm) => PointerMmPerSecond * pixels / (mm >= SmallestMm ? mm : UnknownScreenMm);
+
     void MovePointer(short x, short y, double dt, double now, Motion m)
     {
         var (cx, cy) = Curve(x, y);
         if (cx == 0 && cy == 0) { pointerX = pointerY = 0; boost.Reset(); return; }
         if (m.Precise) boost.Reset();
         var factor = m.Precise ? PreciseFactor * m.Speed.Precise : m.Speed.Pointer * boost.At(Travel(x, y), now, m.Speed.Acceleration);
-        // The screen's height read at each step, not once: the primary screen can change under the
-        // launcher (Windows' placeholder monitor all night, then the TV on at 4K).
-        var speed = PointerSpeed * (Screen.PrimaryScreen?.Bounds.Height ?? 1080) * dt * factor;
+        // The screen read at each step, not once: the primary screen can change under the launcher
+        // (Windows' placeholder monitor all night, then the TV on at 4K).
+        var (pixels, mm) = Input.ScreenHeight();
+        var speed = FullTilt(pixels, mm) * dt * factor;
         pointerX += cx * speed;
         pointerY -= cy * speed; // stick up is positive, screen up is negative
         int dx = (int)pointerX, dy = (int)pointerY;

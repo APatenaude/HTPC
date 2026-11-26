@@ -25,6 +25,7 @@ static class Input
     public static void Type(string text) => Add("type " + text);
     public static void MouseButton(Button button, bool down) => Add($"mouse {button} {(down ? "down" : "up")}");
     public static void MoveBy(int dx, int dy) { if (dx != 0 || dy != 0) Add("move"); }
+    public static (int Pixels, int Mm) ScreenHeight() => (2160, 810); // a 65-inch TV at 4K
     public static void Wheel(int amount, bool horizontal = false) { if (amount != 0) Add("wheel"); }
 }
 

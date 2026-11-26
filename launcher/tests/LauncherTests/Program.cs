@@ -266,13 +266,20 @@ T.Group("PadMapper", () =>
     slow.Slow = false;
     Check(on && off && keptOverMaps && !slow.Slow, $"L3: slow on, off, on again; kept over a map change, off when told (another app): {on} {off} {keptOverMaps} {slow.Slow}");
 
-    // Acceleration (PadMapper.Boost): at the edge (0.9, off under 0.85) for 200 ms, then from 1 to the most in 500 ms.
+    // Acceleration (PadMapper.Boost): at the edge (0.9, off under 0.85) for 200 ms, then from 1 to the most in 2 s.
     var boost = new PadMapper.Boost();
-    var ramp = new List<double> { boost.At(0.5, 0, 3), boost.At(0.95, 1000, 3), boost.At(0.95, 1150, 3), boost.At(0.95, 1450, 3), boost.At(0.87, 1700, 3), boost.At(0.95, 2500, 3),
-        boost.At(0.84, 2510, 3), boost.At(0.87, 2520, 3), boost.At(1, 3000, 1), boost.At(1, 4000, 1) };
+    var ramp = new List<double> { boost.At(0.5, 0, 3), boost.At(0.95, 1000, 3), boost.At(0.95, 1150, 3), boost.At(0.95, 2200, 3), boost.At(0.87, 3200, 3), boost.At(0.95, 4000, 3),
+        boost.At(0.84, 4010, 3), boost.At(0.87, 4020, 3), boost.At(1, 4500, 1), boost.At(1, 5500, 1) };
     Check(ramp.Select(v => v.ToString("0.##")).SequenceEqual(new[] { "1", "1", "1", "2", "3", "3", "1", "1", "1", "1" }),
-        "acceleration: 1 short of the edge and for its first 200 ms, halfway at 450 ms, the most at 700 ms (0.87 still the edge), 1 at once under 0.85, " +
+        "acceleration: 1 short of the edge and for its first 200 ms, halfway at 1.2 s, the most at 2.2 s (0.87 still the edge), 1 at once under 0.85, " +
         "0.87 again not the edge, level 1 off: " + string.Join(" ", ramp.Select(v => v.ToString("0.##"))));
+
+    // Pointer speed (PadMapper.FullTilt): the same mm a second on any screen, from the height it reports.
+    double MmPerSecond(int pixels, int mm) => PadMapper.FullTilt(pixels, mm) / pixels * mm;
+    Check(Math.Abs(MmPerSecond(1440, 334) - 134) < 1e-9 && Math.Abs(MmPerSecond(2160, 810) - 134) < 1e-9,
+        "full tilt: 134 mm a second on a 34-inch ultrawide and on a 65-inch TV at 4K");
+    Check(Math.Abs(PadMapper.FullTilt(1080, 0) / 1080 - 0.4) < 0.001 && PadMapper.FullTilt(2160, 90) == PadMapper.FullTilt(2160, 0),
+        "a screen that reports no size, or under 10 cm (an aspect ratio only): 0.4 of its height a second");
 });
 
 // A: A as it goes down (as ever), then AHold at 0.5 s and AUp when let go (hold A on a home tile
