@@ -274,10 +274,12 @@ T.Group("PadMapper", () =>
         "acceleration: 1 short of the edge and for its first 200 ms, halfway at 1.2 s, the most at 2.2 s (0.87 still the edge), 1 at once under 0.85, " +
         "0.87 again not the edge, level 1 off: " + string.Join(" ", ramp.Select(v => v.ToString("0.##"))));
 
-    // Pointer speed (PadMapper.FullTilt): the same mm a second on any screen, from the height it reports.
+    // Pointer speed (PadMapper.FullTilt): mm a second from the height the screen reports, faster on a taller one.
     double MmPerSecond(int pixels, int mm) => PadMapper.FullTilt(pixels, mm) / pixels * mm;
-    Check(Math.Abs(MmPerSecond(1440, 334) - 134) < 1e-9 && Math.Abs(MmPerSecond(2160, 810) - 134) < 1e-9,
-        "full tilt: 134 mm a second on a 34-inch ultrawide and on a 65-inch TV at 4K");
+    Check(Math.Abs(MmPerSecond(1440, 334) - 134) < 1e-9 && Math.Abs(MmPerSecond(1080, 299) - 134) < 1e-9,
+        "full tilt: 134 mm a second on a 34-inch ultrawide, and on a smaller screen");
+    Check(Math.Abs(MmPerSecond(2160, 810) / 134 - Math.Sqrt(810 / 335.0)) < 1e-9,
+        "a 65-inch TV at 4K: x1.55, the square root of its height over a desk screen's");
     Check(Math.Abs(PadMapper.FullTilt(1080, 0) / 1080 - 0.4) < 0.001 && PadMapper.FullTilt(2160, 90) == PadMapper.FullTilt(2160, 0),
         "a screen that reports no size, or under 10 cm (an aspect ratio only): 0.4 of its height a second");
 });

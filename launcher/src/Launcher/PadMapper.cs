@@ -65,10 +65,12 @@ sealed class PadMapper
     const short ArrowThreshold = 16000;   // a stick used as arrows, as in the launcher's menus
     const int TriggerDown = 96, TriggerUp = 48;
     const int RepeatDelayMs = 350, RepeatEveryMs = 60;
-    // Full tilt before acceleration: 134 mm a second (0.4 heights of a 34-inch ultrawide, the owner's
-    // choice in ControllerNavigation), physical so that a big or scaled-up TV is not faster.
+    // Full tilt before acceleration: 134 mm a second on a desk screen (0.4 heights of a 34-inch
+    // ultrawide, the owner's choice in ControllerNavigation), physical so that a scaled-up TV is not
+    // faster. A taller screen is watched from farther away: x the square root of its height over a
+    // desk screen's, 1.55 on a 65-inch TV (the owner, 26 Nov 2026: 134 there too slow, 2.4 times too fast).
     const double PointerMmPerSecond = 134;
-    const double UnknownScreenMm = 335;   // a screen that reports no size: 0.4 of its height a second
+    const double DeskScreenMm = 335;      // also what a screen that reports no size counts as: 0.4 of its height a second
     const int SmallestMm = 100;           // under it, no size or an EDID that holds only the aspect ratio (16 x 9 cm)
     const double PreciseFactor = 0.5;
     const double ScrollSpeed = 2400;      // wheel units per second at full tilt (20 notches)
@@ -308,7 +310,11 @@ sealed class PadMapper
     }
 
     /// <summary>Pixels a second at full tilt, before acceleration, on a screen this tall in pixels and millimetres (0: unknown).</summary>
-    internal static double FullTilt(int pixels, int mm) => PointerMmPerSecond * pixels / (mm >= SmallestMm ? mm : UnknownScreenMm);
+    internal static double FullTilt(int pixels, int mm)
+    {
+        double height = mm >= SmallestMm ? mm : DeskScreenMm;
+        return PointerMmPerSecond * Math.Sqrt(Math.Max(height, DeskScreenMm) / DeskScreenMm) * pixels / height;
+    }
 
     void MovePointer(short x, short y, double dt, double now, Motion m)
     {
